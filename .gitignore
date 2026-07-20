@@ -1,0 +1,8 @@
+node_modules
+.next
+.env
+.env.local
+.vercel
+drizzle/meta
+*.tsbuildinfo
+next-env.d.ts

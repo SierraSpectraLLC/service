@@ -1,0 +1,57 @@
+:root {
+  --navy: #172A4A;
+  --coral: #E8613C;
+  --sky: #5BA8D9;
+  --slate: #64748B;
+  --bg: #F4F6F9;
+  --card: #FFFFFF;
+  --line: #E2E8F0;
+  --ink: #1E293B;
+  --mut: #64748B;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+a { color: #1D6396; }
+input, select, textarea, button { font-family: inherit; font-size: 13px; }
+input, select, textarea {
+  padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; width: 100%;
+}
+label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); margin-bottom: 3px; }
+
+.container { max-width: 960px; margin: 0 auto; padding: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.card-title { font-weight: 700; font-size: 14px; color: var(--navy); }
+.spectrum { height: 4px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }
+.pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+.btn {
+  cursor: pointer; border-radius: 8px; font-weight: 700; font-size: 13px;
+  padding: 8px 14px; border: 1px solid var(--line); background: #fff; color: var(--navy);
+}
+.btn.sm { font-size: 12px; padding: 5px 10px; }
+.btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
+.btn.accent { background: var(--coral); color: #fff; border-color: var(--coral); }
+.btn.link { border: none; background: none; padding: 0; color: #1D6396; font-size: 11px; }
+.mut { color: var(--mut); }
+.mono { font-family: var(--mono); }
+.eyebrow { font-size: 11px; color: var(--mut); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.row-hover:hover { background: #F8FAFD; cursor: pointer; }
+.dash-form { border: 1px dashed var(--sky); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #F7FBFE; }
+
+.grid-row { display: grid; grid-template-columns: 76px minmax(0,2.2fr) minmax(0,1.4fr) 64px; gap: 10px; align-items: center; }
+.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.pf2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pf3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.pf-ship { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
+.hide-m { display: block; }
+@media (max-width: 640px) {
+  .grid-row { grid-template-columns: 76px minmax(0,1fr); }
+  .hide-m { display: none; }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
+}
