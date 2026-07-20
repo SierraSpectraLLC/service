@@ -85,17 +85,49 @@ export function parseTrackerRows(rows: string[][]): SheetRow[] {
 }
 
 /**
- * Fetch the published CSV, diff against the DB, and insert diff rows for
- * anything that doesn't match. Never writes to instrument data itself -
- * humans resolve diffs in the parity view.
+ * Fetch the tracker rows via the Google Sheets API using a service account.
+ * The sheet stays private; the client just shares it (Viewer) with the
+ * service account's email. Falls back to SHEET_CSV_URL if the service
+ * account env vars aren't set.
+ */
+async function fetchSheetRows(): Promise<string[][]> {
+  const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const saKey = process.env.GOOGLE_PRIVATE_KEY;
+  const sheetId = process.env.SHEET_ID;
+
+  if (saEmail && saKey && sheetId) {
+    const { JWT } = await import("google-auth-library");
+    const jwt = new JWT({
+      email: saEmail,
+      // Vercel env vars store the key with literal \n sequences; restore them.
+      key: saKey.replace(/\\n/g, "\n"),
+      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+    });
+    const range = process.env.SHEET_RANGE || "'Refurbishment Tracker'!A:H";
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
+    const res = await jwt.request<{ values?: string[][] }>({ url });
+    return res.data.values ?? [];
+  }
+
+  // Fallback: published-CSV mode.
+  const csvUrl = process.env.SHEET_CSV_URL;
+  if (!csvUrl) {
+    throw new Error(
+      "Sheet access not configured: set GOOGLE_SERVICE_ACCOUNT_EMAIL + GOOGLE_PRIVATE_KEY + SHEET_ID, or SHEET_CSV_URL"
+    );
+  }
+  const res = await fetch(csvUrl, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
+  return parseCsv(await res.text());
+}
+
+/**
+ * Diff the sheet against the DB and insert diff rows for anything that
+ * doesn't match. Never writes to instrument data itself - humans resolve
+ * diffs in the parity view.
  */
 export async function runSheetSync(): Promise<{ checked: number; diffs: number }> {
-  const url = process.env.SHEET_CSV_URL;
-  if (!url) throw new Error("SHEET_CSV_URL is not set");
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Sheet fetch failed: ${res.status}`);
-  const csv = await res.text();
-  const sheetRows = parseTrackerRows(parseCsv(csv));
+  const sheetRows = parseTrackerRows(await fetchSheetRows());
 
   const dbRows = await db.select().from(instruments);
   const byId = new Map(dbRows.map((r) => [r.externalId, r]));

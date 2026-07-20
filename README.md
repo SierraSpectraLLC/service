@@ -50,9 +50,24 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
 - **Cron**: `vercel.json` already schedules `GET /api/cron/sheet-sync` hourly.
   Set `CRON_SECRET` in project env; Vercel sends it as the bearer token.
 
-### 6. Google Sheet parity
-In the client's sheet: File > Share > Publish to web > select the
-"Refurbishment Tracker" tab > CSV. Put the URL in `SHEET_CSV_URL`.
+### 6. Google Sheet parity (service account)
+The sync reads the client's sheet through the Sheets API with a service
+account, so the sheet stays private - nothing is published to the web.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com), create
+   a project (any name, e.g. `sierra-spectra-sync`).
+2. **APIs & Services > Library** > enable **Google Sheets API**.
+3. **IAM & Admin > Service Accounts** > Create service account. No roles
+   needed - it only reads a sheet shared with it.
+4. Open the account > **Keys > Add key > JSON**. From the downloaded file,
+   copy `client_email` into `GOOGLE_SERVICE_ACCOUNT_EMAIL` and `private_key`
+   into `GOOGLE_PRIVATE_KEY` (paste as-is; `\n` escapes are handled).
+5. In the client's Google Sheet: **Share** > add the service account email as
+   **Viewer**. To the client this just looks like adding another viewer.
+6. Set `SHEET_ID` from the sheet URL
+   (`docs.google.com/spreadsheets/d/<SHEET_ID>/edit`). If their tab is named
+   something other than `Refurbishment Tracker`, adjust `SHEET_RANGE`.
+
 Test manually:
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" https://your-app.vercel.app/api/cron/sheet-sync
@@ -61,6 +76,9 @@ Diffs land in the **Sheet parity** view. Nothing is ever auto-applied; you
 choose "Keep ours" or "Accept sheet" per diff. Stage diffs are informational
 only (resolve by hand on the instrument page); notes and priority can be
 applied mechanically when you accept the sheet value.
+
+If you ever need a zero-setup fallback, setting `SHEET_CSV_URL` (File >
+Share > Publish to web > CSV) works when the service account vars are unset.
 
 ## Roles
 
@@ -91,7 +109,7 @@ src/
   lib/stages.ts           stage/status vocabulary, colors, carrier tracking URLs
   lib/authz.ts            requireUser / requireEditor / requireStaff / requireOwner
   lib/audit.ts            append-only audit writer
-  lib/sheetSync.ts        CSV fetch + parse + diff engine
+  lib/sheetSync.ts        Sheets API fetch (service account) + diff engine
   app/actions.ts          every mutation (server actions, all audited)
   app/page.tsx            dashboard
   app/instruments/[id]/   instrument detail
