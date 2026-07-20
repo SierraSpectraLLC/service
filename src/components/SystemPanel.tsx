@@ -2,12 +2,13 @@
 
 import { useState, useTransition } from "react";
 import StagePanel from "./StagePanel";
+import GasPanel, { type GasRow } from "./GasPanel";
 import { updateInstrument, updateInstrumentNotes } from "@/app/actions";
 
 type Inst = { id: number; externalId: string; client: string; model: string; priority: number; notes: string };
 
-export default function SystemPanel({ instrument, stages, canEdit, isStaff }: {
-  instrument: Inst; stages: string[]; canEdit: boolean; isStaff: boolean;
+export default function SystemPanel({ instrument, stages, gases, canEdit, isStaff }: {
+  instrument: Inst; stages: string[]; gases: GasRow[]; canEdit: boolean; isStaff: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ client: "", model: "", priority: "", notes: "" });
@@ -78,6 +79,7 @@ export default function SystemPanel({ instrument, stages, canEdit, isStaff }: {
       )}
 
       <StagePanel instrumentId={instrument.id} stages={stages} canEdit={canEdit} />
+      <GasPanel instrumentId={instrument.id} gases={gases} canEdit={canEdit} isStaff={isStaff} />
     </div>
   );
 }

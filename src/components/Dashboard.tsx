@@ -7,7 +7,7 @@ import { createInstrument } from "@/app/actions";
 
 type Row = {
   id: number; externalId: string; client: string; model: string; priority: number;
-  stages: string[]; notes: string; openParts: number; lastActivity: string;
+  stages: string[]; notes: string; openParts: number; gasIssues: string[]; lastActivity: string;
 };
 
 const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
@@ -25,11 +25,12 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
   const filtered = useMemo(() => {
     let list = data;
     if (filter === "Awaiting parts") list = list.filter((i) => i.openParts > 0);
+    else if (filter === "Gas attention") list = list.filter((i) => i.gasIssues.length > 0);
     else if (filter !== "All") list = list.filter((i) => i.stages.includes(filter));
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
-        [i.externalId, i.client, i.model, i.notes, i.stages.join(" "), i.lastActivity].join(" ").toLowerCase().includes(s)
+        [i.externalId, i.client, i.model, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.lastActivity].join(" ").toLowerCase().includes(s)
       );
     }
     return list;
@@ -39,6 +40,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
     total: data.length,
     blocked: data.filter((i) => i.stages.includes("Waiting / blocked")).length,
     waiting: data.filter((i) => i.openParts > 0).length,
+    gas: data.filter((i) => i.gasIssues.length > 0).length,
     shipped: data.filter((i) => i.stages.includes("Shipped") || i.stages.includes("Waiting to ship")).length,
   };
 
@@ -62,6 +64,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
           ["Total systems", counts.total, "var(--navy)"],
           ["Waiting / blocked", counts.blocked, "#A32D2D"],
           ["Awaiting parts", counts.waiting, "#8A5410"],
+          ["Gas attention", counts.gas, "#A33A1A"],
           ["Ship queue + shipped", counts.shipped, "#085041"],
         ] as [string, number, string][]).map(([label, n, color]) => (
           <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
@@ -72,7 +75,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-        {["All", ...STAGES, "Awaiting parts"].map((f) => (
+        {["All", ...STAGES, "Awaiting parts", "Gas attention"].map((f) => (
           <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
             borderRadius: 999,
             borderColor: filter === f ? "var(--navy)" : "var(--line)",
@@ -105,7 +108,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div className="grid-row eyebrow" style={{ padding: "9px 14px", borderBottom: "1px solid var(--line)" }}>
-          <span>ID</span><span>System</span><span className="hide-m">Stages</span><span className="hide-m">Parts</span>
+          <span>ID</span><span>System</span><span className="hide-m">Stages</span><span className="hide-m">Parts / gas</span>
         </div>
         {filtered.map((i) => (
           <div key={i.id} className="grid-row row-hover" onClick={() => router.push(`/instruments/${i.id}`)}
@@ -120,8 +123,12 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
                 <Pill key={s} bg={STAGE_COLOR[s]?.bg || "#EEF1F5"} fg={STAGE_COLOR[s]?.fg || "#475569"}>{s}</Pill>
               ))}
             </span>
-            <span className="hide-m">
-              {i.openParts ? <Pill bg="#FAF0DC" fg="#8A5410">{i.openParts} open</Pill> : <span className="mut" style={{ fontSize: 12 }}>-</span>}
+            <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {i.openParts > 0 && <Pill bg="#FAF0DC" fg="#8A5410">{i.openParts} open</Pill>}
+              {i.gasIssues.map((g) => (
+                <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
+              ))}
+              {i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </div>
         ))}

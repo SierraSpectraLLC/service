@@ -3,7 +3,7 @@ import { asc, desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import {
-  instruments, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
+  instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import SystemPanel from "@/components/SystemPanel";
@@ -24,6 +24,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instId));
   if (!inst) notFound();
 
+  const gasRows = await db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id));
   const taskRows = await db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id));
   const taskIds = taskRows.map((t) => t.id);
   const items = taskIds.length ? await db.select().from(checklistItems).where(inArray(checklistItems.taskId, taskIds)).orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id)) : [];
@@ -56,7 +57,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <SystemPanel
         instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
-        stages={inst.stages} canEdit={canEdit} isStaff={isStaff}
+        stages={inst.stages} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
+        canEdit={canEdit} isStaff={isStaff}
       />
 
       <PartsPanel instrumentId={inst.id} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />

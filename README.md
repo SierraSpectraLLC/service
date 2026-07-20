@@ -47,8 +47,12 @@ they can only sign in when the owner enables client access in Settings.
 Import the repo in Vercel. Add all env vars from `.env`. Then:
 - **Storage > Blob**: create a store; `BLOB_READ_WRITE_TOKEN` is injected
   automatically.
-- **Cron**: `vercel.json` already schedules `GET /api/cron/sheet-sync` hourly.
-  Set `CRON_SECRET` in project env; Vercel sends it as the bearer token.
+- **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` hourly and
+  `GET /api/cron/daily-digest` daily at 14:00 UTC (7am PT - adjust the cron
+  expression to taste). Set `CRON_SECRET` in project env; Vercel sends it as
+  the bearer token. The digest emails every system's status (stages, gases,
+  open parts) to all `STAFF_EMAILS` via Resend, with gas problems called out
+  on top.
 
 ### 6. Google Sheet parity (service account)
 The sync reads the client's sheet through the Sheets API with a service
@@ -91,6 +95,17 @@ Share > Publish to web > CSV) works when the service account vars are unset.
 
 All authorization is enforced server-side in the actions
 (`src/app/actions.ts`), not just hidden in the UI.
+
+## Gas tracking
+
+Each system lists the gases it requires (Helium, Nitrogen, Argon, Hydrogen,
+Air) with a status - Connected / Low / Empty / Not connected - and a free-text
+note for tank details. Low/Empty/Not-connected gases surface on the dashboard
+(metric tile, row pill, "Gas attention" filter) and at the top of the daily
+digest email. Individual tanks are deliberately not inventoried; the note
+field ("tank #A-441, swapped Jul 18") covers attribution without the
+bookkeeping. After pulling this feature, run `npm run db:push` once to create
+the `instrument_gases` table.
 
 ## The audit log
 
