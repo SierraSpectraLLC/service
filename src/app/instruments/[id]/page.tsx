@@ -6,7 +6,8 @@ import {
   instruments, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import StagePanel from "@/components/StagePanel";
+import SystemPanel from "@/components/SystemPanel";
+import ActivityNoteForm from "@/components/ActivityNoteForm";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
@@ -53,14 +54,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         ← All instruments
       </Link>
 
-      <div className="card">
-        <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
-          {inst.externalId} · {inst.client} · Priority {inst.priority}
-        </div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)", marginTop: 2 }}>{inst.model}</div>
-        <div className="mut" style={{ fontSize: 13, marginTop: 6 }}>{inst.notes || "No notes."}</div>
-        <StagePanel instrumentId={inst.id} stages={inst.stages} canEdit={canEdit} />
-      </div>
+      <SystemPanel
+        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
+        stages={inst.stages} canEdit={canEdit} isStaff={isStaff}
+      />
 
       <PartsPanel instrumentId={inst.id} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
@@ -71,6 +68,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <div className="card">
         <div className="card-title">Activity</div>
         <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>Append-only. Nothing here can be edited or erased.</div>
+        {canEdit && <ActivityNoteForm instrumentId={inst.id} />}
         <div style={{ borderLeft: "2px solid var(--line)", paddingLeft: 14, display: "flex", flexDirection: "column", gap: 10 }}>
           {activity.map((a) => (
             <div key={a.id}>
@@ -78,6 +76,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 <b>{a.actor === "sheet-sync" ? "Sheet sync" : a.actor.split("@")[0]}</b>{" "}
                 <span className="mut">{a.action}</span>
               </div>
+              {a.field === "note" && a.newValue && <div style={{ fontSize: 13, marginTop: 2 }}>{a.newValue}</div>}
               <div className="mut" style={{ fontSize: 11 }}>{a.createdAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
             </div>
           ))}
