@@ -5,12 +5,14 @@ import { CARRIERS, PART_STATES, PART_COLOR, trackUrl } from "@/lib/stages";
 import { createPart, updatePart, setPartStatus, deletePart } from "@/app/actions";
 
 type Part = {
-  id: number; name: string; partNumber: string; vendor: string; po: string; cost: string;
+  id: number; name: string; partNumber: string; serial: string; vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
   installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
 };
 
-const empty = { name: "", partNumber: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
+const empty = { name: "", partNumber: "", serial: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
+
+const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
 export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { instrumentId: number; parts: Part[]; canEdit: boolean; isStaff: boolean }) {
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -19,7 +21,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
 
   const openNew = () => { setDraft(empty); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
-    setDraft({ name: p.name, partNumber: p.partNumber, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
+    setDraft({ name: p.name, partNumber: p.partNumber, serial: p.serial, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
     setForm({ mode: "edit", id: p.id });
   };
   const close = () => { setForm(null); setDraft(empty); };
@@ -55,7 +57,8 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. 10kV HED supply" />
             </div>
             <div><label>Part number</label><input value={draft.partNumber} onChange={(e) => setDraft({ ...draft, partNumber: e.target.value })} placeholder="G6303-80060" /></div>
-            <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Applied Kilovolts" /></div>
+            <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="US12345678" /></div>
+            <div style={{ gridColumn: "1 / -1" }}><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Applied Kilovolts" /></div>
           </div>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div><label>PO #</label><input value={draft.po} onChange={(e) => setDraft({ ...draft, po: e.target.value })} placeholder="SS-1042" /></div>
@@ -122,6 +125,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
             </div>
             <div className="mut" style={{ fontSize: 12, marginTop: 5 }}>
               {p.partNumber ? <>PN {p.partNumber}</> : "No PN"}
+              {p.serial ? " · SN " + p.serial : ""}
               {p.vendor ? " · " + p.vendor : ""}{p.po ? " · PO " + p.po : ""}{p.cost ? " · $" + p.cost : ""}
             </div>
             {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.installedAt || p.removedAt) && (
@@ -140,6 +144,17 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
           </div>
         );
       })}
+      {(() => {
+        const priced = parts.filter((p) => !isNaN(money(p.cost)));
+        if (!priced.length) return null;
+        const total = priced.reduce((sum, p) => sum + money(p.cost), 0);
+        return (
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, fontSize: 12, marginTop: 2 }}>
+            <span className="mut">Parts total{priced.length < parts.length ? ` (${priced.length} of ${parts.length} priced)` : ""}:</span>
+            <b>${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -3,13 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
+import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
-  sheetDiffs, appSettings,
+  sheetDiffs, appSettings, eodUpdates,
 } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { STAGES, GASES, GAS_STATES } from "@/lib/stages";
+import { shopToday } from "@/lib/shopday";
 
 const rev = (id?: number) => {
   revalidatePath("/");
@@ -96,6 +98,19 @@ export async function createInstrument(data: { externalId: string; client: strin
   });
   rev(row.id);
   return row.id;
+}
+
+export async function deleteInstrument(instrumentId: number) {
+  const u = await requireOwner();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return;
+  await db.delete(instruments).where(eq(instruments.id, instrumentId)); // tasks, parts, gases, attachments cascade
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: `deleted instrument ${inst.externalId}: ${inst.model} (${inst.client})`,
+  });
+  rev(instrumentId);
+  redirect("/");
 }
 
 // ---------------- Gases ----------------
@@ -306,10 +321,68 @@ export async function addTaskNote(taskId: number, text: string) {
   rev(t.instrumentId);
 }
 
+export async function updateTaskNote(noteId: number, text: string) {
+  const u = await requireStaff();
+  const t = text.trim();
+  if (!t) throw new Error("Note text required");
+  const [n] = await db.select().from(taskNotes).where(eq(taskNotes.id, noteId));
+  if (!n || n.text === t) return;
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, n.taskId));
+  await db.update(taskNotes).set({ text: t }).where(eq(taskNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: task?.instrumentId, entityType: "task_note", entityId: noteId,
+    action: `edited a note on '${task?.title ?? "?"}'`, field: "text", oldValue: n.text, newValue: t,
+  });
+  if (task) rev(task.instrumentId);
+}
+
+export async function deleteTaskNote(noteId: number) {
+  const u = await requireStaff();
+  const [n] = await db.select().from(taskNotes).where(eq(taskNotes.id, noteId));
+  if (!n) return;
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, n.taskId));
+  await db.delete(taskNotes).where(eq(taskNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: task?.instrumentId, entityType: "task_note", entityId: noteId,
+    action: `deleted a note by ${n.author} on '${task?.title ?? "?"}'`, field: "text", oldValue: n.text,
+  });
+  if (task) rev(task.instrumentId);
+}
+
+export async function updateItemNote(noteId: number, text: string) {
+  const u = await requireStaff();
+  const t = text.trim();
+  if (!t) throw new Error("Note text required");
+  const [n] = await db.select().from(itemNotes).where(eq(itemNotes.id, noteId));
+  if (!n || n.text === t) return;
+  const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, n.itemId));
+  const [task] = item ? await db.select().from(tasks).where(eq(tasks.id, item.taskId)) : [];
+  await db.update(itemNotes).set({ text: t }).where(eq(itemNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: task?.instrumentId, entityType: "item_note", entityId: noteId,
+    action: `edited a note on '${item?.text ?? "?"}'`, field: "text", oldValue: n.text, newValue: t,
+  });
+  if (task) rev(task.instrumentId);
+}
+
+export async function deleteItemNote(noteId: number) {
+  const u = await requireStaff();
+  const [n] = await db.select().from(itemNotes).where(eq(itemNotes.id, noteId));
+  if (!n) return;
+  const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, n.itemId));
+  const [task] = item ? await db.select().from(tasks).where(eq(tasks.id, item.taskId)) : [];
+  await db.delete(itemNotes).where(eq(itemNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: task?.instrumentId, entityType: "item_note", entityId: noteId,
+    action: `deleted a note by ${n.author} on '${item?.text ?? "?"}'`, field: "text", oldValue: n.text,
+  });
+  if (task) rev(task.instrumentId);
+}
+
 // ---------------- Parts ----------------
 
 type PartInput = {
-  name: string; partNumber: string; vendor: string; po: string; cost: string;
+  name: string; partNumber: string; serial: string; vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
 };
 
@@ -436,6 +509,25 @@ export async function resolveDiff(diffId: number, resolution: "kept_ours" | "acc
   });
   revalidatePath("/parity");
   rev();
+}
+
+// ---------------- End-of-day client update ----------------
+
+/** Upsert today's client-facing update draft for one system. Not audited - it's a draft, not instrument history. */
+export async function saveEodUpdate(instrumentId: number, data: { systemUpdate: string; actionItem: string }) {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) throw new Error("Not found");
+  const date = shopToday();
+  const systemUpdate = data.systemUpdate.trim();
+  const actionItem = data.actionItem.trim();
+  await db.insert(eodUpdates)
+    .values({ instrumentId, date, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [eodUpdates.instrumentId, eodUpdates.date],
+      set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
+    });
+  revalidatePath("/eod");
 }
 
 // ---------------- Settings ----------------

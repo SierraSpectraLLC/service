@@ -3,12 +3,12 @@
 import { useState, useTransition } from "react";
 import StagePanel from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
-import { updateInstrument, updateInstrumentNotes } from "@/app/actions";
+import { updateInstrument, updateInstrumentNotes, deleteInstrument } from "@/app/actions";
 
 type Inst = { id: number; externalId: string; client: string; model: string; priority: number; notes: string };
 
-export default function SystemPanel({ instrument, stages, gases, canEdit, isStaff }: {
-  instrument: Inst; stages: string[]; gases: GasRow[]; canEdit: boolean; isStaff: boolean;
+export default function SystemPanel({ instrument, stages, gases, canEdit, isStaff, isOwner }: {
+  instrument: Inst; stages: string[]; gases: GasRow[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ client: "", model: "", priority: "", notes: "" });
@@ -71,9 +71,21 @@ export default function SystemPanel({ instrument, stages, gases, canEdit, isStaf
             <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3}
               placeholder='Current state of the system, e.g. "No Helium - waiting on refill"' style={{ resize: "vertical" }} />
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" onClick={save} disabled={pending}>{pending ? "Saving..." : "Save changes"}</button>
             <button className="btn sm" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+            {isOwner && (
+              <button
+                className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
+                onClick={() => {
+                  const typed = window.prompt(
+                    `This permanently deletes ${instrument.externalId} with all its tasks, parts, gases and attachments.\n\nType ${instrument.externalId} to confirm:`
+                  );
+                  if (typed !== instrument.externalId) return;
+                  startTransition(() => deleteInstrument(instrument.id));
+                }}
+              >Delete system</button>
+            )}
           </div>
         </div>
       )}

@@ -5,6 +5,7 @@ import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
+  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
@@ -30,6 +31,46 @@ export default function TasksPanel({ instrumentId, tasks, canEdit, isStaff }: { 
 
   const active = tasks.filter((t) => t.state !== "Done");
   const complete = tasks.filter((t) => t.state === "Done");
+
+  // One renderer for both note threads; staff get inline edit / delete.
+  const renderNote = (m: Note, kind: "item" | "task") => {
+    const key = `editnote-${kind}-${m.id}`;
+    const draft = inputs[key];
+    const isEditing = typeof draft === "string";
+    const save = () => {
+      const v = (draft as string).trim();
+      if (v) startTransition(() => (kind === "item" ? updateItemNote(m.id, v) : updateTaskNote(m.id, v)));
+      setInput(key, false);
+    };
+    return (
+      <div key={m.id} style={{ marginBottom: kind === "task" ? 6 : 0 }}>
+        <div style={{ fontSize: 12 }}>
+          <b style={{ color: "var(--navy)" }}>{m.author}</b>{" "}
+          <span className="mut" style={{ fontSize: 11 }}>{when(m.createdAt)}</span>
+          {isStaff && !isEditing && (
+            <>
+              {" "}<button className="btn link" style={{ fontSize: 11 }} onClick={() => setInput(key, m.text)}>edit</button>
+              <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }}
+                onClick={() => {
+                  if (!window.confirm("Delete this note?")) return;
+                  startTransition(() => (kind === "item" ? deleteItemNote(m.id) : deleteTaskNote(m.id)));
+                }}>×</button>
+            </>
+          )}
+        </div>
+        {isEditing ? (
+          <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
+            <input value={draft as string} onChange={(e) => setInput(key, e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setInput(key, false); }}
+              autoFocus style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+            <button className="btn sm" onClick={save}>Save</button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13 }}>{m.text}</div>
+        )}
+      </div>
+    );
+  };
 
   const submitNew = () => {
     if (!draft.title.trim()) return;
@@ -119,12 +160,7 @@ export default function TasksPanel({ instrumentId, tasks, canEdit, isStaff }: { 
                   </div>
                   {tOpen && (
                     <div style={{ marginLeft: 24, marginTop: 6, borderLeft: "2px solid var(--line)", paddingLeft: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                      {c.thread.map((m) => (
-                        <div key={m.id}>
-                          <div style={{ fontSize: 12 }}><b style={{ color: "var(--navy)" }}>{m.author}</b> <span className="mut" style={{ fontSize: 11 }}>{when(m.createdAt)}</span></div>
-                          <div style={{ fontSize: 13 }}>{m.text}</div>
-                        </div>
-                      ))}
+                      {c.thread.map((m) => renderNote(m, "item"))}
                       {canEdit && (
                         <div style={{ display: "flex", gap: 6 }}>
                           <input value={(inputs["itemnote-" + c.id] as string) || ""}
@@ -150,12 +186,7 @@ export default function TasksPanel({ instrumentId, tasks, canEdit, isStaff }: { 
             )}
 
             <div className="eyebrow" style={{ margin: "14px 0 6px" }}>Notes</div>
-            {t.notes.map((m) => (
-              <div key={m.id} style={{ fontSize: 13, marginBottom: 6 }}>
-                <b>{m.author}</b> <span className="mut" style={{ fontSize: 11 }}>{when(m.createdAt)}</span>
-                <div>{m.text}</div>
-              </div>
-            ))}
+            {t.notes.map((m) => renderNote(m, "task"))}
             {t.notes.length === 0 && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>No notes yet.</div>}
             {canEdit && (
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
