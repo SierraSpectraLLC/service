@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { recordAttachments, deleteAttachment } from "@/app/actions";
+import { uploadWithRetry } from "@/lib/uploadWithRetry";
 
 type Attachment = {
   id: number; fileName: string; kind: string; description: string; url: string; size: number;
@@ -16,6 +17,7 @@ type Staged = {
   kind: string;
   description: string;
   progress: number;        // 0-100 while uploading
+  attempt: number;         // 1 = first try; >1 shown as "retry N"
   state: "staged" | "uploading" | "done" | "failed";
   error?: string;
 };
@@ -49,7 +51,7 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
     if (!list) return;
     const next = Array.from(list).map((file) => ({
       key: `${file.name}-${file.size}-${file.lastModified}`,
-      file, kind: guessKind(file.name), description: "", progress: 0, state: "staged" as const,
+      file, kind: guessKind(file.name), description: "", progress: 0, attempt: 1, state: "staged" as const,
     }));
     setStaged((s) => {
       const have = new Set(s.map((x) => x.key));
@@ -67,18 +69,28 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
     // Sequential: predictable on mobile bandwidth, and per-file progress stays honest.
     for (const s of staged) {
       if (s.state === "done") continue;
-      patch(s.key, { state: "uploading", progress: 0, error: undefined });
+      patch(s.key, { state: "uploading", progress: 0, attempt: 1, error: undefined });
       try {
-        const blob = await upload(s.file.name, s.file, {
-          access: "public",
-          handleUploadUrl: "/api/upload",
-          multipart: s.file.size > 8 * 1024 * 1024,
-          onUploadProgress: ({ percentage }) => patch(s.key, { progress: Math.round(percentage) }),
+        const blob = await uploadWithRetry({
+          // Retry the whole file on a stall/error with a fresh connection.
+          onProgress: (pct) => patch(s.key, { progress: pct }),
+          onAttempt: (attempt) => patch(s.key, { attempt, progress: 0 }),
+          uploadFn: (signal, onProgress) =>
+            upload(s.file.name, s.file, {
+              access: "public",
+              handleUploadUrl: "/api/upload",
+              // Multipart retries individual parts and is far more resilient on
+              // flaky mobile connections; use it for anything non-trivial.
+              multipart: s.file.size > 4 * 1024 * 1024,
+              abortSignal: signal,
+              onUploadProgress: ({ percentage }) => onProgress(Math.round(percentage)),
+            }),
         });
         patch(s.key, { state: "done", progress: 100 });
         done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
       } catch (e) {
-        patch(s.key, { state: "failed", error: (e as Error).message || "Upload failed" });
+        const msg = (e as Error).message || "Upload failed";
+        patch(s.key, { state: "failed", error: /stall/i.test(msg) ? "Connection stalled after several tries - check signal and retry" : msg });
       }
     }
     if (done.length) {
@@ -142,7 +154,11 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
                   <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />
                 </div>
               )}
-              {s.state === "uploading" && <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>{s.progress}%</div>}
+              {s.state === "uploading" && (
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+                  {s.progress}%{s.attempt > 1 ? ` · retry ${s.attempt}` : ""}
+                </div>
+              )}
               {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "#2E6B2E" }}>Uploaded ✓</div>}
               {s.state === "failed" && <div style={{ fontSize: 11, marginTop: 3, color: "#A32D2D" }}>Failed: {s.error}</div>}
             </div>
