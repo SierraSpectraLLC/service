@@ -65,7 +65,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <AttachmentsPanel instrumentId={inst.id} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
-      <TasksPanel instrumentId={inst.id} tasks={fullTasks} canEdit={canEdit} />
+      <TasksPanel instrumentId={inst.id} tasks={fullTasks} canEdit={canEdit} isStaff={isStaff} />
 
       <div className="card">
         <div className="card-title">Activity</div>

@@ -29,7 +29,11 @@ export function gasAttention(status: string): boolean {
 }
 
 export const TASK_STATES = ["Open", "In progress", "Blocked", "Done"] as const;
-export const PART_STATES = ["Needed", "Ordered", "In transit", "Received", "Backordered"] as const;
+export const PART_STATES = ["Needed", "Ordered", "In transit", "Received", "Backordered", "Installed", "Removed"] as const;
+/** True while a part still needs someone to do something (order, chase, install). */
+export function partOpen(status: string): boolean {
+  return status !== "Received" && status !== "Installed" && status !== "Removed";
+}
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;
 export const ATTACH_KINDS = ["Tune report", "Test data", "Report", "Photo", "Manual", "Other"] as const;
 
@@ -56,6 +60,8 @@ export const PART_COLOR: Record<string, { bg: string; fg: string }> = {
   "In transit": { bg: "#E7F2FA", fg: "#1D6396" },
   Received: { bg: "#E5F3E5", fg: "#2E6B2E" },
   Backordered: { bg: "#FBE9E9", fg: "#A32D2D" },
+  Installed: { bg: "#DDF0EA", fg: "#085041" },
+  Removed: { bg: "#EEF1F5", fg: "#64748B" },
 };
 export const ATTACH_META: Record<string, { glyph: string; bg: string; fg: string }> = {
   "Tune report": { glyph: "⚙", bg: "#EDEBFA", fg: "#4F45A3" },

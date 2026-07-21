@@ -3,8 +3,8 @@
 import { useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
-  createTask, setTaskState, assignTask, addChecklistItem, toggleChecklistItem,
-  addItemNote, addTaskNote,
+  createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
+  toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
@@ -17,11 +17,13 @@ type Task = {
 const PEOPLE = ["", "Joe", "Bill"];
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumentId: number; tasks: Task[]; canEdit: boolean }) {
+export default function TasksPanel({ instrumentId, tasks, canEdit, isStaff }: { instrumentId: number; tasks: Task[]; canEdit: boolean; isStaff: boolean }) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "" });
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState({ title: "", body: "" });
   const [inputs, setInputs] = useState<Record<string, string | boolean>>({});
   const [pending, startTransition] = useTransition();
   const setInput = (k: string, v: string | boolean) => setInputs((s) => ({ ...s, [k]: v }));
@@ -54,8 +56,24 @@ export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumen
 
         {open && (
           <div style={{ borderTop: "1px solid var(--line)", padding: 12, background: "#FAFBFD" }}>
-            {t.body && <div style={{ fontSize: 13, marginBottom: 10 }}>{t.body}</div>}
-            {canEdit && (
+            {editing === t.id ? (
+              <div className="dash-form" style={{ marginBottom: 12 }}>
+                <label>Title *</label>
+                <input value={editDraft.title} onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })} style={{ marginBottom: 8 }} />
+                <label>Body</label>
+                <textarea value={editDraft.body} onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })} rows={2} style={{ marginBottom: 8, resize: "vertical" }} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="btn sm accent" disabled={pending || !editDraft.title.trim()}
+                    onClick={() => startTransition(async () => { await updateTask(t.id, editDraft); setEditing(null); })}>
+                    {pending ? "Saving..." : "Save"}
+                  </button>
+                  <button className="btn sm" onClick={() => setEditing(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              t.body && <div style={{ fontSize: 13, marginBottom: 10 }}>{t.body}</div>
+            )}
+            {canEdit && editing !== t.id && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <span className="mut" style={{ fontSize: 12 }}>Status:</span>
                 <select value={t.state} onChange={(e) => startTransition(() => setTaskState(t.id, e.target.value))} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
@@ -65,6 +83,14 @@ export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumen
                 <select value={t.assignee} onChange={(e) => startTransition(() => assignTask(t.id, e.target.value))} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
                   {PEOPLE.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
                 </select>
+                <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
+                {isStaff && (
+                  <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
+                    onClick={() => {
+                      if (!window.confirm(`Delete task "${t.title}"? Its checklist and notes go with it.`)) return;
+                      startTransition(async () => { await deleteTask(t.id); setExpanded(null); });
+                    }}>Delete</button>
+                )}
               </div>
             )}
 
@@ -83,6 +109,13 @@ export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumen
                       {n > 0 && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396", padding: "1px 7px" }}>{n}</span>}
                       {tOpen ? "hide" : n > 0 ? "notes" : "+ note"}
                     </button>
+                    {isStaff && (
+                      <button className="btn link" title="Remove item" style={{ color: "#A32D2D", padding: "0 4px" }}
+                        onClick={() => {
+                          if (n > 0 && !window.confirm(`Remove "${c.text}" and its ${n} note${n > 1 ? "s" : ""}?`)) return;
+                          startTransition(() => deleteChecklistItem(c.id));
+                        }}>×</button>
+                    )}
                   </div>
                   {tOpen && (
                     <div style={{ marginLeft: 24, marginTop: 6, borderLeft: "2px solid var(--line)", paddingLeft: 10, display: "flex", flexDirection: "column", gap: 8 }}>

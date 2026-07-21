@@ -174,6 +174,41 @@ export async function createTask(instrumentId: number, data: { title: string; bo
   rev(instrumentId);
 }
 
+export async function updateTask(taskId: number, data: { title: string; body: string }) {
+  const u = await requireEditor();
+  const title = data.title.trim();
+  if (!title) throw new Error("Title required");
+  const body = data.body.trim();
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t || (t.title === title && t.body === body)) return;
+  await db.update(tasks).set({ title, body }).where(eq(tasks.id, taskId));
+  if (t.title !== title) {
+    await audit({
+      actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+      action: `renamed task '${t.title}' to '${title}'`, field: "title", oldValue: t.title, newValue: title,
+    });
+  }
+  if (t.body !== body) {
+    await audit({
+      actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+      action: `edited task '${title}' description`, field: "body", oldValue: t.body, newValue: body,
+    });
+  }
+  rev(t.instrumentId);
+}
+
+export async function deleteTask(taskId: number) {
+  const u = await requireStaff();
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t) return;
+  await db.delete(tasks).where(eq(tasks.id, taskId)); // checklist + notes cascade
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    action: `deleted task '${t.title}'${t.state !== "Done" ? ` (was ${t.state})` : ""}`,
+  });
+  rev(t.instrumentId);
+}
+
 export async function setTaskState(taskId: number, state: string) {
   const u = await requireEditor();
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
@@ -231,6 +266,19 @@ export async function toggleChecklistItem(itemId: number) {
   if (t) rev(t.instrumentId);
 }
 
+export async function deleteChecklistItem(itemId: number) {
+  const u = await requireStaff();
+  const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, itemId));
+  if (!item) return;
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, item.taskId));
+  await db.delete(checklistItems).where(eq(checklistItems.id, itemId)); // item notes cascade
+  await audit({
+    actor: u.email, instrumentId: t?.instrumentId, entityType: "checklist_item", entityId: itemId,
+    action: `removed checklist item '${item.text}'${t ? ` from '${t.title}'` : ""}`,
+  });
+  if (t) rev(t.instrumentId);
+}
+
 export async function addItemNote(itemId: number, text: string) {
   const u = await requireEditor();
   if (!text.trim()) return;
@@ -262,16 +310,36 @@ export async function addTaskNote(taskId: number, text: string) {
 
 type PartInput = {
   name: string; partNumber: string; vendor: string; po: string; cost: string;
-  carrier: string; tracking: string; orderedAt: string; eta: string; status: string;
+  carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
 };
+
+const today = () => new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/** Auto-stamp the lifecycle date when a part first enters Received / Installed / Removed. */
+function partStamps(before: { status: string; receivedAt: string; installedAt: string; removedAt: string }, status: string) {
+  return {
+    receivedAt: status === "Received" && before.status !== "Received" ? today() : before.receivedAt,
+    installedAt: status === "Installed" && before.status !== "Installed" ? today() : before.installedAt,
+    removedAt: status === "Removed" && before.status !== "Removed" ? today() : before.removedAt,
+  };
+}
+
+const partStatusVerb = (status: string) =>
+  status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
 
 export async function createPart(instrumentId: number, data: PartInput) {
   const u = await requireEditor();
   if (!data.name.trim()) throw new Error("Name required");
-  const [p] = await db.insert(parts).values({ ...data, name: data.name.trim(), instrumentId }).returning();
+  const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
+  const [p] = await db.insert(parts).values({ ...data, ...stamps, name: data.name.trim(), note: data.note.trim(), instrumentId }).returning();
+  const verb = partStatusVerb(p.status);
+  const pn = p.partNumber ? ` (PN ${p.partNumber})` : "";
+  const note = p.note ? ` - ${p.note}` : "";
   await audit({
     actor: u.email, instrumentId, entityType: "part", entityId: p.id,
-    action: `added part '${p.name}'${p.partNumber ? ` (PN ${p.partNumber})` : ""} - ${p.status}`,
+    action: verb
+      ? `${verb} part '${p.name}'${pn}${note}`
+      : `added part '${p.name}'${pn} - ${p.status}${note}`,
   });
   rev(instrumentId);
 }
@@ -280,9 +348,13 @@ export async function updatePart(partId: number, data: PartInput) {
   const u = await requireEditor();
   const [before] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!before) return;
-  await db.update(parts).set({ ...data, name: data.name.trim() }).where(eq(parts.id, partId));
+  const stamps = partStamps(before, data.status);
+  await db.update(parts).set({ ...data, ...stamps, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
+  const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
-    ? `part '${data.name}' status: ${before.status} -> ${data.status}`
+    ? verb
+      ? `${verb} part '${data.name}'${data.note.trim() ? ` - ${data.note.trim()}` : ""}`
+      : `part '${data.name}' status: ${before.status} -> ${data.status}`
     : `edited part '${data.name}'`;
   await audit({
     actor: u.email, instrumentId: before.instrumentId, entityType: "part", entityId: partId,
@@ -295,11 +367,13 @@ export async function setPartStatus(partId: number, status: string) {
   const u = await requireEditor();
   const [p] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!p || p.status === status) return;
-  const receivedAt = status === "Received" ? new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }) : p.receivedAt;
-  await db.update(parts).set({ status, receivedAt }).where(eq(parts.id, partId));
+  const stamps = partStamps(p, status);
+  await db.update(parts).set({ status, ...stamps }).where(eq(parts.id, partId));
+  const verb = partStatusVerb(status);
   await audit({
     actor: u.email, instrumentId: p.instrumentId, entityType: "part", entityId: partId,
-    action: `part '${p.name}' status: ${p.status} -> ${status}`, field: "status", oldValue: p.status, newValue: status,
+    action: verb ? `${verb} part '${p.name}'` : `part '${p.name}' status: ${p.status} -> ${status}`,
+    field: "status", oldValue: p.status, newValue: status,
   });
   rev(p.instrumentId);
 }
@@ -311,7 +385,7 @@ export async function deletePart(partId: number) {
   await db.delete(parts).where(eq(parts.id, partId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId, entityType: "part", entityId: partId,
-    action: `removed part '${p.name}'`,
+    action: `deleted part record '${p.name}'`,
   });
   rev(p.instrumentId);
 }

@@ -123,7 +123,11 @@ export const parts = pgTable("parts", {
   orderedAt: text("ordered_at").notNull().default(""),
   eta: text("eta").notNull().default(""),
   receivedAt: text("received_at").notNull().default(""),
-  // Needed | Ordered | In transit | Received | Backordered
+  installedAt: text("installed_at").notNull().default(""),
+  removedAt: text("removed_at").notNull().default(""),
+  // Install/swap detail: what it replaced, serial in/out, where it came from.
+  note: text("note").notNull().default(""),
+  // Needed | Ordered | In transit | Received | Backordered | Installed | Removed
   status: text("status").notNull().default("Needed"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("parts_instrument_idx").on(t.instrumentId)]);

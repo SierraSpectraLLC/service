@@ -7,10 +7,10 @@ import { createPart, updatePart, setPartStatus, deletePart } from "@/app/actions
 type Part = {
   id: number; name: string; partNumber: string; vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
-  status: string; createdAt: string;
+  installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
 };
 
-const empty = { name: "", partNumber: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed" };
+const empty = { name: "", partNumber: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
 
 export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { instrumentId: number; parts: Part[]; canEdit: boolean; isStaff: boolean }) {
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -19,7 +19,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
 
   const openNew = () => { setDraft(empty); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
-    setDraft({ name: p.name, partNumber: p.partNumber, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status });
+    setDraft({ name: p.name, partNumber: p.partNumber, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
     setForm({ mode: "edit", id: p.id });
   };
   const close = () => { setForm(null); setDraft(empty); };
@@ -39,7 +39,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
         <div className="card-title">Parts</div>
         {canEdit && (
           <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => (form ? close() : openNew())}>
-            {form ? "Cancel" : "+ Order part"}
+            {form ? "Cancel" : "+ Add part"}
           </button>
         )}
       </div>
@@ -47,7 +47,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
       {form && (
         <div className="dash-form">
           <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>
-            {form.mode === "new" ? "New part order" : "Edit part"}
+            {form.mode === "new" ? "New part" : "Edit part"}
           </div>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div style={{ gridColumn: "1 / -1" }}>
@@ -76,9 +76,14 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
             </div>
             <div><label>Tracking #</label><input className="mono" value={draft.tracking} onChange={(e) => setDraft({ ...draft, tracking: e.target.value })} placeholder="1Z999AA10123456784" /></div>
           </div>
-          <div className="pf2" style={{ marginBottom: 12 }}>
+          <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Ordered</label><input value={draft.orderedAt} onChange={(e) => setDraft({ ...draft, orderedAt: e.target.value })} placeholder="Jul 18" /></div>
             <div><label>ETA</label><input value={draft.eta} onChange={(e) => setDraft({ ...draft, eta: e.target.value })} placeholder="Jul 23" /></div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label>Install / swap note</label>
+            <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+              placeholder='e.g. "From stock; replaced failing unit SN 4411, old one returned for RMA"' />
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" onClick={save} disabled={pending}>
@@ -95,7 +100,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
         </div>
       )}
 
-      {parts.length === 0 && !form && <div className="mut" style={{ fontSize: 13 }}>No parts ordered for this system.</div>}
+      {parts.length === 0 && !form && <div className="mut" style={{ fontSize: 13 }}>No parts tracked for this system.</div>}
       {parts.map((p) => {
         const link = trackUrl(p.carrier, p.tracking);
         return (
@@ -119,7 +124,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
               {p.partNumber ? <>PN {p.partNumber}</> : "No PN"}
               {p.vendor ? " · " + p.vendor : ""}{p.po ? " · PO " + p.po : ""}{p.cost ? " · $" + p.cost : ""}
             </div>
-            {(p.tracking || p.eta || p.orderedAt || p.receivedAt) && (
+            {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.installedAt || p.removedAt) && (
               <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                 {p.tracking && (link
                   ? <a className="mono" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{p.carrier} {p.tracking} ↗</a>
@@ -127,8 +132,11 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
                 {p.orderedAt && <span className="mut">Ordered {p.orderedAt}</span>}
                 {p.eta && <span className="mut">ETA {p.eta}</span>}
                 {p.receivedAt && <span style={{ color: "#2E6B2E" }}>Received {p.receivedAt}</span>}
+                {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {p.installedAt}</span>}
+                {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {p.removedAt}</span>}
               </div>
             )}
+            {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
           </div>
         );
       })}
