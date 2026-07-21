@@ -111,13 +111,15 @@ digest email. Individual tanks are deliberately not inventoried; the note
 field ("tank #A-441, swapped Jul 18") covers attribution without the
 bookkeeping.
 
-Schema changes apply themselves on deploy: the `vercel-build` script runs
-`drizzle-kit push` against `DATABASE_URL` before `next build`, so the database
-is diffed and synced to `src/db/schema.ts` on every Vercel build (a no-op when
-nothing changed). Local `npm run build` is unaffected. Additive changes (new
-tables/columns) apply cleanly; a destructive change (dropping or renaming)
-will stop and fail the build instead of applying silently - run that kind of
-migration deliberately with `npm run db:push` from a machine.
+Schema changes apply themselves on deploy: `next.config.mjs` runs
+`drizzle-kit push` against `DATABASE_URL` at the start of every Vercel
+production build (hooked into the config so it runs regardless of how the
+build command is configured), syncing the database to `src/db/schema.ts` - a
+no-op when nothing changed. Local `npm run build` skips it (no `VERCEL` env).
+Additive changes (new tables/columns) apply cleanly; a destructive change
+(dropping or renaming) will stop and fail the build instead of applying
+silently - run that kind of migration deliberately with `npm run db:push`
+from a machine.
 
 ## The audit log
 
