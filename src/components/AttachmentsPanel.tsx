@@ -39,6 +39,19 @@ function fmtSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+// Ask the server whether it can reach Blob. Distinguishes a storage/token
+// misconfig from a browser->Blob network problem when an upload fails.
+async function diagnoseStorage(): Promise<string> {
+  try {
+    const res = await fetch("/api/upload", { method: "GET" });
+    const data = (await res.json()) as { ok?: boolean; error?: string };
+    if (data.ok) return "storage is reachable from the server, so this looks like a network problem between your device and storage - try a stronger connection";
+    return `storage check failed on the server: ${data.error} - this is a Vercel Blob configuration issue, not your connection`;
+  } catch (e) {
+    return `couldn't run the storage check: ${(e as Error).message}`;
+  }
+}
+
 export default function AttachmentsPanel({ instrumentId, attachments, canEdit, isStaff }: {
   instrumentId: number; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
 }) {
@@ -92,9 +105,11 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
       } catch (e) {
         let error: string;
         if (e instanceof UploadStalledError) {
-          error = e.gotProgress
-            ? "Connection stalled mid-upload after 3 tries - move to stronger signal and retry"
-            : "Upload never started after 3 tries - check your connection, then retry";
+          // A stall could be the connection OR a broken storage config - ask the
+          // server which, so the message is actionable.
+          const diag = await diagnoseStorage();
+          const head = e.gotProgress ? "Upload stalled mid-transfer after 3 tries" : "Upload never started after 3 tries";
+          error = `${head}. ${diag}`;
         } else {
           // Real SDK error, e.g. token/config problems ("Failed to retrieve the client token").
           error = (e as Error).message || "Upload failed";
