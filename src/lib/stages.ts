@@ -11,6 +11,23 @@ export const STAGES = [
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
+export const GASES = ["Helium", "Nitrogen", "Argon", "Hydrogen", "Air"] as const;
+export type Gas = (typeof GASES)[number];
+export const GAS_STATES = ["Connected", "Low", "Empty", "Not connected"] as const;
+export const GAS_SYMBOL: Record<string, string> = {
+  Helium: "He", Nitrogen: "N2", Argon: "Ar", Hydrogen: "H2", Air: "Air",
+};
+export const GAS_COLOR: Record<string, { bg: string; fg: string }> = {
+  Connected: { bg: "#E5F3E5", fg: "#2E6B2E" },
+  Low: { bg: "#FAF0DC", fg: "#8A5410" },
+  Empty: { bg: "#FBE9E9", fg: "#A32D2D" },
+  "Not connected": { bg: "#EEF1F5", fg: "#475569" },
+};
+/** True when a gas status should surface on the dashboard / digest. */
+export function gasAttention(status: string): boolean {
+  return status === "Low" || status === "Empty" || status === "Not connected";
+}
+
 export const TASK_STATES = ["Open", "In progress", "Blocked", "Done"] as const;
 export const PART_STATES = ["Needed", "Ordered", "In transit", "Received", "Backordered"] as const;
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;

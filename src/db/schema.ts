@@ -1,5 +1,5 @@
 import {
-  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index,
+  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -97,6 +97,18 @@ export const taskNotes = pgTable("task_notes", {
   text: text("text").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("task_notes_task_idx").on(t.taskId)]);
+
+// Gas requirements per system. One row per (instrument, gas); status vocabulary
+// lives in src/lib/stages.ts. Tank details go in the free-text note - individual
+// tank inventory is deliberately not modeled (yet).
+export const instrumentGases = pgTable("instrument_gases", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  gas: text("gas").notNull(),                          // Helium, Nitrogen, ...
+  status: text("status").notNull().default("Connected"), // Connected | Low | Empty | Not connected
+  note: text("note").notNull().default(""),            // tank #, psi, supplier
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("gases_instrument_idx").on(t.instrumentId), unique("gases_instrument_gas").on(t.instrumentId, t.gas)]);
 
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),

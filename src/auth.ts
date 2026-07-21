@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users, accounts, sessions, verificationTokens, appSettings } from "@/db/schema";
 
-function parseList(v: string | undefined): string[] {
+export function parseList(v: string | undefined): string[] {
   return (v || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 }
 

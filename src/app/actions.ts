@@ -4,12 +4,12 @@ import { revalidatePath } from "next/cache";
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  instruments, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
+  instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings,
 } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
-import { STAGES } from "@/lib/stages";
+import { STAGES, GASES, GAS_STATES } from "@/lib/stages";
 
 const rev = (id?: number) => {
   revalidatePath("/");
@@ -47,6 +47,43 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
   rev(instrumentId);
 }
 
+export async function updateInstrument(instrumentId: number, data: { client: string; model: string; priority: number }) {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) throw new Error("Not found");
+  const client = data.client.trim();
+  const model = data.model.trim();
+  if (!model) throw new Error("Model required");
+  const priority = data.priority || inst.priority;
+  const changed: [string, string, string][] = [];
+  if (client !== inst.client) changed.push(["client", inst.client, client]);
+  if (model !== inst.model) changed.push(["model", inst.model, model]);
+  if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
+  if (!changed.length) return;
+  await db.update(instruments).set({ client, model, priority, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  for (const [field, oldValue, newValue] of changed) {
+    await audit({
+      actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+      action: `updated ${field}`, field, oldValue, newValue,
+    });
+  }
+  rev(instrumentId);
+}
+
+/** Freeform note straight into the activity log - for things that aren't a task or a part order. */
+export async function addInstrumentNote(instrumentId: number, text: string) {
+  const u = await requireEditor();
+  const t = text.trim();
+  if (!t) throw new Error("Note text required");
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) throw new Error("Not found");
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: "posted note", field: "note", newValue: t,
+  });
+  rev(instrumentId);
+}
+
 export async function createInstrument(data: { externalId: string; client: string; model: string; priority: number }) {
   const u = await requireStaff();
   const [row] = await db.insert(instruments).values({
@@ -59,6 +96,67 @@ export async function createInstrument(data: { externalId: string; client: strin
   });
   rev(row.id);
   return row.id;
+}
+
+// ---------------- Gases ----------------
+
+export async function addInstrumentGas(instrumentId: number, gas: string) {
+  const u = await requireEditor();
+  if (!(GASES as readonly string[]).includes(gas)) throw new Error("Unknown gas");
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) throw new Error("Not found");
+  const existing = await db.select().from(instrumentGases)
+    .where(and(eq(instrumentGases.instrumentId, instrumentId), eq(instrumentGases.gas, gas)));
+  if (existing.length) return;
+  await db.insert(instrumentGases).values({ instrumentId, gas });
+  await audit({
+    actor: u.email, instrumentId, entityType: "gas", entityId: inst.externalId,
+    action: `added gas requirement: ${gas}`, field: "gas", newValue: gas,
+  });
+  rev(instrumentId);
+}
+
+export async function setGasStatus(gasId: number, status: string) {
+  const u = await requireEditor();
+  if (!(GAS_STATES as readonly string[]).includes(status)) throw new Error("Unknown gas status");
+  const [g] = await db.select().from(instrumentGases).where(eq(instrumentGases.id, gasId));
+  if (!g) throw new Error("Not found");
+  if (g.status === status) return;
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, g.instrumentId));
+  await db.update(instrumentGases).set({ status, updatedAt: new Date() }).where(eq(instrumentGases.id, gasId));
+  await audit({
+    actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
+    action: `${g.gas}: ${g.status} -> ${status}`, field: "status", oldValue: g.status, newValue: status,
+  });
+  rev(g.instrumentId);
+}
+
+export async function updateGasNote(gasId: number, note: string) {
+  const u = await requireEditor();
+  const [g] = await db.select().from(instrumentGases).where(eq(instrumentGases.id, gasId));
+  if (!g) throw new Error("Not found");
+  const t = note.trim();
+  if (g.note === t) return;
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, g.instrumentId));
+  await db.update(instrumentGases).set({ note: t, updatedAt: new Date() }).where(eq(instrumentGases.id, gasId));
+  await audit({
+    actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
+    action: `updated ${g.gas} note`, field: "note", oldValue: g.note, newValue: t,
+  });
+  rev(g.instrumentId);
+}
+
+export async function removeInstrumentGas(gasId: number) {
+  const u = await requireStaff();
+  const [g] = await db.select().from(instrumentGases).where(eq(instrumentGases.id, gasId));
+  if (!g) throw new Error("Not found");
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, g.instrumentId));
+  await db.delete(instrumentGases).where(eq(instrumentGases.id, gasId));
+  await audit({
+    actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
+    action: `removed gas requirement: ${g.gas}`, field: "gas", oldValue: g.gas,
+  });
+  rev(g.instrumentId);
 }
 
 // ---------------- Tasks ----------------

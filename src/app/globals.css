@@ -43,8 +43,8 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .row-hover:hover { background: #F8FAFD; cursor: pointer; }
 .dash-form { border: 1px dashed var(--sky); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #F7FBFE; }
 
-.grid-row { display: grid; grid-template-columns: 76px minmax(0,2.2fr) minmax(0,1.4fr) 64px; gap: 10px; align-items: center; }
-.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.grid-row { display: grid; grid-template-columns: 76px minmax(0,2.2fr) minmax(0,1.4fr) minmax(64px,auto); gap: 10px; align-items: center; }
+.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .pf2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pf3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .pf-ship { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
