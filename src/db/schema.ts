@@ -115,6 +115,7 @@ export const parts = pgTable("parts", {
   instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   partNumber: text("part_number").notNull().default(""),
+  serial: text("serial").notNull().default(""),
   vendor: text("vendor").notNull().default(""),
   po: text("po").notNull().default(""),
   cost: text("cost").notNull().default(""), // free text: "1,240" - money math not needed yet
@@ -123,7 +124,11 @@ export const parts = pgTable("parts", {
   orderedAt: text("ordered_at").notNull().default(""),
   eta: text("eta").notNull().default(""),
   receivedAt: text("received_at").notNull().default(""),
-  // Needed | Ordered | In transit | Received | Backordered
+  installedAt: text("installed_at").notNull().default(""),
+  removedAt: text("removed_at").notNull().default(""),
+  // Install/swap detail: what it replaced, serial in/out, where it came from.
+  note: text("note").notNull().default(""),
+  // Needed | Ordered | In transit | Received | Backordered | Installed | Removed
   status: text("status").notNull().default("Needed"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("parts_instrument_idx").on(t.instrumentId)]);
@@ -139,6 +144,18 @@ export const attachments = pgTable("attachments", {
   uploadedBy: text("uploaded_by").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("attachments_instrument_idx").on(t.instrumentId)]);
+
+// One row per (instrument, day): the client-facing end-of-day update draft.
+// Staff fill these in during the day; /eod renders them into the email template.
+export const eodUpdates = pgTable("eod_updates", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  date: text("date").notNull(), // YYYY-MM-DD in shop time
+  systemUpdate: text("system_update").notNull().default(""),
+  actionItem: text("action_item").notNull().default(""),
+  updatedBy: text("updated_by").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("eod_instrument_date").on(t.instrumentId, t.date), index("eod_date_idx").on(t.date)]);
 
 // Append-only. No update or delete paths exist in the app code, by design.
 export const auditLog = pgTable("audit_log", {

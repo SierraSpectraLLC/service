@@ -37,9 +37,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
                 {isStaff && (
-                  <Link className="btn sm" href="/parity" style={{ textDecoration: "none" }}>
-                    Sheet parity{openDiffs ? ` (${openDiffs})` : ""}
-                  </Link>
+                  <>
+                    <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>
+                    <Link className="btn sm" href="/parity" style={{ textDecoration: "none" }}>
+                      Sheet parity{openDiffs ? ` (${openDiffs})` : ""}
+                    </Link>
+                  </>
                 )}
                 {user.role === "owner" && (
                   <Link className="btn sm" href="/settings" style={{ textDecoration: "none" }}>Settings</Link>

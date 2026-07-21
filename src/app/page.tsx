@@ -1,7 +1,7 @@
 import { asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
-import { GAS_SYMBOL, gasAttention } from "@/lib/stages";
+import { GAS_SYMBOL, gasAttention, partOpen } from "@/lib/stages";
 import { requireUser } from "@/lib/authz";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
@@ -18,7 +18,7 @@ export default async function Home() {
   const recent = await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200);
 
   const data = rows.map((i) => {
-    const openParts = allParts.filter((p) => p.instrumentId === i.id && p.status !== "Received").length;
+    const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
     const gasIssues = allGases
       .filter((g) => g.instrumentId === i.id && gasAttention(g.status))
       .map((g) => `${GAS_SYMBOL[g.gas] || g.gas} ${g.status === "Not connected" ? "n/c" : g.status.toLowerCase()}`);

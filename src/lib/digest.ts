@@ -1,7 +1,7 @@
 import { asc, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
-import { GAS_COLOR, gasAttention } from "@/lib/stages";
+import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { parseList } from "@/auth";
 
 const esc = (s: string) =>
@@ -23,7 +23,7 @@ export async function composeDigest(): Promise<{ subject: string; html: string }
   const attention: string[] = [];
   const body = rows.map((i) => {
     const g = gases.filter((x) => x.instrumentId === i.id);
-    const openParts = allParts.filter((p) => p.instrumentId === i.id && p.status !== "Received").length;
+    const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
     const last = recent.find((a) => a.instrumentId === i.id);
     const issues = g.filter((x) => gasAttention(x.status));
     for (const x of issues) {

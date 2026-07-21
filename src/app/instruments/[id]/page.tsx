@@ -58,14 +58,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <SystemPanel
         instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
         stages={inst.stages} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
-        canEdit={canEdit} isStaff={isStaff}
+        canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />
 
       <PartsPanel instrumentId={inst.id} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
       <AttachmentsPanel instrumentId={inst.id} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
-      <TasksPanel instrumentId={inst.id} tasks={fullTasks} canEdit={canEdit} />
+      <TasksPanel instrumentId={inst.id} tasks={fullTasks} canEdit={canEdit} isStaff={isStaff} />
 
       <div className="card">
         <div className="card-title">Activity</div>
