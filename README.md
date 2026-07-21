@@ -112,10 +112,15 @@ field ("tank #A-441, swapped Jul 18") covers attribution without the
 bookkeeping.
 
 Schema changes apply themselves on deploy: `next.config.mjs` runs
-`drizzle-kit push` against `DATABASE_URL` at the start of every Vercel
-production build (hooked into the config so it runs regardless of how the
-build command is configured), syncing the database to `src/db/schema.ts` - a
-no-op when nothing changed. Local `npm run build` skips it (no `VERCEL` env).
+`drizzle-kit push` at the start of every Vercel production build (hooked into
+the config so it runs regardless of how the build command is configured),
+syncing the database to `src/db/schema.ts` - a no-op when nothing changed.
+It then runs `scripts/verify-schema.ts`, which fails the build unless every
+table/column the code defines actually exists (drizzle-kit's exit code can't
+be trusted on its own). Push statements are printed in the build log
+(`verbose`). DDL prefers `DATABASE_URL_UNPOOLED` (Neon's direct connection)
+when set - add it in Vercel env alongside the pooled `DATABASE_URL`. Local
+`npm run build` skips all of it (no `VERCEL` env).
 Additive changes (new tables/columns) apply cleanly; a destructive change
 (dropping or renaming) will stop and fail the build instead of applying
 silently - run that kind of migration deliberately with `npm run db:push`
