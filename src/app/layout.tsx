@@ -13,14 +13,13 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const user = await currentUser();
-  let openDiffs = 0;
-  if (user) {
-    try {
-      const rows = await db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false));
-      openDiffs = rows.length;
-    } catch { /* table may not exist before first push */ }
-  }
+  // Run auth and the diff count concurrently; the count only renders for staff.
+  const [user, diffRows] = await Promise.all([
+    currentUser(),
+    db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false))
+      .catch(() => []), // table may not exist before first push
+  ]);
+  const openDiffs = user ? diffRows.length : 0;
   const isStaff = user && (user.role === "owner" || user.role === "staff");
 
   return (

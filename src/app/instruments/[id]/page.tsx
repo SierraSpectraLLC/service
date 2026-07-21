@@ -21,19 +21,25 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const instId = parseInt(id);
   if (isNaN(instId)) notFound();
 
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instId));
+  // neon-http makes each query its own round-trip, so batch the independent
+  // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity] = await Promise.all([
+    db.select().from(instruments).where(eq(instruments.id, instId)),
+    db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
+    db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
+    db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id)),
+    db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(desc(attachments.createdAt)),
+    db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
+  ]);
   if (!inst) notFound();
 
-  const gasRows = await db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id));
-  const taskRows = await db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id));
   const taskIds = taskRows.map((t) => t.id);
-  const items = taskIds.length ? await db.select().from(checklistItems).where(inArray(checklistItems.taskId, taskIds)).orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id)) : [];
+  const [items, tNotes] = await Promise.all([
+    taskIds.length ? db.select().from(checklistItems).where(inArray(checklistItems.taskId, taskIds)).orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id)) : [],
+    taskIds.length ? db.select().from(taskNotes).where(inArray(taskNotes.taskId, taskIds)).orderBy(asc(taskNotes.createdAt)) : [],
+  ]);
   const itemIds = items.map((i) => i.id);
   const iNotes = itemIds.length ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt)) : [];
-  const tNotes = taskIds.length ? await db.select().from(taskNotes).where(inArray(taskNotes.taskId, taskIds)).orderBy(asc(taskNotes.createdAt)) : [];
-  const partRows = await db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id));
-  const attachRows = await db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(desc(attachments.createdAt));
-  const activity = await db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100);
 
   const canEdit = user.role !== "client_viewer";
   const isStaff = user.role === "owner" || user.role === "staff";

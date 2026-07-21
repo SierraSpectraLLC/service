@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { STAGES, STAGE_COLOR } from "@/lib/stages";
 import { createInstrument } from "@/app/actions";
@@ -111,8 +112,8 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
           <span>ID</span><span>System</span><span className="hide-m">Stages</span><span className="hide-m">Parts / gas</span>
         </div>
         {filtered.map((i) => (
-          <div key={i.id} className="grid-row row-hover" onClick={() => router.push(`/instruments/${i.id}`)}
-            style={{ padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
+          <Link key={i.id} href={`/instruments/${i.id}`} className="grid-row row-hover"
+            style={{ padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none", color: "inherit" }}>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
             <span style={{ minWidth: 0 }}>
               <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.model}</span>
@@ -130,7 +131,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
               ))}
               {i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
-          </div>
+          </Link>
         ))}
         {filtered.length === 0 && (
           <div className="mut" style={{ padding: 24, fontSize: 13, textAlign: "center" }}>No instruments match. Clear the filter or search.</div>

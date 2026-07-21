@@ -41,6 +41,13 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .mono { font-family: var(--mono); }
 .eyebrow { font-size: 11px; color: var(--mut); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 .row-hover:hover { background: #F8FAFD; cursor: pointer; }
+.skeleton {
+  border-radius: 6px;
+  background: linear-gradient(90deg, #EDF0F4 25%, #F6F8FB 50%, #EDF0F4 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite linear;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 .dash-form { border: 1px dashed var(--sky); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #F7FBFE; }
 
 .grid-row { display: grid; grid-template-columns: 76px minmax(0,2.2fr) minmax(0,1.4fr) minmax(64px,auto); gap: 10px; align-items: center; }

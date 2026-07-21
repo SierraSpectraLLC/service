@@ -45,6 +45,11 @@ they can only sign in when the owner enables client access in Settings.
 
 ### 5. Vercel
 Import the repo in Vercel. Add all env vars from `.env`. Then:
+- **Region**: page speed is dominated by the latency between the Vercel
+  function and Neon, multiplied by several queries per page. Make sure the
+  project's function region (Vercel > Settings > Functions) matches the Neon
+  project's region (shown in the Neon console) - a cross-country mismatch adds
+  hundreds of ms per page load that no code change can recover.
 - **Storage > Blob**: create a store; `BLOB_READ_WRITE_TOKEN` is injected
   automatically.
 - **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` hourly and
