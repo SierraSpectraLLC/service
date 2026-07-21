@@ -40,12 +40,20 @@ function fmtSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+// AbortSignal.timeout is missing on older Safari - use a manual controller.
+function timedSignal(ms: number): AbortSignal {
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
 // Trace each leg of the upload path from this browser and report which one
 // dies. Leg 1: server -> Blob (config). Leg 2: token minting on our own
 // domain. Leg 3: a real tiny PUT from this browser to Blob storage.
+// Leg 4: a tiny real relay POST (same-origin, raw bytes).
 async function traceUploadPath(): Promise<string> {
   const legs: string[] = [];
-  const timed = (ms: number) => AbortSignal.timeout(ms);
+  const timed = timedSignal;
 
   try {
     const res = await fetch("/api/upload", { method: "GET", signal: timed(10_000) });
@@ -84,24 +92,61 @@ async function traceUploadPath(): Promise<string> {
       });
       legs.push(res.ok ? "browser->storage: OK (!)" : `browser->storage: reachable but rejected (status ${res.status})`);
     } catch (e) {
-      legs.push(`browser->storage: BLOCKED on this network (${(e as Error).name}) - a DNS/content blocker, VPN, or firewall is stopping blob.vercel-storage.com`);
+      legs.push(`browser->storage: BLOCKED (${(e as Error).name})`);
     }
+  }
+
+  try {
+    const res = await fetch(`/api/upload/relay?filename=${encodeURIComponent("diagnostics/relay-ping.txt")}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array([112, 105, 110, 103]), // "ping"
+      signal: timed(15_000),
+    });
+    const d = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    legs.push(res.ok && d.url ? "server relay: OK" : `server relay: FAILED (${d.error || `status ${res.status}`})`);
+  } catch (e) {
+    legs.push(`server relay: BLOCKED (${(e as Error).name})`);
   }
   return legs.join(" | ");
 }
 
 // Last-resort: push the file through our own server (same-origin, so network
 // filters that block the storage domain don't apply). 4 MB cap (Vercel limit).
+// The file is read into memory FIRST and sent as raw bytes: Safari's fetch is
+// unreliable with File bodies ("Load failed"), especially when the picked
+// file's handle has gone stale - reading it up front both avoids that fetch
+// path and turns a stale handle into a clear, actionable error.
 const RELAY_MAX_BYTES = 4 * 1024 * 1024;
 async function relayUpload(file: File): Promise<{ url: string }> {
-  const res = await fetch(`/api/upload/relay?filename=${encodeURIComponent(file.name)}`, {
-    method: "POST",
-    body: file,
-    signal: AbortSignal.timeout(120_000),
-  });
-  const data = (await res.json()) as { url?: string; error?: string };
-  if (!res.ok || !data.url) throw new Error(data.error || `relay failed (status ${res.status})`);
-  return { url: data.url };
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch {
+    throw new Error("the browser can no longer read this file - remove it from the list and pick it again");
+  }
+  let lastErr = new Error("relay failed");
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const res = await fetch(`/api/upload/relay?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes,
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+      const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error || `status ${res.status}`);
+      return { url: data.url };
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e as Error;
+      if (attempt === 1) await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  throw lastErr;
 }
 
 export default function AttachmentsPanel({ instrumentId, attachments, canEdit, isStaff }: {
@@ -182,7 +227,10 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
             done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
             continue;
           } catch (relayErr) {
-            patch(s.key, { state: "failed", error: `Direct upload and server relay both failed. Relay: ${(relayErr as Error).message}. Trace: ${await traceUploadPath()}` });
+            patch(s.key, {
+              state: "failed",
+              error: `Direct upload and server relay both failed. Relay: ${(relayErr as Error).name}: ${(relayErr as Error).message}. Trace: ${await traceUploadPath()}. If this happens on every network, the cause is on this device/browser - a content blocker, iCloud Private Relay, or a security app; try once in a different browser to confirm.`,
+            });
             continue;
           }
         }
