@@ -18,17 +18,12 @@ export default function config(phase) {
   // re-evaluate the config; they inherit the flag and skip.
   if (phase === PHASE_PRODUCTION_BUILD && process.env.VERCEL && !process.env.__SCHEMA_PUSH_DONE) {
     process.env.__SCHEMA_PUSH_DONE = "1";
-    console.log("[schema] syncing database schema (drizzle-kit push)...");
-    // drizzle-kit can print an error yet still exit 0, so its exit code alone
-    // proves nothing. Run it, surface its output, then independently verify
-    // that every table/column the app's schema defines actually exists -
-    // that check is what gates the build.
-    try {
-      execSync("npx drizzle-kit push", { stdio: "inherit" });
-    } catch {
-      console.error("[schema] drizzle-kit push exited nonzero - verifying what actually applied...");
-    }
-    execSync("npx tsx scripts/verify-schema.ts", { stdio: "inherit" }); // throws -> build fails loudly
+    // Apply the idempotent, additive schema sync (never destructive, so it
+    // can't hit drizzle-kit push's spurious-diff rollback), then independently
+    // verify every table/column the app needs actually exists. The verify step
+    // is what gates the build - it throws and fails the deploy on any gap.
+    execSync("npx tsx scripts/sync-schema.ts", { stdio: "inherit" });
+    execSync("npx tsx scripts/verify-schema.ts", { stdio: "inherit" });
   }
   return nextConfig;
 }

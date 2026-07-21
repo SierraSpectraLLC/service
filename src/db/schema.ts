@@ -1,3 +1,7 @@
+// NOTE: Deploys apply drizzle/schema-sync.sql (idempotent, additive), not
+// `drizzle-kit push`. When you add a table/column/index here, mirror it there.
+// The build's verify-schema gate fails the deploy if a column is missing, so a
+// forgotten mirror is caught loudly - never shipped silently.
 import {
   pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique,
 } from "drizzle-orm/pg-core";
