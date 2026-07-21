@@ -18,7 +18,7 @@ type Staged = {
   description: string;
   progress: number;        // 0-100 while uploading
   attempt: number;         // 1 = first try; >1 shown as "retry N"
-  mode: UploadMode;        // compat = no progress events (plain transport)
+  mode: UploadMode | "relay"; // compat = no progress events; relay = via our server
   state: "staged" | "uploading" | "done" | "failed";
   error?: string;
 };
@@ -40,17 +40,68 @@ function fmtSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
-// Ask the server whether it can reach Blob. Distinguishes a storage/token
-// misconfig from a browser->Blob network problem when an upload fails.
-async function diagnoseStorage(): Promise<string> {
+// Trace each leg of the upload path from this browser and report which one
+// dies. Leg 1: server -> Blob (config). Leg 2: token minting on our own
+// domain. Leg 3: a real tiny PUT from this browser to Blob storage.
+async function traceUploadPath(): Promise<string> {
+  const legs: string[] = [];
+  const timed = (ms: number) => AbortSignal.timeout(ms);
+
   try {
-    const res = await fetch("/api/upload", { method: "GET" });
+    const res = await fetch("/api/upload", { method: "GET", signal: timed(10_000) });
     const data = (await res.json()) as { ok?: boolean; error?: string };
-    if (data.ok) return "storage is reachable from the server, so this looks like a network problem between your device and storage - try a stronger connection";
-    return `storage check failed on the server: ${data.error} - this is a Vercel Blob configuration issue, not your connection`;
+    legs.push(data.ok ? "server->storage: OK" : `server->storage: FAILED (${data.error})`);
+    if (!data.ok) return legs.join(" | ") + " - Vercel Blob config issue, not your connection";
   } catch (e) {
-    return `couldn't run the storage check: ${(e as Error).message}`;
+    legs.push(`server->storage check unreachable (${(e as Error).name})`);
   }
+
+  let clientToken = "";
+  try {
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: timed(10_000),
+      body: JSON.stringify({
+        type: "blob.generate-client-token",
+        payload: { pathname: "diagnostics/ping.txt", callbackUrl: new URL("/api/upload", location.href).href, clientPayload: null, multipart: false },
+      }),
+    });
+    const data = (await res.json()) as { clientToken?: string; error?: string };
+    clientToken = data.clientToken || "";
+    legs.push(clientToken ? "token minting: OK" : `token minting: FAILED (${data.error || `status ${res.status}`})`);
+  } catch (e) {
+    legs.push(`token minting: HUNG/BLOCKED (${(e as Error).name})`);
+  }
+
+  if (clientToken) {
+    try {
+      const res = await fetch("https://blob.vercel-storage.com/diagnostics/ping.txt", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${clientToken}`, "x-api-version": "9" },
+        body: "ping",
+        signal: timed(10_000),
+      });
+      legs.push(res.ok ? "browser->storage: OK (!)" : `browser->storage: reachable but rejected (status ${res.status})`);
+    } catch (e) {
+      legs.push(`browser->storage: BLOCKED on this network (${(e as Error).name}) - a DNS/content blocker, VPN, or firewall is stopping blob.vercel-storage.com`);
+    }
+  }
+  return legs.join(" | ");
+}
+
+// Last-resort: push the file through our own server (same-origin, so network
+// filters that block the storage domain don't apply). 4 MB cap (Vercel limit).
+const RELAY_MAX_BYTES = 4 * 1024 * 1024;
+async function relayUpload(file: File): Promise<{ url: string }> {
+  const res = await fetch(`/api/upload/relay?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+    signal: AbortSignal.timeout(120_000),
+  });
+  const data = (await res.json()) as { url?: string; error?: string };
+  if (!res.ok || !data.url) throw new Error(data.error || `relay failed (status ${res.status})`);
+  return { url: data.url };
 }
 
 export default function AttachmentsPanel({ instrumentId, attachments, canEdit, isStaff }: {
@@ -84,6 +135,12 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
     for (const s of staged) {
       if (s.state === "done") continue;
       patch(s.key, { state: "uploading", progress: 0, attempt: 1, mode: "progress", error: undefined });
+      // Small files get ONE direct attempt then fall through to the server
+      // relay fast - no point burning minutes on compat retries when the
+      // same-origin relay is the reliable path on blocked networks. Large
+      // files can't relay (4 MB request cap), so they walk the full ladder
+      // (progress -> compat) with a size-aware timeout.
+      const canRelay = s.file.size <= RELAY_MAX_BYTES;
       try {
         const blob = await uploadWithRetry({
           // Retry the whole file on a stall/error with a fresh connection. If
@@ -91,6 +148,8 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
           // mode: no progress reporting, which makes the SDK send a plain
           // non-streaming body that survives HTTP/1.1 network paths
           // (VPNs, TLS-inspecting middleboxes) where streaming uploads die.
+          maxAttempts: canRelay ? 1 : 3,
+          compatTimeoutMs: Math.min(8 * 60_000, Math.max(90_000, (s.file.size / (20 * 1024)) * 1000)),
           onProgress: (pct) => patch(s.key, { progress: pct }),
           onAttempt: (attempt, mode) => patch(s.key, { attempt, mode, progress: 0 }),
           uploadFn: (signal, onProgress, mode) =>
@@ -112,16 +171,25 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
         patch(s.key, { state: "done", progress: 100 });
         done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
       } catch (e) {
+        // Direct upload exhausted its retries. Before failing, try the server
+        // relay - it uses only same-origin requests, so it works on networks
+        // that block the storage domain from the browser.
+        if (canRelay) {
+          try {
+            patch(s.key, { mode: "relay", attempt: 1, progress: 0 });
+            const blob = await relayUpload(s.file);
+            patch(s.key, { state: "done", progress: 100 });
+            done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
+            continue;
+          } catch (relayErr) {
+            patch(s.key, { state: "failed", error: `Direct upload and server relay both failed. Relay: ${(relayErr as Error).message}. Trace: ${await traceUploadPath()}` });
+            continue;
+          }
+        }
         let error: string;
         if (e instanceof UploadStalledError) {
-          // A stall could be the connection OR a broken storage config - ask the
-          // server which, so the message is actionable.
-          const diag = await diagnoseStorage();
           const head = e.gotProgress ? "Upload stalled mid-transfer after 3 tries" : "Upload could not get through after 3 tries";
-          const hint = e.mode === "compat"
-            ? " Even the compatibility path failed - if you're on a VPN, security software, or hotel/guest wifi, try switching networks."
-            : "";
-          error = `${head}. ${diag}${hint}`;
+          error = `${head}, and the file is too large for the 4 MB server relay. Trace: ${await traceUploadPath()}`;
         } else {
           // Real SDK error, e.g. token/config problems ("Failed to retrieve the client token").
           error = (e as Error).message || "Upload failed";
@@ -187,16 +255,18 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
                 style={{ marginTop: 6, fontSize: 12, padding: "5px 9px" }} />
               {s.state === "uploading" && (
                 <div style={{ marginTop: 6, height: 6, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
-                  {s.mode === "compat"
-                    ? <div className="skeleton" style={{ height: "100%", width: "100%", borderRadius: 999 }} />
-                    : <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />}
+                  {s.mode === "progress"
+                    ? <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />
+                    : <div className="skeleton" style={{ height: "100%", width: "100%", borderRadius: 999 }} />}
                 </div>
               )}
               {s.state === "uploading" && (
                 <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
-                  {s.mode === "compat"
-                    ? `uploading in compatibility mode (no progress on this network)${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`
-                    : `${s.progress}%${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`}
+                  {s.mode === "relay"
+                    ? "direct upload blocked - sending through the server instead..."
+                    : s.mode === "compat"
+                      ? `uploading in compatibility mode (no progress on this network)${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`
+                      : `${s.progress}%${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`}
                 </div>
               )}
               {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "#2E6B2E" }}>Uploaded ✓</div>}
