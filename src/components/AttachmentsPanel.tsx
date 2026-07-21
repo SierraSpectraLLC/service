@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { recordAttachments, deleteAttachment } from "@/app/actions";
-import { uploadWithRetry } from "@/lib/uploadWithRetry";
+import { uploadWithRetry, UploadStalledError } from "@/lib/uploadWithRetry";
 
 type Attachment = {
   id: number; fileName: string; kind: string; description: string; url: string; size: number;
@@ -79,9 +79,10 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
             upload(s.file.name, s.file, {
               access: "public",
               handleUploadUrl: "/api/upload",
-              // Multipart retries individual parts and is far more resilient on
-              // flaky mobile connections; use it for anything non-trivial.
-              multipart: s.file.size > 4 * 1024 * 1024,
+              // Multipart (parts uploaded in parallel, each retried) only helps
+              // above the SDK's 8MB part size; below that a plain PUT is simpler
+              // and has less to go wrong.
+              multipart: s.file.size > 8 * 1024 * 1024,
               abortSignal: signal,
               onUploadProgress: ({ percentage }) => onProgress(Math.round(percentage)),
             }),
@@ -89,8 +90,16 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
         patch(s.key, { state: "done", progress: 100 });
         done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
       } catch (e) {
-        const msg = (e as Error).message || "Upload failed";
-        patch(s.key, { state: "failed", error: /stall/i.test(msg) ? "Connection stalled after several tries - check signal and retry" : msg });
+        let error: string;
+        if (e instanceof UploadStalledError) {
+          error = e.gotProgress
+            ? "Connection stalled mid-upload after 3 tries - move to stronger signal and retry"
+            : "Upload never started after 3 tries - check your connection, then retry";
+        } else {
+          // Real SDK error, e.g. token/config problems ("Failed to retrieve the client token").
+          error = (e as Error).message || "Upload failed";
+        }
+        patch(s.key, { state: "failed", error });
       }
     }
     if (done.length) {
