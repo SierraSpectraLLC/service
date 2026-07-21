@@ -1,34 +1,43 @@
 /**
- * Resilient upload wrapper for flaky (mobile) connections.
+ * Resilient upload wrapper for hostile networks.
  *
- * Symptoms it fixes: a Vercel Blob upload freezes at a fixed percentage (61%,
- * or 0% at the very start) and never resolves or rejects - a stalled multipart
- * part/PUT that hangs with no error.
+ * Two distinct failure modes it handles:
+ *  - Mid-transfer stall (progress freezes at e.g. 61%): flaky connection.
+ *    Abort and retry with a fresh connection, keeping progress reporting.
+ *  - Never starts (stuck at 0% on a good connection): requesting upload
+ *    progress makes @vercel/blob use fetch with a STREAMING request body,
+ *    which requires HTTP/2 end-to-end. VPNs, TLS-inspecting security
+ *    software, and hotel/corporate middleboxes downgrade to HTTP/1.1, where
+ *    Chrome kills streaming uploads instantly - and the SDK's internal
+ *    10x retry loop makes that look like a silent hang. The fallback:
+ *    retry in "compat" mode WITHOUT progress reporting, which makes the SDK
+ *    send a plain non-streaming body that works over HTTP/1.1.
  *
- * Design notes (both matter):
- *  - Stall is detected on *forward* progress only. The SDK emits an initial
- *    0% event and can repeat the same value; resetting the watchdog on every
- *    event (including 0%) is what let a stuck-at-0% upload hang forever.
- *  - The attempt is raced against a stall promise that REJECTS, so control flow
- *    never depends on the underlying upload honoring the abort signal. Even if
- *    it ignores the abort, the race rejects, we retry, and after `maxAttempts`
- *    a real error is thrown (never a silent freeze).
+ * Watchdogs:
+ *  - progress mode: abort if progress hasn't advanced for `stallMs`
+ *    (forward progress only - the SDK emits/repeats 0% events).
+ *  - compat mode: no progress events exist, so instead apply a generous
+ *    overall cap `compatTimeoutMs`.
+ * Every attempt is raced against a rejecting timer, so control flow never
+ * depends on the SDK honoring the abort signal - no silent hangs, ever.
  *
- * `uploadFn` is injected so this is testable without a real Blob store.
+ * `uploadFn` is injected so all of this is testable without a Blob store.
  */
-export type UploadFn<T> = (signal: AbortSignal, onProgress: (pct: number) => void) => Promise<T>;
+export type UploadMode = "progress" | "compat";
+export type UploadFn<T> = (signal: AbortSignal, onProgress: (pct: number) => void, mode: UploadMode) => Promise<T>;
 
 export type RetryOptions<T> = {
   uploadFn: UploadFn<T>;
   onProgress?: (pct: number) => void;
-  onAttempt?: (attempt: number, reason: "stalled" | "error") => void; // a retry is starting
-  stallMs?: number;      // abort an attempt if progress hasn't advanced for this long
+  onAttempt?: (attempt: number, mode: UploadMode) => void; // a retry is starting
+  stallMs?: number;         // progress mode: abort if progress hasn't advanced for this long
+  compatTimeoutMs?: number; // compat mode: overall cap per attempt
   maxAttempts?: number;
   sleep?: (ms: number) => Promise<void>;
 };
 
 export class UploadStalledError extends Error {
-  constructor(public gotProgress: boolean) {
+  constructor(public gotProgress: boolean, public mode: UploadMode) {
     super(gotProgress ? "stalled mid-transfer" : "upload did not start");
     this.name = "UploadStalledError";
   }
@@ -40,47 +49,54 @@ export async function uploadWithRetry<T>(opts: RetryOptions<T>): Promise<T> {
     onProgress = () => {},
     onAttempt = () => {},
     stallMs = 30_000,
+    compatTimeoutMs = 8 * 60_000,
     maxAttempts = 3,
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = opts;
 
   let lastErr: unknown;
-  let everGotProgress = false;
+  let mode: UploadMode = "progress";
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let maxPct = -1;               // highest percentage seen this attempt
+    let maxPct = -1;   // highest percentage seen this attempt
     let stalled = false;
     let rejectStall!: (e: Error) => void;
-
     const stallPromise = new Promise<never>((_res, rej) => { rejectStall = rej; });
+
+    const trip = () => {
+      stalled = true;
+      controller.abort();                                  // best-effort cancel
+      rejectStall(new UploadStalledError(maxPct > 0, mode)); // guarantees the race rejects
+    };
     const arm = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => {
-        stalled = true;
-        controller.abort();                       // best-effort cancel of the real upload
-        rejectStall(new UploadStalledError(everGotProgress)); // guarantees the race rejects
-      }, stallMs);
+      timer = setTimeout(trip, mode === "progress" ? stallMs : compatTimeoutMs);
     };
-    arm(); // guard the connect/first-byte window too
+    arm(); // progress mode: guards connect/first-byte; compat mode: the overall cap
 
     try {
       const result = await Promise.race([
         uploadFn(controller.signal, (pct) => {
-          if (pct > maxPct) { maxPct = pct; if (pct > 0) everGotProgress = true; arm(); } // reset ONLY on forward progress
+          // Reset ONLY on forward progress, and only in progress mode -
+          // compat mode's timer is an overall cap, not a stall detector.
+          if (pct > maxPct) { maxPct = pct; if (mode === "progress") arm(); }
           onProgress(pct);
-        }),
+        }, mode),
         stallPromise,
       ]);
       if (timer) clearTimeout(timer);
       return result;
     } catch (e) {
       if (timer) clearTimeout(timer);
-      // A stalled attempt always surfaces as UploadStalledError, even when the
-      // underlying upload's own abort rejection wins the race.
-      lastErr = stalled ? new UploadStalledError(everGotProgress) : e;
+      // A tripped watchdog always surfaces as UploadStalledError, even when the
+      // SDK's own abort rejection wins the race.
+      lastErr = stalled ? new UploadStalledError(maxPct > 0, mode) : e;
       if (attempt < maxAttempts) {
-        onAttempt(attempt + 1, stalled ? "stalled" : "error");
+        // Never-started in progress mode -> the streaming transport is likely
+        // being blocked by the network path; all further attempts go compat.
+        if (mode === "progress" && maxPct <= 0) mode = "compat";
+        onAttempt(attempt + 1, mode);
         onProgress(0);
         await sleep(1000 * attempt); // brief backoff
         continue;

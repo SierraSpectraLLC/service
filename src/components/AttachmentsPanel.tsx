@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { recordAttachments, deleteAttachment } from "@/app/actions";
-import { uploadWithRetry, UploadStalledError } from "@/lib/uploadWithRetry";
+import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
 type Attachment = {
   id: number; fileName: string; kind: string; description: string; url: string; size: number;
@@ -18,6 +18,7 @@ type Staged = {
   description: string;
   progress: number;        // 0-100 while uploading
   attempt: number;         // 1 = first try; >1 shown as "retry N"
+  mode: UploadMode;        // compat = no progress events (plain transport)
   state: "staged" | "uploading" | "done" | "failed";
   error?: string;
 };
@@ -64,7 +65,7 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
     if (!list) return;
     const next = Array.from(list).map((file) => ({
       key: `${file.name}-${file.size}-${file.lastModified}`,
-      file, kind: guessKind(file.name), description: "", progress: 0, attempt: 1, state: "staged" as const,
+      file, kind: guessKind(file.name), description: "", progress: 0, attempt: 1, mode: "progress" as const, state: "staged" as const,
     }));
     setStaged((s) => {
       const have = new Set(s.map((x) => x.key));
@@ -82,13 +83,17 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
     // Sequential: predictable on mobile bandwidth, and per-file progress stays honest.
     for (const s of staged) {
       if (s.state === "done") continue;
-      patch(s.key, { state: "uploading", progress: 0, attempt: 1, error: undefined });
+      patch(s.key, { state: "uploading", progress: 0, attempt: 1, mode: "progress", error: undefined });
       try {
         const blob = await uploadWithRetry({
-          // Retry the whole file on a stall/error with a fresh connection.
+          // Retry the whole file on a stall/error with a fresh connection. If
+          // the first attempt never starts, later attempts run in "compat"
+          // mode: no progress reporting, which makes the SDK send a plain
+          // non-streaming body that survives HTTP/1.1 network paths
+          // (VPNs, TLS-inspecting middleboxes) where streaming uploads die.
           onProgress: (pct) => patch(s.key, { progress: pct }),
-          onAttempt: (attempt) => patch(s.key, { attempt, progress: 0 }),
-          uploadFn: (signal, onProgress) =>
+          onAttempt: (attempt, mode) => patch(s.key, { attempt, mode, progress: 0 }),
+          uploadFn: (signal, onProgress, mode) =>
             upload(s.file.name, s.file, {
               access: "public",
               handleUploadUrl: "/api/upload",
@@ -97,7 +102,11 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
               // and has less to go wrong.
               multipart: s.file.size > 8 * 1024 * 1024,
               abortSignal: signal,
-              onUploadProgress: ({ percentage }) => onProgress(Math.round(percentage)),
+              // Requesting progress forces the streaming transport - omit it
+              // entirely in compat mode.
+              ...(mode === "progress"
+                ? { onUploadProgress: ({ percentage }: { percentage: number }) => onProgress(Math.round(percentage)) }
+                : {}),
             }),
         });
         patch(s.key, { state: "done", progress: 100 });
@@ -108,8 +117,11 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
           // A stall could be the connection OR a broken storage config - ask the
           // server which, so the message is actionable.
           const diag = await diagnoseStorage();
-          const head = e.gotProgress ? "Upload stalled mid-transfer after 3 tries" : "Upload never started after 3 tries";
-          error = `${head}. ${diag}`;
+          const head = e.gotProgress ? "Upload stalled mid-transfer after 3 tries" : "Upload could not get through after 3 tries";
+          const hint = e.mode === "compat"
+            ? " Even the compatibility path failed - if you're on a VPN, security software, or hotel/guest wifi, try switching networks."
+            : "";
+          error = `${head}. ${diag}${hint}`;
         } else {
           // Real SDK error, e.g. token/config problems ("Failed to retrieve the client token").
           error = (e as Error).message || "Upload failed";
@@ -175,12 +187,16 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
                 style={{ marginTop: 6, fontSize: 12, padding: "5px 9px" }} />
               {s.state === "uploading" && (
                 <div style={{ marginTop: 6, height: 6, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />
+                  {s.mode === "compat"
+                    ? <div className="skeleton" style={{ height: "100%", width: "100%", borderRadius: 999 }} />
+                    : <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />}
                 </div>
               )}
               {s.state === "uploading" && (
                 <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
-                  {s.progress}%{s.attempt > 1 ? ` · retry ${s.attempt}` : ""}
+                  {s.mode === "compat"
+                    ? `uploading in compatibility mode (no progress on this network)${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`
+                    : `${s.progress}%${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`}
                 </div>
               )}
               {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "#2E6B2E" }}>Uploaded ✓</div>}
