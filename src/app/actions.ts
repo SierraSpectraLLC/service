@@ -318,13 +318,26 @@ export async function deletePart(partId: number) {
 
 // ---------------- Attachments ----------------
 
-export async function recordAttachment(instrumentId: number, data: { fileName: string; kind: string; url: string; size: number }) {
+export async function recordAttachment(instrumentId: number, data: { fileName: string; kind: string; url: string; size: number; description?: string }) {
+  await recordAttachments(instrumentId, [{ ...data, description: data.description ?? "" }]);
+}
+
+/** Batch variant: one insert + one audit entry per file, single revalidation. */
+export async function recordAttachments(
+  instrumentId: number,
+  files: { fileName: string; kind: string; url: string; size: number; description: string }[]
+) {
   const u = await requireEditor();
-  const [a] = await db.insert(attachments).values({ ...data, instrumentId, uploadedBy: u.name }).returning();
-  await audit({
-    actor: u.email, instrumentId, entityType: "attachment", entityId: a.id,
-    action: `attached ${data.kind.toLowerCase()}: ${data.fileName}`,
-  });
+  if (!files.length) return;
+  const rows = await db.insert(attachments)
+    .values(files.map((f) => ({ ...f, description: f.description.trim(), instrumentId, uploadedBy: u.name })))
+    .returning();
+  for (const a of rows) {
+    await audit({
+      actor: u.email, instrumentId, entityType: "attachment", entityId: a.id,
+      action: `attached ${a.kind.toLowerCase()}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}`,
+    });
+  }
   rev(instrumentId);
 }
 

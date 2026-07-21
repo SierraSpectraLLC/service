@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
   createTask, setTaskState, assignTask, addChecklistItem, toggleChecklistItem,
@@ -16,6 +16,40 @@ type Task = {
 
 const PEOPLE = ["", "Joe", "Bill"];
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+// Small optimistic wrappers so taps register instantly; the server action and
+// revalidation reconcile behind them.
+function ItemCheckbox({ item, canEdit }: { item: Item; canEdit: boolean }) {
+  const [, startTransition] = useTransition();
+  const [done, setOptimistic] = useOptimistic(item.done, (_cur: boolean, next: boolean) => next);
+  return (
+    <input type="checkbox" checked={done} disabled={!canEdit}
+      onChange={() => startTransition(async () => { setOptimistic(!done); await toggleChecklistItem(item.id); })}
+      style={{ width: 16, height: 16, accentColor: "var(--coral)", cursor: canEdit ? "pointer" : "default" }} />
+  );
+}
+
+function TaskStateSelect({ task }: { task: Task }) {
+  const [, startTransition] = useTransition();
+  const [state, setOptimistic] = useOptimistic(task.state, (_cur: string, next: string) => next);
+  return (
+    <select value={state} onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setTaskState(task.id, e.target.value); })}
+      style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+      {TASK_STATES.map((s) => <option key={s}>{s}</option>)}
+    </select>
+  );
+}
+
+function AssigneeSelect({ task }: { task: Task }) {
+  const [, startTransition] = useTransition();
+  const [assignee, setOptimistic] = useOptimistic(task.assignee, (_cur: string, next: string) => next);
+  return (
+    <select value={assignee} onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await assignTask(task.id, e.target.value); })}
+      style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+      {PEOPLE.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
+    </select>
+  );
+}
 
 export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumentId: number; tasks: Task[]; canEdit: boolean }) {
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -58,13 +92,9 @@ export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumen
             {canEdit && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <span className="mut" style={{ fontSize: 12 }}>Status:</span>
-                <select value={t.state} onChange={(e) => startTransition(() => setTaskState(t.id, e.target.value))} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
-                  {TASK_STATES.map((s) => <option key={s}>{s}</option>)}
-                </select>
+                <TaskStateSelect task={t} />
                 <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
-                <select value={t.assignee} onChange={(e) => startTransition(() => assignTask(t.id, e.target.value))} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
-                  {PEOPLE.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
-                </select>
+                <AssigneeSelect task={t} />
               </div>
             )}
 
@@ -75,9 +105,7 @@ export default function TasksPanel({ instrumentId, tasks, canEdit }: { instrumen
               return (
                 <div key={c.id} style={{ marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input type="checkbox" checked={c.done} disabled={!canEdit}
-                      onChange={() => startTransition(() => toggleChecklistItem(c.id))}
-                      style={{ width: 16, height: 16, accentColor: "var(--coral)", cursor: canEdit ? "pointer" : "default" }} />
+                    <ItemCheckbox item={c} canEdit={canEdit} />
                     <span style={{ fontSize: 13, flex: 1, textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--mut)" : "var(--ink)" }}>{c.text}</span>
                     <button className="btn link" onClick={() => setInput("threadopen-" + c.id, !tOpen)} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       {n > 0 && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396", padding: "1px 7px" }}>{n}</span>}

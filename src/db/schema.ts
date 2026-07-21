@@ -134,6 +134,7 @@ export const attachments = pgTable("attachments", {
   fileName: text("file_name").notNull(),
   // Tune report | Test data | Report | Photo | Manual | Other
   kind: text("kind").notNull().default("Other"),
+  description: text("description").notNull().default(""),
   url: text("url").notNull(),         // Vercel Blob URL
   size: integer("size").notNull().default(0), // bytes
   uploadedBy: text("uploaded_by").notNull(),

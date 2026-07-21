@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_COLOR, trackUrl } from "@/lib/stages";
 import { createPart, updatePart, setPartStatus, deletePart } from "@/app/actions";
 
@@ -9,6 +9,20 @@ type Part = {
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
   status: string; createdAt: string;
 };
+
+function PartStatusSelect({ part }: { part: Part }) {
+  const [, startTransition] = useTransition();
+  const [status, setOptimistic] = useOptimistic(part.status, (_cur: string, next: string) => next);
+  return (
+    <select
+      value={status}
+      onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setPartStatus(part.id, e.target.value); })}
+      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: PART_COLOR[status]?.bg, color: PART_COLOR[status]?.fg, cursor: "pointer" }}
+    >
+      {PART_STATES.map((s) => <option key={s}>{s}</option>)}
+    </select>
+  );
+}
 
 const empty = { name: "", partNumber: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed" };
 
@@ -103,13 +117,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</span>
               {canEdit ? (
-                <select
-                  value={p.status}
-                  onChange={(e) => startTransition(() => setPartStatus(p.id, e.target.value))}
-                  style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: PART_COLOR[p.status]?.bg, color: PART_COLOR[p.status]?.fg, cursor: "pointer" }}
-                >
-                  {PART_STATES.map((s) => <option key={s}>{s}</option>)}
-                </select>
+                <PartStatusSelect part={p} />
               ) : (
                 <span className="pill" style={{ background: PART_COLOR[p.status]?.bg, color: PART_COLOR[p.status]?.fg }}>{p.status}</span>
               )}

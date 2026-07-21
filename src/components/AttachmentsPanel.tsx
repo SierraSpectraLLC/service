@@ -3,11 +3,21 @@
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachment, deleteAttachment } from "@/app/actions";
+import { recordAttachments, deleteAttachment } from "@/app/actions";
 
 type Attachment = {
-  id: number; fileName: string; kind: string; url: string; size: number;
+  id: number; fileName: string; kind: string; description: string; url: string; size: number;
   uploadedBy: string; createdAt: string;
+};
+
+type Staged = {
+  key: string;
+  file: File;
+  kind: string;
+  description: string;
+  progress: number;        // 0-100 while uploading
+  state: "staged" | "uploading" | "done" | "failed";
+  error?: string;
 };
 
 function guessKind(name: string): string {
@@ -31,54 +41,124 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
   instrumentId: number; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [kind, setKind] = useState<string>("");
+  const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState("");
   const [, startTransition] = useTransition();
 
-  const onPick = async (file: File | undefined) => {
-    if (!file) return;
-    setError("");
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    const next = Array.from(list).map((file) => ({
+      key: `${file.name}-${file.size}-${file.lastModified}`,
+      file, kind: guessKind(file.name), description: "", progress: 0, state: "staged" as const,
+    }));
+    setStaged((s) => {
+      const have = new Set(s.map((x) => x.key));
+      return [...s, ...next.filter((x) => !have.has(x.key))];
+    });
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const patch = (key: string, p: Partial<Staged>) =>
+    setStaged((s) => s.map((x) => (x.key === key ? { ...x, ...p } : x)));
+
+  const uploadAll = async () => {
     setUploading(true);
-    try {
-      const blob = await upload(file.name, file, {
-        access: "public",
-        handleUploadUrl: "/api/upload",
+    const done: { fileName: string; kind: string; url: string; size: number; description: string }[] = [];
+    // Sequential: predictable on mobile bandwidth, and per-file progress stays honest.
+    for (const s of staged) {
+      if (s.state === "done") continue;
+      patch(s.key, { state: "uploading", progress: 0, error: undefined });
+      try {
+        const blob = await upload(s.file.name, s.file, {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          multipart: s.file.size > 8 * 1024 * 1024,
+          onUploadProgress: ({ percentage }) => patch(s.key, { progress: Math.round(percentage) }),
+        });
+        patch(s.key, { state: "done", progress: 100 });
+        done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
+      } catch (e) {
+        patch(s.key, { state: "failed", error: (e as Error).message || "Upload failed" });
+      }
+    }
+    if (done.length) {
+      const doneNames = new Set(done.map((d) => d.fileName));
+      startTransition(async () => {
+        await recordAttachments(instrumentId, done);
+        // Keep only failed rows staged so they can be retried.
+        setStaged((s) => s.filter((x) => !(x.state === "done" && doneNames.has(x.file.name))));
+        setUploading(false);
       });
-      const k = kind || guessKind(file.name);
-      startTransition(() => recordAttachment(instrumentId, { fileName: file.name, kind: k, url: blob.url, size: file.size }));
-    } catch (e) {
-      setError((e as Error).message || "Upload failed");
-    } finally {
+    } else {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-      setKind("");
     }
   };
+
+  const pendingCount = staged.filter((s) => s.state !== "done").length;
 
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
         <div className="card-title">Attachments</div>
         {canEdit && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            <select value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
-              <option value="">Auto-detect type</option>
-              {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
-            </select>
+          <div style={{ marginLeft: "auto" }}>
             <button className="btn sm primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
-              {uploading ? "Uploading..." : "⬆ Upload file"}
+              + Add files
             </button>
-            <input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => onPick(e.target.files?.[0])} />
+            <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={(e) => addFiles(e.target.files)} />
           </div>
         )}
       </div>
       <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
         Tune files, test data, reports, source photos. Stored permanently and attributed.
       </div>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
 
-      {attachments.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>}
+      {staged.length > 0 && (
+        <div className="dash-form" style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 8 }}>
+            Ready to upload ({staged.length})
+          </div>
+          {staged.map((s) => (
+            <div key={s.key} style={{ marginBottom: 10, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 700, flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.file.name}
+                </span>
+                <span className="mut" style={{ fontSize: 11 }}>{fmtSize(s.file.size)}</span>
+                <select value={s.kind} disabled={uploading} onChange={(e) => patch(s.key, { kind: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
+                  {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
+                </select>
+                {!uploading && (
+                  <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }}
+                    onClick={() => setStaged((x) => x.filter((y) => y.key !== s.key))}>remove</button>
+                )}
+              </div>
+              <input value={s.description} disabled={uploading}
+                onChange={(e) => patch(s.key, { description: e.target.value })}
+                placeholder='Description... e.g. "post-repair tune, passed at 101% of spec"'
+                style={{ marginTop: 6, fontSize: 12, padding: "5px 9px" }} />
+              {s.state === "uploading" && (
+                <div style={{ marginTop: 6, height: 6, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />
+                </div>
+              )}
+              {s.state === "uploading" && <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>{s.progress}%</div>}
+              {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "#2E6B2E" }}>Uploaded ✓</div>}
+              {s.state === "failed" && <div style={{ fontSize: 11, marginTop: 3, color: "#A32D2D" }}>Failed: {s.error}</div>}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn sm accent" onClick={uploadAll} disabled={uploading || pendingCount === 0}>
+              {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount === 1 ? "" : "s"}`}
+            </button>
+            {!uploading && (
+              <button className="btn sm" onClick={() => setStaged([])}>Clear</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {attachments.length === 0 && staged.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>}
       {attachments.map((a) => {
         const m = ATTACH_META[a.kind] || ATTACH_META.Other;
         return (
@@ -86,6 +166,7 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
             <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="mono" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
+              {a.description && <div style={{ fontSize: 12, marginTop: 2 }}>{a.description}</div>}
               <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                 <span className="pill" style={{ background: m.bg, color: m.fg }}>{a.kind}</span>
                 <span style={{ marginLeft: 6 }}>
