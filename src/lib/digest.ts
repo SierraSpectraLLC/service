@@ -55,7 +55,7 @@ export async function composeDigest(): Promise<{ subject: string; html: string }
        </div>`
     : `<div style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#0F6E56;margin-bottom:16px;">All gas requirements OK.</div>`;
 
-  const today = new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
+  const today = new Date().toLocaleDateString("en-US", { timeZone: process.env.SHOP_TZ || "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
   const html = `
 <body style="background:#F4F6F9;margin:0;padding:20px 0;">
   <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:680px;margin:auto;background:#fff;border-radius:12px;border:1px solid #E2E8F0;">

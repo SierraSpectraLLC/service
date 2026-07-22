@@ -6,6 +6,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { shopTime } from "@/lib/shopday";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import PartsPanel from "@/components/PartsPanel";
@@ -85,7 +86,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 <span className="mut">{a.action}</span>
               </div>
               {a.field === "note" && a.newValue && <div style={{ fontSize: 13, marginTop: 2 }}>{a.newValue}</div>}
-              <div className="mut" style={{ fontSize: 11 }}>{a.createdAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+              <div className="mut" style={{ fontSize: 11 }}>{shopTime(a.createdAt)}</div>
             </div>
           ))}
           {activity.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No activity yet.</div>}

@@ -12,7 +12,7 @@ import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
 import { STAGES, GASES, GAS_STATES } from "@/lib/stages";
-import { shopToday } from "@/lib/shopday";
+import { shopToday, shopMonthDay } from "@/lib/shopday";
 
 const rev = (id?: number) => {
   revalidatePath("/");
@@ -387,7 +387,7 @@ type PartInput = {
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
 };
 
-const today = () => new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+const today = () => shopMonthDay();
 
 /** Auto-stamp the lifecycle date when a part first enters Received / Installed / Removed. */
 function partStamps(before: { status: string; receivedAt: string; installedAt: string; removedAt: string }, status: string) {
