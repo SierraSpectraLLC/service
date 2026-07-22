@@ -568,7 +568,10 @@ export async function saveEodUpdate(instrumentId: number, data: { systemUpdate: 
       target: [eodUpdates.instrumentId, eodUpdates.date],
       set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
     });
-  revalidatePath("/eod");
+  // No revalidatePath here on purpose: autosave fires on every typing pause,
+  // and a revalidate would make the client re-fetch the whole page each time
+  // (visible jank on mobile). The typist's screen is already current; other
+  // viewers get fresh data on page load, which is how the EOD flow works.
 }
 
 /** Leave a system out of (or bring it back into) today's client email. Keeps any saved text. */
