@@ -158,6 +158,8 @@ export const eodUpdates = pgTable("eod_updates", {
   date: text("date").notNull(), // YYYY-MM-DD in shop time
   systemUpdate: text("system_update").notNull().default(""),
   actionItem: text("action_item").notNull().default(""),
+  skipped: boolean("skipped").notNull().default(false), // left out of today's email
+
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [unique("eod_instrument_date").on(t.instrumentId, t.date), index("eod_date_idx").on(t.date)]);

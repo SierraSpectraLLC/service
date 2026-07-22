@@ -571,6 +571,20 @@ export async function saveEodUpdate(instrumentId: number, data: { systemUpdate: 
   revalidatePath("/eod");
 }
 
+/** Leave a system out of (or bring it back into) today's client email. Keeps any saved text. */
+export async function setEodSkip(instrumentId: number, skipped: boolean) {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) throw new Error("Not found");
+  await db.insert(eodUpdates)
+    .values({ instrumentId, date: shopToday(), skipped, updatedBy: u.name, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [eodUpdates.instrumentId, eodUpdates.date],
+      set: { skipped, updatedBy: u.name, updatedAt: new Date() },
+    });
+  revalidatePath("/eod");
+}
+
 // ---------------- Settings ----------------
 
 export async function updateSettings(data: { clientAccessEnabled: boolean; clientCanEdit: boolean }) {

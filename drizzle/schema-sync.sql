@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS "eod_updates" (
   "date" text NOT NULL,
   "system_update" text NOT NULL DEFAULT '',
   "action_item" text NOT NULL DEFAULT '',
+  "skipped" boolean NOT NULL DEFAULT false,
   "updated_by" text NOT NULL DEFAULT '',
   "updated_at" timestamp NOT NULL DEFAULT now()
 );
@@ -194,6 +195,7 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "serial" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "installed_at" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "removed_at" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "note" text NOT NULL DEFAULT '';
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "skipped" boolean NOT NULL DEFAULT false;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
