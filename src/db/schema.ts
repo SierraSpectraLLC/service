@@ -109,7 +109,7 @@ export const instrumentGases = pgTable("instrument_gases", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
   gas: text("gas").notNull(),                          // Helium, Nitrogen, ...
-  status: text("status").notNull().default("Connected"), // Connected | Low | Empty | Not connected
+  status: text("status").notNull().default("Connected"), // Connected | Low | Empty | Not connected | Not needed
   note: text("note").notNull().default(""),            // tank #, psi, supplier
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("gases_instrument_idx").on(t.instrumentId), unique("gases_instrument_gas").on(t.instrumentId, t.gas)]);

@@ -13,7 +13,9 @@ export type Stage = (typeof STAGES)[number];
 
 export const GASES = ["Helium", "Nitrogen", "Argon", "Hydrogen", "Air"] as const;
 export type Gas = (typeof GASES)[number];
-export const GAS_STATES = ["Connected", "Low", "Empty", "Not connected"] as const;
+// "Not connected" is a problem (system needs it, isn't hooked up);
+// "Not needed" is inert (system doesn't use this gas) and never flags attention.
+export const GAS_STATES = ["Connected", "Low", "Empty", "Not connected", "Not needed"] as const;
 export const GAS_SYMBOL: Record<string, string> = {
   Helium: "He", Nitrogen: "N2", Argon: "Ar", Hydrogen: "H2", Air: "Air",
 };
@@ -22,6 +24,7 @@ export const GAS_COLOR: Record<string, { bg: string; fg: string }> = {
   Low: { bg: "#FAF0DC", fg: "#8A5410" },
   Empty: { bg: "#FBE9E9", fg: "#A32D2D" },
   "Not connected": { bg: "#EEF1F5", fg: "#475569" },
+  "Not needed": { bg: "#F1F5F9", fg: "#94A3B8" },
 };
 /** True when a gas status should surface on the dashboard / digest. */
 export function gasAttention(status: string): boolean {
