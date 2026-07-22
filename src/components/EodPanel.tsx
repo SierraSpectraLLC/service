@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { saveEodUpdate, setEodSkip } from "@/app/actions";
 
 type Sys = {
@@ -9,28 +9,46 @@ type Sys = {
   suggestedUpdate: string; suggestedAction: string;
 };
 type Draft = { systemUpdate: string; actionItem: string };
+type SaveState = "dirty" | "saving" | "saved";
 
 const SEP = "-".repeat(50);
+const AUTOSAVE_MS = 900;
 
 export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY: string }) {
   const [drafts, setDrafts] = useState<Record<number, Draft>>(
     Object.fromEntries(systems.map((s) => [s.id, { systemUpdate: s.systemUpdate, actionItem: s.actionItem }]))
   );
-  const [savedIds, setSavedIds] = useState<Set<number>>(new Set());
+  const [status, setStatus] = useState<Record<number, SaveState>>({});
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const included = systems.filter((s) => !s.skipped);
+  // Autosave: debounce while typing, flush immediately on blur. The refs keep
+  // the timer callbacks reading the latest draft, not the one they closed over.
+  const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+
+  const flush = (id: number) => {
+    if (timers.current[id]) { clearTimeout(timers.current[id]); delete timers.current[id]; }
+    const d = draftsRef.current[id];
+    if (!d) return;
+    setStatus((s) => ({ ...s, [id]: "saving" }));
+    startTransition(async () => {
+      await saveEodUpdate(id, d);
+      // If the user typed again while this save was in flight, stay dirty;
+      // the newer edit's own timer will save it.
+      setStatus((s) => (s[id] === "dirty" ? s : { ...s, [id]: "saved" }));
+    });
+  };
 
   const setDraft = (id: number, patch: Partial<Draft>) => {
     setDrafts((d) => ({ ...d, [id]: { ...d[id], ...patch } }));
-    setSavedIds((s) => { const n = new Set(s); n.delete(id); return n; });
+    setStatus((s) => ({ ...s, [id]: "dirty" }));
+    if (timers.current[id]) clearTimeout(timers.current[id]);
+    timers.current[id] = setTimeout(() => flush(id), AUTOSAVE_MS);
   };
 
-  const dirty = (s: Sys) => {
-    const d = drafts[s.id];
-    return !!d && (d.systemUpdate !== s.systemUpdate || d.actionItem !== s.actionItem);
-  };
+  const included = systems.filter((s) => !s.skipped);
 
   // Fill only what's empty - a suggestion never overwrites something typed.
   const autofill = (s: Sys) => {
@@ -44,20 +62,6 @@ export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY
     const d = drafts[s.id];
     return (!d.systemUpdate && !!s.suggestedUpdate) || (!d.actionItem && !!s.suggestedAction);
   };
-
-  const save = (id: number) =>
-    startTransition(async () => {
-      await saveEodUpdate(id, drafts[id]);
-      setSavedIds((s) => new Set(s).add(id));
-    });
-
-  const saveAll = () =>
-    startTransition(async () => {
-      for (const s of included) {
-        if (dirty(s)) await saveEodUpdate(s.id, drafts[s.id]);
-      }
-      setSavedIds(new Set(included.map((s) => s.id)));
-    });
 
   const emailText = [
     `${dateMDY} - Daily Updates`,
@@ -79,24 +83,28 @@ export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const saveLabel = (st: SaveState | undefined) =>
+    st === "saving" ? "Saving..." : st === "saved" ? "Saved ✓" : st === "dirty" ? "Unsaved" : "";
+  const anyUnsaved = Object.values(status).some((s) => s === "dirty" || s === "saving");
+
   return (
     <>
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
           <div className="card-title">End-of-day client update</div>
           <span className="mut" style={{ fontSize: 12 }}>{dateMDY}</span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <span className="mut" style={{ fontSize: 12 }}>
+              {anyUnsaved ? "Saving..." : Object.keys(status).length ? "All changes saved" : ""}
+            </span>
             <button className="btn sm" onClick={() => included.forEach(autofill)} disabled={pending || !included.some(canAutofill)}>
               Autofill empty
-            </button>
-            <button className="btn sm accent" onClick={saveAll} disabled={pending || !included.some(dirty)}>
-              {pending ? "Saving..." : "Save all"}
             </button>
           </div>
         </div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
-          Every active system (anything not Shipped). Autofill drafts from today&apos;s activity - always review before copying.
-          Skipped systems stay out of the email.
+          Every active system (anything not Shipped). Saves automatically as you type. Autofill drafts from
+          today&apos;s activity - always review before copying. Skipped systems stay out of the email.
         </div>
 
         {systems.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No active systems.</div>}
@@ -117,15 +125,13 @@ export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>System {num + 1}: <span className="mono">{s.label}</span></span>
                 <span className="mut" style={{ fontSize: 12 }}>{s.client}</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  <span className="mut" style={{ fontSize: 11 }}>{saveLabel(status[s.id])}</span>
                   {canAutofill(s) && (
                     <button className="btn link" onClick={() => autofill(s)} disabled={pending} title="Draft from today's activity and open items">
                       autofill
                     </button>
                   )}
-                  <button className="btn sm" onClick={() => save(s.id)} disabled={pending || !dirty(s)}>
-                    {savedIds.has(s.id) && !dirty(s) ? "Saved ✓" : "Save"}
-                  </button>
                   <button className="btn link" style={{ color: "#A32D2D" }} disabled={pending}
                     onClick={() => startTransition(() => setEodSkip(s.id, true))}>skip</button>
                 </div>
@@ -133,11 +139,13 @@ export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY
               <label style={{ fontSize: 11 }}>System Update</label>
               <textarea rows={2} value={drafts[s.id]?.systemUpdate ?? ""}
                 onChange={(e) => setDraft(s.id, { systemUpdate: e.target.value })}
+                onBlur={() => { if (status[s.id] === "dirty") flush(s.id); }}
                 placeholder={s.suggestedUpdate || "What happened on this system today"}
                 style={{ marginBottom: 8, resize: "vertical" }} />
               <label style={{ fontSize: 11 }}>Action Item</label>
               <input value={drafts[s.id]?.actionItem ?? ""}
                 onChange={(e) => setDraft(s.id, { actionItem: e.target.value })}
+                onBlur={() => { if (status[s.id] === "dirty") flush(s.id); }}
                 placeholder={s.suggestedAction || "Next step / what we need"} />
             </div>
           );
