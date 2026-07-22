@@ -13,14 +13,13 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const user = await currentUser();
-  let openDiffs = 0;
-  if (user) {
-    try {
-      const rows = await db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false));
-      openDiffs = rows.length;
-    } catch { /* table may not exist before first push */ }
-  }
+  // Run auth and the diff count concurrently; the count only renders for staff.
+  const [user, diffRows] = await Promise.all([
+    currentUser(),
+    db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false))
+      .catch(() => []), // table may not exist before first push
+  ]);
+  const openDiffs = user ? diffRows.length : 0;
   const isStaff = user && (user.role === "owner" || user.role === "staff");
 
   return (
@@ -55,6 +54,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
         </div>
         {children}
+        <div className="container" style={{ paddingTop: 24, paddingBottom: 18 }}>
+          <div className="mut mono" style={{ fontSize: 11 }}>
+            build {process.env.NEXT_PUBLIC_BUILD_SHA} ·{" "}
+            {new Date(process.env.NEXT_PUBLIC_BUILD_TIME || 0).toLocaleString("en-US", {
+              timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+            })}{" "}
+            PT
+          </div>
+        </div>
       </body>
     </html>
   );

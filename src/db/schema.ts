@@ -1,3 +1,7 @@
+// NOTE: Deploys apply drizzle/schema-sync.sql (idempotent, additive), not
+// `drizzle-kit push`. When you add a table/column/index here, mirror it there.
+// The build's verify-schema gate fails the deploy if a column is missing, so a
+// forgotten mirror is caught loudly - never shipped silently.
 import {
   pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique,
 } from "drizzle-orm/pg-core";
@@ -139,6 +143,7 @@ export const attachments = pgTable("attachments", {
   fileName: text("file_name").notNull(),
   // Tune report | Test data | Report | Photo | Manual | Other
   kind: text("kind").notNull().default("Other"),
+  description: text("description").notNull().default(""),
   url: text("url").notNull(),         // Vercel Blob URL
   size: integer("size").notNull().default(0), // bytes
   uploadedBy: text("uploaded_by").notNull(),

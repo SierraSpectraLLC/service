@@ -3,11 +3,24 @@
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachment, deleteAttachment } from "@/app/actions";
+import { recordAttachments, deleteAttachment } from "@/app/actions";
+import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
 type Attachment = {
-  id: number; fileName: string; kind: string; url: string; size: number;
+  id: number; fileName: string; kind: string; description: string; url: string; size: number;
   uploadedBy: string; createdAt: string;
+};
+
+type Staged = {
+  key: string;
+  file: File;
+  kind: string;
+  description: string;
+  progress: number;        // 0-100 while uploading
+  attempt: number;         // 1 = first try; >1 shown as "retry N"
+  mode: UploadMode | "relay"; // compat = no progress events; relay = via our server
+  state: "staged" | "uploading" | "done" | "failed";
+  error?: string;
 };
 
 function guessKind(name: string): string {
@@ -27,58 +40,299 @@ function fmtSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+// AbortSignal.timeout is missing on older Safari - use a manual controller.
+function timedSignal(ms: number): AbortSignal {
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
+// Trace each leg of the upload path from this browser and report which one
+// dies. Leg 1: server -> Blob (config). Leg 2: token minting on our own
+// domain. Leg 3: a real tiny PUT from this browser to Blob storage.
+// Leg 4: a tiny real relay POST (same-origin, raw bytes).
+async function traceUploadPath(): Promise<string> {
+  const legs: string[] = [];
+  const timed = timedSignal;
+
+  try {
+    const res = await fetch("/api/upload", { method: "GET", signal: timed(10_000) });
+    const data = (await res.json()) as { ok?: boolean; error?: string };
+    legs.push(data.ok ? "server->storage: OK" : `server->storage: FAILED (${data.error})`);
+    if (!data.ok) return legs.join(" | ") + " - Vercel Blob config issue, not your connection";
+  } catch (e) {
+    legs.push(`server->storage check unreachable (${(e as Error).name})`);
+  }
+
+  let clientToken = "";
+  try {
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal: timed(10_000),
+      body: JSON.stringify({
+        type: "blob.generate-client-token",
+        payload: { pathname: "diagnostics/ping.txt", callbackUrl: new URL("/api/upload", location.href).href, clientPayload: null, multipart: false },
+      }),
+    });
+    const data = (await res.json()) as { clientToken?: string; error?: string };
+    clientToken = data.clientToken || "";
+    legs.push(clientToken ? "token minting: OK" : `token minting: FAILED (${data.error || `status ${res.status}`})`);
+  } catch (e) {
+    legs.push(`token minting: HUNG/BLOCKED (${(e as Error).name})`);
+  }
+
+  if (clientToken) {
+    try {
+      const res = await fetch("https://blob.vercel-storage.com/diagnostics/ping.txt", {
+        method: "PUT",
+        headers: { authorization: `Bearer ${clientToken}`, "x-api-version": "9" },
+        body: "ping",
+        signal: timed(10_000),
+      });
+      legs.push(res.ok ? "browser->storage: OK (!)" : `browser->storage: reachable but rejected (status ${res.status})`);
+    } catch (e) {
+      legs.push(`browser->storage: BLOCKED (${(e as Error).name})`);
+    }
+  }
+
+  try {
+    const res = await fetch(`/api/upload/relay?filename=${encodeURIComponent("diagnostics/relay-ping.txt")}`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array([112, 105, 110, 103]), // "ping"
+      signal: timed(15_000),
+    });
+    const d = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+    legs.push(res.ok && d.url ? "server relay: OK" : `server relay: FAILED (${d.error || `status ${res.status}`})`);
+  } catch (e) {
+    legs.push(`server relay: BLOCKED (${(e as Error).name})`);
+  }
+  return legs.join(" | ");
+}
+
+// Last-resort: push the file through our own server (same-origin, so network
+// filters that block the storage domain don't apply). 4 MB cap (Vercel limit).
+// The file is read into memory FIRST and sent as raw bytes: Safari's fetch is
+// unreliable with File bodies ("Load failed"), especially when the picked
+// file's handle has gone stale - reading it up front both avoids that fetch
+// path and turns a stale handle into a clear, actionable error.
+const RELAY_MAX_BYTES = 4 * 1024 * 1024;
+async function relayUpload(file: File): Promise<{ url: string }> {
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await file.arrayBuffer();
+  } catch {
+    throw new Error("the browser can no longer read this file - remove it from the list and pick it again");
+  }
+  let lastErr = new Error("relay failed");
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 120_000);
+    try {
+      const res = await fetch(`/api/upload/relay?filename=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes,
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+      const data = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!res.ok || !data.url) throw new Error(data.error || `status ${res.status}`);
+      return { url: data.url };
+    } catch (e) {
+      clearTimeout(t);
+      lastErr = e as Error;
+      if (attempt === 1) await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  throw lastErr;
+}
+
 export default function AttachmentsPanel({ instrumentId, attachments, canEdit, isStaff }: {
   instrumentId: number; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [kind, setKind] = useState<string>("");
+  const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState("");
   const [, startTransition] = useTransition();
 
-  const onPick = async (file: File | undefined) => {
-    if (!file) return;
-    setError("");
+  const addFiles = (list: FileList | null) => {
+    if (!list) return;
+    const next = Array.from(list).map((file) => ({
+      key: `${file.name}-${file.size}-${file.lastModified}`,
+      file, kind: guessKind(file.name), description: "", progress: 0, attempt: 1, mode: "progress" as const, state: "staged" as const,
+    }));
+    setStaged((s) => {
+      const have = new Set(s.map((x) => x.key));
+      return [...s, ...next.filter((x) => !have.has(x.key))];
+    });
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const patch = (key: string, p: Partial<Staged>) =>
+    setStaged((s) => s.map((x) => (x.key === key ? { ...x, ...p } : x)));
+
+  const uploadAll = async () => {
     setUploading(true);
-    try {
-      const blob = await upload(file.name, file, {
-        access: "public",
-        handleUploadUrl: "/api/upload",
+    const done: { fileName: string; kind: string; url: string; size: number; description: string }[] = [];
+    // Sequential: predictable on mobile bandwidth, and per-file progress stays honest.
+    for (const s of staged) {
+      if (s.state === "done") continue;
+      patch(s.key, { state: "uploading", progress: 0, attempt: 1, mode: "progress", error: undefined });
+      // Small files get ONE direct attempt then fall through to the server
+      // relay fast - no point burning minutes on compat retries when the
+      // same-origin relay is the reliable path on blocked networks. Large
+      // files can't relay (4 MB request cap), so they walk the full ladder
+      // (progress -> compat) with a size-aware timeout.
+      const canRelay = s.file.size <= RELAY_MAX_BYTES;
+      try {
+        const blob = await uploadWithRetry({
+          // Retry the whole file on a stall/error with a fresh connection. If
+          // the first attempt never starts, later attempts run in "compat"
+          // mode: no progress reporting, which makes the SDK send a plain
+          // non-streaming body that survives HTTP/1.1 network paths
+          // (VPNs, TLS-inspecting middleboxes) where streaming uploads die.
+          maxAttempts: canRelay ? 1 : 3,
+          compatTimeoutMs: Math.min(8 * 60_000, Math.max(90_000, (s.file.size / (20 * 1024)) * 1000)),
+          onProgress: (pct) => patch(s.key, { progress: pct }),
+          onAttempt: (attempt, mode) => patch(s.key, { attempt, mode, progress: 0 }),
+          uploadFn: (signal, onProgress, mode) =>
+            upload(s.file.name, s.file, {
+              access: "public",
+              handleUploadUrl: "/api/upload",
+              // Multipart (parts uploaded in parallel, each retried) only helps
+              // above the SDK's 8MB part size; below that a plain PUT is simpler
+              // and has less to go wrong.
+              multipart: s.file.size > 8 * 1024 * 1024,
+              abortSignal: signal,
+              // Requesting progress forces the streaming transport - omit it
+              // entirely in compat mode.
+              ...(mode === "progress"
+                ? { onUploadProgress: ({ percentage }: { percentage: number }) => onProgress(Math.round(percentage)) }
+                : {}),
+            }),
+        });
+        patch(s.key, { state: "done", progress: 100 });
+        done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
+      } catch (e) {
+        // Direct upload exhausted its retries. Before failing, try the server
+        // relay - it uses only same-origin requests, so it works on networks
+        // that block the storage domain from the browser.
+        if (canRelay) {
+          try {
+            patch(s.key, { mode: "relay", attempt: 1, progress: 0 });
+            const blob = await relayUpload(s.file);
+            patch(s.key, { state: "done", progress: 100 });
+            done.push({ fileName: s.file.name, kind: s.kind, url: blob.url, size: s.file.size, description: s.description });
+            continue;
+          } catch (relayErr) {
+            patch(s.key, {
+              state: "failed",
+              error: `Direct upload and server relay both failed. Relay: ${(relayErr as Error).name}: ${(relayErr as Error).message}. Trace: ${await traceUploadPath()}. If this happens on every network, the cause is on this device/browser - a content blocker, iCloud Private Relay, or a security app; try once in a different browser to confirm.`,
+            });
+            continue;
+          }
+        }
+        let error: string;
+        if (e instanceof UploadStalledError) {
+          const head = e.gotProgress ? "Upload stalled mid-transfer after 3 tries" : "Upload could not get through after 3 tries";
+          error = `${head}, and the file is too large for the 4 MB server relay. Trace: ${await traceUploadPath()}`;
+        } else {
+          // Real SDK error, e.g. token/config problems ("Failed to retrieve the client token").
+          error = (e as Error).message || "Upload failed";
+        }
+        patch(s.key, { state: "failed", error });
+      }
+    }
+    if (done.length) {
+      const doneNames = new Set(done.map((d) => d.fileName));
+      startTransition(async () => {
+        await recordAttachments(instrumentId, done);
+        // Keep only failed rows staged so they can be retried.
+        setStaged((s) => s.filter((x) => !(x.state === "done" && doneNames.has(x.file.name))));
+        setUploading(false);
       });
-      const k = kind || guessKind(file.name);
-      startTransition(() => recordAttachment(instrumentId, { fileName: file.name, kind: k, url: blob.url, size: file.size }));
-    } catch (e) {
-      setError((e as Error).message || "Upload failed");
-    } finally {
+    } else {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-      setKind("");
     }
   };
+
+  const pendingCount = staged.filter((s) => s.state !== "done").length;
 
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
         <div className="card-title">Attachments</div>
         {canEdit && (
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            <select value={kind} onChange={(e) => setKind(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
-              <option value="">Auto-detect type</option>
-              {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
-            </select>
+          <div style={{ marginLeft: "auto" }}>
             <button className="btn sm primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
-              {uploading ? "Uploading..." : "⬆ Upload file"}
+              + Add files
             </button>
-            <input ref={fileRef} type="file" style={{ display: "none" }} onChange={(e) => onPick(e.target.files?.[0])} />
+            <input ref={fileRef} type="file" multiple style={{ display: "none" }} onChange={(e) => addFiles(e.target.files)} />
           </div>
         )}
       </div>
       <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
         Tune files, test data, reports, source photos. Stored permanently and attributed.
       </div>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
 
-      {attachments.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>}
+      {staged.length > 0 && (
+        <div className="dash-form" style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 8 }}>
+            Ready to upload ({staged.length})
+          </div>
+          {staged.map((s) => (
+            <div key={s.key} style={{ marginBottom: 10, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 700, flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.file.name}
+                </span>
+                <span className="mut" style={{ fontSize: 11 }}>{fmtSize(s.file.size)}</span>
+                <select value={s.kind} disabled={uploading} onChange={(e) => patch(s.key, { kind: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
+                  {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
+                </select>
+                {!uploading && (
+                  <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }}
+                    onClick={() => setStaged((x) => x.filter((y) => y.key !== s.key))}>remove</button>
+                )}
+              </div>
+              <input value={s.description} disabled={uploading}
+                onChange={(e) => patch(s.key, { description: e.target.value })}
+                placeholder='Description... e.g. "post-repair tune, passed at 101% of spec"'
+                style={{ marginTop: 6, fontSize: 12, padding: "5px 9px" }} />
+              {s.state === "uploading" && (
+                <div style={{ marginTop: 6, height: 6, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
+                  {s.mode === "progress"
+                    ? <div style={{ height: "100%", width: `${s.progress}%`, background: "var(--sky)", transition: "width 200ms" }} />
+                    : <div className="skeleton" style={{ height: "100%", width: "100%", borderRadius: 999 }} />}
+                </div>
+              )}
+              {s.state === "uploading" && (
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+                  {s.mode === "relay"
+                    ? "direct upload blocked - sending through the server instead..."
+                    : s.mode === "compat"
+                      ? `uploading in compatibility mode (no progress on this network)${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`
+                      : `${s.progress}%${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`}
+                </div>
+              )}
+              {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "#2E6B2E" }}>Uploaded ✓</div>}
+              {s.state === "failed" && <div style={{ fontSize: 11, marginTop: 3, color: "#A32D2D" }}>Failed: {s.error}</div>}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn sm accent" onClick={uploadAll} disabled={uploading || pendingCount === 0}>
+              {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount === 1 ? "" : "s"}`}
+            </button>
+            {!uploading && (
+              <button className="btn sm" onClick={() => setStaged([])}>Clear</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {attachments.length === 0 && staged.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>}
       {attachments.map((a) => {
         const m = ATTACH_META[a.kind] || ATTACH_META.Other;
         return (
@@ -86,6 +340,7 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
             <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="mono" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
+              {a.description && <div style={{ fontSize: 12, marginTop: 2 }}>{a.description}</div>}
               <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                 <span className="pill" style={{ background: m.bg, color: m.fg }}>{a.kind}</span>
                 <span style={{ marginLeft: 6 }}>

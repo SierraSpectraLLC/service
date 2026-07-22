@@ -12,10 +12,12 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const rows = await db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId));
-  const allParts = await db.select().from(parts);
-  const allGases = await db.select().from(instrumentGases);
-  const recent = await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200);
+  const [rows, allParts, allGases, recent] = await Promise.all([
+    db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(parts),
+    db.select().from(instrumentGases),
+    db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200),
+  ]);
 
   const data = rows.map((i) => {
     const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;

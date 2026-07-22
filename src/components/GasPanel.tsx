@@ -1,10 +1,24 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { GASES, GAS_STATES, GAS_COLOR } from "@/lib/stages";
 import { addInstrumentGas, setGasStatus, updateGasNote, removeInstrumentGas } from "@/app/actions";
 
 export type GasRow = { id: number; gas: string; status: string; note: string };
+
+function GasStatusSelect({ row }: { row: GasRow }) {
+  const [, startTransition] = useTransition();
+  const [status, setOptimistic] = useOptimistic(row.status, (_cur: string, next: string) => next);
+  return (
+    <select
+      value={status}
+      onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setGasStatus(row.id, e.target.value); })}
+      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: GAS_COLOR[status]?.bg, color: GAS_COLOR[status]?.fg, cursor: "pointer" }}
+    >
+      {GAS_STATES.map((s) => <option key={s}>{s}</option>)}
+    </select>
+  );
+}
 
 export default function GasPanel({ instrumentId, gases, canEdit, isStaff }: {
   instrumentId: number; gases: GasRow[]; canEdit: boolean; isStaff: boolean;
@@ -31,13 +45,7 @@ export default function GasPanel({ instrumentId, gases, canEdit, isStaff }: {
           <div key={g.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 13, fontWeight: 700, width: 76 }}>{g.gas}</span>
             {canEdit ? (
-              <select
-                value={g.status}
-                onChange={(e) => startTransition(() => setGasStatus(g.id, e.target.value))}
-                style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: GAS_COLOR[g.status]?.bg, color: GAS_COLOR[g.status]?.fg, cursor: "pointer" }}
-              >
-                {GAS_STATES.map((s) => <option key={s}>{s}</option>)}
-              </select>
+              <GasStatusSelect row={g} />
             ) : (
               <span className="pill" style={{ background: GAS_COLOR[g.status]?.bg, color: GAS_COLOR[g.status]?.fg }}>{g.status}</span>
             )}

@@ -1,3 +1,4 @@
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, sheetDiffs } from "@/db/schema";
 import { audit } from "@/lib/audit";
@@ -90,21 +91,32 @@ export function parseTrackerRows(rows: string[][]): SheetRow[] {
  * service account's email. Falls back to SHEET_CSV_URL if the service
  * account env vars aren't set.
  */
-async function fetchSheetRows(): Promise<string[][]> {
+function sheetsJwt() {
   const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const saKey = process.env.GOOGLE_PRIVATE_KEY;
   const sheetId = process.env.SHEET_ID;
+  if (!saEmail || !saKey || !sheetId) return null;
+  return { saEmail, saKey, sheetId };
+}
 
-  if (saEmail && saKey && sheetId) {
-    const { JWT } = await import("google-auth-library");
-    const jwt = new JWT({
-      email: saEmail,
-      // Vercel env vars store the key with literal \n sequences; restore them.
-      key: saKey.replace(/\\n/g, "\n"),
-      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    });
-    const range = process.env.SHEET_RANGE || "'Refurbishment Tracker'!A:H";
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(range)}`;
+async function makeJwtClient(saEmail: string, saKey: string) {
+  const { JWT } = await import("google-auth-library");
+  return new JWT({
+    email: saEmail,
+    // Vercel env vars store the key with literal \n sequences; restore them.
+    key: saKey.replace(/\\n/g, "\n"),
+    // Write scope (includes read) - the write-back feature updates cells.
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+}
+
+const sheetRange = () => process.env.SHEET_RANGE || "'Refurbishment Tracker'!A:H";
+
+async function fetchSheetRows(): Promise<string[][]> {
+  const sa = sheetsJwt();
+  if (sa) {
+    const jwt = await makeJwtClient(sa.saEmail, sa.saKey);
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${sa.sheetId}/values/${encodeURIComponent(sheetRange())}`;
     const res = await jwt.request<{ values?: string[][] }>({ url });
     return res.data.values ?? [];
   }
@@ -122,18 +134,92 @@ async function fetchSheetRows(): Promise<string[][]> {
 }
 
 /**
+ * Locate the cell for a diff field on a system's row. Pure so it's testable:
+ * rows are the raw sheet values (header first), field is a diff field name.
+ */
+export function locateSheetCell(rows: string[][], externalId: string, field: string): { rowIndex: number; colIndex: number } | null {
+  if (!rows.length) return null;
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const col = (name: string) => header.findIndex((h) => h.includes(name));
+  const fieldCol: Record<string, number> = {
+    Priority: col("priority"),
+    Notes: col("notes"),
+    Stage: col("process"),
+  };
+  const colIndex = fieldCol[field] ?? -1;
+  const idCol = col("id");
+  if (colIndex < 0 || idCol < 0) return null;
+  const rowIndex = rows.findIndex((r, i) => i > 0 && (r[idCol] || "").trim() === externalId);
+  if (rowIndex < 0) return null;
+  return { rowIndex, colIndex };
+}
+
+/** 0-based column index -> A1 letters (0 -> A, 26 -> AA). */
+function colLetter(i: number): string {
+  let s = "";
+  for (let n = i; n >= 0; n = Math.floor(n / 26) - 1) s = String.fromCharCode(65 + (n % 26)) + s;
+  return s;
+}
+
+/**
+ * Write one of our values into the client's sheet. Requires the service
+ * account to have Editor access on the sheet. The documented SHEET_RANGE
+ * starts at A1, so row/col indexes map directly to A1 notation.
+ */
+export async function pushValueToSheet(externalId: string, field: string, value: string): Promise<void> {
+  const sa = sheetsJwt();
+  if (!sa) throw new Error("Sheet write-back needs the service account (GOOGLE_SERVICE_ACCOUNT_EMAIL/GOOGLE_PRIVATE_KEY/SHEET_ID); the CSV fallback is read-only");
+  const rows = await fetchSheetRows();
+  const cell = locateSheetCell(rows, externalId, field);
+  if (!cell) throw new Error(`Could not find ${field} cell for ${externalId} in the sheet`);
+  const sheetName = sheetRange().split("!")[0];
+  const a1 = `${sheetName}!${colLetter(cell.colIndex)}${cell.rowIndex + 1}`;
+  const jwt = await makeJwtClient(sa.saEmail, sa.saKey);
+  await jwt.request({
+    url: `https://sheets.googleapis.com/v4/spreadsheets/${sa.sheetId}/values/${encodeURIComponent(a1)}?valueInputOption=USER_ENTERED`,
+    method: "PUT",
+    data: { range: a1, values: [[value]] },
+  });
+}
+
+/**
  * Diff the sheet against the DB and insert diff rows for anything that
  * doesn't match. Never writes to instrument data itself - humans resolve
  * diffs in the parity view.
  */
-export async function runSheetSync(): Promise<{ checked: number; diffs: number }> {
+export async function runSheetSync(): Promise<{ checked: number; diffs: number; updated: number; skipped: number; cleared: number }> {
   const sheetRows = parseTrackerRows(await fetchSheetRows());
 
   const dbRows = await db.select().from(instruments);
   const byId = new Map(dbRows.map((r) => [r.externalId, r]));
-  let diffCount = 0;
+
+  // Memory of prior runs: at most one open diff per (system, field), and the
+  // most recent resolved decision. A resolved diff suppresses re-flagging for
+  // as long as the sheet still says the same thing - Joe already ruled on it.
+  const existing = await db.select().from(sheetDiffs).orderBy(asc(sheetDiffs.id));
+  const key = (externalId: string, field: string) => `${externalId}|${field}`;
+  const open = new Map<string, typeof existing[number]>();
+  const lastResolved = new Map<string, typeof existing[number]>();
+  for (const d of existing) {
+    if (d.resolved) lastResolved.set(key(d.externalId, d.field), d);
+    else open.set(key(d.externalId, d.field), d);
+  }
+
+  let diffCount = 0, updated = 0, skipped = 0, cleared = 0;
+  const flaggedKeys = new Set<string>();
 
   const record = async (externalId: string, field: string, sheetValue: string, dbValue: string) => {
+    const k = key(externalId, field);
+    flaggedKeys.add(k);
+    const o = open.get(k);
+    if (o) {
+      if (o.sheetValue === sheetValue && o.dbValue === dbValue) { skipped++; return; } // already flagged as-is
+      await db.update(sheetDiffs).set({ sheetValue, dbValue, runAt: new Date() }).where(eq(sheetDiffs.id, o.id));
+      updated++;
+      return;
+    }
+    const r = lastResolved.get(k);
+    if (r && r.sheetValue === sheetValue) { skipped++; return; } // same sheet value we already ruled on
     await db.insert(sheetDiffs).values({ externalId, field, sheetValue, dbValue });
     diffCount++;
   };
@@ -165,10 +251,20 @@ export async function runSheetSync(): Promise<{ checked: number; diffs: number }
     await record(externalId, "Row", "(missing from sheet)", `${d.model} (${d.client})`);
   }
 
+  // Mismatches that disappeared (sheet edited to match us, or we accepted the
+  // sheet value) leave a stale open diff behind - close it out.
+  for (const [k, o] of open) {
+    if (flaggedKeys.has(k)) continue;
+    await db.update(sheetDiffs)
+      .set({ resolved: true, resolvedBy: "sheet-sync", resolution: "auto_cleared" })
+      .where(eq(sheetDiffs.id, o.id));
+    cleared++;
+  }
+
   await audit({
     actor: "sheet-sync",
     entityType: "sheet_sync",
-    action: `poll complete: ${sheetRows.length} sheet rows checked, ${diffCount} diffs recorded`,
+    action: `poll complete: ${sheetRows.length} sheet rows checked, ${diffCount} new diffs, ${updated} refreshed, ${skipped} already known, ${cleared} auto-cleared`,
   });
-  return { checked: sheetRows.length, diffs: diffCount };
+  return { checked: sheetRows.length, diffs: diffCount, updated, skipped, cleared };
 }

@@ -1,8 +1,10 @@
+import { cache } from "react";
 import { auth } from "@/auth";
 
 export type Role = "owner" | "staff" | "client_viewer" | "client_editor";
 
-export async function currentUser() {
+// cache() dedupes the session DB lookup across layout + page within a request.
+export const currentUser = cache(async () => {
   const session = await auth();
   if (!session?.user?.email) return null;
   return {
@@ -10,7 +12,7 @@ export async function currentUser() {
     name: session.user.name || session.user.email.split("@")[0],
     role: ((session.user as { role?: string }).role || "client_viewer") as Role,
   };
-}
+});
 
 /** Throws unless the caller is signed in. Returns the user. */
 export async function requireUser() {

@@ -10,6 +10,7 @@ import {
 } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
+import { pushValueToSheet } from "@/lib/sheetSync";
 import { STAGES, GASES, GAS_STATES } from "@/lib/stages";
 import { shopToday } from "@/lib/shopday";
 
@@ -465,13 +466,26 @@ export async function deletePart(partId: number) {
 
 // ---------------- Attachments ----------------
 
-export async function recordAttachment(instrumentId: number, data: { fileName: string; kind: string; url: string; size: number }) {
+export async function recordAttachment(instrumentId: number, data: { fileName: string; kind: string; url: string; size: number; description?: string }) {
+  await recordAttachments(instrumentId, [{ ...data, description: data.description ?? "" }]);
+}
+
+/** Batch variant: one insert + one audit entry per file, single revalidation. */
+export async function recordAttachments(
+  instrumentId: number,
+  files: { fileName: string; kind: string; url: string; size: number; description: string }[]
+) {
   const u = await requireEditor();
-  const [a] = await db.insert(attachments).values({ ...data, instrumentId, uploadedBy: u.name }).returning();
-  await audit({
-    actor: u.email, instrumentId, entityType: "attachment", entityId: a.id,
-    action: `attached ${data.kind.toLowerCase()}: ${data.fileName}`,
-  });
+  if (!files.length) return;
+  const rows = await db.insert(attachments)
+    .values(files.map((f) => ({ ...f, description: f.description.trim(), instrumentId, uploadedBy: u.name })))
+    .returning();
+  for (const a of rows) {
+    await audit({
+      actor: u.email, instrumentId, entityType: "attachment", entityId: a.id,
+      action: `attached ${a.kind.toLowerCase()}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}`,
+    });
+  }
   rev(instrumentId);
 }
 
@@ -489,10 +503,33 @@ export async function deleteAttachment(attachmentId: number) {
 
 // ---------------- Sheet diffs ----------------
 
-export async function resolveDiff(diffId: number, resolution: "kept_ours" | "accepted_sheet") {
+export async function resolveDiff(
+  diffId: number,
+  resolution: "kept_ours" | "accepted_sheet" | "kept_ours_pushed"
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [d] = await db.select().from(sheetDiffs).where(eq(sheetDiffs.id, diffId));
-  if (!d || d.resolved) return;
+  if (!d || d.resolved) return {};
+
+  // "Keep ours + fix sheet": write our value into the client's sheet first;
+  // only mark resolved once the write succeeded.
+  if (resolution === "kept_ours_pushed") {
+    if (d.field === "Row") return { error: "Row-level diffs can't be pushed to the sheet - fix the row by hand" };
+    let value = d.dbValue;
+    const [inst] = await db.select().from(instruments).where(eq(instruments.externalId, d.externalId));
+    if (d.field === "Stage" && inst) {
+      // Write only what the sheet can express - internal-only stages stay ours.
+      value = inst.stages.filter((s) => !["Waiting / blocked", "Waiting to ship"].includes(s)).join(", ");
+    }
+    if (d.field === "Notes" && inst) value = inst.notes;
+    if (d.field === "Priority" && inst) value = String(inst.priority);
+    try {
+      await pushValueToSheet(d.externalId, d.field, value);
+    } catch (e) {
+      return { error: (e as Error).message || "Sheet update failed" };
+    }
+  }
+
   await db.update(sheetDiffs).set({ resolved: true, resolvedBy: u.email, resolution }).where(eq(sheetDiffs.id, diffId));
   // Accepting the sheet's value applies it for the fields we can apply mechanically.
   if (resolution === "accepted_sheet") {
@@ -503,12 +540,16 @@ export async function resolveDiff(diffId: number, resolution: "kept_ours" | "acc
       // Stage diffs are resolved by hand in the UI; too lossy to auto-apply.
     }
   }
+  const how = resolution === "kept_ours" ? "kept ours"
+    : resolution === "accepted_sheet" ? "accepted sheet"
+    : "kept ours and updated the sheet";
   await audit({
     actor: u.email, entityType: "sheet_diff", entityId: diffId,
-    action: `resolved sheet diff on ${d.externalId} ${d.field} (${resolution === "kept_ours" ? "kept ours" : "accepted sheet"})`,
+    action: `resolved sheet diff on ${d.externalId} ${d.field} (${how})`,
   });
   revalidatePath("/parity");
   rev();
+  return {};
 }
 
 // ---------------- End-of-day client update ----------------

@@ -45,6 +45,11 @@ they can only sign in when the owner enables client access in Settings.
 
 ### 5. Vercel
 Import the repo in Vercel. Add all env vars from `.env`. Then:
+- **Region**: page speed is dominated by the latency between the Vercel
+  function and Neon, multiplied by several queries per page. Make sure the
+  project's function region (Vercel > Settings > Functions) matches the Neon
+  project's region (shown in the Neon console) - a cross-country mismatch adds
+  hundreds of ms per page load that no code change can recover.
 - **Storage > Blob**: create a store; `BLOB_READ_WRITE_TOKEN` is injected
   automatically.
 - **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` hourly and
@@ -106,13 +111,28 @@ digest email. Individual tanks are deliberately not inventoried; the note
 field ("tank #A-441, swapped Jul 18") covers attribution without the
 bookkeeping.
 
-Schema changes apply themselves on deploy: the `vercel-build` script runs
-`drizzle-kit push` against `DATABASE_URL` before `next build`, so the database
-is diffed and synced to `src/db/schema.ts` on every Vercel build (a no-op when
-nothing changed). Local `npm run build` is unaffected. Additive changes (new
-tables/columns) apply cleanly; a destructive change (dropping or renaming)
-will stop and fail the build instead of applying silently - run that kind of
-migration deliberately with `npm run db:push` from a machine.
+Schema changes apply themselves on deploy. `next.config.mjs`, at the start of
+every Vercel production build (hooked into the config so it runs regardless of
+how the build command is configured), applies `drizzle/schema-sync.sql` via
+`scripts/sync-schema.ts`, then runs `scripts/verify-schema.ts`.
+
+`drizzle/schema-sync.sql` is an idempotent, **additive-only** sync
+(`CREATE ... IF NOT EXISTS`, guarded `ADD COLUMN`/constraints, never a `DROP`).
+It heals a database in any state and can't produce the destructive rollback
+that `drizzle-kit push` does when its introspection diff goes wrong against the
+production catalog. **When you change `src/db/schema.ts`, mirror the additive
+change in `drizzle/schema-sync.sql`** - `verify-schema.ts` fails the build if
+any column the code defines is missing, so a forgotten mirror is caught loudly,
+never shipped. DDL prefers `DATABASE_URL_UNPOOLED` (Neon's direct connection)
+when set - add it in Vercel env alongside the pooled `DATABASE_URL`. Local
+`npm run build` skips all of it (no `VERCEL` env).
+
+`drizzle-kit push` (`npm run db:push`) is still the tool for a full reconcile
+or destructive change - run it deliberately from a machine, not on deploy.
+Additive changes (new tables/columns) apply cleanly; a destructive change
+(dropping or renaming) will stop and fail the build instead of applying
+silently - run that kind of migration deliberately with `npm run db:push`
+from a machine.
 
 ## The audit log
 
