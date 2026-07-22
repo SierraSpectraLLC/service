@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS "parts" (
   "instrument_id" integer NOT NULL,
   "name" text NOT NULL,
   "part_number" text NOT NULL DEFAULT '',
+  "serial" text NOT NULL DEFAULT '',
   "vendor" text NOT NULL DEFAULT '',
   "po" text NOT NULL DEFAULT '',
   "cost" text NOT NULL DEFAULT '',
@@ -117,6 +118,9 @@ CREATE TABLE IF NOT EXISTS "parts" (
   "ordered_at" text NOT NULL DEFAULT '',
   "eta" text NOT NULL DEFAULT '',
   "received_at" text NOT NULL DEFAULT '',
+  "installed_at" text NOT NULL DEFAULT '',
+  "removed_at" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
   "status" text NOT NULL DEFAULT 'Needed',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
@@ -159,6 +163,15 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_access_enabled" boolean NOT NULL DEFAULT false,
   "client_can_edit" boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS "eod_updates" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "date" text NOT NULL,
+  "system_update" text NOT NULL DEFAULT '',
+  "action_item" text NOT NULL DEFAULT '',
+  "updated_by" text NOT NULL DEFAULT '',
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
 
 -- ── Columns (heals existing tables that predate a column) ─────────────────
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "name" text;
@@ -177,6 +190,10 @@ ALTER TABLE "instrument_gases" ADD COLUMN IF NOT EXISTS "updated_at" timestamp N
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'Other';
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "description" text NOT NULL DEFAULT '';
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "size" integer NOT NULL DEFAULT 0;
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "serial" text NOT NULL DEFAULT '';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "installed_at" text NOT NULL DEFAULT '';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "removed_at" text NOT NULL DEFAULT '';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "note" text NOT NULL DEFAULT '';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -189,11 +206,15 @@ CREATE INDEX IF NOT EXISTS "attachments_instrument_idx" ON "attachments" ("instr
 CREATE INDEX IF NOT EXISTS "audit_instrument_idx" ON "audit_log" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "audit_created_idx" ON "audit_log" ("created_at");
 CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
+CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 
 -- ── Unique constraints ────────────────────────────────────────────────────
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'gases_instrument_gas') THEN
     ALTER TABLE "instrument_gases" ADD CONSTRAINT "gases_instrument_gas" UNIQUE ("instrument_id","gas");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_instrument_date') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_instrument_date" UNIQUE ("instrument_id","date");
   END IF;
 END $$;
 
@@ -233,6 +254,10 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "attachments" ADD CONSTRAINT "attachments_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
 END $$;
