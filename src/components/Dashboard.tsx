@@ -8,7 +8,8 @@ import { createInstrument } from "@/app/actions";
 
 type Row = {
   id: number; externalId: string; client: string; model: string; priority: number;
-  stages: string[]; notes: string; openParts: number; gasIssues: string[]; lastActivity: string;
+  stages: string[]; notes: string; openParts: number; gasIssues: string[];
+  missingFromSheet: boolean; lastActivity: string;
 };
 
 const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
@@ -17,25 +18,39 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
 
 export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; canEdit: boolean; isStaff: boolean }) {
   const router = useRouter();
-  const [filter, setFilter] = useState("All");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "" });
   const [pending, startTransition] = useTransition();
 
+  const FLAGS = ["Awaiting parts", "Gas attention", ...(isStaff ? ["Not on sheet"] : [])];
+  const toggleFilter = (f: string) =>
+    setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
+
+  const matchesFlag = (i: Row, f: string) =>
+    f === "Awaiting parts" ? i.openParts > 0
+    : f === "Gas attention" ? i.gasIssues.length > 0
+    : f === "Not on sheet" ? i.missingFromSheet
+    : true;
+
   const filtered = useMemo(() => {
     let list = data;
-    if (filter === "Awaiting parts") list = list.filter((i) => i.openParts > 0);
-    else if (filter === "Gas attention") list = list.filter((i) => i.gasIssues.length > 0);
-    else if (filter !== "All") list = list.filter((i) => i.stages.includes(filter));
+    // Stages combine as OR (either stage matches); flags combine as AND.
+    const stageSel = selected.filter((f) => (STAGES as readonly string[]).includes(f));
+    const flagSel = selected.filter((f) => !(STAGES as readonly string[]).includes(f));
+    if (stageSel.length) list = list.filter((i) => stageSel.some((s) => i.stages.includes(s)));
+    for (const f of flagSel) list = list.filter((i) => matchesFlag(i, f));
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
-        [i.externalId, i.client, i.model, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.lastActivity].join(" ").toLowerCase().includes(s)
+        [i.externalId, i.client, i.model, i.notes, i.stages.join(" "), i.gasIssues.join(" "),
+          i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
       );
     }
     return list;
-  }, [data, filter, q]);
+  }, [data, selected, q]);
 
   const counts = {
     total: data.length,
@@ -76,13 +91,51 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-        {["All", ...STAGES, "Awaiting parts", "Gas attention"].map((f) => (
-          <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
+        <div style={{ position: "relative" }}>
+          <button className="btn sm" onClick={() => setFilterOpen((v) => !v)} style={{
             borderRadius: 999,
-            borderColor: filter === f ? "var(--navy)" : "var(--line)",
-            background: filter === f ? "var(--navy)" : "#fff",
-            color: filter === f ? "#fff" : "var(--mut)",
-          }}>{f}</button>
+            borderColor: selected.length ? "var(--navy)" : "var(--line)",
+            background: selected.length ? "var(--navy)" : "#fff",
+            color: selected.length ? "#fff" : "var(--mut)",
+          }}>
+            Filter by{selected.length ? ` (${selected.length})` : ""} {filterOpen ? "▴" : "▾"}
+          </button>
+          {filterOpen && (
+            <>
+              <div onClick={() => setFilterOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
+              <div style={{
+                position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 21, background: "#fff",
+                border: "1px solid var(--line)", borderRadius: 10, boxShadow: "0 8px 24px rgba(23,42,74,0.14)",
+                padding: "10px 14px", minWidth: 220, maxHeight: "60vh", overflowY: "auto",
+              }}>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Stage</div>
+                {STAGES.map((s) => (
+                  <label key={s} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selected.includes(s)} onChange={() => toggleFilter(s)}
+                      style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
+                    {s}
+                  </label>
+                ))}
+                <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Flags</div>
+                {FLAGS.map((f) => (
+                  <label key={f} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                    <input type="checkbox" checked={selected.includes(f)} onChange={() => toggleFilter(f)}
+                      style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
+                    {f}
+                  </label>
+                ))}
+                {selected.length > 0 && (
+                  <button className="btn link" style={{ marginTop: 8 }} onClick={() => setSelected([])}>Clear all</button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+        {selected.map((f) => (
+          <button key={f} className="pill" onClick={() => toggleFilter(f)} title="Remove filter"
+            style={{ background: "#EDEBFA", color: "#4F45A3", border: "none", cursor: "pointer" }}>
+            {f} ×
+          </button>
         ))}
         {isStaff && (
           <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => setShowNew((v) => !v)}>
@@ -117,7 +170,10 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
             <span style={{ minWidth: 0 }}>
               <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.model}</span>
-              <span className="mut" style={{ fontSize: 11 }}>{i.client} · P{i.priority}</span>
+              <span className="mut" style={{ fontSize: 11 }}>
+                {i.client} · P{i.priority}
+                {i.missingFromSheet && <span style={{ color: "#A32D2D", fontWeight: 700 }}> · not on sheet</span>}
+              </span>
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {i.stages.map((s) => (
@@ -125,11 +181,12 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
               ))}
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {i.missingFromSheet && <Pill bg="#FBE9E9" fg="#A32D2D">not on sheet</Pill>}
               {i.openParts > 0 && <Pill bg="#FAF0DC" fg="#8A5410">{i.openParts} open</Pill>}
               {i.gasIssues.map((g) => (
                 <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
               ))}
-              {i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
+              {!i.missingFromSheet && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </Link>
         ))}

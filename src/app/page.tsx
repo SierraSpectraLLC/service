@@ -1,6 +1,6 @@
-import { asc, eq, desc } from "drizzle-orm";
+import { and, asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen } from "@/lib/stages";
 import { requireUser } from "@/lib/authz";
 import { redirect } from "next/navigation";
@@ -12,12 +12,20 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
     db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200),
+    db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
   ]);
+
+  // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
+  // Internal parity detail, so staff eyes only.
+  const isStaff = user.role === "owner" || user.role === "staff";
+  const droppedFromSheet = new Set(
+    isStaff ? openRowDiffs.filter((d) => d.sheetValue === "(missing from sheet)").map((d) => d.externalId) : []
+  );
 
   const data = rows.map((i) => {
     const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
@@ -35,9 +43,10 @@ export default async function Home() {
       notes: i.notes,
       openParts,
       gasIssues,
+      missingFromSheet: droppedFromSheet.has(i.externalId),
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
     };
   });
 
-  return <Dashboard data={data} canEdit={user.role !== "client_viewer"} isStaff={user.role === "owner" || user.role === "staff"} />;
+  return <Dashboard data={data} canEdit={user.role !== "client_viewer"} isStaff={isStaff} />;
 }
