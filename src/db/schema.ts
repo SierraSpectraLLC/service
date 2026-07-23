@@ -190,6 +190,16 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
 
+// Client sign-in allowlist, editable by the owner in Settings. An entry is
+// either an exact email ("jane@labzenllc.com") or a whole domain
+// ("@labzenllc.com"). Unioned with the CLIENT_EMAILS env allowlist at sign-in.
+export const clientAllowlist = pgTable("client_allowlist", {
+  id: serial("id").primaryKey(),
+  entry: text("entry").notNull(),
+  addedBy: text("added_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("allowlist_entry_unique").on(t.entry)]);
+
 // Singleton row (id = 1)
 export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().default(1),

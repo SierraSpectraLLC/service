@@ -6,8 +6,9 @@ import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
-  sheetDiffs, appSettings, eodUpdates,
+  sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions,
 } from "@/db/schema";
+import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
@@ -586,6 +587,50 @@ export async function setEodSkip(instrumentId: number, skipped: boolean) {
       set: { skipped, updatedBy: u.name, updatedAt: new Date() },
     });
   revalidatePath("/eod");
+}
+
+// ---------------- Client sign-in allowlist ----------------
+
+/** "jane@labzenllc.com" (one person) or "@labzenllc.com" (whole domain). */
+const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
+const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
+
+export async function addClientAccess(raw: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const entry = raw.trim().toLowerCase();
+  if (!ALLOW_EMAIL.test(entry) && !ALLOW_DOMAIN.test(entry)) {
+    // Returned, not thrown: prod masks thrown server-action messages.
+    return { error: 'Enter an email like "jane@labzenllc.com" or a domain like "@labzenllc.com"' };
+  }
+  await db.insert(clientAllowlist).values({ entry, addedBy: u.name }).onConflictDoNothing();
+  await audit({
+    actor: u.email, entityType: "settings", entityId: entry,
+    action: `allowed client sign-in: ${entry}`,
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
+export async function removeClientAccess(id: number) {
+  const u = await requireOwner();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row) return;
+  await db.delete(clientAllowlist).where(eq(clientAllowlist.id, id));
+  // Revoke live sessions for anyone who just lost access - removal should
+  // take effect now, not when their 30-day session happens to expire.
+  const allUsers = await db.select().from(users);
+  for (const usr of allUsers) {
+    const email = usr.email.toLowerCase();
+    if (!matchesEntry(email, row.entry)) continue;
+    if (roleForEmail(email)) continue; // still allowed via env (staff or CLIENT_EMAILS)
+    if (await emailInClientAllowlist(email)) continue; // still covered by another entry
+    await db.delete(sessions).where(eq(sessions.userId, usr.id));
+  }
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: `removed client sign-in: ${row.entry}`,
+  });
+  revalidatePath("/settings");
 }
 
 // ---------------- Settings ----------------

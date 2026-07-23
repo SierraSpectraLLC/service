@@ -163,6 +163,12 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_access_enabled" boolean NOT NULL DEFAULT false,
   "client_can_edit" boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS "client_allowlist" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "entry" text NOT NULL,
+  "added_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "eod_updates" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,
@@ -217,6 +223,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_instrument_date') THEN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_instrument_date" UNIQUE ("instrument_id","date");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'allowlist_entry_unique') THEN
+    ALTER TABLE "client_allowlist" ADD CONSTRAINT "allowlist_entry_unique" UNIQUE ("entry");
   END IF;
 END $$;
 
