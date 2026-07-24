@@ -25,7 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <body>
-        <div style={{ background: "var(--navy)", color: "#fff" }}>
+        <div className="app-header" style={{ background: "var(--navy)", color: "#fff" }}>
           <div className="spectrum" />
           <div className="container" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingTop: 14, paddingBottom: 14 }}>
             <Link href="/" style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.3, color: "#fff", textDecoration: "none" }}>
@@ -56,7 +56,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </div>
         </div>
         {children}
-        <div className="container" style={{ paddingTop: 24, paddingBottom: 18 }}>
+        <div className="container app-footer" style={{ paddingTop: 24, paddingBottom: 18 }}>
           <div className="mut mono" style={{ fontSize: 11 }}>
             build {process.env.NEXT_PUBLIC_BUILD_SHA} ·{" "}
             {new Date(process.env.NEXT_PUBLIC_BUILD_TIME || 0).toLocaleString("en-US", {

@@ -62,3 +62,11 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
 }
+
+/* Sign-off packet: browser print / save-as-PDF is the export path. */
+@media print {
+  .app-header, .app-footer, .no-print { display: none !important; }
+  body { background: #fff; }
+  .card { border: none; box-shadow: none; padding: 0; }
+  a { color: inherit; text-decoration: none; }
+}

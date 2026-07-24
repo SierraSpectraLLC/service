@@ -64,9 +64,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="container">
-      <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none", display: "inline-block", marginBottom: 10 }}>
-        ← All instruments
-      </Link>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
+          ← All instruments
+        </Link>
+        {isStaff && (
+          <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
+            Sign-off packet
+          </Link>
+        )}
+      </div>
 
       <SystemPanel
         instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
