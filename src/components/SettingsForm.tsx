@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import {
   updateSettings, addClientAccess, removeClientAccess,
   addStage, setStageColor, renameStage, deleteStage,
+  addPerson, removePerson, updateEodRecipients,
 } from "@/app/actions";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
@@ -17,10 +18,11 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 
 type AllowRow = { id: number; entry: string; addedBy: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
+type PersonRow = { id: number; name: string; email: string; org: string };
 
 export default function SettingsForm(props: {
   clientAccessEnabled: boolean; clientCanEdit: boolean; allowlist: AllowRow[]; envClients: string[];
-  stageDefs: StageRow[];
+  stageDefs: StageRow[]; people: PersonRow[]; eodRecipients: string;
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [edit, setEdit] = useState(props.clientCanEdit);
@@ -43,6 +45,28 @@ export default function SettingsForm(props: {
       const res = await addClientAccess(v);
       if (res?.error) setError(res.error);
       else setNewEntry("");
+    });
+  };
+
+  // People roster + EOD recipients.
+  const [personDraft, setPersonDraft] = useState({ name: "", email: "", org: "sierra" });
+  const [personError, setPersonError] = useState("");
+  const [recipients, setRecipients] = useState(props.eodRecipients);
+  const [recipientsMsg, setRecipientsMsg] = useState("");
+  const submitPerson = () => {
+    if (!personDraft.name.trim()) return;
+    setPersonError("");
+    startTransition(async () => {
+      const res = await addPerson(personDraft.name, personDraft.email, personDraft.org);
+      if (res?.error) setPersonError(res.error);
+      else setPersonDraft({ name: "", email: "", org: personDraft.org });
+    });
+  };
+  const saveRecipients = () => {
+    setRecipientsMsg("");
+    startTransition(async () => {
+      const res = await updateEodRecipients(recipients);
+      setRecipientsMsg(res?.error ?? "Saved ✓");
     });
   };
 
@@ -103,6 +127,57 @@ export default function SettingsForm(props: {
           <div className="mut" style={{ fontSize: 12 }}>Stages, tasks, parts, and notes. Every change is attributed in the audit log. Enabling this also enables viewing.</div>
         </div>
       </div>
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>People</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Task assignees and @mention targets - Sierra and LabZen. An email makes assignments and
+          mentions reach them; without one they can still be assigned, just not notified.
+        </div>
+        {props.people.map((p) => (
+          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
+            <span className="pill" style={p.org === "labzen"
+              ? { background: "#E7F2FA", color: "#1D6396" }
+              : { background: "#EEF1F5", color: "#475569" }}>
+              {p.org === "labzen" ? "LabZen" : "Sierra"}
+            </span>
+            {p.email && <span className="mut mono" style={{ fontSize: 11 }}>{p.email}</span>}
+            <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
+              onClick={() => {
+                if (!window.confirm(`Remove ${p.name} from the roster? Existing task assignments keep the name.`)) return;
+                startTransition(() => removePerson(p.id));
+              }}>remove</button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          <input value={personDraft.name} onChange={(e) => setPersonDraft({ ...personDraft, name: e.target.value })}
+            placeholder="Name" style={{ flex: "1 1 90px", fontSize: 13 }} />
+          <input className="mono" value={personDraft.email} onChange={(e) => setPersonDraft({ ...personDraft, email: e.target.value })}
+            placeholder="email (optional)" style={{ flex: "2 1 160px", fontSize: 13 }} />
+          <select value={personDraft.org} onChange={(e) => setPersonDraft({ ...personDraft, org: e.target.value })} style={{ width: "auto", fontSize: 13 }}>
+            <option value="sierra">Sierra</option>
+            <option value="labzen">LabZen</option>
+          </select>
+          <button className="btn sm accent" onClick={submitPerson} disabled={pending || !personDraft.name.trim()}>Add</button>
+        </div>
+        {personError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{personError}</div>}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>EOD email recipients</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Who the EOD page&apos;s &quot;Send to LabZen&quot; button emails. Comma-separated.
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input className="mono" value={recipients} onChange={(e) => { setRecipients(e.target.value); setRecipientsMsg(""); }}
+            placeholder="michael@labzenllc.com, adam@labzenllc.com" style={{ flex: 1, fontSize: 13 }} />
+          <button className="btn sm accent" onClick={saveRecipients} disabled={pending || recipients === props.eodRecipients}>Save</button>
+        </div>
+        {recipientsMsg && (
+          <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
+        )}
+      </div>
+
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Stages</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>

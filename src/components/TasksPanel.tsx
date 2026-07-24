@@ -15,7 +15,6 @@ type Task = {
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
 };
 
-const PEOPLE = ["", "Joe", "Bill"];
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 // Small optimistic wrappers so taps register instantly; the server action and
@@ -41,19 +40,22 @@ function TaskStateSelect({ task }: { task: Task }) {
   );
 }
 
-function AssigneeSelect({ task }: { task: Task }) {
+function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   const [, startTransition] = useTransition();
   const [assignee, setOptimistic] = useOptimistic(task.assignee, (_cur: string, next: string) => next);
+  // Keep a legacy assignee visible even if they've left the roster.
+  const options = ["", ...people, ...(assignee && !people.includes(assignee) ? [assignee] : [])];
   return (
     <select value={assignee} onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await assignTask(task.id, e.target.value); })}
       style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
-      {PEOPLE.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
+      {options.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
     </select>
   );
 }
 
-export default function TasksPanel({ instrumentId, tasks, templates, canEdit, isStaff }: {
-  instrumentId: number; tasks: Task[]; templates: { id: number; name: string }[]; canEdit: boolean; isStaff: boolean;
+export default function TasksPanel({ instrumentId, tasks, templates, people, canEdit, isStaff }: {
+  instrumentId: number; tasks: Task[]; templates: { id: number; name: string }[]; people: string[];
+  canEdit: boolean; isStaff: boolean;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -155,7 +157,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, canEdit, is
                 <span className="mut" style={{ fontSize: 12 }}>Status:</span>
                 <TaskStateSelect task={t} />
                 <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
-                <AssigneeSelect task={t} />
+                <AssigneeSelect task={t} people={people} />
                 <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
                 {isStaff && (
                   <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
@@ -264,7 +266,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, canEdit, is
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span className="mut" style={{ fontSize: 12 }}>Assign:</span>
             <select value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })} style={{ width: "auto" }}>
-              {PEOPLE.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
+              {["", ...people].map((p) => <option key={p} value={p}>{p || "-"}</option>)}
             </select>
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submitNew} disabled={pending}>
               {pending ? "Creating..." : "Create task"}

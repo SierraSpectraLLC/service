@@ -891,6 +891,58 @@ export async function deleteStage(id: number): Promise<{ error?: string }> {
   return {};
 }
 
+// ---------------- People roster ----------------
+// Task assignees and @mention targets, Sierra + LabZen. Owner-managed in Settings.
+
+export async function addPerson(name: string, email: string, org: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const n = name.trim();
+  const e = email.trim().toLowerCase();
+  if (!n || n.length > 40) return { error: "Name must be 1-40 characters" };
+  if (e && !ALLOW_EMAIL.test(e)) return { error: "Enter a valid email, or leave it blank" };
+  const o = org === "labzen" ? "labzen" : "sierra";
+  const existing = await db.select().from(people);
+  if (existing.some((p) => p.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" is already on the roster` };
+  await db.insert(people).values({ name: n, email: e, org: o }).onConflictDoNothing();
+  await audit({
+    actor: u.email, entityType: "settings", entityId: n,
+    action: `added ${o === "labzen" ? "LabZen" : "Sierra"} person to roster: ${n}${e ? ` <${e}>` : ""}`,
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
+export async function removePerson(id: number) {
+  const u = await requireOwner();
+  const [p] = await db.select().from(people).where(eq(people.id, id));
+  if (!p) return;
+  await db.delete(people).where(eq(people.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: p.name,
+    action: `removed person from roster: ${p.name}`,
+  });
+  revalidatePath("/settings");
+}
+
+/** Who the EOD "Send to LabZen" button emails. Comma-separated. */
+export async function updateEodRecipients(value: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const entries = value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const bad = entries.find((e) => !ALLOW_EMAIL.test(e));
+  if (bad) return { error: `"${bad}" doesn't look like an email` };
+  const eodRecipients = entries.join(", ");
+  await db.insert(appSettings)
+    .values({ id: 1, eodRecipients })
+    .onConflictDoUpdate({ target: appSettings.id, set: { eodRecipients } });
+  await audit({
+    actor: u.email, entityType: "settings", entityId: 1,
+    action: `EOD recipients: ${eodRecipients || "(none)"}`,
+  });
+  revalidatePath("/settings");
+  revalidatePath("/eod");
+  return {};
+}
+
 // ---------------- Client sign-in allowlist ----------------
 
 /** "jane@labzenllc.com" (one person) or "@labzenllc.com" (whole domain). */
