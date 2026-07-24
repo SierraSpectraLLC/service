@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import StagePanel from "./StagePanel";
+import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument } from "@/app/actions";
 
 type Inst = { id: number; externalId: string; client: string; model: string; priority: number; notes: string };
 
-export default function SystemPanel({ instrument, stages, gases, canEdit, isStaff, isOwner }: {
-  instrument: Inst; stages: string[]; gases: GasRow[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
+export default function SystemPanel({ instrument, stages, stageDefs, gases, canEdit, isStaff, isOwner }: {
+  instrument: Inst; stages: string[]; stageDefs: StageDefLite[]; gases: GasRow[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ client: "", model: "", priority: "", notes: "" });
@@ -90,7 +90,7 @@ export default function SystemPanel({ instrument, stages, gases, canEdit, isStaf
         </div>
       )}
 
-      <StagePanel instrumentId={instrument.id} stages={stages} canEdit={canEdit} />
+      <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
       <GasPanel instrumentId={instrument.id} gases={gases} canEdit={canEdit} isStaff={isStaff} />
     </div>
   );

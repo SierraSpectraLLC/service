@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { updateSettings, addClientAccess, removeClientAccess } from "@/app/actions";
+import { useRef, useState, useTransition } from "react";
+import {
+  updateSettings, addClientAccess, removeClientAccess,
+  addStage, setStageColor, renameStage, deleteStage,
+} from "@/app/actions";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
@@ -13,9 +16,11 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 }
 
 type AllowRow = { id: number; entry: string; addedBy: string };
+type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
 
 export default function SettingsForm(props: {
   clientAccessEnabled: boolean; clientCanEdit: boolean; allowlist: AllowRow[]; envClients: string[];
+  stageDefs: StageRow[];
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [edit, setEdit] = useState(props.clientCanEdit);
@@ -41,6 +46,43 @@ export default function SettingsForm(props: {
     });
   };
 
+  // Stage editor: live-preview color drags locally, commit debounced.
+  const [stageDraft, setStageDraft] = useState({ name: "", bg: "#C9DAF8" });
+  const [stageError, setStageError] = useState("");
+  const [colors, setColors] = useState<Record<number, string>>({});
+  const colorTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  const changeColor = (id: number, bg: string) => {
+    setColors((c) => ({ ...c, [id]: bg }));
+    if (colorTimers.current[id]) clearTimeout(colorTimers.current[id]);
+    colorTimers.current[id] = setTimeout(() => startTransition(() => setStageColor(id, bg)), 600);
+  };
+  const submitStage = () => {
+    if (!stageDraft.name.trim()) return;
+    setStageError("");
+    startTransition(async () => {
+      const res = await addStage(stageDraft.name, stageDraft.bg);
+      if (res?.error) setStageError(res.error);
+      else setStageDraft({ name: "", bg: "#C9DAF8" });
+    });
+  };
+  const doRename = (s: StageRow) => {
+    const next = window.prompt(`Rename stage "${s.name}" to:`, s.name);
+    if (!next || next.trim() === s.name) return;
+    setStageError("");
+    startTransition(async () => {
+      const res = await renameStage(s.id, next);
+      if (res?.error) setStageError(res.error);
+    });
+  };
+  const doDelete = (s: StageRow) => {
+    if (!window.confirm(`Delete stage "${s.name}"? It will be removed from any system that has it.`)) return;
+    setStageError("");
+    startTransition(async () => {
+      const res = await deleteStage(s.id);
+      if (res?.error) setStageError(res.error);
+    });
+  };
+
   return (
     <div className="card">
       <div style={{ fontWeight: 700, fontSize: 15, color: "var(--navy)", marginBottom: 4 }}>Client access</div>
@@ -61,6 +103,39 @@ export default function SettingsForm(props: {
           <div className="mut" style={{ fontSize: 12 }}>Stages, tasks, parts, and notes. Every change is attributed in the audit log. Enabling this also enables viewing.</div>
         </div>
       </div>
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Stages</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Pick a background color - the text color adjusts automatically. Built-in stage names are locked
+          (sync and reports key on them); stages you add can be renamed or deleted.
+        </div>
+        {props.stageDefs.map((s) => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
+            <span className="pill" style={{ background: colors[s.id] ?? s.bg, color: s.fg }}>{s.name}</span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              {!s.builtin && (
+                <>
+                  <button className="btn link" style={{ fontSize: 11 }} disabled={pending} onClick={() => doRename(s)}>rename</button>
+                  <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending} onClick={() => doDelete(s)}>delete</button>
+                </>
+              )}
+              <input type="color" value={colors[s.id] ?? s.bg} onChange={(e) => changeColor(s.id, e.target.value)}
+                disabled={s.id < 0} title={s.id < 0 ? "Available after the next deploy seeds the stage table" : "Stage color"}
+                style={{ width: 34, height: 26, padding: 2, border: "1px solid var(--line)", borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+            </div>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center" }}>
+          <input value={stageDraft.name} onChange={(e) => setStageDraft({ ...stageDraft, name: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") submitStage(); }}
+            placeholder="New stage name" style={{ flex: 1, fontSize: 13 }} />
+          <input type="color" value={stageDraft.bg} onChange={(e) => setStageDraft({ ...stageDraft, bg: e.target.value })}
+            style={{ width: 34, height: 30, padding: 2, border: "1px solid var(--line)", borderRadius: 6, background: "#fff", cursor: "pointer" }} />
+          <button className="btn sm accent" onClick={submitStage} disabled={pending || !stageDraft.name.trim()}>Add</button>
+        </div>
+        {stageError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{stageError}</div>}
+      </div>
+
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Who can sign in as a client</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>

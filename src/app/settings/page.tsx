@@ -4,14 +4,18 @@ import { db } from "@/db";
 import { appSettings, clientAllowlist } from "@/db/schema";
 import { requireOwner } from "@/lib/authz";
 import { parseList } from "@/auth";
+import { getStageDefs } from "@/lib/stageDefs";
 import SettingsForm from "@/components/SettingsForm";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   try { await requireOwner(); } catch { redirect("/"); }
-  const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
-  const allowRows = await db.select().from(clientAllowlist).orderBy(asc(clientAllowlist.entry));
+  const [[s], allowRows, stageDefList] = await Promise.all([
+    db.select().from(appSettings).where(eq(appSettings.id, 1)),
+    db.select().from(clientAllowlist).orderBy(asc(clientAllowlist.entry)),
+    getStageDefs(),
+  ]);
   return (
     <div className="container" style={{ maxWidth: 620 }}>
       <SettingsForm
@@ -19,6 +23,7 @@ export default async function SettingsPage() {
         clientCanEdit={s?.clientCanEdit ?? false}
         allowlist={allowRows.map((r) => ({ id: r.id, entry: r.entry, addedBy: r.addedBy }))}
         envClients={parseList(process.env.CLIENT_EMAILS)}
+        stageDefs={stageDefList}
       />
     </div>
   );

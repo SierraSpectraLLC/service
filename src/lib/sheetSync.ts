@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, sheetDiffs } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { STAGES } from "@/lib/stages";
+import { STAGES, SHEET_STAGES } from "@/lib/stages";
 
 /**
  * Minimal RFC-4180-ish CSV parser (handles quoted fields with commas/newlines).
@@ -232,9 +232,10 @@ export async function runSheetSync(): Promise<{ checked: number; diffs: number; 
     }
     byId.delete(s.externalId);
     const sheetStages = s.stages.join(", ");
-    const dbStages = (d.stages || []).filter((x) => s.stages.includes(x) || true).join(", ");
-    // Stage comparison ignores our extra internal-only stages the sheet can't express.
-    const dbComparable = (d.stages || []).filter((x) => !["Waiting / blocked", "Waiting to ship"].includes(x)).join(", ");
+    const dbStages = (d.stages || []).join(", ");
+    // Stage comparison covers only stages the sheet can express - internal-only
+    // built-ins and custom stages added in Settings never generate diffs.
+    const dbComparable = (d.stages || []).filter((x) => (SHEET_STAGES as readonly string[]).includes(x)).join(", ");
     if (sheetStages && sheetStages !== dbComparable) {
       await record(s.externalId, "Stage", sheetStages, dbStages);
     }

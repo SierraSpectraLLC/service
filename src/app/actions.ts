@@ -6,13 +6,14 @@ import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
-  sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions,
+  sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
+import { getStageDefs } from "@/lib/stageDefs";
 import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
-import { STAGES, GASES, GAS_STATES } from "@/lib/stages";
+import { GASES, GAS_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopMonthDay } from "@/lib/shopday";
 
 const rev = (id?: number) => {
@@ -24,7 +25,8 @@ const rev = (id?: number) => {
 
 export async function toggleStage(instrumentId: number, stage: string) {
   const u = await requireEditor();
-  if (!(STAGES as readonly string[]).includes(stage)) throw new Error("Unknown stage");
+  const defs = await getStageDefs();
+  if (!defs.some((s) => s.name === stage)) throw new Error("Unknown stage");
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) throw new Error("Not found");
   const has = inst.stages.includes(stage);
@@ -587,6 +589,87 @@ export async function setEodSkip(instrumentId: number, skipped: boolean) {
       set: { skipped, updatedBy: u.name, updatedAt: new Date() },
     });
   revalidatePath("/eod");
+}
+
+// ---------------- Stage vocabulary ----------------
+
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+export async function addStage(name: string, bg: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const n = name.trim();
+  if (!n || n.length > 40) return { error: "Stage name must be 1-40 characters" };
+  if (!HEX.test(bg)) return { error: "Pick a color" };
+  const existing = await db.select().from(stageDefs);
+  if (existing.some((s) => s.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
+  const sortOrder = Math.max(0, ...existing.map((s) => s.sortOrder)) + 1;
+  await db.insert(stageDefs).values({ name: n, bg: bg.toUpperCase(), fg: autoFg(bg), sortOrder }).onConflictDoNothing();
+  await audit({ actor: u.email, entityType: "settings", entityId: n, action: `added stage "${n}"` });
+  revalidatePath("/settings");
+  rev();
+  return {};
+}
+
+export async function setStageColor(id: number, bg: string) {
+  const u = await requireOwner();
+  if (!HEX.test(bg)) return;
+  const [s] = await db.select().from(stageDefs).where(eq(stageDefs.id, id));
+  if (!s || s.bg === bg.toUpperCase()) return;
+  await db.update(stageDefs).set({ bg: bg.toUpperCase(), fg: autoFg(bg) }).where(eq(stageDefs.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: s.name,
+    action: `recolored stage "${s.name}"`, field: "bg", oldValue: s.bg, newValue: bg.toUpperCase(),
+  });
+  revalidatePath("/settings");
+  rev();
+}
+
+export async function renameStage(id: number, name: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const n = name.trim();
+  if (!n || n.length > 40) return { error: "Stage name must be 1-40 characters" };
+  const [s] = await db.select().from(stageDefs).where(eq(stageDefs.id, id));
+  if (!s || s.name === n) return {};
+  if (s.builtin) return { error: "Built-in stages can't be renamed - sync and reports key on their names" };
+  const existing = await db.select().from(stageDefs);
+  if (existing.some((x) => x.id !== id && x.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
+  await db.update(stageDefs).set({ name: n }).where(eq(stageDefs.id, id));
+  // Carry the rename onto every instrument tagged with the old name.
+  const insts = await db.select().from(instruments);
+  for (const i of insts) {
+    if (!i.stages.includes(s.name)) continue;
+    await db.update(instruments)
+      .set({ stages: i.stages.map((x) => (x === s.name ? n : x)), updatedAt: new Date() })
+      .where(eq(instruments.id, i.id));
+  }
+  await audit({
+    actor: u.email, entityType: "settings", entityId: n,
+    action: `renamed stage "${s.name}" to "${n}"`, field: "name", oldValue: s.name, newValue: n,
+  });
+  revalidatePath("/settings");
+  rev();
+  return {};
+}
+
+export async function deleteStage(id: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [s] = await db.select().from(stageDefs).where(eq(stageDefs.id, id));
+  if (!s) return {};
+  if (s.builtin) return { error: "Built-in stages can't be deleted - sync and reports key on their names" };
+  await db.delete(stageDefs).where(eq(stageDefs.id, id));
+  // Strip it from any instruments; keep the at-least-one-stage invariant.
+  const insts = await db.select().from(instruments);
+  for (const i of insts) {
+    if (!i.stages.includes(s.name)) continue;
+    const next = i.stages.filter((x) => x !== s.name);
+    await db.update(instruments)
+      .set({ stages: next.length ? next : ["Intake"], updatedAt: new Date() })
+      .where(eq(instruments.id, i.id));
+  }
+  await audit({ actor: u.email, entityType: "settings", entityId: s.name, action: `deleted stage "${s.name}"` });
+  revalidatePath("/settings");
+  rev();
+  return {};
 }
 
 // ---------------- Client sign-in allowlist ----------------

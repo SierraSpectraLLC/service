@@ -190,6 +190,19 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
 
+// Stage vocabulary: seeded with the nine built-ins (schema-sync.sql), owner
+// can recolor any stage and add/rename/delete custom ones in Settings.
+// Built-in rows (builtin=true) can't be renamed or deleted - their names are
+// referenced by sync, dashboard counts, and the EOD report.
+export const stageDefs = pgTable("stage_defs", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  bg: text("bg").notNull(),
+  fg: text("fg").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  builtin: boolean("builtin").notNull().default(false),
+}, (t) => [unique("stage_defs_name_unique").on(t.name)]);
+
 // Client sign-in allowlist, editable by the owner in Settings. An entry is
 // either an exact email ("jane@labzenllc.com") or a whole domain
 // ("@labzenllc.com"). Unioned with the CLIENT_EMAILS env allowlist at sign-in.

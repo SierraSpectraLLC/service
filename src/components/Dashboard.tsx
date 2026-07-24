@@ -3,8 +3,9 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { STAGES, STAGE_COLOR } from "@/lib/stages";
 import { createInstrument } from "@/app/actions";
+
+type StageDefLite = { name: string; bg: string; fg: string };
 
 type Row = {
   id: number; externalId: string; client: string; model: string; priority: number;
@@ -16,8 +17,12 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; canEdit: boolean; isStaff: boolean }) {
+export default function Dashboard({ data, stageDefs, canEdit, isStaff }: {
+  data: Row[]; stageDefs: StageDefLite[]; canEdit: boolean; isStaff: boolean;
+}) {
   const router = useRouter();
+  const stageNames = stageDefs.map((d) => d.name);
+  const stageColor = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
   const [selected, setSelected] = useState<string[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -38,8 +43,8 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
   const filtered = useMemo(() => {
     let list = data;
     // Stages combine as OR (either stage matches); flags combine as AND.
-    const stageSel = selected.filter((f) => (STAGES as readonly string[]).includes(f));
-    const flagSel = selected.filter((f) => !(STAGES as readonly string[]).includes(f));
+    const stageSel = selected.filter((f) => stageNames.includes(f));
+    const flagSel = selected.filter((f) => !stageNames.includes(f));
     if (stageSel.length) list = list.filter((i) => stageSel.some((s) => i.stages.includes(s)));
     for (const f of flagSel) list = list.filter((i) => matchesFlag(i, f));
     if (q.trim()) {
@@ -109,7 +114,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
                 padding: "10px 14px", minWidth: 220, maxHeight: "60vh", overflowY: "auto",
               }}>
                 <div className="eyebrow" style={{ marginBottom: 4 }}>Stage</div>
-                {STAGES.map((s) => (
+                {stageNames.map((s) => (
                   <label key={s} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
                     <input type="checkbox" checked={selected.includes(s)} onChange={() => toggleFilter(s)}
                       style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
@@ -177,7 +182,7 @@ export default function Dashboard({ data, canEdit, isStaff }: { data: Row[]; can
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {i.stages.map((s) => (
-                <Pill key={s} bg={STAGE_COLOR[s]?.bg || "#EEF1F5"} fg={STAGE_COLOR[s]?.fg || "#475569"}>{s}</Pill>
+                <Pill key={s} bg={stageColor(s).bg} fg={stageColor(s).fg}>{s}</Pill>
               ))}
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>

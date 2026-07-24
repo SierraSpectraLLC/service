@@ -1,3 +1,8 @@
+// Built-in stage vocabulary. The live list (plus any custom stages and color
+// overrides) is the stage_defs table, editable in Settings; these consts are
+// the seed values and the fallback before the table is populated. The built-in
+// NAMES are load-bearing: "Shipped", "Waiting / blocked", "Waiting to ship",
+// and "Intake" are referenced by sync, dashboard counts, and the EOD report.
 export const STAGES = [
   "Intake",
   "Refurbishment",
@@ -10,6 +15,26 @@ export const STAGES = [
   "Shipped",
 ] as const;
 export type Stage = (typeof STAGES)[number];
+
+// Stages the client's sheet can express (sheetSync alias targets). Stage
+// parity compares only these, so internal-only and custom stages never
+// generate sheet diffs.
+export const SHEET_STAGES = [
+  "Intake", "Refurbishment", "System setup", "Checkout", "Applications", "Sign-off", "Shipped",
+] as const;
+
+/** Readable text color for a pill background: deep shade of the same hue on light, pale tint on dark. */
+export function autoFg(bg: string): string {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(bg.trim());
+  if (!m) return "#475569";
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  const mix = lum < 140
+    ? (c: number) => Math.round(c + (255 - c) * 0.78)
+    : (c: number) => Math.round(c * 0.42);
+  return "#" + [r, g, b].map((c) => mix(c).toString(16).padStart(2, "0")).join("").toUpperCase();
+}
 
 export const GASES = ["Helium", "Nitrogen", "Argon", "Hydrogen", "Air"] as const;
 export type Gas = (typeof GASES)[number];
@@ -40,16 +65,18 @@ export function partOpen(status: string): boolean {
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;
 export const ATTACH_KINDS = ["Tune report", "Test data", "Report", "Photo", "Manual", "Other"] as const;
 
+// Matched to the client sheet's dropdown chips (their "Waiting" = our
+// "Waiting / blocked"; their "Packing" purple = our "Waiting to ship").
 export const STAGE_COLOR: Record<string, { bg: string; fg: string }> = {
-  Intake: { bg: "#EEF1F5", fg: "#475569" },
-  Refurbishment: { bg: "#FBEAE3", fg: "#A33A1A" },
-  "System setup": { bg: "#E7F2FA", fg: "#1D6396" },
-  Checkout: { bg: "#FAF0DC", fg: "#8A5410" },
-  Applications: { bg: "#E2F5EC", fg: "#0F6E56" },
+  Intake: { bg: "#F9CB9C", fg: "#783F04" },
+  Refurbishment: { bg: "#FFE599", fg: "#7F6000" },
+  "System setup": { bg: "#C9DAF8", fg: "#1C4587" },
+  Checkout: { bg: "#B6E2A1", fg: "#2C5E1A" },
+  Applications: { bg: "#E69138", fg: "#2E1C05" },
   "Sign-off": { bg: "#E5F3E5", fg: "#2E6B2E" },
-  "Waiting / blocked": { bg: "#FBE9E9", fg: "#A32D2D" },
-  "Waiting to ship": { bg: "#EDEBFA", fg: "#4F45A3" },
-  Shipped: { bg: "#DDF0EA", fg: "#085041" },
+  "Waiting / blocked": { bg: "#F4CCCC", fg: "#B42318" },
+  "Waiting to ship": { bg: "#D9D2E9", fg: "#674EA7" },
+  Shipped: { bg: "#38761D", fg: "#D9EAD3" },
 };
 export const TASK_COLOR: Record<string, { bg: string; fg: string }> = {
   Open: { bg: "#EEF1F5", fg: "#475569" },

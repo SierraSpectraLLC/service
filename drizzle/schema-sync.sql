@@ -163,6 +163,14 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_access_enabled" boolean NOT NULL DEFAULT false,
   "client_can_edit" boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS "stage_defs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "name" text NOT NULL,
+  "bg" text NOT NULL,
+  "fg" text NOT NULL,
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "builtin" boolean NOT NULL DEFAULT false
+);
 CREATE TABLE IF NOT EXISTS "client_allowlist" (
   "id" serial PRIMARY KEY NOT NULL,
   "entry" text NOT NULL,
@@ -227,6 +235,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'allowlist_entry_unique') THEN
     ALTER TABLE "client_allowlist" ADD CONSTRAINT "allowlist_entry_unique" UNIQUE ("entry");
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_defs_name_unique') THEN
+    ALTER TABLE "stage_defs" ADD CONSTRAINT "stage_defs_name_unique" UNIQUE ("name");
+  END IF;
 END $$;
 
 -- ── Foreign keys (guarded; ON DELETE CASCADE per schema.ts) ───────────────
@@ -272,3 +283,18 @@ DO $$ BEGIN
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ── Seeds (idempotent; ON CONFLICT DO NOTHING never touches existing rows) ─
+-- Built-in stages, colored to match the client sheet's dropdown chips.
+-- After seeding, colors and custom stages are managed in Settings.
+INSERT INTO "stage_defs" ("name","bg","fg","sort_order","builtin") VALUES
+  ('Intake','#F9CB9C','#783F04',1,true),
+  ('Refurbishment','#FFE599','#7F6000',2,true),
+  ('System setup','#C9DAF8','#1C4587',3,true),
+  ('Checkout','#B6E2A1','#2C5E1A',4,true),
+  ('Applications','#E69138','#2E1C05',5,true),
+  ('Sign-off','#E5F3E5','#2E6B2E',6,true),
+  ('Waiting / blocked','#F4CCCC','#B42318',7,true),
+  ('Waiting to ship','#D9D2E9','#674EA7',8,true),
+  ('Shipped','#38761D','#D9EAD3',9,true)
+ON CONFLICT ("name") DO NOTHING;

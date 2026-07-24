@@ -1,19 +1,23 @@
 "use client";
 
 import { useOptimistic, useTransition } from "react";
-import { STAGES, STAGE_COLOR } from "@/lib/stages";
 import { toggleStage } from "@/app/actions";
 
-export default function StagePanel({ instrumentId, stages, canEdit }: { instrumentId: number; stages: string[]; canEdit: boolean }) {
+export type StageDefLite = { name: string; bg: string; fg: string };
+
+export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }: {
+  instrumentId: number; stages: string[]; stageDefs: StageDefLite[]; canEdit: boolean;
+}) {
   const [, startTransition] = useTransition();
   // Flip the pill immediately; the server action + revalidation reconcile behind it.
   const [optimisticStages, applyToggle] = useOptimistic(stages, (cur: string[], stage: string) =>
     cur.includes(stage) ? cur.filter((s) => s !== stage) : [...cur, stage]
   );
   const toggle = (s: string) => startTransition(async () => { applyToggle(s); await toggleStage(instrumentId, s); });
+  const color = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
   // Active stages render as pills; the rest live in a compact dropdown so the
-  // full nine-stage vocabulary doesn't clutter the page (especially mobile).
-  const inactive = STAGES.filter((s) => !optimisticStages.includes(s));
+  // full stage vocabulary doesn't clutter the page (especially mobile).
+  const inactive = stageDefs.filter((d) => !optimisticStages.includes(d.name));
   return (
     <>
       <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>
@@ -26,7 +30,7 @@ export default function StagePanel({ instrumentId, stages, canEdit }: { instrume
             className="pill"
             onClick={canEdit ? () => toggle(s) : undefined}
             style={{
-              background: STAGE_COLOR[s]?.bg, color: STAGE_COLOR[s]?.fg,
+              background: color(s).bg, color: color(s).fg,
               cursor: canEdit ? "pointer" : "default", userSelect: "none",
             }}
           >{s}{canEdit && optimisticStages.length > 1 ? " ×" : ""}</span>
@@ -38,7 +42,7 @@ export default function StagePanel({ instrumentId, stages, canEdit }: { instrume
             style={{ width: "auto", fontSize: 12, padding: "3px 6px", borderRadius: 999, color: "var(--mut)" }}
           >
             <option value="">+ Add stage</option>
-            {inactive.map((s) => <option key={s} value={s}>{s}</option>)}
+            {inactive.map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
           </select>
         )}
       </div>

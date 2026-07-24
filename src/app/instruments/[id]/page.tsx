@@ -7,6 +7,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
+import { getStageDefs } from "@/lib/stageDefs";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import PartsPanel from "@/components/PartsPanel";
@@ -24,13 +25,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id)),
     db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(desc(attachments.createdAt)),
     db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
+    getStageDefs(),
   ]);
   if (!inst) notFound();
 
@@ -64,7 +66,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <SystemPanel
         instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
-        stages={inst.stages} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
+        stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
+        gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />
 
