@@ -117,9 +117,15 @@ export const instrumentGases = pgTable("instrument_gases", {
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  // part | consumable - consumables (ferrules, septa, liners) share the same
+  // lifecycle/cost/audit but get a lighter-weight form.
+  kind: text("kind").notNull().default("part"),
   name: text("name").notNull(),
   partNumber: text("part_number").notNull().default(""),
   serial: text("serial").notNull().default(""),
+  qty: text("qty").notNull().default(""), // free text, mainly for consumables
+  // Custom label/value fields as a JSON array of {k,v} - e.g. GC column ID/length.
+  specs: text("specs").notNull().default(""),
   vendor: text("vendor").notNull().default(""),
   po: text("po").notNull().default(""),
   cost: text("cost").notNull().default(""), // free text: "1,240" - money math not needed yet

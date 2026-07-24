@@ -18,6 +18,7 @@ import { pushValueToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
+import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { sendEmail } from "@/lib/email";
 
 const rev = (id?: number) => {
@@ -416,9 +417,20 @@ export async function deleteItemNote(noteId: number) {
 // ---------------- Parts ----------------
 
 type PartInput = {
-  name: string; partNumber: string; serial: string; vendor: string; po: string; cost: string;
+  kind: string; name: string; partNumber: string; serial: string; qty: string; specs: string;
+  vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
 };
+
+/** Normalize client-supplied kind/specs so only well-formed values are stored. */
+function cleanPartInput(data: PartInput): PartInput {
+  return {
+    ...data,
+    kind: data.kind === "consumable" ? "consumable" : "part",
+    qty: data.qty.trim(),
+    specs: serializeSpecs(parseSpecs(data.specs)),
+  };
+}
 
 const today = () => shopMonthDay();
 
@@ -434,25 +446,29 @@ function partStamps(before: { status: string; receivedAt: string; installedAt: s
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
 
-export async function createPart(instrumentId: number, data: PartInput) {
+export async function createPart(instrumentId: number, raw: PartInput) {
   const u = await requireEditor();
+  const data = cleanPartInput(raw);
   if (!data.name.trim()) throw new Error("Name required");
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
   const [p] = await db.insert(parts).values({ ...data, ...stamps, name: data.name.trim(), note: data.note.trim(), instrumentId }).returning();
   const verb = partStatusVerb(p.status);
+  const noun = p.kind === "consumable" ? "consumable" : "part";
   const pn = p.partNumber ? ` (PN ${p.partNumber})` : "";
+  const qty = p.qty ? ` x${p.qty}` : "";
   const note = p.note ? ` - ${p.note}` : "";
   await audit({
     actor: u.email, instrumentId, entityType: "part", entityId: p.id,
     action: verb
-      ? `${verb} part '${p.name}'${pn}${note}`
-      : `added part '${p.name}'${pn} - ${p.status}${note}`,
+      ? `${verb} ${noun} '${p.name}'${qty}${pn}${note}`
+      : `added ${noun} '${p.name}'${qty}${pn} - ${p.status}${note}`,
   });
   rev(instrumentId);
 }
 
-export async function updatePart(partId: number, data: PartInput) {
+export async function updatePart(partId: number, raw: PartInput) {
   const u = await requireEditor();
+  const data = cleanPartInput(raw);
   const [before] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!before) return;
   const stamps = partStamps(before, data.status);

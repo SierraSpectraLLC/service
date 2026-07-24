@@ -1,11 +1,13 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { CARRIERS, PART_STATES, PART_COLOR, trackUrl } from "@/lib/stages";
+import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
+import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import { createPart, updatePart, setPartStatus, deletePart } from "@/app/actions";
 
 type Part = {
-  id: number; name: string; partNumber: string; serial: string; vendor: string; po: string; cost: string;
+  id: number; kind: string; name: string; partNumber: string; serial: string; qty: string; specs: string;
+  vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
   installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
 };
@@ -24,27 +26,43 @@ function PartStatusSelect({ part }: { part: Part }) {
   );
 }
 
-const empty = { name: "", partNumber: "", serial: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
+const empty = { kind: "part", name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
 export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { instrumentId: number; parts: Part[]; canEdit: boolean; isStaff: boolean }) {
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
   const [draft, setDraft] = useState<typeof empty>(empty);
+  const [specPairs, setSpecPairs] = useState<SpecPair[]>([]);
   const [pending, startTransition] = useTransition();
 
-  const openNew = () => { setDraft(empty); setForm({ mode: "new" }); };
+  const openNew = () => { setDraft(empty); setSpecPairs([]); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
-    setDraft({ name: p.name, partNumber: p.partNumber, serial: p.serial, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
+    setDraft({ kind: p.kind, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
+    setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
-  const close = () => { setForm(null); setDraft(empty); };
+  const close = () => { setForm(null); setDraft(empty); setSpecPairs([]); };
+
+  // Consumables usually come off the shelf and go straight in; parts start as Needed.
+  const setKind = (kind: string) => {
+    setDraft((d) => ({ ...d, kind, ...(form?.mode === "new" ? { status: kind === "consumable" ? "Installed" : "Needed" } : {}) }));
+  };
+  const setPair = (i: number, patch: Partial<SpecPair>) =>
+    setSpecPairs((s) => s.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+
+  // Order paperwork only matters once something is actually on order; keep the
+  // fields visible when editing a row that already has them filled.
+  const showOrderFields =
+    (ORDER_STATES as readonly string[]).includes(draft.status) ||
+    !!(draft.po || draft.carrier || draft.tracking || draft.orderedAt || draft.eta);
 
   const save = () => {
     if (!draft.name.trim() || !form) return;
+    const payload = { ...draft, specs: serializeSpecs(specPairs) };
     startTransition(async () => {
-      if (form.mode === "new") await createPart(instrumentId, draft);
-      else await updatePart(form.id, draft);
+      if (form.mode === "new") await createPart(instrumentId, payload);
+      else await updatePart(form.id, payload);
       close();
     });
   };
@@ -55,27 +73,43 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
         <div className="card-title">Parts</div>
         {canEdit && (
           <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => (form ? close() : openNew())}>
-            {form ? "Cancel" : "+ Add part"}
+            {form ? "Cancel" : "+ Add"}
           </button>
         )}
       </div>
 
       {form && (
         <div className="dash-form">
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>
-            {form.mode === "new" ? "New part" : "Edit part"}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>
+              {form.mode === "new" ? "New" : "Edit"}
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {[["part", "Part"], ["consumable", "Consumable"]].map(([k, label]) => (
+                <button key={k} className="pill" onClick={() => setKind(k)}
+                  style={{
+                    border: "none", cursor: "pointer",
+                    background: draft.kind === k ? "var(--navy)" : "#EEF1F5",
+                    color: draft.kind === k ? "#fff" : "#475569",
+                  }}>{label}</button>
+              ))}
+            </div>
+            {draft.kind === "consumable" && (
+              <span className="mut" style={{ fontSize: 11 }}>ferrules, septa, liners... defaults to Installed</span>
+            )}
           </div>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div style={{ gridColumn: "1 / -1" }}>
-              <label>Part name *</label>
-              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. 10kV HED supply" />
+              <label>Name *</label>
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                placeholder={draft.kind === "consumable" ? "e.g. Vespel ferrule 1/4in" : "e.g. 10kV HED supply"} />
             </div>
             <div><label>Part number</label><input value={draft.partNumber} onChange={(e) => setDraft({ ...draft, partNumber: e.target.value })} placeholder="G6303-80060" /></div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="US12345678" /></div>
-            <div style={{ gridColumn: "1 / -1" }}><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Applied Kilovolts" /></div>
+            <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Restek" /></div>
+            <div><label>Qty</label><input value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="1" /></div>
           </div>
-          <div className="pf3" style={{ marginBottom: 8 }}>
-            <div><label>PO #</label><input value={draft.po} onChange={(e) => setDraft({ ...draft, po: e.target.value })} placeholder="SS-1042" /></div>
+          <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>
             <div>
               <label>Status</label>
@@ -84,23 +118,44 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
               </select>
             </div>
           </div>
-          <div className="pf-ship" style={{ marginBottom: 8 }}>
-            <div>
-              <label>Carrier</label>
-              <select value={draft.carrier} onChange={(e) => setDraft({ ...draft, carrier: e.target.value })}>
-                {CARRIERS.map((c) => <option key={c} value={c}>{c || "-"}</option>)}
-              </select>
-            </div>
-            <div><label>Tracking #</label><input className="mono" value={draft.tracking} onChange={(e) => setDraft({ ...draft, tracking: e.target.value })} placeholder="1Z999AA10123456784" /></div>
-          </div>
-          <div className="pf2" style={{ marginBottom: 8 }}>
-            <div><label>Ordered</label><input value={draft.orderedAt} onChange={(e) => setDraft({ ...draft, orderedAt: e.target.value })} placeholder="Jul 18" /></div>
-            <div><label>ETA</label><input value={draft.eta} onChange={(e) => setDraft({ ...draft, eta: e.target.value })} placeholder="Jul 23" /></div>
-          </div>
-          <div style={{ marginBottom: 12 }}>
+          {showOrderFields && (
+            <>
+              <div className="pf3" style={{ marginBottom: 8 }}>
+                <div><label>PO #</label><input value={draft.po} onChange={(e) => setDraft({ ...draft, po: e.target.value })} placeholder="SS-1042" /></div>
+                <div><label>Ordered</label><input value={draft.orderedAt} onChange={(e) => setDraft({ ...draft, orderedAt: e.target.value })} placeholder="Jul 18" /></div>
+                <div><label>ETA</label><input value={draft.eta} onChange={(e) => setDraft({ ...draft, eta: e.target.value })} placeholder="Jul 23" /></div>
+              </div>
+              <div className="pf-ship" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Carrier</label>
+                  <select value={draft.carrier} onChange={(e) => setDraft({ ...draft, carrier: e.target.value })}>
+                    {CARRIERS.map((c) => <option key={c} value={c}>{c || "-"}</option>)}
+                  </select>
+                </div>
+                <div><label>Tracking #</label><input className="mono" value={draft.tracking} onChange={(e) => setDraft({ ...draft, tracking: e.target.value })} placeholder="1Z999AA10123456784" /></div>
+              </div>
+            </>
+          )}
+          <div style={{ marginBottom: 8 }}>
             <label>Install / swap note</label>
             <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
               placeholder='e.g. "From stock; replaced failing unit SN 4411, old one returned for RMA"' />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label>Details</label>
+            {specPairs.map((p, i) => (
+              <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <input value={p.k} onChange={(e) => setPair(i, { k: e.target.value })} placeholder="Length" style={{ flex: "0 1 120px", fontSize: 13 }} />
+                <input value={p.v} onChange={(e) => setPair(i, { v: e.target.value })} placeholder="30 m" style={{ flex: 1, fontSize: 13 }} />
+                <button className="btn link" style={{ color: "#A32D2D", padding: "0 4px" }}
+                  onClick={() => setSpecPairs((s) => s.filter((_, idx) => idx !== i))}>×</button>
+              </div>
+            ))}
+            {specPairs.length < SPECS_MAX_PAIRS && (
+              <button className="btn link" onClick={() => setSpecPairs((s) => [...s, { k: "", v: "" }])}>
+                + add field {specPairs.length === 0 ? "(e.g. ID, Length, Film)" : ""}
+              </button>
+            )}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" onClick={save} disabled={pending}>
@@ -118,40 +173,61 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
       )}
 
       {parts.length === 0 && !form && <div className="mut" style={{ fontSize: 13 }}>No parts tracked for this system.</div>}
-      {parts.map((p) => {
-        const link = trackUrl(p.carrier, p.tracking);
-        return (
-          <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#FAFBFD" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}</span>
-              {canEdit ? (
-                <PartStatusSelect part={p} />
-              ) : (
-                <span className="pill" style={{ background: PART_COLOR[p.status]?.bg, color: PART_COLOR[p.status]?.fg }}>{p.status}</span>
-              )}
-              {canEdit && <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => openEdit(p)}>edit</button>}
-            </div>
-            <div className="mut" style={{ fontSize: 12, marginTop: 5 }}>
-              {p.partNumber ? <>PN {p.partNumber}</> : "No PN"}
-              {p.serial ? " · SN " + p.serial : ""}
-              {p.vendor ? " · " + p.vendor : ""}{p.po ? " · PO " + p.po : ""}{p.cost ? " · $" + p.cost : ""}
-            </div>
-            {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.installedAt || p.removedAt) && (
-              <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-                {p.tracking && (link
-                  ? <a className="mono" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{p.carrier} {p.tracking} ↗</a>
-                  : <span className="mono" style={{ color: "#1D6396" }}>{p.carrier ? p.carrier + " " : ""}{p.tracking}</span>)}
-                {p.orderedAt && <span className="mut">Ordered {p.orderedAt}</span>}
-                {p.eta && <span className="mut">ETA {p.eta}</span>}
-                {p.receivedAt && <span style={{ color: "#2E6B2E" }}>Received {p.receivedAt}</span>}
-                {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {p.installedAt}</span>}
-                {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {p.removedAt}</span>}
+      {(() => {
+        const renderRow = (p: Part) => {
+          const link = trackUrl(p.carrier, p.tracking);
+          const specs = parseSpecs(p.specs);
+          return (
+            <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#FAFBFD" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}{p.qty ? <span className="mut" style={{ fontWeight: 400 }}> × {p.qty}</span> : null}</span>
+                {canEdit ? (
+                  <PartStatusSelect part={p} />
+                ) : (
+                  <span className="pill" style={{ background: PART_COLOR[p.status]?.bg, color: PART_COLOR[p.status]?.fg }}>{p.status}</span>
+                )}
+                {canEdit && <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => openEdit(p)}>edit</button>}
               </div>
-            )}
-            {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
-          </div>
+              <div className="mut" style={{ fontSize: 12, marginTop: 5 }}>
+                {p.partNumber ? <>PN {p.partNumber}</> : "No PN"}
+                {p.serial ? " · SN " + p.serial : ""}
+                {p.vendor ? " · " + p.vendor : ""}{p.po ? " · PO " + p.po : ""}{p.cost ? " · $" + p.cost : ""}
+              </div>
+              {specs.length > 0 && (
+                <div style={{ fontSize: 12, marginTop: 5 }}>
+                  {specs.map((s, i) => (
+                    <span key={i}>{i > 0 ? " · " : ""}<span className="mut">{s.k}</span> <b style={{ fontWeight: 600 }}>{s.v}</b></span>
+                  ))}
+                </div>
+              )}
+              {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.installedAt || p.removedAt) && (
+                <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                  {p.tracking && (link
+                    ? <a className="mono" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{p.carrier} {p.tracking} ↗</a>
+                    : <span className="mono" style={{ color: "#1D6396" }}>{p.carrier ? p.carrier + " " : ""}{p.tracking}</span>)}
+                  {p.orderedAt && <span className="mut">Ordered {p.orderedAt}</span>}
+                  {p.eta && <span className="mut">ETA {p.eta}</span>}
+                  {p.receivedAt && <span style={{ color: "#2E6B2E" }}>Received {p.receivedAt}</span>}
+                  {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {p.installedAt}</span>}
+                  {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {p.removedAt}</span>}
+                </div>
+              )}
+              {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
+            </div>
+          );
+        };
+        const proper = parts.filter((p) => p.kind !== "consumable");
+        const consumables = parts.filter((p) => p.kind === "consumable");
+        const both = proper.length > 0 && consumables.length > 0;
+        return (
+          <>
+            {both && proper.length > 0 && <div className="eyebrow" style={{ margin: "4px 0 6px" }}>Parts</div>}
+            {proper.map(renderRow)}
+            {both && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Consumables</div>}
+            {consumables.map(renderRow)}
+          </>
         );
-      })}
+      })()}
       {(() => {
         const priced = parts.filter((p) => !isNaN(money(p.cost)));
         if (!priced.length) return null;

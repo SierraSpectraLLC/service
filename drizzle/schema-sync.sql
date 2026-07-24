@@ -107,9 +107,12 @@ CREATE TABLE IF NOT EXISTS "instrument_gases" (
 CREATE TABLE IF NOT EXISTS "parts" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'part',
   "name" text NOT NULL,
   "part_number" text NOT NULL DEFAULT '',
   "serial" text NOT NULL DEFAULT '',
+  "qty" text NOT NULL DEFAULT '',
+  "specs" text NOT NULL DEFAULT '',
   "vendor" text NOT NULL DEFAULT '',
   "po" text NOT NULL DEFAULT '',
   "cost" text NOT NULL DEFAULT '',
@@ -249,6 +252,9 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "serial" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "installed_at" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "removed_at" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "note" text NOT NULL DEFAULT '';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'part';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "qty" text NOT NULL DEFAULT '';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "specs" text NOT NULL DEFAULT '';
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "skipped" boolean NOT NULL DEFAULT false;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
 

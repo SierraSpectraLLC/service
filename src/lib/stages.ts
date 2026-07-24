@@ -62,6 +62,8 @@ export const PART_STATES = ["Needed", "Ordered", "In transit", "Received", "Back
 export function partOpen(status: string): boolean {
   return status !== "Received" && status !== "Installed" && status !== "Removed";
 }
+/** Statuses where PO/carrier/tracking/ordered/ETA are relevant - the form hides them otherwise. */
+export const ORDER_STATES = ["Ordered", "In transit", "Received", "Backordered"] as const;
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;
 export const ATTACH_KINDS = ["Tune report", "Test data", "Report", "Photo", "Manual", "Other"] as const;
 

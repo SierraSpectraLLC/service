@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { instruments, tasks, checklistItems, parts, attachments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
+import { parseSpecs } from "@/lib/partSpecs";
 import PrintButton from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -87,15 +88,21 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
         {done.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No completed tasks recorded.</div>}
 
         <div className="eyebrow" style={{ margin: "16px 0 6px" }}>Parts</div>
-        {relevantParts.map((p) => (
-          <div key={p.id} style={{ fontSize: 12, padding: "3px 0", breakInside: "avoid" }}>
-            <b>{p.name}</b>
-            {p.partNumber ? ` · PN ${p.partNumber}` : ""}
-            {p.serial ? ` · SN ${p.serial}` : ""}
-            {" · "}{p.status === "Removed" ? `Removed ${p.removedAt}` : p.status === "Installed" ? `Installed ${p.installedAt}` : `Received ${p.receivedAt}`}
-            {p.note ? <span className="mut"> - {p.note}</span> : null}
-          </div>
-        ))}
+        {relevantParts.map((p) => {
+          const specs = parseSpecs(p.specs);
+          return (
+            <div key={p.id} style={{ fontSize: 12, padding: "3px 0", breakInside: "avoid" }}>
+              <b>{p.name}</b>
+              {p.qty ? ` ×${p.qty}` : ""}
+              {p.kind === "consumable" ? <span className="mut"> (consumable)</span> : null}
+              {p.partNumber ? ` · PN ${p.partNumber}` : ""}
+              {p.serial ? ` · SN ${p.serial}` : ""}
+              {specs.length ? ` · ${specs.map((s) => `${s.k} ${s.v}`).join(", ")}` : ""}
+              {" · "}{p.status === "Removed" ? `Removed ${p.removedAt}` : p.status === "Installed" ? `Installed ${p.installedAt}` : `Received ${p.receivedAt}`}
+              {p.note ? <span className="mut"> - {p.note}</span> : null}
+            </div>
+          );
+        })}
         {relevantParts.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No parts recorded.</div>}
 
         <div className="eyebrow" style={{ margin: "16px 0 6px" }}>Documents on file</div>
