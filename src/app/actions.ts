@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
+import { notifyTaskAssigned, notifyGasEmpty } from "@/lib/notify";
 import { audit } from "@/lib/audit";
 import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
@@ -154,6 +155,12 @@ export async function setGasStatus(gasId: number, status: string) {
     actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
     action: `${g.gas}: ${g.status} -> ${status}`, field: "status", oldValue: g.status, newValue: status,
   });
+  if (status === "Empty") {
+    await notifyGasEmpty({
+      actorEmail: u.email, actorName: u.name, gas: g.gas,
+      instrumentId: g.instrumentId, externalId: inst?.externalId ?? "",
+    });
+  }
   rev(g.instrumentId);
 }
 
@@ -197,6 +204,13 @@ export async function createTask(instrumentId: number, data: { title: string; bo
     actor: u.email, instrumentId, entityType: "task", entityId: t.id,
     action: `created task '${t.title}'${t.assignee ? ` (assigned ${t.assignee})` : ""}`,
   });
+  if (t.assignee) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+    await notifyTaskAssigned({
+      actorEmail: u.email, actorName: u.name, assignee: t.assignee,
+      taskTitle: t.title, instrumentId, externalId: inst?.externalId ?? "",
+    });
+  }
   rev(instrumentId);
 }
 
@@ -262,6 +276,13 @@ export async function assignTask(taskId: number, assignee: string) {
     actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
     action: `assigned '${t.title}' to ${assignee || "nobody"}`, field: "assignee", oldValue: t.assignee, newValue: assignee,
   });
+  if (assignee && assignee !== t.assignee) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, t.instrumentId));
+    await notifyTaskAssigned({
+      actorEmail: u.email, actorName: u.name, assignee,
+      taskTitle: t.title, instrumentId: t.instrumentId, externalId: inst?.externalId ?? "",
+    });
+  }
   rev(t.instrumentId);
 }
 

@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
 import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { parseList } from "@/auth";
+import { sendEmail } from "@/lib/email";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -86,14 +87,6 @@ export async function runDailyDigest(): Promise<{ sent: boolean; to: string[]; s
   const to = parseList(process.env.STAFF_EMAILS);
   if (!to.length) throw new Error("STAFF_EMAILS is empty");
   const { subject, html } = await composeDigest();
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.AUTH_RESEND_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from: process.env.EMAIL_FROM, to, subject, html }),
-  });
-  if (!res.ok) throw new Error("Resend error: " + JSON.stringify(await res.json()));
+  await sendEmail(to, subject, html);
   return { sent: true, to, subject };
 }
