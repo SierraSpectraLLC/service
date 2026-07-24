@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { saveEodUpdate, setEodSkip } from "@/app/actions";
+import { saveEodUpdate, setEodSkip, sendEodEmail } from "@/app/actions";
 
 type Sys = {
   id: number; label: string; client: string;
@@ -14,7 +14,9 @@ type SaveState = "dirty" | "saving" | "saved";
 const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
 
-export default function EodPanel({ systems, dateMDY, readOnly = false }: { systems: Sys[]; dateMDY: string; readOnly?: boolean }) {
+export default function EodPanel({ systems, dateMDY, readOnly = false, canSend = false, sentInfo = "" }: {
+  systems: Sys[]; dateMDY: string; readOnly?: boolean; canSend?: boolean; sentInfo?: string;
+}) {
   const [drafts, setDrafts] = useState<Record<number, Draft>>(
     Object.fromEntries(systems.map((s) => [s.id, { systemUpdate: s.systemUpdate, actionItem: s.actionItem }]))
   );
@@ -81,6 +83,16 @@ export default function EodPanel({ systems, dateMDY, readOnly = false }: { syste
     await navigator.clipboard.writeText(emailText);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const [sendMsg, setSendMsg] = useState("");
+  const send = () => {
+    if (!window.confirm(`Email today's update to the LabZen recipients configured in Settings?${sentInfo ? `\n\n(Already ${sentInfo.toLowerCase()} - this sends it again.)` : ""}`)) return;
+    setSendMsg("");
+    startTransition(async () => {
+      const res = await sendEodEmail();
+      setSendMsg(res?.error ? res.error : `Sent to ${res.sent} recipient${res.sent === 1 ? "" : "s"} ✓`);
+    });
   };
 
   const saveLabel = (st: SaveState | undefined) =>
@@ -180,12 +192,24 @@ export default function EodPanel({ systems, dateMDY, readOnly = false }: { syste
       </div>
 
       <div className="card">
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           <div className="card-title">Email preview</div>
-          <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={copy}>
-            {copied ? "Copied ✓" : "Copy to clipboard"}
-          </button>
+          {sentInfo && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{sentInfo} ✓</span>}
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            {!readOnly && (
+              <button className="btn sm accent" onClick={send} disabled={pending || anyUnsaved || !canSend}
+                title={canSend ? "Emails the recipients configured in Settings, with portal links per system" : "Add EOD recipients in Settings first"}>
+                {pending ? "..." : "Send to LabZen"}
+              </button>
+            )}
+            <button className="btn sm primary" onClick={copy}>
+              {copied ? "Copied ✓" : "Copy to clipboard"}
+            </button>
+          </div>
         </div>
+        {sendMsg && (
+          <div style={{ fontSize: 12, marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
+        )}
         <pre style={{
           fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#F5F7FA",
           border: "1px solid var(--line)", borderRadius: 8, padding: 12, margin: 0,

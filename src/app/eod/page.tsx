@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog } from "@/db/schema";
+import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { partOpen, gasAttention } from "@/lib/stages";
-import { shopToday, shopTodayMDY } from "@/lib/shopday";
+import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
 import EodPanel from "@/components/EodPanel";
 import EodDateNav from "@/components/EodDateNav";
 
@@ -29,19 +29,26 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   const dates = recorded.map((r) => r.date);
 
   let systems;
+  let sentInfo = "";
+  let canSend = false;
   if (isToday) {
     // Today: every active system, editable, with autofill suggestions.
     const rows = await db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId));
     const active = rows.filter((i) => !i.stages.includes("Shipped"));
     const ids = active.map((i) => i.id);
 
-    const [saved, taskRows, partRows, gasRows, recentAudit] = await Promise.all([
+    const [saved, taskRows, partRows, gasRows, recentAudit, [settings]] = await Promise.all([
       db.select().from(eodUpdates).where(eq(eodUpdates.date, today)),
       ids.length ? db.select().from(tasks).where(inArray(tasks.instrumentId, ids)) : Promise.resolve([]),
       ids.length ? db.select().from(parts).where(inArray(parts.instrumentId, ids)) : Promise.resolve([]),
       ids.length ? db.select().from(instrumentGases).where(inArray(instrumentGases.instrumentId, ids)) : Promise.resolve([]),
       db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(400),
+      db.select().from(appSettings).where(eq(appSettings.id, 1)),
     ]);
+
+    const lastSend = recentAudit.find((a) => a.entityType === "eod" && a.entityId === today);
+    sentInfo = lastSend ? `Sent ${shopTime(lastSend.createdAt)} by ${lastSend.actor.split("@")[0]}` : "";
+    canSend = !!(settings?.eodRecipients ?? "").trim();
 
     // Today's human activity, in shop time (audit timestamps are UTC).
     const tz = process.env.SHOP_TZ || "America/Los_Angeles";
@@ -98,7 +105,8 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   return (
     <div className="container">
       <EodDateNav date={date} today={today} dates={dates} />
-      <EodPanel systems={systems} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday} />
+      <EodPanel systems={systems} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
+        canSend={canSend} sentInfo={sentInfo} />
     </div>
   );
 }

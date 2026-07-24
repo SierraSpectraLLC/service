@@ -16,7 +16,9 @@ import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, autoFg } from "@/lib/stages";
-import { shopToday, shopMonthDay } from "@/lib/shopday";
+import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
+import { composeEodEmail } from "@/lib/eodEmail";
+import { sendEmail } from "@/lib/email";
 
 const rev = (id?: number) => {
   revalidatePath("/");
@@ -603,6 +605,30 @@ export async function saveEodUpdate(instrumentId: number, data: { systemUpdate: 
   // and a revalidate would make the client re-fetch the whole page each time
   // (visible jank on mobile). The typist's screen is already current; other
   // viewers get fresh data on page load, which is how the EOD flow works.
+}
+
+/** Email today's EOD report to the recipients configured in Settings. */
+export async function sendEodEmail(): Promise<{ error?: string; sent?: number }> {
+  const u = await requireStaff();
+  const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const to = (s?.eodRecipients ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (!to.length) return { error: "No recipients configured - add them in Settings first" };
+  const { subject, html, filled, total } = await composeEodEmail(shopToday(), shopTodayMDY());
+  if (!total) return { error: "No active systems to report on" };
+  if (!filled) return { error: "Every system is still blank - fill in at least one update before sending" };
+  try {
+    await sendEmail(to, subject, html);
+  } catch (e) {
+    // Explicit user action, so surface the failure instead of swallowing it.
+    console.error("[eod] send failed:", (e as Error).message);
+    return { error: "Email failed to send - check AUTH_RESEND_KEY / EMAIL_FROM and try again" };
+  }
+  await audit({
+    actor: u.email, entityType: "eod", entityId: shopToday(),
+    action: `sent EOD update to ${to.length} recipient${to.length === 1 ? "" : "s"}`,
+  });
+  revalidatePath("/eod");
+  return { sent: to.length };
 }
 
 /** Leave a system out of (or bring it back into) today's client email. Keeps any saved text. */
