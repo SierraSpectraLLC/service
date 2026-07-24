@@ -2,9 +2,11 @@
 // daily digest covers routine status. Every send is wrapped so a mail failure
 // can never fail the action that triggered it.
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { users, people } from "@/db/schema";
 import { parseList } from "@/lib/allowMatch";
 import { sendEmail } from "@/lib/email";
+
+export type Person = { name: string; email: string };
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -14,21 +16,39 @@ const appUrl = () =>
   (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "");
 
 /**
- * Assignees are freeform first names ("Joe", "Bill"). Resolve to an email by
- * (1) exact users.name match, then (2) a staff email whose local part starts
- * with the name (joe -> joe.vincent96@...). Null when nothing matches - the
- * caller skips the notification rather than guessing.
+ * Assignees/mentions are freeform names ("Joe", "Thomas", "Chris Ma").
+ * Resolve to an email by (1) the people roster (Settings), (2) exact
+ * users.name match, then (3) a staff email whose local part starts with the
+ * name (joe -> joe.vincent96@...). Null when nothing matches - the caller
+ * skips the notification rather than guessing.
  */
 export function resolveAssigneeEmail(
   name: string,
   staffEmails: string[],
   userRows: { name: string | null; email: string }[],
+  roster: Person[] = [],
 ): string | null {
   const n = name.trim().toLowerCase();
   if (!n) return null;
+  const inRoster = roster.find((p) => p.name.trim().toLowerCase() === n && p.email.trim());
+  if (inRoster) return inRoster.email.trim().toLowerCase();
   const byName = userRows.find((u) => (u.name || "").trim().toLowerCase() === n);
   if (byName) return byName.email.toLowerCase();
   return staffEmails.find((e) => e.split("@")[0].startsWith(n)) ?? null;
+}
+
+/**
+ * Which roster names does a post @mention? A name matches on its full form
+ * ("@Chris Ma") or its first word ("@Chris"), case-insensitive.
+ */
+export function parseMentions(body: string, names: string[]): string[] {
+  const lc = body.toLowerCase();
+  return names.filter((raw) => {
+    const full = raw.trim().toLowerCase();
+    if (!full) return false;
+    const first = full.split(/\s+/)[0];
+    return lc.includes("@" + full) || lc.includes("@" + first);
+  });
 }
 
 const wrap = (body: string) => `
@@ -43,8 +63,11 @@ export async function notifyTaskAssigned(opts: {
 }) {
   try {
     const staff = parseList(process.env.STAFF_EMAILS);
-    const userRows = await db.select({ name: users.name, email: users.email }).from(users);
-    const to = resolveAssigneeEmail(opts.assignee, staff, userRows);
+    const [userRows, roster] = await Promise.all([
+      db.select({ name: users.name, email: users.email }).from(users),
+      db.select({ name: people.name, email: people.email }).from(people),
+    ]);
+    const to = resolveAssigneeEmail(opts.assignee, staff, userRows, roster);
     if (!to || to === opts.actorEmail.toLowerCase()) return; // unknown assignee or self-assign
     const url = appUrl();
     await sendEmail(
@@ -55,6 +78,40 @@ export async function notifyTaskAssigned(opts: {
     );
   } catch (e) {
     console.error("[notify] task-assigned email failed:", (e as Error).message);
+  }
+}
+
+export async function notifyDiscussion(opts: {
+  actorEmail: string; actorName: string; actorIsClient: boolean;
+  body: string; instrumentId: number | null; label: string; // label: externalId or "General"
+}) {
+  try {
+    const staff = parseList(process.env.STAFF_EMAILS);
+    const [userRows, roster] = await Promise.all([
+      db.select({ name: users.name, email: users.email }).from(users),
+      db.select({ name: people.name, email: people.email }).from(people),
+    ]);
+    const actor = opts.actorEmail.toLowerCase();
+    const to = new Set<string>();
+    // Mentioned people get pinged directly.
+    for (const name of parseMentions(opts.body, roster.map((p) => p.name))) {
+      const email = resolveAssigneeEmail(name, staff, userRows, roster);
+      if (email && email !== actor) to.add(email);
+    }
+    // A client post always reaches all staff - their questions must never be missed.
+    if (opts.actorIsClient) for (const e of staff) if (e !== actor) to.add(e);
+    if (!to.size) return;
+    const url = appUrl();
+    const link = opts.instrumentId != null ? `${url}/instruments/${opts.instrumentId}` : `${url}/discussions`;
+    await sendEmail(
+      [...to],
+      `${opts.label}: ${opts.actorName} posted in discussion`,
+      wrap(`<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
+        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.body)}</div>
+        ${url ? `<a href="${link}">Reply in the portal</a>` : ""}`),
+    );
+  } catch (e) {
+    console.error("[notify] discussion email failed:", (e as Error).message);
   }
 }
 

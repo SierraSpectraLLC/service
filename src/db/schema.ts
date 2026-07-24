@@ -190,6 +190,28 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
 
+// Shared discussion threads between Sierra Spectra and the client. One thread
+// per instrument, plus a General board (instrument_id null) for lab-wide items
+// like the N2 generator project. Posting requires only a signed-in user -
+// clients may post even when the edit toggle is off (talking != editing).
+export const discussionPosts = pgTable("discussion_posts", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }), // null = General
+  author: text("author").notNull(),
+  authorEmail: text("author_email").notNull().default(""),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("discussion_instrument_idx").on(t.instrumentId), index("discussion_created_idx").on(t.createdAt)]);
+
+// People roster (Sierra + LabZen): task assignees and @mention targets.
+// Email optional - blank falls back to the STAFF_EMAILS heuristic in notify.ts.
+export const people = pgTable("people", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().default(""),
+  org: text("org").notNull().default("sierra"), // sierra | labzen
+}, (t) => [unique("people_name_unique").on(t.name)]);
+
 // Stage transition history: one row every time a stage is added to or removed
 // from an instrument. Powers the "12d in Checkout" age chips and cycle-time
 // metrics. Written by toggleStage/createInstrument/deleteStage; renaming a
@@ -254,4 +276,6 @@ export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().default(1),
   clientAccessEnabled: boolean("client_access_enabled").notNull().default(false),
   clientCanEdit: boolean("client_can_edit").notNull().default(false),
+  // Comma-separated list the EOD "Send to LabZen" button emails.
+  eodRecipients: text("eod_recipients").notNull().default(""),
 });

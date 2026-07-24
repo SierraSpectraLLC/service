@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  taskTemplates,
+  taskTemplates, discussionPosts,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
@@ -15,6 +15,7 @@ import ActivityNoteForm from "@/components/ActivityNoteForm";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
+import DiscussionPanel from "@/components/DiscussionPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, stageSince] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, stageSince, discussion] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -37,6 +38,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     getStageDefs(),
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
     getStageSince([instId]),
+    db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
   ]);
   if (!inst) notFound();
 
@@ -92,6 +94,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <AttachmentsPanel instrumentId={inst.id} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
       <TasksPanel instrumentId={inst.id} tasks={fullTasks} templates={templateList} canEdit={canEdit} isStaff={isStaff} />
+
+      <DiscussionPanel
+        instrumentId={inst.id}
+        posts={discussion.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        isStaff={isStaff}
+      />
 
       <div className="card">
         <div className="card-title">Activity</div>

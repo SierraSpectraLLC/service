@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { sheetDiffs } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { signOut } from "@/auth";
+import NavMore from "@/components/NavMore";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -35,18 +36,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             {user && (
               <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
+                <Link className="btn sm" href="/discussions" style={{ textDecoration: "none" }}>Discussion</Link>
+                {isStaff && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {isStaff && (
-                  <>
-                    <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>
-                    <Link className="btn sm" href="/templates" style={{ textDecoration: "none" }}>Templates</Link>
-                    <Link className="btn sm" href="/metrics" style={{ textDecoration: "none" }}>Metrics</Link>
-                    <Link className="btn sm" href="/parity" style={{ textDecoration: "none" }}>
-                      Sheet parity{openDiffs ? ` (${openDiffs})` : ""}
-                    </Link>
-                  </>
-                )}
-                {user.role === "owner" && (
-                  <Link className="btn sm" href="/settings" style={{ textDecoration: "none" }}>Settings</Link>
+                  <NavMore items={[
+                    { href: "/templates", label: "Templates" },
+                    { href: "/metrics", label: "Metrics" },
+                    { href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` },
+                    ...(user.role === "owner" ? [{ href: "/settings", label: "Settings" }] : []),
+                  ]} />
                 )}
                 <form action={async () => { "use server"; await signOut({ redirectTo: "/login" }); }}>
                   <button className="btn sm" type="submit">Sign out</button>

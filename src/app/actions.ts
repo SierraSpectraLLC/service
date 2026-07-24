@@ -7,13 +7,13 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems, stageEvents,
+  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion } from "@/lib/notify";
 import { audit } from "@/lib/audit";
-import { requireEditor, requireStaff, requireOwner } from "@/lib/authz";
+import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopMonthDay } from "@/lib/shopday";
@@ -617,6 +617,47 @@ export async function setEodSkip(instrumentId: number, skipped: boolean) {
       set: { skipped, updatedBy: u.name, updatedAt: new Date() },
     });
   revalidatePath("/eod");
+}
+
+// ---------------- Discussions ----------------
+// Posting only needs a signed-in user: talking is not record-editing, so
+// client viewers may post even while the edit toggle is off.
+
+export async function postDiscussion(instrumentId: number | null, body: string) {
+  const u = await requireUser();
+  const text = body.trim();
+  if (!text) throw new Error("Post text required");
+  let externalId = "";
+  if (instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+    if (!inst) throw new Error("Not found");
+    externalId = inst.externalId;
+  }
+  await db.insert(discussionPosts).values({ instrumentId, author: u.name, authorEmail: u.email, body: text });
+  await audit({
+    actor: u.email, instrumentId: instrumentId ?? undefined, entityType: "discussion", entityId: externalId || "general",
+    action: `posted in ${externalId ? `${externalId} ` : "general "}discussion: "${text.length > 120 ? text.slice(0, 120) + "..." : text}"`,
+  });
+  await notifyDiscussion({
+    actorEmail: u.email, actorName: u.name,
+    actorIsClient: u.role === "client_viewer" || u.role === "client_editor",
+    body: text, instrumentId, label: externalId || "General",
+  });
+  if (instrumentId !== null) rev(instrumentId);
+  revalidatePath("/discussions");
+}
+
+export async function deleteDiscussionPost(postId: number) {
+  const u = await requireStaff();
+  const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
+  if (!p) return;
+  await db.delete(discussionPosts).where(eq(discussionPosts.id, postId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
+    action: `deleted a discussion post by ${p.author}`, field: "body", oldValue: p.body,
+  });
+  if (p.instrumentId !== null) rev(p.instrumentId);
+  revalidatePath("/discussions");
 }
 
 // ---------------- SOP templates ----------------

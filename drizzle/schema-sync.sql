@@ -161,7 +161,22 @@ CREATE TABLE IF NOT EXISTS "sheet_diffs" (
 CREATE TABLE IF NOT EXISTS "app_settings" (
   "id" integer PRIMARY KEY DEFAULT 1,
   "client_access_enabled" boolean NOT NULL DEFAULT false,
-  "client_can_edit" boolean NOT NULL DEFAULT false
+  "client_can_edit" boolean NOT NULL DEFAULT false,
+  "eod_recipients" text NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS "discussion_posts" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer,
+  "author" text NOT NULL,
+  "author_email" text NOT NULL DEFAULT '',
+  "body" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "people" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "name" text NOT NULL,
+  "email" text NOT NULL DEFAULT '',
+  "org" text NOT NULL DEFAULT 'sierra'
 );
 CREATE TABLE IF NOT EXISTS "stage_events" (
   "id" serial PRIMARY KEY NOT NULL,
@@ -235,6 +250,7 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "installed_at" text NOT NULL DEFAUL
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "removed_at" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "note" text NOT NULL DEFAULT '';
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "skipped" boolean NOT NULL DEFAULT false;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -250,6 +266,8 @@ CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
 CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 -- ── Unique constraints ────────────────────────────────────────────────────
@@ -268,6 +286,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'task_templates_name_unique') THEN
     ALTER TABLE "task_templates" ADD CONSTRAINT "task_templates_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'people_name_unique') THEN
+    ALTER TABLE "people" ADD CONSTRAINT "people_name_unique" UNIQUE ("name");
   END IF;
 END $$;
 
@@ -313,6 +334,10 @@ DO $$ BEGIN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_events_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "stage_events" ADD CONSTRAINT "stage_events_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
@@ -340,4 +365,9 @@ INSERT INTO "stage_defs" ("name","bg","fg","sort_order","builtin") VALUES
   ('Waiting / blocked','#F4CCCC','#B42318',7,true),
   ('Waiting to ship','#D9D2E9','#674EA7',8,true),
   ('Shipped','#38761D','#D9EAD3',9,true)
+ON CONFLICT ("name") DO NOTHING;
+-- Assignee roster starters; emails and LabZen people are added in Settings.
+INSERT INTO "people" ("name","email","org") VALUES
+  ('Joe','','sierra'),
+  ('Bill','','sierra')
 ON CONFLICT ("name") DO NOTHING;
