@@ -190,6 +190,30 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
 
+// SOP templates: a named bundle of tasks (each with a checklist) that can be
+// applied to an instrument in one tap - e.g. "GC/MS refurb SOP". Managed by
+// staff on /templates; applying copies rows into tasks/checklist_items.
+export const taskTemplates = pgTable("task_templates", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("task_templates_name_unique").on(t.name)]);
+
+export const templateTasks = pgTable("template_tasks", {
+  id: serial("id").primaryKey(),
+  templateId: integer("template_id").notNull().references(() => taskTemplates.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("template_tasks_template_idx").on(t.templateId)]);
+
+export const templateItems = pgTable("template_items", {
+  id: serial("id").primaryKey(),
+  templateTaskId: integer("template_task_id").notNull().references(() => templateTasks.id, { onDelete: "cascade" }),
+  text: text("text").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("template_items_task_idx").on(t.templateTaskId)]);
+
 // Stage vocabulary: seeded with the nine built-ins (schema-sync.sql), owner
 // can recolor any stage and add/rename/delete custom ones in Settings.
 // Built-in rows (builtin=true) can't be renamed or deleted - their names are

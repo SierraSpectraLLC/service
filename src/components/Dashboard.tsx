@@ -17,8 +17,8 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, canEdit, isStaff }: {
-  data: Row[]; stageDefs: StageDefLite[]; canEdit: boolean; isStaff: boolean;
+export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff }: {
+  data: Row[]; stageDefs: StageDefLite[]; templates: { id: number; name: string }[]; canEdit: boolean; isStaff: boolean;
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
@@ -28,6 +28,7 @@ export default function Dashboard({ data, stageDefs, canEdit, isStaff }: {
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "" });
+  const [tpl, setTpl] = useState("");
   const [pending, startTransition] = useTransition();
 
   const FLAGS = ["Awaiting parts", "Gas attention", ...(isStaff ? ["Not on sheet"] : [])];
@@ -71,9 +72,10 @@ export default function Dashboard({ data, stageDefs, canEdit, isStaff }: {
       const id = await createInstrument({
         externalId: draft.externalId, client: draft.client, model: draft.model,
         priority: parseInt(draft.priority) || 99,
-      });
+      }, parseInt(tpl) || undefined);
       setShowNew(false);
       setDraft({ externalId: "", client: "", model: "", priority: "" });
+      setTpl("");
       router.push(`/instruments/${id}`);
     });
   };
@@ -159,7 +161,18 @@ export default function Dashboard({ data, stageDefs, canEdit, isStaff }: {
             <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} placeholder="11" /></div>
             <div><label>Model *</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="Shimadzu LCMS-8045 + LC-30" /></div>
           </div>
-          <button className="btn sm accent" onClick={submitNew} disabled={pending}>{pending ? "Creating..." : "Create instrument"}</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {templates.length > 0 && (
+              <>
+                <span className="mut" style={{ fontSize: 12 }}>Apply SOP:</span>
+                <select value={tpl} onChange={(e) => setTpl(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+                  <option value="">None</option>
+                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </>
+            )}
+            <button className="btn sm accent" onClick={submitNew} disabled={pending}>{pending ? "Creating..." : "Create instrument"}</button>
+          </div>
         </div>
       )}
 

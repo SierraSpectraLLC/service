@@ -163,6 +163,24 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_access_enabled" boolean NOT NULL DEFAULT false,
   "client_can_edit" boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS "task_templates" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "name" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "template_tasks" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "template_id" integer NOT NULL,
+  "title" text NOT NULL,
+  "body" text NOT NULL DEFAULT '',
+  "sort_order" integer NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS "template_items" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "template_task_id" integer NOT NULL,
+  "text" text NOT NULL,
+  "sort_order" integer NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS "stage_defs" (
   "id" serial PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
@@ -223,6 +241,8 @@ CREATE INDEX IF NOT EXISTS "audit_instrument_idx" ON "audit_log" ("instrument_id
 CREATE INDEX IF NOT EXISTS "audit_created_idx" ON "audit_log" ("created_at");
 CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
+CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
+CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 -- ── Unique constraints ────────────────────────────────────────────────────
 DO $$ BEGIN
@@ -237,6 +257,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_defs_name_unique') THEN
     ALTER TABLE "stage_defs" ADD CONSTRAINT "stage_defs_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'task_templates_name_unique') THEN
+    ALTER TABLE "task_templates" ADD CONSTRAINT "task_templates_name_unique" UNIQUE ("name");
   END IF;
 END $$;
 
@@ -281,6 +304,14 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_tasks_template_id_task_templates_id_fk') THEN
+    ALTER TABLE "template_tasks" ADD CONSTRAINT "template_tasks_template_id_task_templates_id_fk"
+      FOREIGN KEY ("template_id") REFERENCES "task_templates"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_items_template_task_id_template_tasks_id_fk') THEN
+    ALTER TABLE "template_items" ADD CONSTRAINT "template_items_template_task_id_template_tasks_id_fk"
+      FOREIGN KEY ("template_task_id") REFERENCES "template_tasks"("id") ON DELETE CASCADE;
   END IF;
 END $$;
 

@@ -5,7 +5,7 @@ import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
-  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote,
+  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, applyTemplate,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
@@ -52,7 +52,9 @@ function AssigneeSelect({ task }: { task: Task }) {
   );
 }
 
-export default function TasksPanel({ instrumentId, tasks, canEdit, isStaff }: { instrumentId: number; tasks: Task[]; canEdit: boolean; isStaff: boolean }) {
+export default function TasksPanel({ instrumentId, tasks, templates, canEdit, isStaff }: {
+  instrumentId: number; tasks: Task[]; templates: { id: number; name: string }[]; canEdit: boolean; isStaff: boolean;
+}) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
@@ -233,12 +235,22 @@ export default function TasksPanel({ instrumentId, tasks, canEdit, isStaff }: { 
 
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <div className="card-title">Tasks</div>
         {canEdit && (
-          <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => setShowNew((v) => !v)}>
-            {showNew ? "Cancel" : "+ New task"}
-          </button>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            {templates.length > 0 && (
+              <select value="" disabled={pending}
+                onChange={(e) => { const id = parseInt(e.target.value); if (id) startTransition(() => applyTemplate(instrumentId, id)); }}
+                style={{ width: "auto", fontSize: 12 }}>
+                <option value="">Apply template...</option>
+                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <button className="btn sm primary" onClick={() => setShowNew((v) => !v)}>
+              {showNew ? "Cancel" : "+ New task"}
+            </button>
+          </div>
         )}
       </div>
 

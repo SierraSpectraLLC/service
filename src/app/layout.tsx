@@ -38,6 +38,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {isStaff && (
                   <>
                     <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>
+                    <Link className="btn sm" href="/templates" style={{ textDecoration: "none" }}>Templates</Link>
                     <Link className="btn sm" href="/parity" style={{ textDecoration: "none" }}>
                       Sheet parity{openDiffs ? ` (${openDiffs})` : ""}
                     </Link>

@@ -1,12 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
+  taskTemplates, templateTasks, templateItems,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -90,7 +91,10 @@ export async function addInstrumentNote(instrumentId: number, text: string) {
   rev(instrumentId);
 }
 
-export async function createInstrument(data: { externalId: string; client: string; model: string; priority: number }) {
+export async function createInstrument(
+  data: { externalId: string; client: string; model: string; priority: number },
+  templateId?: number,
+) {
   const u = await requireStaff();
   const [row] = await db.insert(instruments).values({
     externalId: data.externalId.trim(), client: data.client.trim(), model: data.model.trim(),
@@ -100,6 +104,7 @@ export async function createInstrument(data: { externalId: string; client: strin
     actor: u.email, instrumentId: row.id, entityType: "instrument", entityId: row.externalId,
     action: `created instrument ${row.externalId}: ${row.model}`,
   });
+  if (templateId) await copyTemplateOnto(row.id, row.externalId, templateId, u.email);
   rev(row.id);
   return row.id;
 }
@@ -589,6 +594,154 @@ export async function setEodSkip(instrumentId: number, skipped: boolean) {
       set: { skipped, updatedBy: u.name, updatedAt: new Date() },
     });
   revalidatePath("/eod");
+}
+
+// ---------------- SOP templates ----------------
+// Shop-wide SOPs, so staff (not just owner) manage them. Applying a template
+// copies its tasks + checklist items onto an instrument.
+
+export async function createTemplate(name: string): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const n = name.trim();
+  if (!n || n.length > 80) return { error: "Template name must be 1-80 characters" };
+  const existing = await db.select().from(taskTemplates);
+  if (existing.some((t) => t.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
+  const [row] = await db.insert(taskTemplates).values({ name: n }).returning();
+  await audit({ actor: u.email, entityType: "template", entityId: row.id, action: `created template "${n}"` });
+  revalidatePath("/templates");
+  return { id: row.id };
+}
+
+export async function renameTemplate(templateId: number, name: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const n = name.trim();
+  if (!n || n.length > 80) return { error: "Template name must be 1-80 characters" };
+  const [t] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
+  if (!t || t.name === n) return {};
+  const existing = await db.select().from(taskTemplates);
+  if (existing.some((x) => x.id !== templateId && x.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
+  await db.update(taskTemplates).set({ name: n }).where(eq(taskTemplates.id, templateId));
+  await audit({
+    actor: u.email, entityType: "template", entityId: templateId,
+    action: `renamed template "${t.name}" to "${n}"`, field: "name", oldValue: t.name, newValue: n,
+  });
+  revalidatePath("/templates");
+  return {};
+}
+
+export async function deleteTemplate(templateId: number) {
+  const u = await requireStaff();
+  const [t] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
+  if (!t) return;
+  await db.delete(taskTemplates).where(eq(taskTemplates.id, templateId)); // tasks + items cascade
+  await audit({ actor: u.email, entityType: "template", entityId: templateId, action: `deleted template "${t.name}"` });
+  revalidatePath("/templates");
+}
+
+export async function addTemplateTask(templateId: number, data: { title: string; body: string }) {
+  const u = await requireStaff();
+  const title = data.title.trim();
+  if (!title) return;
+  const [t] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
+  if (!t) return;
+  const siblings = await db.select().from(templateTasks).where(eq(templateTasks.templateId, templateId));
+  const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
+  await db.insert(templateTasks).values({ templateId, title, body: data.body.trim(), sortOrder });
+  await audit({
+    actor: u.email, entityType: "template", entityId: templateId,
+    action: `added task "${title}" to template "${t.name}"`,
+  });
+  revalidatePath("/templates");
+}
+
+export async function updateTemplateTask(taskId: number, data: { title: string; body: string }) {
+  const u = await requireStaff();
+  const title = data.title.trim();
+  if (!title) return;
+  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, taskId));
+  if (!tt || (tt.title === title && tt.body === data.body.trim())) return;
+  await db.update(templateTasks).set({ title, body: data.body.trim() }).where(eq(templateTasks.id, taskId));
+  await audit({
+    actor: u.email, entityType: "template", entityId: tt.templateId,
+    action: `edited template task "${title}"`,
+  });
+  revalidatePath("/templates");
+}
+
+export async function deleteTemplateTask(taskId: number) {
+  const u = await requireStaff();
+  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, taskId));
+  if (!tt) return;
+  await db.delete(templateTasks).where(eq(templateTasks.id, taskId)); // items cascade
+  await audit({
+    actor: u.email, entityType: "template", entityId: tt.templateId,
+    action: `removed template task "${tt.title}"`,
+  });
+  revalidatePath("/templates");
+}
+
+export async function addTemplateItem(templateTaskId: number, text: string) {
+  const u = await requireStaff();
+  const t = text.trim();
+  if (!t) return;
+  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, templateTaskId));
+  if (!tt) return;
+  const siblings = await db.select().from(templateItems).where(eq(templateItems.templateTaskId, templateTaskId));
+  const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
+  await db.insert(templateItems).values({ templateTaskId, text: t, sortOrder });
+  await audit({
+    actor: u.email, entityType: "template", entityId: tt.templateId,
+    action: `added checklist item "${t}" to template task "${tt.title}"`,
+  });
+  revalidatePath("/templates");
+}
+
+export async function deleteTemplateItem(itemId: number) {
+  const u = await requireStaff();
+  const [item] = await db.select().from(templateItems).where(eq(templateItems.id, itemId));
+  if (!item) return;
+  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, item.templateTaskId));
+  await db.delete(templateItems).where(eq(templateItems.id, itemId));
+  await audit({
+    actor: u.email, entityType: "template", entityId: tt?.templateId,
+    action: `removed checklist item "${item.text}" from template task "${tt?.title ?? "?"}"`,
+  });
+  revalidatePath("/templates");
+}
+
+/** Shared copy step for applyTemplate and createInstrument-with-template. */
+async function copyTemplateOnto(instrumentId: number, externalId: string, templateId: number, actor: string) {
+  const [tpl] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
+  if (!tpl) throw new Error("Template not found");
+  const tplTasks = await db.select().from(templateTasks).where(eq(templateTasks.templateId, templateId))
+    .orderBy(asc(templateTasks.sortOrder), asc(templateTasks.id));
+  const taskIds = tplTasks.map((t) => t.id);
+  const tplItems = taskIds.length
+    ? await db.select().from(templateItems).where(inArray(templateItems.templateTaskId, taskIds))
+      .orderBy(asc(templateItems.sortOrder), asc(templateItems.id))
+    : [];
+  for (const tt of tplTasks) {
+    const [task] = await db.insert(tasks).values({
+      instrumentId, title: tt.title, body: tt.body, sortOrder: tt.sortOrder,
+    }).returning();
+    const items = tplItems.filter((i) => i.templateTaskId === tt.id);
+    for (const item of items) {
+      await db.insert(checklistItems).values({ taskId: task.id, text: item.text, sortOrder: item.sortOrder });
+    }
+  }
+  await audit({
+    actor, instrumentId, entityType: "template", entityId: externalId,
+    action: `applied template "${tpl.name}": ${tplTasks.length} task${tplTasks.length === 1 ? "" : "s"}, ${tplItems.length} checklist item${tplItems.length === 1 ? "" : "s"}`,
+  });
+}
+
+/** Copy a template's tasks + checklists onto an instrument. */
+export async function applyTemplate(instrumentId: number, templateId: number) {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) throw new Error("Not found");
+  await copyTemplateOnto(instrumentId, inst.externalId, templateId, u.email);
+  rev(instrumentId);
 }
 
 // ---------------- Stage vocabulary ----------------
