@@ -6,65 +6,99 @@ import { requireUser } from "@/lib/authz";
 import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import EodPanel from "@/components/EodPanel";
+import EodDateNav from "@/components/EodDateNav";
 
 export const dynamic = "force-dynamic";
 
-export default async function EodPage() {
+const mdy = (iso: string) => {
+  const [y, m, d] = iso.split("-");
+  return `${m}/${d}/${y.slice(2)}`;
+};
+
+export default async function EodPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
 
+  const { date: dateParam } = await searchParams;
   const today = shopToday();
-  const rows = await db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId));
-  const active = rows.filter((i) => !i.stages.includes("Shipped"));
-  const ids = active.map((i) => i.id);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? dateParam! : today;
+  const isToday = date === today;
 
-  const [saved, taskRows, partRows, gasRows, recentAudit] = await Promise.all([
-    db.select().from(eodUpdates).where(eq(eodUpdates.date, today)),
-    ids.length ? db.select().from(tasks).where(inArray(tasks.instrumentId, ids)) : Promise.resolve([]),
-    ids.length ? db.select().from(parts).where(inArray(parts.instrumentId, ids)) : Promise.resolve([]),
-    ids.length ? db.select().from(instrumentGases).where(inArray(instrumentGases.instrumentId, ids)) : Promise.resolve([]),
-    db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(400),
-  ]);
+  const recorded = await db.selectDistinct({ date: eodUpdates.date }).from(eodUpdates).orderBy(desc(eodUpdates.date)).limit(60);
+  const dates = recorded.map((r) => r.date);
 
-  // Today's human activity, in shop time (audit timestamps are UTC).
-  const tz = process.env.SHOP_TZ || "America/Los_Angeles";
-  const todayAudit = recentAudit.filter(
-    (a) => a.actor !== "sheet-sync" && a.createdAt.toLocaleDateString("en-CA", { timeZone: tz }) === today
-  );
+  let systems;
+  if (isToday) {
+    // Today: every active system, editable, with autofill suggestions.
+    const rows = await db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId));
+    const active = rows.filter((i) => !i.stages.includes("Shipped"));
+    const ids = active.map((i) => i.id);
 
-  const systems = active.map((i) => {
-    const u = saved.find((s) => s.instrumentId === i.id);
+    const [saved, taskRows, partRows, gasRows, recentAudit] = await Promise.all([
+      db.select().from(eodUpdates).where(eq(eodUpdates.date, today)),
+      ids.length ? db.select().from(tasks).where(inArray(tasks.instrumentId, ids)) : Promise.resolve([]),
+      ids.length ? db.select().from(parts).where(inArray(parts.instrumentId, ids)) : Promise.resolve([]),
+      ids.length ? db.select().from(instrumentGases).where(inArray(instrumentGases.instrumentId, ids)) : Promise.resolve([]),
+      db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(400),
+    ]);
 
-    // Suggested update: what actually happened on this system today, oldest first.
-    // Freeform notes carry their text; everything else uses the audit summary.
-    const happenings = todayAudit
-      .filter((a) => a.instrumentId === i.id)
-      .reverse()
-      .map((a) => (a.field === "note" && a.newValue ? a.newValue : a.action));
-    const suggestedUpdate = [...new Set(happenings)].slice(0, 6).join("; ");
+    // Today's human activity, in shop time (audit timestamps are UTC).
+    const tz = process.env.SHOP_TZ || "America/Los_Angeles";
+    const todayAudit = recentAudit.filter(
+      (a) => a.actor !== "sheet-sync" && a.createdAt.toLocaleDateString("en-CA", { timeZone: tz }) === today
+    );
 
-    // Suggested action item: blocked work first, then parts in flight, then gas needs.
-    const blocked = taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked").map((t) => `Blocked: ${t.title}`);
-    const waiting = partRows.filter((p) => p.instrumentId === i.id && partOpen(p.status)).map((p) => `${p.name} (${p.status.toLowerCase()})`);
-    const gas = gasRows.filter((g) => g.instrumentId === i.id && gasAttention(g.status)).map((g) => `${g.gas} ${g.status.toLowerCase()}`);
-    const suggestedAction = [...blocked, ...waiting, ...gas].slice(0, 3).join("; ");
-
-    return {
-      id: i.id,
-      label: `${i.externalId} - ${i.model}`,
-      client: i.client,
-      systemUpdate: u?.systemUpdate ?? "",
-      actionItem: u?.actionItem ?? "",
-      skipped: u?.skipped ?? false,
-      suggestedUpdate,
-      suggestedAction,
-    };
-  });
+    systems = active.map((i) => {
+      const u = saved.find((s) => s.instrumentId === i.id);
+      // Suggested update: what actually happened on this system today, oldest first.
+      const happenings = todayAudit
+        .filter((a) => a.instrumentId === i.id)
+        .reverse()
+        .map((a) => (a.field === "note" && a.newValue ? a.newValue : a.action));
+      const suggestedUpdate = [...new Set(happenings)].slice(0, 6).join("; ");
+      // Suggested action item: blocked work first, then parts in flight, then gas needs.
+      const blocked = taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked").map((t) => `Blocked: ${t.title}`);
+      const waiting = partRows.filter((p) => p.instrumentId === i.id && partOpen(p.status)).map((p) => `${p.name} (${p.status.toLowerCase()})`);
+      const gas = gasRows.filter((g) => g.instrumentId === i.id && gasAttention(g.status)).map((g) => `${g.gas} ${g.status.toLowerCase()}`);
+      const suggestedAction = [...blocked, ...waiting, ...gas].slice(0, 3).join("; ");
+      return {
+        id: i.id,
+        label: `${i.externalId} - ${i.model}`,
+        client: i.client,
+        systemUpdate: u?.systemUpdate ?? "",
+        actionItem: u?.actionItem ?? "",
+        skipped: u?.skipped ?? false,
+        suggestedUpdate,
+        suggestedAction,
+      };
+    });
+  } else {
+    // Past day: read-only snapshot of what was recorded.
+    const saved = await db.select().from(eodUpdates).where(eq(eodUpdates.date, date));
+    const ids = saved.map((s) => s.instrumentId);
+    const insts = ids.length
+      ? await db.select().from(instruments).where(inArray(instruments.id, ids)).orderBy(asc(instruments.priority), asc(instruments.externalId))
+      : [];
+    systems = insts.map((i) => {
+      const u = saved.find((s) => s.instrumentId === i.id)!;
+      return {
+        id: i.id,
+        label: `${i.externalId} - ${i.model}`,
+        client: i.client,
+        systemUpdate: u.systemUpdate,
+        actionItem: u.actionItem,
+        skipped: u.skipped,
+        suggestedUpdate: "",
+        suggestedAction: "",
+      };
+    });
+  }
 
   return (
     <div className="container">
-      <EodPanel systems={systems} dateMDY={shopTodayMDY()} />
+      <EodDateNav date={date} today={today} dates={dates} />
+      <EodPanel systems={systems} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday} />
     </div>
   );
 }

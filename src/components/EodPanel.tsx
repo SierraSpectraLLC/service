@@ -14,7 +14,7 @@ type SaveState = "dirty" | "saving" | "saved";
 const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
 
-export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY: string }) {
+export default function EodPanel({ systems, dateMDY, readOnly = false }: { systems: Sys[]; dateMDY: string; readOnly?: boolean }) {
   const [drafts, setDrafts] = useState<Record<number, Draft>>(
     Object.fromEntries(systems.map((s) => [s.id, { systemUpdate: s.systemUpdate, actionItem: s.actionItem }]))
   );
@@ -93,30 +93,57 @@ export default function EodPanel({ systems, dateMDY }: { systems: Sys[]; dateMDY
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
           <div className="card-title">End-of-day client update</div>
           <span className="mut" style={{ fontSize: 12 }}>{dateMDY}</span>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            <span className="mut" style={{ fontSize: 12 }}>
-              {anyUnsaved ? "Saving..." : Object.keys(status).length ? "All changes saved" : ""}
-            </span>
-            <button className="btn sm" onClick={() => included.forEach(autofill)} disabled={pending || !included.some(canAutofill)}>
-              Autofill empty
-            </button>
-          </div>
+          {!readOnly && (
+            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              <span className="mut" style={{ fontSize: 12 }}>
+                {anyUnsaved ? "Saving..." : Object.keys(status).length ? "All changes saved" : ""}
+              </span>
+              <button className="btn sm" onClick={() => included.forEach(autofill)} disabled={pending || !included.some(canAutofill)}>
+                Autofill empty
+              </button>
+            </div>
+          )}
         </div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
-          Every active system (anything not Shipped). Saves automatically as you type. Autofill drafts from
-          today&apos;s activity - always review before copying. Skipped systems stay out of the email.
+          {readOnly
+            ? "Read-only snapshot of a previous day. Only today's update can be edited."
+            : "Every active system (anything not Shipped). Saves automatically as you type. Autofill drafts from today's activity - always review before copying. Skipped systems stay out of the email."}
         </div>
 
-        {systems.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No active systems.</div>}
+        {systems.length === 0 && (
+          <div className="mut" style={{ fontSize: 13 }}>
+            {readOnly ? "No EOD update was recorded for this day." : "No active systems."}
+          </div>
+        )}
         {systems.map((s) => {
           const num = included.findIndex((x) => x.id === s.id);
           if (s.skipped) {
             return (
               <div key={s.id} style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: "8px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8, opacity: 0.65 }}>
                 <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{s.label}</span>
-                <span className="pill" style={{ background: "#EEF1F5", color: "#64748B" }}>Skipped today</span>
-                <button className="btn link" style={{ marginLeft: "auto" }} disabled={pending}
-                  onClick={() => startTransition(() => setEodSkip(s.id, false))}>Include</button>
+                <span className="pill" style={{ background: "#EEF1F5", color: "#64748B" }}>{readOnly ? "Skipped" : "Skipped today"}</span>
+                {!readOnly && (
+                  <button className="btn link" style={{ marginLeft: "auto" }} disabled={pending}
+                    onClick={() => startTransition(() => setEodSkip(s.id, false))}>Include</button>
+                )}
+              </div>
+            );
+          }
+          if (readOnly) {
+            return (
+              <div key={s.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>System {num + 1}: <span className="mono">{s.label}</span></span>
+                  <span className="mut" style={{ fontSize: 12 }}>{s.client}</span>
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 4 }}>
+                  <span className="eyebrow" style={{ marginRight: 6 }}>Update</span>
+                  {s.systemUpdate || <span className="mut">(blank)</span>}
+                </div>
+                <div style={{ fontSize: 13 }}>
+                  <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>
+                  {s.actionItem || <span className="mut">(blank)</span>}
+                </div>
               </div>
             );
           }
