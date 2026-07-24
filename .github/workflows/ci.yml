@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Schema mirror check
+        run: npx tsx scripts/check-schema-mirror.ts
+      - name: Production build
+        # Dummy connection string: pages are dynamic so nothing connects at
+        # build time, and the deploy-time schema sync only runs on Vercel.
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://ci:ci@ci.local/ci
