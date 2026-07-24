@@ -9,6 +9,7 @@ import {
 import { requireUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
+import { getStageSince, ageDays } from "@/lib/stageAges";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import PartsPanel from "@/components/PartsPanel";
@@ -26,7 +27,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, stageSince] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -35,6 +36,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
     getStageDefs(),
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
+    getStageSince([instId]),
   ]);
   if (!inst) notFound();
 
@@ -69,6 +71,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <SystemPanel
         instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
         stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
+        stageAges={Object.fromEntries(inst.stages.flatMap((s) => {
+          const since = stageSince.get(instId)?.get(s) ?? inst.createdAt;
+          const d = ageDays(since);
+          return d >= 1 ? [[s, `${d}d`]] : [];
+        }))}
         gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />

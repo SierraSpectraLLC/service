@@ -190,6 +190,18 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
 
+// Stage transition history: one row every time a stage is added to or removed
+// from an instrument. Powers the "12d in Checkout" age chips and cycle-time
+// metrics. Written by toggleStage/createInstrument/deleteStage; renaming a
+// custom stage leaves old rows under the old name (rare, accepted).
+export const stageEvents = pgTable("stage_events", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  stage: text("stage").notNull(),
+  kind: text("kind").notNull(), // added | removed
+  at: timestamp("at").notNull().defaultNow(),
+}, (t) => [index("stage_events_instrument_idx").on(t.instrumentId)]);
+
 // SOP templates: a named bundle of tasks (each with a checklist) that can be
 // applied to an instrument in one tap - e.g. "GC/MS refurb SOP". Managed by
 // staff on /templates; applying copies rows into tasks/checklist_items.

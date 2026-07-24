@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
+import { getStageSince, ageDays } from "@/lib/stageAges";
 import { requireUser } from "@/lib/authz";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
@@ -30,7 +31,19 @@ export default async function Home() {
     isStaff ? openRowDiffs.filter((d) => d.sheetValue === "(missing from sheet)").map((d) => d.externalId) : []
   );
 
+  const stageSince = await getStageSince(rows.map((r) => r.id));
+
   const data = rows.map((i) => {
+    // Flag systems parked in a stage for a week+ (shipped systems are done, not stuck).
+    let aging = "";
+    if (!i.stages.includes("Shipped")) {
+      let worst = 0, worstStage = "";
+      for (const s of i.stages) {
+        const d = ageDays(stageSince.get(i.id)?.get(s) ?? i.createdAt);
+        if (d > worst) { worst = d; worstStage = s; }
+      }
+      if (worst >= 7) aging = `${worst}d in ${worstStage}`;
+    }
     const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
     const gasIssues = allGases
       .filter((g) => g.instrumentId === i.id && gasAttention(g.status))
@@ -46,6 +59,7 @@ export default async function Home() {
       notes: i.notes,
       openParts,
       gasIssues,
+      aging,
       missingFromSheet: droppedFromSheet.has(i.externalId),
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
     };

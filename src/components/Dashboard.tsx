@@ -10,7 +10,7 @@ type StageDefLite = { name: string; bg: string; fg: string };
 type Row = {
   id: number; externalId: string; client: string; model: string; priority: number;
   stages: string[]; notes: string; openParts: number; gasIssues: string[];
-  missingFromSheet: boolean; lastActivity: string;
+  aging: string; missingFromSheet: boolean; lastActivity: string;
 };
 
 const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
@@ -52,7 +52,7 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
       const s = q.toLowerCase();
       list = list.filter((i) =>
         [i.externalId, i.client, i.model, i.notes, i.stages.join(" "), i.gasIssues.join(" "),
-          i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
+          i.aging, i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
       );
     }
     return list;
@@ -200,11 +200,12 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {i.missingFromSheet && <Pill bg="#FBE9E9" fg="#A32D2D">not on sheet</Pill>}
+              {i.aging && <Pill bg="#FAF0DC" fg="#8A5410">{i.aging}</Pill>}
               {i.openParts > 0 && <Pill bg="#FAF0DC" fg="#8A5410">{i.openParts} open</Pill>}
               {i.gasIssues.map((g) => (
                 <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
               ))}
-              {!i.missingFromSheet && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
+              {!i.missingFromSheet && !i.aging && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </Link>
         ))}

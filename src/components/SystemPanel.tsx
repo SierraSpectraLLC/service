@@ -7,8 +7,9 @@ import { updateInstrument, updateInstrumentNotes, deleteInstrument } from "@/app
 
 type Inst = { id: number; externalId: string; client: string; model: string; priority: number; notes: string };
 
-export default function SystemPanel({ instrument, stages, stageDefs, gases, canEdit, isStaff, isOwner }: {
-  instrument: Inst; stages: string[]; stageDefs: StageDefLite[]; gases: GasRow[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
+export default function SystemPanel({ instrument, stages, stageDefs, stageAges, gases, canEdit, isStaff, isOwner }: {
+  instrument: Inst; stages: string[]; stageDefs: StageDefLite[]; stageAges: Record<string, string>;
+  gases: GasRow[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ client: "", model: "", priority: "", notes: "" });
@@ -90,7 +91,7 @@ export default function SystemPanel({ instrument, stages, stageDefs, gases, canE
         </div>
       )}
 
-      <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
+      <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} ages={stageAges} canEdit={canEdit} />
       <GasPanel instrumentId={instrument.id} gases={gases} canEdit={canEdit} isStaff={isStaff} />
     </div>
   );

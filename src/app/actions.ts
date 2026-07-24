@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems,
+  taskTemplates, templateTasks, templateItems, stageEvents,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -34,6 +34,7 @@ export async function toggleStage(instrumentId: number, stage: string) {
   if (has && inst.stages.length === 1) return; // keep at least one stage
   const next = has ? inst.stages.filter((s) => s !== stage) : [...inst.stages, stage];
   await db.update(instruments).set({ stages: next, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.insert(stageEvents).values({ instrumentId, stage, kind: has ? "removed" : "added" });
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
     action: `${has ? "removed" : "added"} stage: ${stage}`, field: "stages",
@@ -100,6 +101,7 @@ export async function createInstrument(
     externalId: data.externalId.trim(), client: data.client.trim(), model: data.model.trim(),
     priority: data.priority || 99, stages: ["Intake"],
   }).returning();
+  await db.insert(stageEvents).values({ instrumentId: row.id, stage: "Intake", kind: "added" });
   await audit({
     actor: u.email, instrumentId: row.id, entityType: "instrument", entityId: row.externalId,
     action: `created instrument ${row.externalId}: ${row.model}`,
@@ -818,6 +820,8 @@ export async function deleteStage(id: number): Promise<{ error?: string }> {
     await db.update(instruments)
       .set({ stages: next.length ? next : ["Intake"], updatedAt: new Date() })
       .where(eq(instruments.id, i.id));
+    await db.insert(stageEvents).values({ instrumentId: i.id, stage: s.name, kind: "removed" });
+    if (!next.length) await db.insert(stageEvents).values({ instrumentId: i.id, stage: "Intake", kind: "added" });
   }
   await audit({ actor: u.email, entityType: "settings", entityId: s.name, action: `deleted stage "${s.name}"` });
   revalidatePath("/settings");

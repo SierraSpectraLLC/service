@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_access_enabled" boolean NOT NULL DEFAULT false,
   "client_can_edit" boolean NOT NULL DEFAULT false
 );
+CREATE TABLE IF NOT EXISTS "stage_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "stage" text NOT NULL,
+  "kind" text NOT NULL,
+  "at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "task_templates" (
   "id" serial PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
@@ -242,6 +249,7 @@ CREATE INDEX IF NOT EXISTS "audit_created_idx" ON "audit_log" ("created_at");
 CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
+CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 -- ── Unique constraints ────────────────────────────────────────────────────
@@ -303,6 +311,10 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_events_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "stage_events" ADD CONSTRAINT "stage_events_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_tasks_template_id_task_templates_id_fk') THEN
