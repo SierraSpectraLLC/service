@@ -15,7 +15,7 @@ import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion } from "@/lib/noti
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, autoFg } from "@/lib/stages";
+import { GASES, GAS_STATES, ATTACH_KINDS, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
@@ -119,7 +119,9 @@ export async function deleteInstrument(instrumentId: number) {
   const u = await requireOwner();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return;
+  const files = await db.select({ url: attachments.url }).from(attachments).where(eq(attachments.instrumentId, instrumentId));
   await db.delete(instruments).where(eq(instruments.id, instrumentId)); // tasks, parts, gases, attachments cascade
+  await deleteBlobs(files.map((f) => f.url)); // cascade covers rows; blobs need explicit removal
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
     action: `deleted instrument ${inst.externalId}: ${inst.model} (${inst.client})`,
@@ -538,14 +540,47 @@ export async function recordAttachments(
   rev(instrumentId);
 }
 
+export async function updateAttachment(attachmentId: number, data: { fileName: string; kind: string; description: string }) {
+  const u = await requireEditor();
+  const fileName = data.fileName.trim();
+  if (!fileName) throw new Error("File name required");
+  const kind = (ATTACH_KINDS as readonly string[]).includes(data.kind) ? data.kind : "Other";
+  const description = data.description.trim();
+  const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  if (!a || (a.fileName === fileName && a.kind === kind && a.description === description)) return;
+  await db.update(attachments).set({ fileName, kind, description }).where(eq(attachments.id, attachmentId));
+  const changes: string[] = [];
+  if (a.fileName !== fileName) changes.push(`renamed to '${fileName}'`);
+  if (a.kind !== kind) changes.push(`${a.kind} -> ${kind}`);
+  if (a.description !== description) changes.push("description updated");
+  await audit({
+    actor: u.email, instrumentId: a.instrumentId, entityType: "attachment", entityId: attachmentId,
+    action: `edited attachment '${a.fileName}': ${changes.join(", ")}`,
+    field: "description", oldValue: a.description, newValue: description,
+  });
+  rev(a.instrumentId);
+}
+
+/** Best-effort blob removal - never lets a storage hiccup block the record delete. */
+async function deleteBlobs(urls: string[]) {
+  if (!urls.length) return;
+  try {
+    const { del } = await import("@vercel/blob");
+    await del(urls);
+  } catch (e) {
+    console.error("[blob] delete failed (orphaned file, harmless but billed):", (e as Error).message);
+  }
+}
+
 export async function deleteAttachment(attachmentId: number) {
   const u = await requireStaff();
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
   if (!a) return;
   await db.delete(attachments).where(eq(attachments.id, attachmentId));
+  await deleteBlobs([a.url]); // remove the actual file from Vercel Blob, not just our record
   await audit({
     actor: u.email, instrumentId: a.instrumentId, entityType: "attachment", entityId: attachmentId,
-    action: `removed attachment: ${a.fileName}`,
+    action: `removed attachment: ${a.fileName} (file deleted from storage)`,
   });
   rev(a.instrumentId);
 }

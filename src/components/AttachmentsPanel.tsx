@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachments, deleteAttachment } from "@/app/actions";
+import { recordAttachments, deleteAttachment, updateAttachment } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
 type Attachment = {
@@ -155,6 +155,8 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
   const fileRef = useRef<HTMLInputElement>(null);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState({ fileName: "", kind: "Other", description: "" });
   const [, startTransition] = useTransition();
 
   const addFiles = (list: FileList | null) => {
@@ -335,6 +337,32 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
       {attachments.length === 0 && staged.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>}
       {attachments.map((a) => {
         const m = ATTACH_META[a.kind] || ATTACH_META.Other;
+        if (editing === a.id) {
+          return (
+            <div key={a.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                <input className="mono" value={editDraft.fileName}
+                  onChange={(e) => setEditDraft({ ...editDraft, fileName: e.target.value })}
+                  style={{ flex: "2 1 180px", fontSize: 13 }} />
+                <select value={editDraft.kind} onChange={(e) => setEditDraft({ ...editDraft, kind: e.target.value })}
+                  style={{ width: "auto", fontSize: 12 }}>
+                  {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
+                </select>
+              </div>
+              <input value={editDraft.description}
+                onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
+                placeholder='Description... e.g. "post-repair tune, passed at 101% of spec"'
+                style={{ fontSize: 12, padding: "5px 9px", marginBottom: 8 }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn sm accent" disabled={!editDraft.fileName.trim()}
+                  onClick={() => startTransition(async () => { await updateAttachment(a.id, editDraft); setEditing(null); })}>
+                  Save
+                </button>
+                <button className="btn sm" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </div>
+          );
+        }
         return (
           <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
@@ -349,10 +377,18 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
               </div>
             </div>
             <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>download</a>
+            {canEdit && (
+              <button className="btn link" style={{ fontSize: 12, flexShrink: 0 }}
+                onClick={() => { setEditDraft({ fileName: a.fileName, kind: a.kind, description: a.description }); setEditing(a.id); }}
+              >edit</button>
+            )}
             {isStaff && (
               <button
                 className="btn link" style={{ color: "#A32D2D", fontSize: 12, flexShrink: 0 }}
-                onClick={() => startTransition(() => deleteAttachment(a.id))}
+                onClick={() => {
+                  if (!window.confirm(`Remove "${a.fileName}"? The file is permanently deleted from storage.`)) return;
+                  startTransition(() => deleteAttachment(a.id));
+                }}
               >remove</button>
             )}
           </div>
