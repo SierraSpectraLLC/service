@@ -11,7 +11,7 @@ import {
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned } from "@/lib/notify";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet } from "@/lib/sheetSync";
@@ -96,11 +96,37 @@ export async function addInstrumentNote(instrumentId: number, text: string) {
   rev(instrumentId);
 }
 
+/** Either side may assign a lead - LabZen hands Sierra a system or claims one themselves. */
+export async function setInstrumentLead(instrumentId: number, lead: string) {
+  const u = await requireEditor();
+  const name = lead.trim();
+  if (name) {
+    const roster = await db.select().from(people);
+    if (!roster.some((p) => p.name === name)) throw new Error("Unknown person");
+  }
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst || inst.lead === name) return;
+  await db.update(instruments).set({ lead: name, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: name ? `assigned ${inst.externalId} to ${name}` : `cleared lead on ${inst.externalId}`,
+    field: "lead", oldValue: inst.lead, newValue: name,
+  });
+  if (name) {
+    await notifySystemAssigned({
+      actorEmail: u.email, actorName: u.name, lead: name,
+      instrumentId, externalId: inst.externalId, model: inst.model,
+    });
+  }
+  rev(instrumentId);
+}
+
 export async function createInstrument(
   data: { externalId: string; client: string; model: string; priority: number },
   templateId?: number,
 ) {
-  const u = await requireStaff();
+  // Editors, not just staff: LabZen adds their internal systems themselves.
+  const u = await requireEditor();
   const [row] = await db.insert(instruments).values({
     externalId: data.externalId.trim(), client: data.client.trim(), model: data.model.trim(),
     priority: data.priority || 99, stages: ["Intake"],

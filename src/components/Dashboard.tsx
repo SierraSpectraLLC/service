@@ -8,7 +8,7 @@ import { createInstrument } from "@/app/actions";
 type StageDefLite = { name: string; bg: string; fg: string };
 
 type Row = {
-  id: number; externalId: string; client: string; model: string; priority: number;
+  id: number; externalId: string; client: string; model: string; priority: number; lead: string;
   stages: string[]; notes: string; openParts: number; gasIssues: string[];
   aging: string; missingFromSheet: boolean; lastActivity: string;
 };
@@ -32,6 +32,8 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
   const [pending, startTransition] = useTransition();
 
   const FLAGS = ["Awaiting parts", "Gas attention", ...(isStaff ? ["Not on sheet"] : [])];
+  const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
+  const leadKey = (l: string) => `lead:${l}`;
   const toggleFilter = (f: string) =>
     setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
 
@@ -43,15 +45,17 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
 
   const filtered = useMemo(() => {
     let list = data;
-    // Stages combine as OR (either stage matches); flags combine as AND.
+    // Stages and leads each combine as OR within their group; flags combine as AND.
     const stageSel = selected.filter((f) => stageNames.includes(f));
-    const flagSel = selected.filter((f) => !stageNames.includes(f));
+    const leadSel = selected.filter((f) => f.startsWith("lead:")).map((f) => f.slice(5));
+    const flagSel = selected.filter((f) => !stageNames.includes(f) && !f.startsWith("lead:"));
     if (stageSel.length) list = list.filter((i) => stageSel.some((s) => i.stages.includes(s)));
+    if (leadSel.length) list = list.filter((i) => leadSel.includes(i.lead));
     for (const f of flagSel) list = list.filter((i) => matchesFlag(i, f));
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
-        [i.externalId, i.client, i.model, i.notes, i.stages.join(" "), i.gasIssues.join(" "),
+        [i.externalId, i.client, i.model, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "),
           i.aging, i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
       );
     }
@@ -131,6 +135,18 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
                     {f}
                   </label>
                 ))}
+                {LEADS.length > 0 && (
+                  <>
+                    <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Lead</div>
+                    {LEADS.map((l) => (
+                      <label key={l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                        <input type="checkbox" checked={selected.includes(leadKey(l))} onChange={() => toggleFilter(leadKey(l))}
+                          style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
+                        {l}
+                      </label>
+                    ))}
+                  </>
+                )}
                 {selected.length > 0 && (
                   <button className="btn link" style={{ marginTop: 8 }} onClick={() => setSelected([])}>Clear all</button>
                 )}
@@ -141,10 +157,10 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
         {selected.map((f) => (
           <button key={f} className="pill" onClick={() => toggleFilter(f)} title="Remove filter"
             style={{ background: "#EDEBFA", color: "#4F45A3", border: "none", cursor: "pointer" }}>
-            {f} ×
+            {f.startsWith("lead:") ? f.slice(5) : f} ×
           </button>
         ))}
-        {isStaff && (
+        {canEdit && (
           <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => setShowNew((v) => !v)}>
             {showNew ? "Cancel" : "+ New instrument"}
           </button>
@@ -190,6 +206,7 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
               <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.model}</span>
               <span className="mut" style={{ fontSize: 11 }}>
                 {i.client} · P{i.priority}
+                {i.lead && <span style={{ color: "var(--navy)", fontWeight: 700 }}> · {i.lead}</span>}
                 {i.missingFromSheet && <span style={{ color: "#A32D2D", fontWeight: 700 }}> · not on sheet</span>}
               </span>
             </span>

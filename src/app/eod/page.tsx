@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings } from "@/db/schema";
+import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
@@ -32,9 +32,14 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   let sentInfo = "";
   let canSend = false;
   if (isToday) {
-    // Today: every active system, editable, with autofill suggestions.
-    const rows = await db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId));
-    const active = rows.filter((i) => !i.stages.includes("Shipped"));
+    // Today: every active Sierra-led system, editable, with autofill suggestions.
+    // LabZen-led systems stay out of Sierra's report (their own work).
+    const [rows, roster] = await Promise.all([
+      db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+      db.select().from(people),
+    ]);
+    const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
+    const active = rows.filter((i) => !i.stages.includes("Shipped") && !labzenLed.has(i.lead));
     const ids = active.map((i) => i.id);
 
     const [saved, taskRows, partRows, gasRows, recentAudit, [settings]] = await Promise.all([

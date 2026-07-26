@@ -81,6 +81,29 @@ export async function notifyTaskAssigned(opts: {
   }
 }
 
+export async function notifySystemAssigned(opts: {
+  actorEmail: string; actorName: string; lead: string; instrumentId: number; externalId: string; model: string;
+}) {
+  try {
+    const staff = parseList(process.env.STAFF_EMAILS);
+    const [userRows, roster] = await Promise.all([
+      db.select({ name: users.name, email: users.email }).from(users),
+      db.select({ name: people.name, email: people.email }).from(people),
+    ]);
+    const to = resolveAssigneeEmail(opts.lead, staff, userRows, roster);
+    if (!to || to === opts.actorEmail.toLowerCase()) return;
+    const url = appUrl();
+    await sendEmail(
+      [to],
+      `${opts.externalId}: you're the lead`,
+      wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)} - ${esc(opts.model)}</b>.
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+    );
+  } catch (e) {
+    console.error("[notify] system-assigned email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyDiscussion(opts: {
   actorEmail: string; actorName: string; actorIsClient: boolean;
   body: string; instrumentId: number | null; label: string; // label: externalId or "General"
