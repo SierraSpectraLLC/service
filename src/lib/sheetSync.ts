@@ -133,6 +133,11 @@ async function fetchSheetRows(): Promise<string[][]> {
   return parseCsv(await res.text());
 }
 
+/** Fetch + parse the tracker in one call - used by resolveDiff to import a missing row. */
+export async function fetchTrackerRows(): Promise<SheetRow[]> {
+  return parseTrackerRows(await fetchSheetRows());
+}
+
 /**
  * Locate the cell for a diff field on a system's row. Pure so it's testable:
  * rows are the raw sheet values (header first), field is a diff field name.

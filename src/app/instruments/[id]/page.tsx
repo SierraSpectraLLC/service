@@ -80,7 +80,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       </div>
 
       <SystemPanel
-        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, notes: inst.notes }}
+        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, lead: inst.lead, notes: inst.notes }}
         stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
         stageAges={Object.fromEntries(inst.stages.flatMap((s) => {
           const since = stageSince.get(instId)?.get(s) ?? inst.createdAt;
@@ -88,6 +88,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           return d >= 1 ? [[s, `${d}d`]] : [];
         }))}
         gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
+        people={peopleRows.map((p) => p.name)}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />
 

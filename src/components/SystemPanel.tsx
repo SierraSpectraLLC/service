@@ -1,15 +1,28 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
-import { updateInstrument, updateInstrumentNotes, deleteInstrument } from "@/app/actions";
+import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead } from "@/app/actions";
 
-type Inst = { id: number; externalId: string; client: string; model: string; priority: number; notes: string };
+type Inst = { id: number; externalId: string; client: string; model: string; priority: number; lead: string; notes: string };
 
-export default function SystemPanel({ instrument, stages, stageDefs, stageAges, gases, canEdit, isStaff, isOwner }: {
+function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead: string; people: string[] }) {
+  const [, startTransition] = useTransition();
+  const [value, setOptimistic] = useOptimistic(lead, (_cur: string, next: string) => next);
+  const options = ["", ...people, ...(value && !people.includes(value) ? [value] : [])];
+  return (
+    <select value={value}
+      onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setInstrumentLead(instrumentId, e.target.value); })}
+      style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+      {options.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
+    </select>
+  );
+}
+
+export default function SystemPanel({ instrument, stages, stageDefs, stageAges, gases, people, canEdit, isStaff, isOwner }: {
   instrument: Inst; stages: string[]; stageDefs: StageDefLite[]; stageAges: Record<string, string>;
-  gases: GasRow[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
+  gases: GasRow[]; people: string[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ client: "", model: "", priority: "", notes: "" });
@@ -44,6 +57,12 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
           {!editing && (
             <>
               <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)", marginTop: 2 }}>{instrument.model}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
+                {canEdit
+                  ? <LeadSelect instrumentId={instrument.id} lead={instrument.lead} people={people} />
+                  : <span style={{ fontSize: 12, fontWeight: 700, color: instrument.lead ? "var(--navy)" : "var(--mut)" }}>{instrument.lead || "-"}</span>}
+              </div>
               <div className="mut" style={{ fontSize: 13, marginTop: 6, whiteSpace: "pre-wrap" }}>{instrument.notes || "No notes."}</div>
             </>
           )}

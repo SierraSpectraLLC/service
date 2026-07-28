@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS "instruments" (
   "client" text NOT NULL,
   "model" text NOT NULL,
   "priority" integer NOT NULL DEFAULT 99,
+  "lead" text NOT NULL DEFAULT '',
   "stages" text[] NOT NULL DEFAULT '{}',
   "notes" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now(),
@@ -238,6 +239,7 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "email_verified" timestamp;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "image" text;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" text NOT NULL DEFAULT 'client_viewer';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "priority" integer NOT NULL DEFAULT 99;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "lead" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "stages" text[] NOT NULL DEFAULT '{}';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "notes" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now();

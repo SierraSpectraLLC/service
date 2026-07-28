@@ -28,14 +28,12 @@ export default async function DiscussionsPage() {
         posts={general.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         isStaff={isStaff}
         title="General discussion"
-        subtitle="Lab-wide topics that don't belong to one system (projects, logistics, scheduling). @mention someone to email them a link."
+        subtitle="Lab-wide topics."
       />
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Recent system discussions</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Latest posts across all systems - tap through to reply on the system&apos;s page.
-        </div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>Tap through to reply on the system&apos;s page.</div>
         {recent.map((p) => (
           <Link key={p.id} href={`/instruments/${p.instrumentId}`} className="row-hover"
             style={{ display: "block", padding: "8px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>

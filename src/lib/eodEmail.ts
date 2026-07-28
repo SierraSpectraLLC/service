@@ -4,7 +4,7 @@
 // so replies migrate into discussions instead of reply-all email.
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates } from "@/db/schema";
+import { instruments, eodUpdates, people } from "@/db/schema";
 
 const SEP = "-".repeat(50);
 const esc = (s: string) =>
@@ -17,11 +17,14 @@ const appUrl = () =>
 export async function composeEodEmail(date: string, dateMDY: string): Promise<{
   subject: string; html: string; filled: number; total: number;
 }> {
-  const [rows, saved] = await Promise.all([
+  const [rows, saved, roster] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
+    db.select().from(people),
   ]);
-  const active = rows.filter((i) => !i.stages.includes("Shipped"));
+  // Sierra's report covers Sierra-led work; LabZen-led systems are theirs.
+  const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
+  const active = rows.filter((i) => !i.stages.includes("Shipped") && !labzenLed.has(i.lead));
   const included = active.filter((i) => !saved.find((s) => s.instrumentId === i.id)?.skipped);
   const url = appUrl();
 

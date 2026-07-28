@@ -11,10 +11,10 @@ import {
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned } from "@/lib/notify";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
-import { pushValueToSheet } from "@/lib/sheetSync";
+import { pushValueToSheet, fetchTrackerRows } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
@@ -96,11 +96,37 @@ export async function addInstrumentNote(instrumentId: number, text: string) {
   rev(instrumentId);
 }
 
+/** Either side may assign a lead - LabZen hands Sierra a system or claims one themselves. */
+export async function setInstrumentLead(instrumentId: number, lead: string) {
+  const u = await requireEditor();
+  const name = lead.trim();
+  if (name) {
+    const roster = await db.select().from(people);
+    if (!roster.some((p) => p.name === name)) throw new Error("Unknown person");
+  }
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst || inst.lead === name) return;
+  await db.update(instruments).set({ lead: name, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: name ? `assigned ${inst.externalId} to ${name}` : `cleared lead on ${inst.externalId}`,
+    field: "lead", oldValue: inst.lead, newValue: name,
+  });
+  if (name) {
+    await notifySystemAssigned({
+      actorEmail: u.email, actorName: u.name, lead: name,
+      instrumentId, externalId: inst.externalId, model: inst.model,
+    });
+  }
+  rev(instrumentId);
+}
+
 export async function createInstrument(
   data: { externalId: string; client: string; model: string; priority: number },
   templateId?: number,
 ) {
-  const u = await requireStaff();
+  // Editors, not just staff: LabZen adds their internal systems themselves.
+  const u = await requireEditor();
   const [row] = await db.insert(instruments).values({
     externalId: data.externalId.trim(), client: data.client.trim(), model: data.model.trim(),
     priority: data.priority || 99, stages: ["Intake"],
@@ -614,11 +640,44 @@ export async function resolveDiff(
     }
   }
 
+  // Accepting a "Row" diff for a system the sheet has and we don't means:
+  // import it. Pull the full sheet row (priority, stages, notes) when we can;
+  // fall back to the diff's "model (client)" summary if the sheet is
+  // unreachable. Runs BEFORE marking resolved so a failed import stays open.
+  if (resolution === "accepted_sheet" && d.field === "Row" && d.dbValue === "(missing from our records)") {
+    const [existing] = await db.select().from(instruments).where(eq(instruments.externalId, d.externalId));
+    if (!existing) {
+      let client = "", model = d.sheetValue, priority = 99, stages: string[] = [], notes = "";
+      try {
+        const sheetRow = (await fetchTrackerRows()).find((r) => r.externalId === d.externalId);
+        if (sheetRow) ({ client, model, priority, stages, notes } = sheetRow);
+      } catch {
+        const m = /^(.*) \(([^)]*)\)$/.exec(d.sheetValue);
+        if (m) { model = m[1]; client = m[2]; }
+      }
+      const rowStages = stages.length ? stages : ["Intake"];
+      const [row] = await db.insert(instruments).values({
+        externalId: d.externalId, client, model, priority, stages: rowStages, notes,
+      }).onConflictDoNothing().returning();
+      if (row) {
+        for (const s of rowStages) {
+          await db.insert(stageEvents).values({ instrumentId: row.id, stage: s, kind: "added" });
+        }
+        await audit({
+          actor: u.email, instrumentId: row.id, entityType: "instrument", entityId: row.externalId,
+          action: `created instrument ${row.externalId}: ${row.model} (imported from sheet via parity)`,
+        });
+      }
+    }
+  }
+  // The reverse Row case ("(missing from sheet)") is acknowledge-only on
+  // purpose - accepting the sheet must never auto-delete our records.
+
   await db.update(sheetDiffs).set({ resolved: true, resolvedBy: u.email, resolution }).where(eq(sheetDiffs.id, diffId));
   // Accepting the sheet's value applies it for the fields we can apply mechanically.
   if (resolution === "accepted_sheet") {
     const [inst] = await db.select().from(instruments).where(eq(instruments.externalId, d.externalId));
-    if (inst) {
+    if (inst && d.field !== "Row") {
       if (d.field === "Notes") await db.update(instruments).set({ notes: d.sheetValue, updatedAt: new Date() }).where(eq(instruments.id, inst.id));
       if (d.field === "Priority") await db.update(instruments).set({ priority: parseInt(d.sheetValue) || inst.priority, updatedAt: new Date() }).where(eq(instruments.id, inst.id));
       // Stage diffs are resolved by hand in the UI; too lossy to auto-apply.

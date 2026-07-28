@@ -32,10 +32,8 @@ export default function DiscussionPanel({ instrumentId, posts, isStaff, title, s
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 4 }}>{title ?? "Discussion"}</div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
-        {subtitle ?? "Shared between Sierra Spectra and LabZen. @mention someone (e.g. @Thomas) to email them a link here."}
-      </div>
+      <div className="card-title" style={{ marginBottom: subtitle ? 4 : 10 }}>{title ?? "Discussion"}</div>
+      {subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>{subtitle}</div>}
 
       {posts.length === 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>No posts yet.</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>

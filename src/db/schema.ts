@@ -57,6 +57,8 @@ export const instruments = pgTable("instruments", {
   client: text("client").notNull(),                   // Testen, GMI, Utah, Casablanca
   model: text("model").notNull(),
   priority: integer("priority").notNull().default(99),
+  // Who's driving this system - a people-roster name (Sierra or LabZen), assignable by either side.
+  lead: text("lead").notNull().default(""),
   stages: text("stages").array().notNull().default([]),
   notes: text("notes").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),

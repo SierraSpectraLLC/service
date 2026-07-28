@@ -55,6 +55,7 @@ export default async function Home() {
       client: i.client,
       model: i.model,
       priority: i.priority,
+      lead: i.lead,
       stages: i.stages,
       notes: i.notes,
       openParts,
