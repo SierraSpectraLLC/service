@@ -14,7 +14,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned } from "@/lib/notify";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
-import { pushValueToSheet, fetchTrackerRows } from "@/lib/sheetSync";
+import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
@@ -96,6 +96,39 @@ export async function addInstrumentNote(instrumentId: number, text: string) {
   rev(instrumentId);
 }
 
+/**
+ * Add one of our systems to the client's sheet as a new row, so a system born
+ * in the portal shows up on their tracker. Closes any open "missing from
+ * sheet" parity diff for it.
+ */
+export async function pushInstrumentToSheet(instrumentId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  try {
+    await appendInstrumentToSheet({
+      externalId: inst.externalId, client: inst.client, model: inst.model,
+      priority: inst.priority, stages: inst.stages, notes: inst.notes,
+    });
+  } catch (e) {
+    return { error: (e as Error).message || "Sheet update failed" };
+  }
+  const open = await db.select().from(sheetDiffs)
+    .where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.externalId, inst.externalId), eq(sheetDiffs.field, "Row")));
+  for (const d of open) {
+    await db.update(sheetDiffs)
+      .set({ resolved: true, resolvedBy: u.email, resolution: "kept_ours_pushed" })
+      .where(eq(sheetDiffs.id, d.id));
+  }
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: `added ${inst.externalId} to the client's sheet`,
+  });
+  revalidatePath("/parity");
+  rev(instrumentId);
+  return {};
+}
+
 /** Either side may assign a lead - LabZen hands Sierra a system or claims one themselves. */
 export async function setInstrumentLead(instrumentId: number, lead: string) {
   const u = await requireEditor();
@@ -122,20 +155,31 @@ export async function setInstrumentLead(instrumentId: number, lead: string) {
 }
 
 export async function createInstrument(
-  data: { externalId: string; client: string; model: string; priority: number },
+  data: { externalId: string; client: string; model: string; priority: number; lead?: string },
   templateId?: number,
 ) {
   // Editors, not just staff: LabZen adds their internal systems themselves.
   const u = await requireEditor();
+  let lead = (data.lead ?? "").trim();
+  if (lead) {
+    const roster = await db.select().from(people);
+    if (!roster.some((p) => p.name === lead)) lead = "";
+  }
   const [row] = await db.insert(instruments).values({
     externalId: data.externalId.trim(), client: data.client.trim(), model: data.model.trim(),
-    priority: data.priority || 99, stages: ["Intake"],
+    priority: data.priority || 99, lead, stages: ["Intake"],
   }).returning();
   await db.insert(stageEvents).values({ instrumentId: row.id, stage: "Intake", kind: "added" });
   await audit({
     actor: u.email, instrumentId: row.id, entityType: "instrument", entityId: row.externalId,
-    action: `created instrument ${row.externalId}: ${row.model}`,
+    action: `created instrument ${row.externalId}: ${row.model}${lead ? ` (lead ${lead})` : ""}`,
   });
+  if (lead) {
+    await notifySystemAssigned({
+      actorEmail: u.email, actorName: u.name, lead,
+      instrumentId: row.id, externalId: row.externalId, model: row.model,
+    });
+  }
   if (templateId) await copyTemplateOnto(row.id, row.externalId, templateId, u.email);
   rev(row.id);
   return row.id;
@@ -624,7 +668,15 @@ export async function resolveDiff(
   // "Keep ours + fix sheet": write our value into the client's sheet first;
   // only mark resolved once the write succeeded.
   if (resolution === "kept_ours_pushed") {
-    if (d.field === "Row") return { error: "Row-level diffs can't be pushed to the sheet - fix the row by hand" };
+    if (d.field === "Row") {
+      // Only meaningful in the "we have it, the sheet doesn't" direction: add the row.
+      if (d.sheetValue !== "(missing from sheet)") {
+        return { error: "This row is on the sheet and not in our records - use Accept sheet to import it" };
+      }
+      const [inst] = await db.select().from(instruments).where(eq(instruments.externalId, d.externalId));
+      if (!inst) return { error: `${d.externalId} is no longer in our records` };
+      return await pushInstrumentToSheet(inst.id); // handles the append, audit, and diff close
+    }
     let value = d.dbValue;
     const [inst] = await db.select().from(instruments).where(eq(instruments.externalId, d.externalId));
     if (d.field === "Stage" && inst) {

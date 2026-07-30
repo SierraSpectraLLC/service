@@ -4,6 +4,7 @@ import { instruments, sheetDiffs } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { STAGES, SHEET_STAGES } from "@/lib/stages";
 
+
 /**
  * Minimal RFC-4180-ish CSV parser (handles quoted fields with commas/newlines).
  * The client's sheet is small; no need for a dependency.
@@ -157,6 +158,58 @@ export function locateSheetCell(rows: string[][], externalId: string, field: str
   const rowIndex = rows.findIndex((r, i) => i > 0 && (r[idCol] || "").trim() === externalId);
   if (rowIndex < 0) return null;
   return { rowIndex, colIndex };
+}
+
+export type PushableInstrument = {
+  externalId: string; client: string; model: string; priority: number; stages: string[]; notes: string;
+};
+
+/**
+ * Lay an instrument out across the sheet's own column order, so a new row
+ * lands in the right columns whatever their arrangement. Pure/testable.
+ * Returns null when the sheet has no recognizable ID column.
+ */
+export function buildSheetRow(header: string[], inst: PushableInstrument): string[] | null {
+  const h = header.map((x) => x.trim().toLowerCase());
+  const col = (name: string) => h.findIndex((x) => x.includes(name));
+  const idCol = col("id");
+  if (idCol < 0) return null;
+  const row: string[] = new Array(Math.max(header.length, idCol + 1)).fill("");
+  const set = (i: number, v: string) => { if (i >= 0) row[i] = v; };
+  set(idCol, inst.externalId);
+  set(col("location"), inst.client);
+  set(col("equipment"), inst.model);
+  set(col("priority"), String(inst.priority));
+  // Only stages the sheet's vocabulary can express - internal-only and custom stages stay ours.
+  set(col("process"), inst.stages.filter((s) => (SHEET_STAGES as readonly string[]).includes(s)).join(", "));
+  set(col("notes"), inst.notes);
+  return row;
+}
+
+/**
+ * Append a system to the client's sheet as a new row. Requires the service
+ * account to have Editor access. Refuses when the ID is already on the sheet,
+ * so it's safe to retry.
+ */
+export async function appendInstrumentToSheet(inst: PushableInstrument): Promise<void> {
+  const sa = sheetsJwt();
+  if (!sa) throw new Error("Adding rows needs the service account (GOOGLE_SERVICE_ACCOUNT_EMAIL/GOOGLE_PRIVATE_KEY/SHEET_ID); the CSV fallback is read-only");
+  const rows = await fetchSheetRows();
+  if (!rows.length) throw new Error("The sheet looks empty - check SHEET_RANGE");
+  const header = rows[0];
+  const idCol = header.map((x) => x.trim().toLowerCase()).findIndex((x) => x.includes("id"));
+  if (idCol < 0) throw new Error("Could not find an ID column in the sheet header");
+  if (rows.some((r, i) => i > 0 && (r[idCol] || "").trim() === inst.externalId)) {
+    throw new Error(`${inst.externalId} is already on the sheet`);
+  }
+  const row = buildSheetRow(header, inst);
+  if (!row) throw new Error("Could not map the system onto the sheet's columns");
+  const jwt = await makeJwtClient(sa.saEmail, sa.saKey);
+  await jwt.request({
+    url: `https://sheets.googleapis.com/v4/spreadsheets/${sa.sheetId}/values/${encodeURIComponent(sheetRange())}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    method: "POST",
+    data: { values: [row] },
+  });
 }
 
 /** 0-based column index -> A1 letters (0 -> A, 26 -> AA). */

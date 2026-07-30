@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, normalizeStages, parseTrackerRows, locateSheetCell } from "@/lib/sheetSync";
+import { parseCsv, normalizeStages, parseTrackerRows, locateSheetCell, buildSheetRow } from "@/lib/sheetSync";
 
 describe("parseCsv", () => {
   it("splits simple rows", () => {
@@ -55,6 +55,29 @@ describe("parseTrackerRows", () => {
     const rows = parseTrackerRows([HEADER, ["2.6", "GMI", "G-001", "LCMS", "", ""], ["", "Utah", "U-001", "GC", "", ""]]);
     expect(rows[0].priority).toBe(3);
     expect(rows[1].priority).toBe(99);
+  });
+});
+
+describe("buildSheetRow", () => {
+  const inst = {
+    externalId: "MSP-002", client: "Mississippi Peptides", model: "Waters ACQUITY H-Class + QDa + PDA",
+    priority: 4, stages: ["Checkout", "Waiting / blocked"], notes: "QDa detector pending",
+  };
+  it("lays values out in the sheet's own column order", () => {
+    expect(buildSheetRow(HEADER, inst)).toEqual([
+      "4", "Mississippi Peptides", "MSP-002", "Waters ACQUITY H-Class + QDa + PDA", "Checkout", "QDa detector pending",
+    ]);
+  });
+  it("omits stages the sheet can't express", () => {
+    const row = buildSheetRow(HEADER, inst)!;
+    expect(row[4]).toBe("Checkout"); // "Waiting / blocked" is internal-only
+  });
+  it("handles a reordered header and leaves unknown columns blank", () => {
+    const header = ["ID", "Equipment", "Owner", "Priority"];
+    expect(buildSheetRow(header, inst)).toEqual(["MSP-002", "Waters ACQUITY H-Class + QDa + PDA", "", "4"]);
+  });
+  it("returns null without an ID column", () => {
+    expect(buildSheetRow(["Priority", "Notes"], inst)).toBeNull();
   });
 });
 
