@@ -59,27 +59,42 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
   rev(instrumentId);
 }
 
-export async function updateInstrument(instrumentId: number, data: { client: string; model: string; priority: number }) {
+export async function updateInstrument(
+  instrumentId: number,
+  data: { externalId?: string; client: string; model: string; priority: number },
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
+  if (!inst) return { error: "Not found" };
   const client = data.client.trim();
   const model = data.model.trim();
-  if (!model) throw new Error("Model required");
+  if (!model) return { error: "Model required" };
+  const externalId = (data.externalId ?? inst.externalId).trim();
+  if (!externalId) return { error: "System ID required" };
+  if (externalId.length > 40) return { error: "System ID must be 40 characters or fewer" };
+  if (externalId !== inst.externalId) {
+    // The column is unique; check first so the user gets a real message.
+    const clash = await db.select().from(instruments).where(eq(instruments.externalId, externalId));
+    if (clash.length) return { error: `${externalId} is already used by another system` };
+  }
   const priority = data.priority || inst.priority;
   const changed: [string, string, string][] = [];
+  if (externalId !== inst.externalId) changed.push(["externalId", inst.externalId, externalId]);
   if (client !== inst.client) changed.push(["client", inst.client, client]);
   if (model !== inst.model) changed.push(["model", inst.model, model]);
   if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
-  if (!changed.length) return;
-  await db.update(instruments).set({ client, model, priority, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  if (!changed.length) return {};
+  await db.update(instruments).set({ externalId, client, model, priority, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
-      actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
-      action: `updated ${field}`, field, oldValue, newValue,
+      // Log under the new ID so the entry is findable, but the old value is in the row.
+      actor: u.email, instrumentId, entityType: "instrument", entityId: externalId,
+      action: field === "externalId" ? `renamed ${oldValue} to ${newValue}` : `updated ${field}`,
+      field, oldValue, newValue,
     });
   }
   rev(instrumentId);
+  return {};
 }
 
 /** Freeform note straight into the activity log - for things that aren't a task or a part order. */
