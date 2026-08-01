@@ -1,6 +1,6 @@
 import { and, asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getStageSince, ageDays } from "@/lib/stageAges";
@@ -14,7 +14,7 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
@@ -22,6 +22,7 @@ export default async function Home() {
     db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
     getStageDefs(),
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
+    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
   ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
@@ -71,6 +72,7 @@ export default async function Home() {
       data={data}
       stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
       templates={templateList}
+      people={peopleRows.map((p) => p.name)}
       canEdit={user.role !== "client_viewer"}
       isStaff={isStaff}
     />

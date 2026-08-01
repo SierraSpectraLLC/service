@@ -25,22 +25,29 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
   gases: GasRow[]; people: string[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ client: "", model: "", priority: "", notes: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "", notes: "" });
+  const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
   const openEdit = () => {
-    setDraft({ client: instrument.client, model: instrument.model, priority: String(instrument.priority), notes: instrument.notes });
+    setDraft({
+      externalId: instrument.externalId, client: instrument.client, model: instrument.model,
+      priority: String(instrument.priority), notes: instrument.notes,
+    });
+    setError("");
     setEditing(true);
   };
 
   const save = () => {
     if (isStaff && !draft.model.trim()) return;
+    setError("");
     startTransition(async () => {
       if (isStaff) {
-        await updateInstrument(instrument.id, {
-          client: draft.client, model: draft.model,
+        const res = await updateInstrument(instrument.id, {
+          externalId: draft.externalId, client: draft.client, model: draft.model,
           priority: parseInt(draft.priority) || instrument.priority,
         });
+        if (res?.error) { setError(res.error); return; } // keep the form open with the bad value
       }
       if (draft.notes !== instrument.notes) await updateInstrumentNotes(instrument.id, draft.notes);
       setEditing(false);
@@ -76,7 +83,11 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
         <div className="dash-form" style={{ marginTop: 10, marginBottom: 0 }}>
           {isStaff && (
             <>
-              <div className="pf-ship" style={{ marginBottom: 8 }}>
+              <div className="pf3" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>System ID *</label>
+                  <input className="mono" value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} placeholder="X-004" />
+                </div>
                 <div><label>Client</label><input value={draft.client} onChange={(e) => setDraft({ ...draft, client: e.target.value })} /></div>
                 <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} /></div>
               </div>
@@ -91,6 +102,7 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
             <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3}
               placeholder='Current state of the system, e.g. "No Helium - waiting on refill"' style={{ resize: "vertical" }} />
           </div>
+          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" onClick={save} disabled={pending}>{pending ? "Saving..." : "Save changes"}</button>
             <button className="btn sm" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>

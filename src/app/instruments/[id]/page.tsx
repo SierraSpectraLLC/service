@@ -17,6 +17,7 @@ import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
+import PushToSheetButton from "@/components/PushToSheetButton";
 
 export const dynamic = "force-dynamic";
 
@@ -73,9 +74,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ← All instruments
         </Link>
         {isStaff && (
-          <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
-            Sign-off packet
-          </Link>
+          <>
+            <span style={{ marginLeft: "auto" }} />
+            <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />
+            <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
+              Sign-off packet
+            </Link>
+          </>
         )}
       </div>
 

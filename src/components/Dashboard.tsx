@@ -17,8 +17,9 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff }: {
-  data: Row[]; stageDefs: StageDefLite[]; templates: { id: number; name: string }[]; canEdit: boolean; isStaff: boolean;
+export default function Dashboard({ data, stageDefs, templates, people, canEdit, isStaff }: {
+  data: Row[]; stageDefs: StageDefLite[]; templates: { id: number; name: string }[]; people: string[];
+  canEdit: boolean; isStaff: boolean;
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
@@ -27,7 +28,7 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "", lead: "" });
   const [tpl, setTpl] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -75,10 +76,10 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
     startTransition(async () => {
       const id = await createInstrument({
         externalId: draft.externalId, client: draft.client, model: draft.model,
-        priority: parseInt(draft.priority) || 99,
+        priority: parseInt(draft.priority) || 99, lead: draft.lead,
       }, parseInt(tpl) || undefined);
       setShowNew(false);
-      setDraft({ externalId: "", client: "", model: "", priority: "" });
+      setDraft({ externalId: "", client: "", model: "", priority: "", lead: "" });
       setTpl("");
       router.push(`/instruments/${id}`);
     });
@@ -178,6 +179,15 @@ export default function Dashboard({ data, stageDefs, templates, canEdit, isStaff
             <div><label>Model *</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="Shimadzu LCMS-8045 + LC-30" /></div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {people.length > 0 && (
+              <>
+                <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
+                <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
+                  <option value="">-</option>
+                  {people.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </>
+            )}
             {templates.length > 0 && (
               <>
                 <span className="mut" style={{ fontSize: 12 }}>Apply SOP:</span>

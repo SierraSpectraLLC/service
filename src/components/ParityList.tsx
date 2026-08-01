@@ -73,12 +73,15 @@ export default function ParityList({ diffs }: { diffs: Diff[] }) {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn sm primary" disabled={pending} onClick={() => resolve(d.id, "kept_ours")}>Keep ours</button>
-                {d.field !== "Row" && (
+                {/* Row diffs can be pushed only in the "we have it, they don't" direction: add the row. */}
+                {(d.field !== "Row" || d.sheetValue === "(missing from sheet)") && (
                   <button className="btn sm accent" disabled={pending} onClick={() => resolve(d.id, "kept_ours_pushed")}>
-                    Keep ours + fix sheet
+                    {d.field === "Row" ? "Add to sheet" : "Keep ours + fix sheet"}
                   </button>
                 )}
-                <button className="btn sm" disabled={pending} onClick={() => resolve(d.id, "accepted_sheet")}>Accept sheet</button>
+                <button className="btn sm" disabled={pending} onClick={() => resolve(d.id, "accepted_sheet")}>
+                  {d.field === "Row" && d.sheetValue === "(missing from sheet)" ? "Just acknowledge" : "Accept sheet"}
+                </button>
               </div>
               {errors[d.id] && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{errors[d.id]}</div>}
             </div>
