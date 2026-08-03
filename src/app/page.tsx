@@ -15,7 +15,7 @@ export default async function Home() {
   try { user = await requireUser(); } catch { redirect("/login"); }
 
   const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows] = await Promise.all([
-    db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
     db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200),

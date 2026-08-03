@@ -35,7 +35,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     // Today: every active Sierra-led system, editable, with autofill suggestions.
     // LabZen-led systems stay out of Sierra's report (their own work).
     const [rows, roster] = await Promise.all([
-      db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+      db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
       db.select().from(people),
     ]);
     const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));

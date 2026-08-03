@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, stageEvents } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
@@ -15,7 +15,7 @@ export default async function MetricsPage() {
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
 
   const [rows, events, defs] = await Promise.all([
-    db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(stageEvents).orderBy(asc(stageEvents.at), asc(stageEvents.id)),
     getStageDefs(),
   ]);

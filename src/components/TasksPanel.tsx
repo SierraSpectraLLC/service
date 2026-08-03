@@ -85,7 +85,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, can
         <div style={{ fontSize: 12 }}>
           <b style={{ color: "var(--navy)" }}>{m.author}</b>{" "}
           <span className="mut" style={{ fontSize: 11 }}>{when(m.createdAt)}</span>
-          {isStaff && !isEditing && (
+          {canEdit && !isEditing && (
             <>
               {" "}<button className="btn link" style={{ fontSize: 11 }} onClick={() => setInput(key, m.text)}>edit</button>
               <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }}

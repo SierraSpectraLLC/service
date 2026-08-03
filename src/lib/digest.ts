@@ -1,4 +1,4 @@
-import { asc, desc } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
 import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
@@ -16,7 +16,7 @@ const pill = (text: string, bg: string, fg: string) =>
  * statuses, and open parts; anything needing gas gets called out on top.
  */
 export async function composeDigest(): Promise<{ subject: string; html: string }> {
-  const rows = await db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId));
+  const rows = await db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId));
   const gases = await db.select().from(instrumentGases);
   const allParts = await db.select().from(parts);
   const recent = await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(300);

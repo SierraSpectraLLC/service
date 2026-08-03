@@ -85,7 +85,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       </div>
 
       <SystemPanel
-        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, lead: inst.lead, notes: inst.notes }}
+        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy }}
         stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
         stageAges={Object.fromEntries(inst.stages.flatMap((s) => {
           const since = stageSince.get(instId)?.get(s) ?? inst.createdAt;
@@ -106,7 +106,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <DiscussionPanel
         instrumentId={inst.id}
         posts={discussion.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-        isStaff={isStaff}
+        canEdit={canEdit}
       />
 
       <div className="card">

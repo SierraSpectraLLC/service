@@ -18,7 +18,7 @@ export async function composeEodEmail(date: string, dateMDY: string): Promise<{
   subject: string; html: string; filled: number; total: number;
 }> {
   const [rows, saved, roster] = await Promise.all([
-    db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
     db.select().from(people),
   ]);

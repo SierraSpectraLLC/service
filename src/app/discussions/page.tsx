@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function DiscussionsPage() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  const isStaff = user.role === "owner" || user.role === "staff";
+  const canEdit = user.role !== "client_viewer";
 
   const [general, recent, insts] = await Promise.all([
     db.select().from(discussionPosts).where(isNull(discussionPosts.instrumentId)).orderBy(asc(discussionPosts.createdAt)),
@@ -26,7 +26,7 @@ export default async function DiscussionsPage() {
       <DiscussionPanel
         instrumentId={null}
         posts={general.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-        isStaff={isStaff}
+        canEdit={canEdit}
         title="General discussion"
         subtitle="Lab-wide topics."
       />

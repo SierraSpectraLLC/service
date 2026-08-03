@@ -3,9 +3,12 @@
 import { useOptimistic, useState, useTransition } from "react";
 import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
-import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead } from "@/app/actions";
+import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 
-type Inst = { id: number; externalId: string; client: string; model: string; priority: number; lead: string; notes: string };
+type Inst = {
+  id: number; externalId: string; client: string; model: string; priority: number;
+  lead: string; notes: string; archived: boolean; archivedBy: string;
+};
 
 function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead: string; people: string[] }) {
   const [, startTransition] = useTransition();
@@ -39,10 +42,10 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
   };
 
   const save = () => {
-    if (isStaff && !draft.model.trim()) return;
+    if (canEdit && !draft.model.trim()) return;
     setError("");
     startTransition(async () => {
-      if (isStaff) {
+      if (canEdit) {
         const res = await updateInstrument(instrument.id, {
           externalId: draft.externalId, client: draft.client, model: draft.model,
           priority: parseInt(draft.priority) || instrument.priority,
@@ -56,6 +59,18 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
 
   return (
     <div className="card">
+      {instrument.archived && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+          <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>Archived</span>
+          <span className="mut" style={{ fontSize: 12 }}>
+            Kept for the record{instrument.archivedBy ? ` · by ${instrument.archivedBy}` : ""} · hidden from the dashboard, EOD, and sheet parity.
+          </span>
+          {canEdit && (
+            <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
+              onClick={() => startTransition(() => setInstrumentArchived(instrument.id, false))}>Restore</button>
+          )}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
@@ -81,7 +96,7 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
 
       {editing && (
         <div className="dash-form" style={{ marginTop: 10, marginBottom: 0 }}>
-          {isStaff && (
+          {canEdit && (
             <>
               <div className="pf3" style={{ marginBottom: 8 }}>
                 <div>
@@ -106,9 +121,16 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" onClick={save} disabled={pending}>{pending ? "Saving..." : "Save changes"}</button>
             <button className="btn sm" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+            {!instrument.archived && (
+              <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
+                onClick={() => {
+                  if (!window.confirm(`Archive ${instrument.externalId}? It keeps all its history and can be restored any time.`)) return;
+                  startTransition(() => setInstrumentArchived(instrument.id, true));
+                }}>Archive</button>
+            )}
             {isOwner && (
               <button
-                className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
+                className="btn link" style={{ color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
                 onClick={() => {
                   const typed = window.prompt(
                     `This permanently deletes ${instrument.externalId} with all its tasks, parts, gases and attachments.\n\nType ${instrument.externalId} to confirm:`

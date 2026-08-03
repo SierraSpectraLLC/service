@@ -59,6 +59,11 @@ export const instruments = pgTable("instruments", {
   priority: integer("priority").notNull().default(99),
   // Who's driving this system - a people-roster name (Sierra or LabZen), assignable by either side.
   lead: text("lead").notNull().default(""),
+  // Retired from the active fleet but kept in full. Archiving is the editor-safe
+  // alternative to deletion; hard delete stays owner-only.
+  archived: boolean("archived").notNull().default(false),
+  archivedAt: timestamp("archived_at"),
+  archivedBy: text("archived_by").notNull().default(""),
   stages: text("stages").array().notNull().default([]),
   notes: text("notes").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),

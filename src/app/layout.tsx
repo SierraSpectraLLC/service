@@ -42,6 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <NavMore items={[
                     { href: "/templates", label: "Templates" },
                     { href: "/metrics", label: "Metrics" },
+                    { href: "/archive", label: "Archived" },
                     { href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` },
                     ...(user.role === "owner" ? [{ href: "/settings", label: "Settings" }] : []),
                   ]} />

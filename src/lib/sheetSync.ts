@@ -306,6 +306,7 @@ export async function runSheetSync(): Promise<{ checked: number; diffs: number; 
   }
   // Instruments we track that the sheet dropped (the original sin).
   for (const [externalId, d] of byId) {
+    if (d.archived) continue;                           // archived systems are off the active fleet
     if ((d.stages || []).includes("Shipped")) continue; // shipped systems fall off the sheet, that's fine
     await record(externalId, "Row", "(missing from sheet)", `${d.model} (${d.client})`);
   }

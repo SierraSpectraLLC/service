@@ -63,7 +63,7 @@ export async function updateInstrument(
   instrumentId: number,
   data: { externalId?: string; client: string; model: string; priority: number },
 ): Promise<{ error?: string }> {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
   const client = data.client.trim();
@@ -108,6 +108,23 @@ export async function addInstrumentNote(instrumentId: number, text: string) {
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
     action: "posted note", field: "note", newValue: t,
   });
+  rev(instrumentId);
+}
+
+/** Retire a system from the active fleet (or bring it back). The editor-safe alternative to deleting. */
+export async function setInstrumentArchived(instrumentId: number, archived: boolean) {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst || inst.archived === archived) return;
+  await db.update(instruments)
+    .set({ archived, archivedAt: archived ? new Date() : null, archivedBy: archived ? u.name : "", updatedAt: new Date() })
+    .where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: archived ? `archived ${inst.externalId}` : `restored ${inst.externalId} to the active fleet`,
+    field: "archived", oldValue: String(inst.archived), newValue: String(archived),
+  });
+  revalidatePath("/archive");
   rev(instrumentId);
 }
 
@@ -444,7 +461,7 @@ export async function addTaskNote(taskId: number, text: string) {
 }
 
 export async function updateTaskNote(noteId: number, text: string) {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const t = text.trim();
   if (!t) throw new Error("Note text required");
   const [n] = await db.select().from(taskNotes).where(eq(taskNotes.id, noteId));
@@ -459,7 +476,7 @@ export async function updateTaskNote(noteId: number, text: string) {
 }
 
 export async function deleteTaskNote(noteId: number) {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const [n] = await db.select().from(taskNotes).where(eq(taskNotes.id, noteId));
   if (!n) return;
   const [task] = await db.select().from(tasks).where(eq(tasks.id, n.taskId));
@@ -472,7 +489,7 @@ export async function deleteTaskNote(noteId: number) {
 }
 
 export async function updateItemNote(noteId: number, text: string) {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const t = text.trim();
   if (!t) throw new Error("Note text required");
   const [n] = await db.select().from(itemNotes).where(eq(itemNotes.id, noteId));
@@ -488,7 +505,7 @@ export async function updateItemNote(noteId: number, text: string) {
 }
 
 export async function deleteItemNote(noteId: number) {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const [n] = await db.select().from(itemNotes).where(eq(itemNotes.id, noteId));
   if (!n) return;
   const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, n.itemId));
@@ -850,8 +867,23 @@ export async function postDiscussion(instrumentId: number | null, body: string) 
   revalidatePath("/discussions");
 }
 
+export async function updateDiscussionPost(postId: number, body: string) {
+  const u = await requireEditor();
+  const text = body.trim();
+  if (!text) throw new Error("Post text required");
+  const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
+  if (!p || p.body === text) return;
+  await db.update(discussionPosts).set({ body: text }).where(eq(discussionPosts.id, postId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
+    action: `edited a discussion post by ${p.author}`, field: "body", oldValue: p.body, newValue: text,
+  });
+  if (p.instrumentId !== null) rev(p.instrumentId);
+  revalidatePath("/discussions");
+}
+
 export async function deleteDiscussionPost(postId: number) {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
   if (!p) return;
   await db.delete(discussionPosts).where(eq(discussionPosts.id, postId));

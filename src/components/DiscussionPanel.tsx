@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { postDiscussion, deleteDiscussionPost } from "@/app/actions";
+import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
 
 export type Post = { id: number; author: string; authorEmail: string; body: string; createdAt: string };
 
@@ -15,11 +15,18 @@ const renderBody = (body: string) =>
       : <span key={i}>{part}</span>
   );
 
-export default function DiscussionPanel({ instrumentId, posts, isStaff, title, subtitle }: {
-  instrumentId: number | null; posts: Post[]; isStaff: boolean; title?: string; subtitle?: string;
+export default function DiscussionPanel({ instrumentId, posts, canEdit, title, subtitle }: {
+  instrumentId: number | null; posts: Post[]; canEdit: boolean; title?: string; subtitle?: string;
 }) {
   const [draft, setDraft] = useState("");
+  const [edits, setEdits] = useState<Record<number, string>>({});
   const [pending, startTransition] = useTransition();
+
+  const saveEdit = (id: number) => {
+    const text = (edits[id] ?? "").trim();
+    if (text) startTransition(() => updateDiscussionPost(id, text));
+    setEdits((e) => { const n = { ...e }; delete n[id]; return n; });
+  };
 
   const submit = () => {
     const text = draft.trim();
@@ -37,22 +44,42 @@ export default function DiscussionPanel({ instrumentId, posts, isStaff, title, s
 
       {posts.length === 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>No posts yet.</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
-        {posts.map((p) => (
-          <div key={p.id}>
-            <div style={{ fontSize: 12 }}>
-              <b style={{ color: "var(--navy)" }}>{p.author}</b>{" "}
-              <span className="mut" style={{ fontSize: 11 }}>{when(p.createdAt)}</span>
-              {isStaff && (
-                <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }} disabled={pending}
-                  onClick={() => {
-                    if (!window.confirm("Delete this post? It stays in the audit history.")) return;
-                    startTransition(() => deleteDiscussionPost(p.id));
-                  }}>×</button>
+        {posts.map((p) => {
+          const editing = typeof edits[p.id] === "string";
+          return (
+            <div key={p.id}>
+              <div style={{ fontSize: 12 }}>
+                <b style={{ color: "var(--navy)" }}>{p.author}</b>{" "}
+                <span className="mut" style={{ fontSize: 11 }}>{when(p.createdAt)}</span>
+                {canEdit && !editing && (
+                  <>
+                    {" "}<button className="btn link" style={{ fontSize: 11 }}
+                      onClick={() => setEdits((e) => ({ ...e, [p.id]: p.body }))}>edit</button>
+                    <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }} disabled={pending}
+                      onClick={() => {
+                        if (!window.confirm("Delete this post? It stays in the audit history.")) return;
+                        startTransition(() => deleteDiscussionPost(p.id));
+                      }}>×</button>
+                  </>
+                )}
+              </div>
+              {editing ? (
+                <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
+                  <textarea value={edits[p.id]} rows={2} autoFocus
+                    onChange={(e) => setEdits((s) => ({ ...s, [p.id]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveEdit(p.id);
+                      if (e.key === "Escape") setEdits((s) => { const n = { ...s }; delete n[p.id]; return n; });
+                    }}
+                    style={{ flex: 1, fontSize: 13, resize: "vertical" }} />
+                  <button className="btn sm" onClick={() => saveEdit(p.id)}>Save</button>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{renderBody(p.body)}</div>
               )}
             </div>
-            <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{renderBody(p.body)}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>

@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS "instruments" (
   "model" text NOT NULL,
   "priority" integer NOT NULL DEFAULT 99,
   "lead" text NOT NULL DEFAULT '',
+  "archived" boolean NOT NULL DEFAULT false,
+  "archived_at" timestamp,
+  "archived_by" text NOT NULL DEFAULT '',
   "stages" text[] NOT NULL DEFAULT '{}',
   "notes" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now(),
@@ -240,6 +243,9 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "image" text;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" text NOT NULL DEFAULT 'client_viewer';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "priority" integer NOT NULL DEFAULT 99;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "lead" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "archived" boolean NOT NULL DEFAULT false;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "archived_at" timestamp;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "archived_by" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "stages" text[] NOT NULL DEFAULT '{}';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "notes" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "created_at" timestamp NOT NULL DEFAULT now();
