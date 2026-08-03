@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, instrumentModules, timeEntries,
+  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, instrumentModules, timeEntries, discussionReads,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -978,6 +978,17 @@ export async function postDiscussion(instrumentId: number | null, body: string) 
   });
   if (instrumentId !== null) rev(instrumentId);
   revalidatePath("/discussions");
+}
+
+/** Mark a thread read for the current user (0 = the General board). */
+export async function markThreadRead(threadId: number) {
+  const u = await requireUser();
+  await db.insert(discussionReads)
+    .values({ userEmail: u.email, threadId, lastSeenAt: new Date() })
+    .onConflictDoUpdate({
+      target: [discussionReads.userEmail, discussionReads.threadId],
+      set: { lastSeenAt: new Date() },
+    });
 }
 
 export async function updateDiscussionPost(postId: number, body: string) {

@@ -37,6 +37,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
                 <Link className="btn sm" href="/discussions" style={{ textDecoration: "none" }}>Discussion</Link>
+                <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
                 {isStaff && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {isStaff && (
                   <NavMore items={[

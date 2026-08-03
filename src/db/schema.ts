@@ -247,6 +247,15 @@ export const discussionPosts = pgTable("discussion_posts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("discussion_instrument_idx").on(t.instrumentId), index("discussion_created_idx").on(t.createdAt)]);
 
+// Per-user read marks for discussion threads. threadId 0 = the General board,
+// otherwise the instrument id. Drives the "N new" badges.
+export const discussionReads = pgTable("discussion_reads", {
+  id: serial("id").primaryKey(),
+  userEmail: text("user_email").notNull(),
+  threadId: integer("thread_id").notNull(),
+  lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+}, (t) => [unique("discussion_reads_user_thread").on(t.userEmail, t.threadId)]);
+
 // People roster (Sierra + LabZen): task assignees and @mention targets.
 // Email optional - blank falls back to the STAFF_EMAILS heuristic in notify.ts.
 export const people = pgTable("people", {

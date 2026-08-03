@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, desc, isNull, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
-import { discussionPosts, instruments } from "@/db/schema";
+import { discussionPosts, instruments, discussionReads } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
 import DiscussionPanel from "@/components/DiscussionPanel";
@@ -14,11 +14,14 @@ export default async function DiscussionsPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
   const canEdit = user.role !== "client_viewer";
 
-  const [general, recent, insts] = await Promise.all([
+  const [general, recent, insts, readRows] = await Promise.all([
     db.select().from(discussionPosts).where(isNull(discussionPosts.instrumentId)).orderBy(asc(discussionPosts.createdAt)),
     db.select().from(discussionPosts).where(isNotNull(discussionPosts.instrumentId)).orderBy(desc(discussionPosts.createdAt)).limit(30),
     db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments),
+    db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, 0))),
   ]);
+  const seenGeneral = readRows[0]?.lastSeenAt;
+  const newGeneral = general.filter((p) => p.authorEmail !== user.email && (!seenGeneral || p.createdAt > seenGeneral)).length;
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
 
   return (
@@ -27,6 +30,7 @@ export default async function DiscussionsPage() {
         instrumentId={null}
         posts={general.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         canEdit={canEdit}
+        newCount={newGeneral}
         title="General discussion"
         subtitle="Lab-wide topics."
       />

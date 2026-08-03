@@ -203,6 +203,12 @@ CREATE TABLE IF NOT EXISTS "discussion_posts" (
   "body" text NOT NULL,
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "discussion_reads" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "user_email" text NOT NULL,
+  "thread_id" integer NOT NULL,
+  "last_seen_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "people" (
   "id" serial PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
@@ -330,6 +336,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'task_templates_name_unique') THEN
     ALTER TABLE "task_templates" ADD CONSTRAINT "task_templates_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_reads_user_thread') THEN
+    ALTER TABLE "discussion_reads" ADD CONSTRAINT "discussion_reads_user_thread" UNIQUE ("user_email","thread_id");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'people_name_unique') THEN
     ALTER TABLE "people" ADD CONSTRAINT "people_name_unique" UNIQUE ("name");

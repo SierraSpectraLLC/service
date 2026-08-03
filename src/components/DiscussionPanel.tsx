@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
+import ThreadSeen from "./ThreadSeen";
 
 export type Post = { id: number; author: string; authorEmail: string; body: string; createdAt: string };
 
@@ -15,8 +16,8 @@ const renderBody = (body: string) =>
       : <span key={i}>{part}</span>
   );
 
-export default function DiscussionPanel({ instrumentId, posts, canEdit, title, subtitle }: {
-  instrumentId: number | null; posts: Post[]; canEdit: boolean; title?: string; subtitle?: string;
+export default function DiscussionPanel({ instrumentId, posts, canEdit, newCount = 0, title, subtitle }: {
+  instrumentId: number | null; posts: Post[]; canEdit: boolean; newCount?: number; title?: string; subtitle?: string;
 }) {
   const [draft, setDraft] = useState("");
   const [edits, setEdits] = useState<Record<number, string>>({});
@@ -39,7 +40,13 @@ export default function DiscussionPanel({ instrumentId, posts, canEdit, title, s
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: subtitle ? 4 : 10 }}>{title ?? "Discussion"}</div>
+      <ThreadSeen threadId={instrumentId ?? 0} hasNew={newCount > 0} />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: subtitle ? 4 : 10 }}>
+        <div className="card-title">{title ?? "Discussion"}</div>
+        {newCount > 0 && (
+          <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{newCount} new</span>
+        )}
+      </div>
       {subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>{subtitle}</div>}
 
       {posts.length === 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>No posts yet.</div>}
