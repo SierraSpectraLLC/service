@@ -1,9 +1,10 @@
 import { and, asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people, tasks } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getStageSince, ageDays } from "@/lib/stageAges";
+import { shopToday } from "@/lib/shopday";
 import { requireUser } from "@/lib/authz";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
@@ -14,7 +15,7 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows, taskRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
@@ -23,6 +24,7 @@ export default async function Home() {
     getStageDefs(),
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
+    db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks),
   ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
@@ -33,6 +35,12 @@ export default async function Home() {
   );
 
   const stageSince = await getStageSince(rows.map((r) => r.id));
+  const today = shopToday();
+  const overdueBy = new Map<number, number>();
+  for (const t of taskRows) {
+    if (t.state === "Done" || !t.dueDate || t.dueDate >= today) continue;
+    overdueBy.set(t.instrumentId, (overdueBy.get(t.instrumentId) ?? 0) + 1);
+  }
 
   const data = rows.map((i) => {
     // Flag systems parked in a stage for a week+ (shipped systems are done, not stuck).
@@ -62,6 +70,7 @@ export default async function Home() {
       openParts,
       gasIssues,
       aging,
+      overdue: overdueBy.get(i.id) ?? 0,
       missingFromSheet: droppedFromSheet.has(i.externalId),
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
     };

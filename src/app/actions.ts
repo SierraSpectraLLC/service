@@ -366,15 +366,16 @@ export async function removeInstrumentGas(gasId: number) {
 
 // ---------------- Tasks ----------------
 
-export async function createTask(instrumentId: number, data: { title: string; body: string; assignee: string }) {
+export async function createTask(instrumentId: number, data: { title: string; body: string; assignee: string; dueDate?: string }) {
   const u = await requireEditor();
   if (!data.title.trim()) throw new Error("Title required");
   const [t] = await db.insert(tasks).values({
     instrumentId, title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
+    dueDate: (data.dueDate ?? "").trim(),
   }).returning();
   await audit({
     actor: u.email, instrumentId, entityType: "task", entityId: t.id,
-    action: `created task '${t.title}'${t.assignee ? ` (assigned ${t.assignee})` : ""}`,
+    action: `created task '${t.title}'${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
   });
   if (t.assignee) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -384,6 +385,21 @@ export async function createTask(instrumentId: number, data: { title: string; bo
     });
   }
   rev(instrumentId);
+}
+
+export async function setTaskDue(taskId: number, dueDate: string) {
+  const u = await requireEditor();
+  const due = dueDate.trim();
+  if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) return;
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t || t.dueDate === due) return;
+  await db.update(tasks).set({ dueDate: due }).where(eq(tasks.id, taskId));
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    action: due ? `set '${t.title}' due ${due}` : `cleared the due date on '${t.title}'`,
+    field: "dueDate", oldValue: t.dueDate, newValue: due,
+  });
+  rev(t.instrumentId);
 }
 
 export async function updateTask(taskId: number, data: { title: string; body: string }) {

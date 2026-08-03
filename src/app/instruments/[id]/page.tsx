@@ -7,7 +7,7 @@ import {
   taskTemplates, discussionPosts, people, instrumentModules,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { shopTime } from "@/lib/shopday";
+import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getStageSince, ageDays } from "@/lib/stageAges";
 import SystemPanel from "@/components/SystemPanel";
@@ -106,7 +106,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <AttachmentsPanel instrumentId={inst.id} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
-      <TasksPanel instrumentId={inst.id} tasks={fullTasks} templates={templateList} people={peopleRows.map((p) => p.name)} canEdit={canEdit} isStaff={isStaff} />
+      <TasksPanel instrumentId={inst.id} tasks={fullTasks} templates={templateList} people={peopleRows.map((p) => p.name)} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
 
       <DiscussionPanel
         instrumentId={inst.id}

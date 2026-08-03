@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS "tasks" (
   "body" text NOT NULL DEFAULT '',
   "state" text NOT NULL DEFAULT 'Open',
   "assignee" text NOT NULL DEFAULT '',
+  "due_date" text NOT NULL DEFAULT '',
   "sort_order" integer NOT NULL DEFAULT 0,
   "created_at" timestamp NOT NULL DEFAULT now(),
   "completed_at" timestamp
@@ -280,6 +281,7 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'part'
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "qty" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "specs" text NOT NULL DEFAULT '';
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "skipped" boolean NOT NULL DEFAULT false;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "due_date" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────

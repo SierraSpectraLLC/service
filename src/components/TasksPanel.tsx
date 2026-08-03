@@ -5,17 +5,33 @@ import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
-  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, applyTemplate,
+  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, applyTemplate, setTaskDue,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; thread: Note[] };
 type Task = {
-  id: number; title: string; body: string; state: string; assignee: string;
+  id: number; title: string; body: string; state: string; assignee: string; dueDate: string;
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
 };
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+/** Due-date chip: red when overdue, amber today/tomorrow, plain otherwise. Dates are shop-day strings. */
+function DueChip({ due, done, today }: { due: string; done: boolean; today: string }) {
+  if (!due) return null;
+  const [y, m, d] = due.split("-");
+  const label = `${parseInt(m)}/${parseInt(d)}`;
+  const overdue = !done && due < today;
+  const soon = !done && due === today;
+  const bg = overdue ? "#FBE9E9" : soon ? "#FAF0DC" : "#EEF1F5";
+  const fg = overdue ? "#A32D2D" : soon ? "#8A5410" : "#475569";
+  return (
+    <span className="pill" style={{ background: bg, color: fg }} title={`Due ${y}-${m}-${d}`}>
+      {overdue ? "overdue " : soon ? "due today" : "due "}{soon ? "" : label}
+    </span>
+  );
+}
 
 // Small optimistic wrappers so taps register instantly; the server action and
 // revalidation reconcile behind them.
@@ -53,14 +69,14 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   );
 }
 
-export default function TasksPanel({ instrumentId, tasks, templates, people, canEdit, isStaff }: {
+export default function TasksPanel({ instrumentId, tasks, templates, people, today, canEdit, isStaff }: {
   instrumentId: number; tasks: Task[]; templates: { id: number; name: string }[]; people: string[];
-  canEdit: boolean; isStaff: boolean;
+  today: string; canEdit: boolean; isStaff: boolean;
 }) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
-  const [draft, setDraft] = useState({ title: "", body: "", assignee: "" });
+  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "" });
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
   const [inputs, setInputs] = useState<Record<string, string | boolean>>({});
@@ -114,7 +130,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, can
     if (!draft.title.trim()) return;
     startTransition(async () => {
       await createTask(instrumentId, draft);
-      setDraft({ title: "", body: "", assignee: "" });
+      setDraft({ title: "", body: "", assignee: "", dueDate: "" });
       setShowNew(false);
     });
   };
@@ -129,6 +145,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, can
           <span className="pill" style={{ background: TASK_COLOR[t.state]?.bg, color: TASK_COLOR[t.state]?.fg }}>{t.state}</span>
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {t.checklist.length > 0 && <span className="mut" style={{ fontSize: 11 }}>{done}/{t.checklist.length}</span>}
+          <DueChip due={t.dueDate} done={isDone} today={today} />
           <span style={{ fontSize: 12, fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
           <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
         </div>
@@ -158,6 +175,9 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, can
                 <TaskStateSelect task={t} />
                 <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
                 <AssigneeSelect task={t} people={people} />
+                <span className="mut" style={{ fontSize: 12 }}>Due:</span>
+                <input type="date" value={t.dueDate} onChange={(e) => startTransition(() => setTaskDue(t.id, e.target.value))}
+                  style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
                 <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
                 {isStaff && (
                   <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
@@ -268,6 +288,9 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, can
             <select value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })} style={{ width: "auto" }}>
               {["", ...people].map((p) => <option key={p} value={p}>{p || "-"}</option>)}
             </select>
+            <span className="mut" style={{ fontSize: 12 }}>Due:</span>
+            <input type="date" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
+              style={{ width: "auto", fontSize: 12 }} />
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submitNew} disabled={pending}>
               {pending ? "Creating..." : "Create task"}
             </button>

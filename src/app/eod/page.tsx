@@ -71,9 +71,12 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
       const suggestedUpdate = [...new Set(happenings)].slice(0, 6).join("; ");
       // Suggested action item: blocked work first, then parts in flight, then gas needs.
       const blocked = taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked").map((t) => `Blocked: ${t.title}`);
+      const dueSoon = taskRows
+        .filter((t) => t.instrumentId === i.id && t.state !== "Done" && t.dueDate && t.dueDate <= today)
+        .map((t) => `${t.dueDate < today ? "Overdue" : "Due today"}: ${t.title}`);
       const waiting = partRows.filter((p) => p.instrumentId === i.id && partOpen(p.status)).map((p) => `${p.name} (${p.status.toLowerCase()})`);
       const gas = gasRows.filter((g) => g.instrumentId === i.id && gasAttention(g.status)).map((g) => `${g.gas} ${g.status.toLowerCase()}`);
-      const suggestedAction = [...blocked, ...waiting, ...gas].slice(0, 3).join("; ");
+      const suggestedAction = [...dueSoon, ...blocked, ...waiting, ...gas].slice(0, 3).join("; ");
       return {
         id: i.id,
         label: `${i.externalId} - ${i.model}`,

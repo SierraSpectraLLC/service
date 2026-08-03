@@ -81,6 +81,7 @@ export const tasks = pgTable("tasks", {
   // Open | In progress | Blocked | Done
   state: text("state").notNull().default("Open"),
   assignee: text("assignee").notNull().default(""),
+  dueDate: text("due_date").notNull().default(""), // YYYY-MM-DD in shop time, blank = no date
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
