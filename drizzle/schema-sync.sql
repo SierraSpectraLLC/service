@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS "instruments" (
   "external_id" text NOT NULL,
   "client" text NOT NULL,
   "model" text NOT NULL,
+  "manufacturer" text NOT NULL DEFAULT '',
+  "serial" text NOT NULL DEFAULT '',
+  "location" text NOT NULL DEFAULT '',
   "priority" integer NOT NULL DEFAULT 99,
   "lead" text NOT NULL DEFAULT '',
   "archived" boolean NOT NULL DEFAULT false,
@@ -171,6 +174,16 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_can_edit" boolean NOT NULL DEFAULT false,
   "eod_recipients" text NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS "instrument_modules" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'Other',
+  "model" text NOT NULL DEFAULT '',
+  "serial" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "discussion_posts" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -243,6 +256,9 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "image" text;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" text NOT NULL DEFAULT 'client_viewer';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "priority" integer NOT NULL DEFAULT 99;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "lead" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "manufacturer" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "serial" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "location" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "archived" boolean NOT NULL DEFAULT false;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "archived_at" timestamp;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "archived_by" text NOT NULL DEFAULT '';
@@ -280,6 +296,7 @@ CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
 CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "modules_instrument_idx" ON "instrument_modules" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
@@ -346,6 +363,10 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instrument_modules_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "instrument_modules" ADD CONSTRAINT "instrument_modules_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_instrument_id_instruments_id_fk') THEN

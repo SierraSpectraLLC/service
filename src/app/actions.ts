@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people,
+  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, instrumentModules,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -15,7 +15,7 @@ import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssig
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, autoFg } from "@/lib/stages";
+import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
@@ -61,7 +61,8 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; model: string; priority: number },
+  data: { externalId?: string; client: string; model: string; priority: number;
+          manufacturer?: string; serial?: string; location?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -78,13 +79,19 @@ export async function updateInstrument(
     if (clash.length) return { error: `${externalId} is already used by another system` };
   }
   const priority = data.priority || inst.priority;
+  const manufacturer = (data.manufacturer ?? inst.manufacturer).trim();
+  const serial = (data.serial ?? inst.serial).trim();
+  const location = (data.location ?? inst.location).trim();
   const changed: [string, string, string][] = [];
   if (externalId !== inst.externalId) changed.push(["externalId", inst.externalId, externalId]);
+  if (manufacturer !== inst.manufacturer) changed.push(["manufacturer", inst.manufacturer, manufacturer]);
+  if (serial !== inst.serial) changed.push(["serial", inst.serial, serial]);
+  if (location !== inst.location) changed.push(["location", inst.location, location]);
   if (client !== inst.client) changed.push(["client", inst.client, client]);
   if (model !== inst.model) changed.push(["model", inst.model, model]);
   if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, model, priority, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments).set({ externalId, client, model, priority, manufacturer, serial, location, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.
@@ -230,6 +237,64 @@ export async function deleteInstrument(instrumentId: number) {
   });
   rev(instrumentId);
   redirect("/");
+}
+
+// ---------------- Modules ----------------
+// The pieces a system is built from (LC pump, autosampler, detector...), each
+// with its own model and serial so a swapped module stays traceable.
+
+type ModuleInput = { kind: string; model: string; serial: string; note: string };
+
+const cleanModule = (d: ModuleInput) => ({
+  kind: (MODULE_KINDS as readonly string[]).includes(d.kind) ? d.kind : "Other",
+  model: d.model.trim(),
+  serial: d.serial.trim(),
+  note: d.note.trim(),
+});
+
+export async function addModule(instrumentId: number, data: ModuleInput): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const m = cleanModule(data);
+  if (!m.model && !m.serial) return { error: "Give the module a model or a serial number" };
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  const siblings = await db.select().from(instrumentModules).where(eq(instrumentModules.instrumentId, instrumentId));
+  const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
+  await db.insert(instrumentModules).values({ ...m, instrumentId, sortOrder });
+  await audit({
+    actor: u.email, instrumentId, entityType: "module", entityId: inst.externalId,
+    action: `added ${m.kind.toLowerCase()}: ${m.model || "(no model)"}${m.serial ? ` SN ${m.serial}` : ""}`,
+  });
+  rev(instrumentId);
+  return {};
+}
+
+export async function updateModule(moduleId: number, data: ModuleInput): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const m = cleanModule(data);
+  if (!m.model && !m.serial) return { error: "Give the module a model or a serial number" };
+  const [before] = await db.select().from(instrumentModules).where(eq(instrumentModules.id, moduleId));
+  if (!before) return { error: "Not found" };
+  await db.update(instrumentModules).set(m).where(eq(instrumentModules.id, moduleId));
+  await audit({
+    actor: u.email, instrumentId: before.instrumentId, entityType: "module", entityId: moduleId,
+    action: `edited ${m.kind.toLowerCase()}: ${m.model || "(no model)"}${m.serial ? ` SN ${m.serial}` : ""}`,
+    field: "serial", oldValue: before.serial, newValue: m.serial,
+  });
+  rev(before.instrumentId);
+  return {};
+}
+
+export async function removeModule(moduleId: number) {
+  const u = await requireStaff();
+  const [m] = await db.select().from(instrumentModules).where(eq(instrumentModules.id, moduleId));
+  if (!m) return;
+  await db.delete(instrumentModules).where(eq(instrumentModules.id, moduleId));
+  await audit({
+    actor: u.email, instrumentId: m.instrumentId, entityType: "module", entityId: moduleId,
+    action: `removed ${m.kind.toLowerCase()}: ${m.model || "(no model)"}${m.serial ? ` SN ${m.serial}` : ""}`,
+  });
+  rev(m.instrumentId);
 }
 
 // ---------------- Gases ----------------

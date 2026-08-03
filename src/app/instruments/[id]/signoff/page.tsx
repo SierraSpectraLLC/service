@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, tasks, checklistItems, parts, attachments } from "@/db/schema";
+import { instruments, tasks, checklistItems, parts, attachments, instrumentModules } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
@@ -25,11 +25,12 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const instId = parseInt(id);
   if (isNaN(instId)) notFound();
 
-  const [[inst], taskRows, partRows, attachRows] = await Promise.all([
+  const [[inst], taskRows, partRows, attachRows, moduleRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id)),
     db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(asc(attachments.createdAt)),
+    db.select().from(instrumentModules).where(eq(instrumentModules.instrumentId, instId)).orderBy(asc(instrumentModules.sortOrder), asc(instrumentModules.id)),
   ]);
   if (!inst) notFound();
 
@@ -65,9 +66,21 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
         <Row label="System ID" value={inst.externalId} />
         <Row label="Model" value={inst.model} />
         <Row label="Client" value={inst.client} />
+        <Row label="Manufacturer" value={inst.manufacturer} />
+        <Row label="Instrument SN" value={inst.serial} />
+        <Row label="Location" value={inst.location} />
         <Row label="Intake" value={shopMonthDay(inst.createdAt)} />
         <Row label="Stages" value={inst.stages.join(", ")} />
         <Row label="Prepared" value={`${shopTime(new Date())} by ${user.name}`} />
+
+        <div className="eyebrow" style={{ margin: "16px 0 6px" }}>Modules</div>
+        {moduleRows.map((m) => (
+          <div key={m.id} style={{ fontSize: 12, padding: "2px 0" }}>
+            {m.kind}: <b>{m.model || "(no model)"}</b>{m.serial ? ` · SN ${m.serial}` : ""}
+            {m.note ? <span className="mut"> - {m.note}</span> : null}
+          </div>
+        ))}
+        {moduleRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>None listed.</div>}
 
         <div className="eyebrow" style={{ margin: "16px 0 6px" }}>Completed work</div>
         {done.map((t) => {

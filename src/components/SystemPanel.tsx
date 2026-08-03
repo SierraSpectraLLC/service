@@ -8,6 +8,7 @@ import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumen
 type Inst = {
   id: number; externalId: string; client: string; model: string; priority: number;
   lead: string; notes: string; archived: boolean; archivedBy: string;
+  manufacturer: string; serial: string; location: string;
 };
 
 function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead: string; people: string[] }) {
@@ -28,7 +29,7 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
   gases: GasRow[]; people: string[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "", notes: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "", notes: "", manufacturer: "", serial: "", location: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -36,6 +37,7 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
     setDraft({
       externalId: instrument.externalId, client: instrument.client, model: instrument.model,
       priority: String(instrument.priority), notes: instrument.notes,
+      manufacturer: instrument.manufacturer, serial: instrument.serial, location: instrument.location,
     });
     setError("");
     setEditing(true);
@@ -49,6 +51,7 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
         const res = await updateInstrument(instrument.id, {
           externalId: draft.externalId, client: draft.client, model: draft.model,
           priority: parseInt(draft.priority) || instrument.priority,
+          manufacturer: draft.manufacturer, serial: draft.serial, location: draft.location,
         });
         if (res?.error) { setError(res.error); return; } // keep the form open with the bad value
       }
@@ -79,6 +82,12 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
           {!editing && (
             <>
               <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)", marginTop: 2 }}>{instrument.model}</div>
+              {(instrument.manufacturer || instrument.serial || instrument.location) && (
+                <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
+                  {[instrument.manufacturer, instrument.serial ? `SN ${instrument.serial}` : "", instrument.location]
+                    .filter(Boolean).join(" · ")}
+                </div>
+              )}
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
                 <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
                 {canEdit
@@ -109,6 +118,11 @@ export default function SystemPanel({ instrument, stages, stageDefs, stageAges, 
               <div style={{ marginBottom: 8 }}>
                 <label>Model *</label>
                 <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+              </div>
+              <div className="pf3" style={{ marginBottom: 8 }}>
+                <div><label>Manufacturer</label><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" /></div>
+                <div><label>Instrument SN</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>
+                <div><label>Location</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Corner room, bench 3" /></div>
               </div>
             </>
           )}

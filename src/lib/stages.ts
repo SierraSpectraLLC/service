@@ -67,6 +67,12 @@ export const ORDER_STATES = ["Ordered", "In transit", "Received", "Backordered"]
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;
 export const ATTACH_KINDS = ["Tune report", "Test data", "Report", "Photo", "Manual", "Other"] as const;
 
+/** Modules that make up a system - LC stack components, GC front ends, MS pieces. */
+export const MODULE_KINDS = [
+  "Pump", "Autosampler", "Column oven", "Detector", "Mass spec", "Degasser",
+  "Controller", "Headspace", "GC", "Injector", "Vacuum pump", "Computer", "Other",
+] as const;
+
 // Matched to the client sheet's dropdown chips (their "Waiting" = our
 // "Waiting / blocked"; their "Packing" purple = our "Waiting to ship").
 export const STAGE_COLOR: Record<string, { bg: string; fg: string }> = {

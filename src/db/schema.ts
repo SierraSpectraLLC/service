@@ -56,6 +56,9 @@ export const instruments = pgTable("instruments", {
   externalId: text("external_id").unique().notNull(), // e.g. T-003, CASA-001
   client: text("client").notNull(),                   // Testen, GMI, Utah, Casablanca
   model: text("model").notNull(),
+  manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
+  serial: text("serial").notNull().default(""),             // the instrument's own serial
+  location: text("location").notNull().default(""),         // room / bench on the client's floor
   priority: integer("priority").notNull().default(99),
   // Who's driving this system - a people-roster name (Sierra or LabZen), assignable by either side.
   lead: text("lead").notNull().default(""),
@@ -202,6 +205,20 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolvedBy: text("resolved_by").notNull().default(""),
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
+
+// Modules that make up a system - an LC stack's pump, autosampler, column
+// oven, detector, or a GC's headspace unit. Each carries its own model and
+// serial so a swapped pump is traceable.
+export const instrumentModules = pgTable("instrument_modules", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("Other"), // Pump, Autosampler, ... (vocabulary in lib/stages.ts)
+  model: text("model").notNull().default(""),
+  serial: text("serial").notNull().default(""),
+  note: text("note").notNull().default(""),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("modules_instrument_idx").on(t.instrumentId)]);
 
 // Shared discussion threads between Sierra Spectra and the client. One thread
 // per instrument, plus a General board (instrument_id null) for lab-wide items
