@@ -175,6 +175,16 @@ CREATE TABLE IF NOT EXISTS "app_settings" (
   "client_can_edit" boolean NOT NULL DEFAULT false,
   "eod_recipients" text NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS "time_entries" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "person" text NOT NULL DEFAULT '',
+  "date" text NOT NULL,
+  "minutes" integer NOT NULL DEFAULT 0,
+  "note" text NOT NULL DEFAULT '',
+  "logged_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "instrument_modules" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,
@@ -298,6 +308,7 @@ CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
 CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "time_instrument_idx" ON "time_entries" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "modules_instrument_idx" ON "instrument_modules" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
@@ -365,6 +376,10 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'time_entries_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "time_entries" ADD CONSTRAINT "time_entries_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instrument_modules_instrument_id_instruments_id_fk') THEN

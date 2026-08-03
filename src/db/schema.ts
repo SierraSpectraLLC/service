@@ -207,6 +207,19 @@ export const sheetDiffs = pgTable("sheet_diffs", {
   resolution: text("resolution").notNull().default(""), // kept_ours | accepted_sheet
 }, (t) => [index("diffs_resolved_idx").on(t.resolved)]);
 
+// Labour logged against a system, in minutes (entered as hours in the UI).
+// Feeds the per-system total and, with parts cost, the true cost of a refurb.
+export const timeEntries = pgTable("time_entries", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  person: text("person").notNull().default(""),
+  date: text("date").notNull(),           // YYYY-MM-DD in shop time
+  minutes: integer("minutes").notNull().default(0),
+  note: text("note").notNull().default(""),
+  loggedBy: text("logged_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("time_instrument_idx").on(t.instrumentId)]);
+
 // Modules that make up a system - an LC stack's pump, autosampler, column
 // oven, detector, or a GC's headspace unit. Each carries its own model and
 // serial so a swapped pump is traceable.

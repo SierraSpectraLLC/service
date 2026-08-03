@@ -33,6 +33,10 @@ function guessKind(name: string): string {
   return "Other";
 }
 
+/** Blob URLs are direct file links, so images can be shown inline. */
+const isImage = (name: string, url: string) =>
+  /\.(jpe?g|png|gif|webp|heic|heif|avif)(\?|$)/i.test(name) || /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(url);
+
 function fmtSize(bytes: number): string {
   if (!bytes) return "-";
   if (bytes < 1024) return bytes + " B";
@@ -365,7 +369,15 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
         }
         return (
           <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
+            {isImage(a.fileName, a.url) ? (
+              <a href={a.url} target="_blank" rel="noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={a.url} alt={a.description || a.fileName} loading="lazy"
+                  style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} />
+              </a>
+            ) : (
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
+            )}
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="mono" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
               {a.description && <div style={{ fontSize: 12, marginTop: 2 }}>{a.description}</div>}
