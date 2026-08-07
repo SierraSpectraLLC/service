@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  taskTemplates, discussionPosts, people, assets, timeEntries, discussionReads,
+  taskTemplates, discussionPosts, people, assets, discussionReads,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopTime, shopToday } from "@/lib/shopday";
@@ -20,7 +20,6 @@ import TasksPanel from "@/components/TasksPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
-import TimePanel from "@/components/TimePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +32,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, stageSince, discussion, peopleRows, assetRows, spareRows, timeRows, readRows] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, stageSince, discussion, peopleRows, assetRows, spareRows, readRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -47,7 +46,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     db.select().from(assets).where(eq(assets.status, "Spare")).orderBy(asc(assets.kind), asc(assets.model)),
-    db.select().from(timeEntries).where(eq(timeEntries.instrumentId, instId)).orderBy(desc(timeEntries.date), desc(timeEntries.id)),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
   ]);
   if (!inst) notFound();
@@ -122,9 +120,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <AttachmentsPanel instrumentId={inst.id} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
       <TasksPanel instrumentId={inst.id} tasks={fullTasks} templates={templateList} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
-
-      <TimePanel instrumentId={inst.id} entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note, assetId: t.assetId }))}
-        today={shopToday()} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} canEdit={canEdit} isStaff={isStaff} />
 
       <DiscussionPanel
         instrumentId={inst.id}

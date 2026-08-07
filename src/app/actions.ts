@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, assets, assetEvents, timeEntries, discussionReads,
+  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, assets, assetEvents, discussionReads,
   checkoutRules,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
@@ -20,7 +20,6 @@ import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } f
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
-import { parseHours, formatHours } from "@/lib/hours";
 import { matchRules } from "@/lib/checkout";
 import { sendEmail } from "@/lib/email";
 
@@ -241,38 +240,6 @@ export async function deleteInstrument(instrumentId: number) {
   });
   rev(instrumentId);
   redirect("/");
-}
-
-// ---------------- Time log ----------------
-
-export async function logTime(instrumentId: number, data: { person: string; date: string; hours: string; note: string; assetId?: number | null }): Promise<{ error?: string }> {
-  const u = await requireEditor();
-  const minutes = parseHours(data.hours);
-  if (minutes === null || minutes <= 0) return { error: 'Enter time like "1.5", "1:30" or "45m"' };
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(data.date.trim()) ? data.date.trim() : shopToday();
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) return { error: "Not found" };
-  const person = data.person.trim() || u.name;
-  const taggedAsset = await validAssetTag(data.assetId, instrumentId);
-  await db.insert(timeEntries).values({ instrumentId, assetId: taggedAsset?.id ?? null, person, date, minutes, note: data.note.trim(), loggedBy: u.email });
-  await audit({
-    actor: u.email, instrumentId, entityType: "time", entityId: inst.externalId,
-    action: `logged ${formatHours(minutes)} for ${person} on ${date}${taggedAsset ? ` [${assetLabel(taggedAsset)}]` : ""}${data.note.trim() ? ` - ${data.note.trim()}` : ""}`,
-  });
-  rev(instrumentId);
-  return {};
-}
-
-export async function deleteTimeEntry(entryId: number) {
-  const u = await requireStaff();
-  const [e] = await db.select().from(timeEntries).where(eq(timeEntries.id, entryId));
-  if (!e) return;
-  await db.delete(timeEntries).where(eq(timeEntries.id, entryId));
-  await audit({
-    actor: u.email, instrumentId: e.instrumentId, entityType: "time", entityId: entryId,
-    action: `removed a ${formatHours(e.minutes)} entry for ${e.person} on ${e.date}`,
-  });
-  rev(e.instrumentId);
 }
 
 // ---------------- Assets ----------------
