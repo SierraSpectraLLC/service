@@ -63,6 +63,37 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
 }
 
+/* Bottom sheet (checkout item editor). Scrim + sheet are plain fixed divs -
+   no portal - so keep them last inside the card that opens them. */
+.scrim {
+  position: fixed; inset: 0; background: rgba(23, 42, 74, 0.35); z-index: 40;
+}
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
+  background: var(--card); border: 1px solid var(--line); border-bottom: none;
+  border-radius: 16px 16px 0 0; padding: 16px;
+  max-width: 560px; margin: 0 auto; max-height: 88dvh; overflow-y: auto;
+  box-shadow: 0 -8px 30px rgba(23, 42, 74, 0.18);
+  animation: sheet-up 0.18s ease-out;
+}
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .sheet { animation: none; }
+}
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button {
+  border: none; background: #fff; color: var(--slate); font-size: 12px; font-weight: 700;
+  padding: 6px 12px; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--navy); color: #fff; }
+.seg button:focus-visible, .sheet button:focus-visible, .sheet input:focus-visible,
+.chip-x:focus-visible, .drag-handle:focus-visible {
+  outline: 2px solid var(--sky); outline-offset: 1px;
+}
+.drag-handle { touch-action: none; cursor: grab; }
+.drag-handle:active { cursor: grabbing; }
+
 /* Sign-off packet: browser print / save-as-PDF is the export path. */
 @media print {
   .app-header, .app-footer, .no-print { display: none !important; }

@@ -199,7 +199,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, sys
                   <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
                     onClick={() => {
                       const msg = t.origin === "checkout"
-                        ? `Delete checkout test "${t.title}"? Use this for tests that don't apply here.`
+                        ? `Delete checkout item "${t.title}"? Use this for items that don't apply here.`
                         : `Delete task "${t.title}"? Its checklist and notes go with it.`;
                       if (!window.confirm(msg)) return;
                       startTransition(async () => { await deleteTask(t.id); setExpanded(null); });
@@ -332,7 +332,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, sys
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <span className="eyebrow">Checkout</span>
             <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{checkout.length}</span>
-            <span className="mut" style={{ fontSize: 11 }}>auto-generated tests · delete any that don&apos;t apply</span>
+            <span className="mut" style={{ fontSize: 11 }}>auto-generated · delete any that don&apos;t apply</span>
           </div>
           {checkout.map((t) => renderTask(t, false))}
           {active.length > 0 && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Tasks</div>}

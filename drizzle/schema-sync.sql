@@ -243,6 +243,20 @@ CREATE TABLE IF NOT EXISTS "checkout_rules" (
   "sort_order" integer NOT NULL DEFAULT 0,
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "checkout_items" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "asset_type" text NOT NULL,
+  "kind" text NOT NULL DEFAULT 'test',
+  "name" text NOT NULL,
+  "position" integer NOT NULL DEFAULT 0,
+  "result_type" text NOT NULL DEFAULT 'pass_fail',
+  "target" text,
+  "tolerance_pct" numeric,
+  "requires_note" boolean NOT NULL DEFAULT false,
+  "consumes_part" boolean NOT NULL DEFAULT false,
+  "model_scope" text[] NOT NULL DEFAULT '{}',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "task_templates" (
   "id" serial PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
@@ -490,3 +504,67 @@ INSERT INTO "people" ("name","email","org") VALUES
   ('Joe','','sierra'),
   ('Bill','','sierra')
 ON CONFLICT ("name") DO NOTHING;
+
+-- ── Migration: checkout_rules -> checkout_items ────────────────────────────
+-- One-time copy, guarded on checkout_items being empty (so it also re-seeds a
+-- DB where every item was deliberately deleted - same behavior the old seed
+-- had). checkout_rules stays behind as the seed source and is otherwise unused.
+-- Criteria parsing: "+/-" or the ± sign -> measured (a trailing % becomes
+-- tolerance_pct, the rest of the text is kept in target); "pass"/"fail" or
+-- blank -> pass_fail; anything else -> note with the original text in target.
+-- Model filters: an exact case-insensitive match against the asset catalog
+-- becomes a one-element scope; non-matches keep the raw string (nothing lost)
+-- and get an audit_log row so they can be reviewed on /templates.
+DO $$
+DECLARE
+  r RECORD;
+  v_result text;
+  v_remainder text;
+  v_target text;
+  v_tol numeric;
+  v_catalog text;
+  v_scope text[];
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "checkout_items") THEN
+    FOR r IN SELECT * FROM "checkout_rules" ORDER BY "kind", "sort_order", "id" LOOP
+      IF r."criteria" ~ '(\+/-|±)' THEN
+        v_result := 'measured';
+        -- Drop a leading "Pass/Fail" - the measured type implies it.
+        v_remainder := btrim(regexp_replace(r."criteria", '^\s*pass\s*/\s*fail\s*', '', 'i'));
+        v_tol := substring(v_remainder from '(?:\+/-|±)\s*([0-9]+\.?[0-9]*)\s*%')::numeric;
+        IF v_remainder ~ '^(\+/-|±)\s*[0-9]+\.?[0-9]*\s*%$' THEN
+          v_target := NULL; -- a bare percent is fully expressed by tolerance_pct
+        ELSE
+          v_target := NULLIF(btrim(regexp_replace(v_remainder, '^(\+/-|±)\s*', '')), '');
+        END IF;
+      ELSIF r."criteria" ILIKE '%pass%' OR r."criteria" ILIKE '%fail%' OR btrim(r."criteria") = '' THEN
+        v_result := 'pass_fail'; v_target := NULL; v_tol := NULL;
+      ELSE
+        v_result := 'note'; v_target := r."criteria"; v_tol := NULL;
+      END IF;
+
+      IF btrim(r."model_match") = '' THEN
+        v_scope := '{}'::text[];
+      ELSE
+        SELECT a."model" INTO v_catalog FROM "assets" a
+          WHERE lower(a."model") = lower(btrim(r."model_match")) LIMIT 1;
+        IF v_catalog IS NOT NULL THEN
+          v_scope := ARRAY[v_catalog];
+        ELSE
+          v_scope := ARRAY[btrim(r."model_match")];
+          INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+          VALUES ('schema-sync', 'checkout', r."id"::text,
+                  'checkout item "' || r."title" || '": model filter "' || btrim(r."model_match") || '" matched no asset in the catalog - carried over as-is, review on /templates');
+        END IF;
+        v_catalog := NULL;
+      END IF;
+
+      INSERT INTO "checkout_items"
+        ("asset_type","kind","name","position","result_type","target","tolerance_pct","model_scope")
+      VALUES (
+        CASE WHEN r."kind" = 'Full system' THEN 'system' ELSE r."kind" END,
+        'test', r."title", r."sort_order", v_result, v_target, v_tol, v_scope
+      );
+    END LOOP;
+  END IF;
+END $$;

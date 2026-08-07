@@ -8,7 +8,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, assets, assetEvents, discussionReads,
-  checkoutRules,
+  checkoutItems,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -20,7 +20,7 @@ import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } f
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
-import { matchRules } from "@/lib/checkout";
+import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { sendEmail } from "@/lib/email";
 
 const rev = (id?: number) => {
@@ -222,7 +222,7 @@ export async function createInstrument(
     });
   }
   if (templateId) await copyTemplateOnto(row.id, row.externalId, templateId, u.email);
-  await generateCheckout(row.id, { id: null, kind: "Full system", model: row.model, serial: "" }, u.email);
+  await generateCheckout(row.id, { id: null, kind: "system", model: row.model, serial: "" }, u.email);
   rev(row.id);
   return row.id;
 }
@@ -265,34 +265,36 @@ async function logAssetEvent(assetId: number, kind: string, instrumentId: number
 }
 
 /**
- * Auto-create checkout tests when an asset lands on a system (or, with a
- * "Full system" target, when a system is created). Skips any test that is
- * already open for the same asset on that system, so re-attach churn is safe.
+ * Auto-create checkout tasks + tests when an asset lands on a system (or,
+ * with an assetType of "system", when a system is created). Skips any item
+ * whose name is already an open task for the same asset on that system, so
+ * re-attach churn is safe.
  */
 async function generateCheckout(
   instrumentId: number,
   target: { id: number | null; kind: string; model: string; serial: string },
   actorEmail: string,
 ) {
-  const rules = await db.select().from(checkoutRules).where(eq(checkoutRules.kind, target.kind));
-  const picked = matchRules(rules, target.kind, target.model);
+  const assetType = target.id === null ? "system" : target.kind;
+  const items = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, assetType));
+  const picked = matchItems(items, assetType, target.model);
   if (!picked.length) return;
   const existing = await db.select().from(tasks).where(eq(tasks.instrumentId, instrumentId));
   const openTitles = new Set(
     existing.filter((t) => t.state !== "Done" && t.assetId === target.id).map((t) => t.title.toLowerCase())
   );
-  const fresh = picked.filter((r) => !openTitles.has(r.title.toLowerCase()));
+  const fresh = picked.filter((i) => !openTitles.has(i.name.toLowerCase()));
   if (!fresh.length) return;
-  for (const r of fresh) {
+  for (const i of fresh) {
     await db.insert(tasks).values({
-      instrumentId, title: r.title, body: r.criteria, origin: "checkout",
-      assetId: target.id, sortOrder: r.sortOrder,
+      instrumentId, title: i.name, body: summarizeItem(i), origin: "checkout",
+      assetId: target.id, sortOrder: i.position,
     });
   }
   const label = target.id !== null ? assetLabel(target as { kind: string; model: string; serial: string }) : "the system";
   await audit({
     actor: actorEmail, instrumentId, entityType: "task", entityId: target.id ?? instrumentId,
-    action: `generated ${fresh.length} checkout test${fresh.length === 1 ? "" : "s"} for ${label}`,
+    action: `generated ${fresh.length} checkout item${fresh.length === 1 ? "" : "s"} for ${label}`,
   });
 }
 
@@ -1350,68 +1352,121 @@ export async function applyTemplate(instrumentId: number, templateId: number) {
   rev(instrumentId);
 }
 
-// ---------------- Checkout rules ----------------
-// Tests auto-created when an asset lands on a system ("Full system" rules
-// fire when a system is created). A rule with a model filter replaces the
-// kind's generic rules for matching models.
+// ---------------- Checkout items ----------------
+// Tasks and tests auto-created when an asset lands on a system (assetType
+// "system" items fire when a system is created). Per kind, model-scoped
+// items replace the type's all-model items for matching models.
 
-const CHECKOUT_KINDS: readonly string[] = [...MODULE_KINDS, "Full system"];
+const CHECKOUT_ASSET_TYPES: readonly string[] = [...MODULE_KINDS, "system"];
 
-export async function addCheckoutRule(
-  data: { kind: string; modelMatch: string; title: string; criteria: string },
-): Promise<{ error?: string }> {
+type CheckoutItemInput = {
+  assetType: string; kind: string; name: string;
+  resultType: string; target: string; tolerancePct: string;
+  requiresNote: boolean; consumesPart: boolean;
+  modelScope: string[];
+};
+
+/** Validate + normalize a checkout item; returns {error} or clean values. */
+function cleanCheckoutItem(data: CheckoutItemInput): { error: string } | {
+  assetType: string; kind: string; name: string;
+  resultType: string; target: string | null; tolerancePct: string | null;
+  requiresNote: boolean; consumesPart: boolean; modelScope: string[];
+} {
+  if (!CHECKOUT_ASSET_TYPES.includes(data.assetType)) return { error: "Pick an asset type" };
+  if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
+  const name = data.name.trim();
+  if (!name || name.length > 120) return { error: "Name must be 1-120 characters" };
+  const isTest = data.kind === "test";
+  const resultType = isTest && (RESULT_TYPES as readonly string[]).includes(data.resultType) ? data.resultType : "pass_fail";
+  const target = isTest && (resultType === "measured" || resultType === "note") ? data.target.trim() || null : null;
+  let tolerancePct: string | null = null;
+  if (isTest && resultType === "measured" && data.tolerancePct.trim()) {
+    const n = parseFloat(data.tolerancePct.trim());
+    if (Number.isNaN(n) || n < 0) return { error: "Tolerance must be a number, e.g. 10" };
+    tolerancePct = String(n);
+  }
+  const modelScope = [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
+  return {
+    assetType: data.assetType, kind: data.kind, name, resultType, target, tolerancePct,
+    requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart, modelScope,
+  };
+}
+
+const checkoutScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", ")} only)` : "");
+
+export async function addCheckoutItem(data: CheckoutItemInput): Promise<{ error?: string }> {
   const u = await requireStaff();
-  if (!CHECKOUT_KINDS.includes(data.kind)) return { error: "Pick an asset type" };
-  const title = data.title.trim();
-  if (!title || title.length > 120) return { error: "Test name must be 1-120 characters" };
-  const modelMatch = data.modelMatch.trim();
-  const criteria = data.criteria.trim();
-  const siblings = await db.select().from(checkoutRules).where(eq(checkoutRules.kind, data.kind));
-  if (siblings.some((r) => r.title.toLowerCase() === title.toLowerCase() && r.modelMatch.toLowerCase() === modelMatch.toLowerCase()))
-    return { error: `"${title}" already exists for ${data.kind}${modelMatch ? ` (${modelMatch})` : ""}` };
-  const sortOrder = Math.max(0, ...siblings.map((r) => r.sortOrder)) + 1;
-  const [row] = await db.insert(checkoutRules).values({ kind: data.kind, modelMatch, title, criteria, sortOrder }).returning();
+  const clean = cleanCheckoutItem(data);
+  if ("error" in clean) return clean;
+  const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, clean.assetType));
+  if (siblings.some((i) => i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
+      && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
+    return { error: `"${clean.name}" already exists for this type` };
+  const position = Math.max(0, ...siblings.map((i) => i.position)) + 1;
+  const [row] = await db.insert(checkoutItems).values({ ...clean, position }).returning();
   await audit({
     actor: u.email, entityType: "checkout", entityId: row.id,
-    action: `added checkout test "${title}" for ${data.kind}${modelMatch ? ` (${modelMatch} models only)` : ""}`,
+    action: `added checkout ${clean.kind} "${clean.name}" for ${clean.assetType}${checkoutScopeLabel(clean.modelScope)}`,
   });
   revalidatePath("/templates");
   return {};
 }
 
-export async function updateCheckoutRule(
-  ruleId: number,
-  data: { modelMatch: string; title: string; criteria: string },
-): Promise<{ error?: string }> {
+export async function updateCheckoutItem(itemId: number, data: CheckoutItemInput): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const [r] = await db.select().from(checkoutRules).where(eq(checkoutRules.id, ruleId));
-  if (!r) return { error: "Not found" };
-  const title = data.title.trim();
-  if (!title || title.length > 120) return { error: "Test name must be 1-120 characters" };
-  const modelMatch = data.modelMatch.trim();
-  const criteria = data.criteria.trim();
-  if (r.title === title && r.modelMatch === modelMatch && r.criteria === criteria) return {};
-  const siblings = await db.select().from(checkoutRules).where(eq(checkoutRules.kind, r.kind));
-  if (siblings.some((x) => x.id !== ruleId && x.title.toLowerCase() === title.toLowerCase() && x.modelMatch.toLowerCase() === modelMatch.toLowerCase()))
-    return { error: `"${title}" already exists for ${r.kind}${modelMatch ? ` (${modelMatch})` : ""}` };
-  await db.update(checkoutRules).set({ title, modelMatch, criteria }).where(eq(checkoutRules.id, ruleId));
+  const [before] = await db.select().from(checkoutItems).where(eq(checkoutItems.id, itemId));
+  if (!before) return { error: "Not found" };
+  const clean = cleanCheckoutItem({ ...data, assetType: before.assetType }); // type is fixed at creation
+  if ("error" in clean) return clean;
+  const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, before.assetType));
+  if (siblings.some((i) => i.id !== itemId && i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
+      && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
+    return { error: `"${clean.name}" already exists for this type` };
+  await db.update(checkoutItems).set({
+    kind: clean.kind, name: clean.name, resultType: clean.resultType, target: clean.target,
+    tolerancePct: clean.tolerancePct, requiresNote: clean.requiresNote, consumesPart: clean.consumesPart,
+    modelScope: clean.modelScope,
+  }).where(eq(checkoutItems.id, itemId));
   await audit({
-    actor: u.email, entityType: "checkout", entityId: ruleId,
-    action: `edited checkout test "${title}" for ${r.kind}`,
-    field: "rule", oldValue: `${r.title} | ${r.modelMatch} | ${r.criteria}`, newValue: `${title} | ${modelMatch} | ${criteria}`,
+    actor: u.email, entityType: "checkout", entityId: itemId,
+    action: `edited checkout ${clean.kind} "${clean.name}" for ${before.assetType}${checkoutScopeLabel(clean.modelScope)}`,
+    field: "item", oldValue: `${before.kind} | ${before.name} | ${before.modelScope.join(", ")}`,
+    newValue: `${clean.kind} | ${clean.name} | ${clean.modelScope.join(", ")}`,
   });
   revalidatePath("/templates");
   return {};
 }
 
-export async function deleteCheckoutRule(ruleId: number) {
+export async function deleteCheckoutItem(itemId: number) {
   const u = await requireStaff();
-  const [r] = await db.select().from(checkoutRules).where(eq(checkoutRules.id, ruleId));
-  if (!r) return;
-  await db.delete(checkoutRules).where(eq(checkoutRules.id, ruleId));
+  const [i] = await db.select().from(checkoutItems).where(eq(checkoutItems.id, itemId));
+  if (!i) return;
+  await db.delete(checkoutItems).where(eq(checkoutItems.id, itemId));
   await audit({
-    actor: u.email, entityType: "checkout", entityId: ruleId,
-    action: `removed checkout test "${r.title}" for ${r.kind}${r.modelMatch ? ` (${r.modelMatch} models only)` : ""}`,
+    actor: u.email, entityType: "checkout", entityId: itemId,
+    action: `removed checkout ${i.kind} "${i.name}" for ${i.assetType}${checkoutScopeLabel(i.modelScope)}`,
+  });
+  revalidatePath("/templates");
+}
+
+/** Persist a drag-reorder within one asset type's list. */
+export async function reorderCheckoutItems(assetType: string, orderedIds: number[]) {
+  const u = await requireStaff();
+  if (!CHECKOUT_ASSET_TYPES.includes(assetType)) return;
+  const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, assetType));
+  const known = new Map(siblings.map((i) => [i.id, i]));
+  let position = 1;
+  for (const id of orderedIds) {
+    const item = known.get(id);
+    if (!item) continue; // ignore ids from other types or stale UIs
+    if (item.position !== position) {
+      await db.update(checkoutItems).set({ position }).where(eq(checkoutItems.id, id));
+    }
+    position++;
+  }
+  await audit({
+    actor: u.email, entityType: "checkout", entityId: assetType,
+    action: `reordered the ${assetType} checkout list`,
   });
   revalidatePath("/templates");
 }

@@ -3,7 +3,7 @@
 // The build's verify-schema gate fails the deploy if a column is missing, so a
 // forgotten mirror is caught loudly - never shipped silently.
 import {
-  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique,
+  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique, numeric,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -300,20 +300,31 @@ export const stageEvents = pgTable("stage_events", {
   at: timestamp("at").notNull().defaultNow(),
 }, (t) => [index("stage_events_instrument_idx").on(t.instrumentId)]);
 
-// Checkout rules: the "Basic Testing Results" matrix. Each asset kind (or
-// "Full system") has standard tests; an optional model filter narrows a rule
-// ("LC-40"), and filtered rules REPLACE the kind's generic rules when any
-// match. Generation happens when an asset is added/attached/moved (and on
-// system creation for "Full system"). Managed on /templates.
-export const checkoutRules = pgTable("checkout_rules", {
+// Checkout items: tasks and tests auto-created when a system or asset is
+// added. Each asset type (or "system" for instrument-level items) carries an
+// ordered list; a non-empty model scope narrows an item to those models and,
+// per kind, scoped items REPLACE the type's all-model items when any match.
+// Superseded checkout_rules stays in the DB (additive pipeline) but is only
+// read by the schema-sync migration that seeds this table. Managed on
+// /templates.
+export const checkoutItems = pgTable("checkout_items", {
   id: serial("id").primaryKey(),
-  kind: text("kind").notNull(),                     // MODULE_KINDS entry or "Full system"
-  modelMatch: text("model_match").notNull().default(""), // substring, case-insensitive; '' = all models
-  title: text("title").notNull(),
-  criteria: text("criteria").notNull().default(""), // becomes the task body
-  sortOrder: integer("sort_order").notNull().default(0),
+  assetType: text("asset_type").notNull(),          // MODULE_KINDS entry or "system"
+  kind: text("kind").notNull().default("test"),     // 'task' | 'test'
+  name: text("name").notNull(),
+  position: integer("position").notNull().default(0), // ordering within its asset type
+  // Test-only
+  resultType: text("result_type").notNull().default("pass_fail"), // pass_fail | measured | reading | note
+  target: text("target"),                           // e.g. "5 mL/min", or the note text
+  tolerancePct: numeric("tolerance_pct"),           // only for measured, e.g. 10
+  // Task-only
+  requiresNote: boolean("requires_note").notNull().default(false),
+  consumesPart: boolean("consumes_part").notNull().default(false),
+  // [] = all models. For assetType 'system' this holds system types
+  // (instruments.model values) instead of asset models.
+  modelScope: text("model_scope").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [unique("checkout_rule_unique").on(t.kind, t.modelMatch, t.title)]);
+});
 
 // SOP templates: a named bundle of tasks (each with a checklist) that can be
 // applied to an instrument in one tap - e.g. "GC/MS refurb SOP". Managed by

@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
 import { asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { taskTemplates, templateTasks, templateItems, checkoutRules } from "@/db/schema";
+import { taskTemplates, templateTasks, templateItems, checkoutItems, assets, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import TemplatesPanel from "@/components/TemplatesPanel";
-import CheckoutRulesPanel from "@/components/CheckoutRulesPanel";
+import CheckoutItemsPanel from "@/components/CheckoutItemsPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +13,13 @@ export default async function TemplatesPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
 
-  const tpls = await db.select().from(taskTemplates).orderBy(asc(taskTemplates.name));
-  const ruleRows = await db.select().from(checkoutRules)
-    .orderBy(asc(checkoutRules.kind), asc(checkoutRules.sortOrder), asc(checkoutRules.id));
+  const [tpls, itemRows, assetModels, systemModels] = await Promise.all([
+    db.select().from(taskTemplates).orderBy(asc(taskTemplates.name)),
+    db.select().from(checkoutItems)
+      .orderBy(asc(checkoutItems.assetType), asc(checkoutItems.position), asc(checkoutItems.id)),
+    db.selectDistinct({ kind: assets.kind, model: assets.model }).from(assets),
+    db.selectDistinct({ model: instruments.model }).from(instruments),
+  ]);
   const tplIds = tpls.map((t) => t.id);
   const tTasks = tplIds.length
     ? await db.select().from(templateTasks).where(inArray(templateTasks.templateId, tplIds))
@@ -36,13 +40,27 @@ export default async function TemplatesPage() {
     })),
   }));
 
+  // Scope options come from the catalog only: distinct asset models per type,
+  // distinct instrument models for the System group.
+  const modelOptions: Record<string, string[]> = {
+    system: [...new Set(systemModels.map((m) => m.model).filter(Boolean))].sort(),
+  };
+  for (const { kind, model } of assetModels) {
+    if (!model) continue;
+    (modelOptions[kind] ??= []).push(model);
+  }
+  for (const k of Object.keys(modelOptions)) modelOptions[k] = [...new Set(modelOptions[k])].sort();
+
   return (
     <div className="container" style={{ maxWidth: 720 }}>
       <TemplatesPanel templates={templates} />
-      <CheckoutRulesPanel
-        rules={ruleRows.map((r) => ({
-          id: r.id, kind: r.kind, modelMatch: r.modelMatch, title: r.title, criteria: r.criteria, sortOrder: r.sortOrder,
+      <CheckoutItemsPanel
+        items={itemRows.map((i) => ({
+          id: i.id, assetType: i.assetType, kind: i.kind, name: i.name, position: i.position,
+          resultType: i.resultType, target: i.target, tolerancePct: i.tolerancePct,
+          requiresNote: i.requiresNote, consumesPart: i.consumesPart, modelScope: i.modelScope,
         }))}
+        modelOptions={modelOptions}
       />
     </div>
   );
