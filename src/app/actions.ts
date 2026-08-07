@@ -846,8 +846,12 @@ export async function updatePart(partId: number, raw: PartInput) {
   const [before] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!before) return;
   const stamps = partStamps(before, data.status);
-  const taggedAsset = await validAssetTag(data.assetId, before.instrumentId);
-  await db.update(parts).set({ ...data, ...stamps, assetId: taggedAsset?.id ?? null, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
+  // Only touch the asset tag when the edit actually changed it - re-validating
+  // an unchanged tag would silently clear it if the asset has since detached.
+  const retagged = (data.assetId ?? null) !== before.assetId;
+  const taggedAsset = retagged ? await validAssetTag(data.assetId, before.instrumentId) : null;
+  const assetId = retagged ? taggedAsset?.id ?? null : before.assetId;
+  await db.update(parts).set({ ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
     ? verb
@@ -858,7 +862,28 @@ export async function updatePart(partId: number, raw: PartInput) {
     actor: u.email, instrumentId: before.instrumentId, entityType: "part", entityId: partId,
     action, field: before.status !== data.status ? "status" : "", oldValue: before.status, newValue: data.status,
   });
+  if (retagged) {
+    await audit({
+      actor: u.email, instrumentId: before.instrumentId, entityType: "part", entityId: partId,
+      action: taggedAsset ? `tagged part '${data.name.trim()}' to ${assetLabel(taggedAsset)}` : `untagged part '${data.name.trim()}' (whole system)`,
+    });
+  }
   rev(before.instrumentId);
+}
+
+export async function setPartAsset(partId: number, assetId: number | null) {
+  const u = await requireEditor();
+  const [p] = await db.select().from(parts).where(eq(parts.id, partId));
+  if (!p) return;
+  const tagged = await validAssetTag(assetId, p.instrumentId);
+  const next = tagged?.id ?? null;
+  if (p.assetId === next) return;
+  await db.update(parts).set({ assetId: next }).where(eq(parts.id, partId));
+  await audit({
+    actor: u.email, instrumentId: p.instrumentId, entityType: "part", entityId: partId,
+    action: tagged ? `tagged part '${p.name}' to ${assetLabel(tagged)}` : `untagged part '${p.name}' (whole system)`,
+  });
+  rev(p.instrumentId);
 }
 
 export async function setPartStatus(partId: number, status: string) {

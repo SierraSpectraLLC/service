@@ -3,7 +3,7 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
-import { createPart, updatePart, setPartStatus, deletePart } from "@/app/actions";
+import { createPart, updatePart, setPartStatus, setPartAsset, deletePart } from "@/app/actions";
 
 type Part = {
   id: number; kind: string; assetId: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
@@ -22,6 +22,26 @@ function PartStatusSelect({ part }: { part: Part }) {
       style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: PART_COLOR[status]?.bg, color: PART_COLOR[status]?.fg, cursor: "pointer" }}
     >
       {PART_STATES.map((s) => <option key={s}>{s}</option>)}
+    </select>
+  );
+}
+
+/** Row-level asset tag, editable in place - no need to open the full edit form. */
+function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { id: number; label: string }[] }) {
+  const [, startTransition] = useTransition();
+  const [assetId, setOptimistic] = useOptimistic(part.assetId, (_cur: number | null, next: number | null) => next);
+  return (
+    <select
+      value={assetId ?? ""}
+      onChange={(e) => startTransition(async () => {
+        const next = e.target.value ? parseInt(e.target.value) : null;
+        setOptimistic(next);
+        await setPartAsset(part.id, next);
+      })}
+      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: assetId !== null ? "#EDEBFA" : "#EEF1F5", color: assetId !== null ? "#4F45A3" : "#475569", cursor: "pointer" }}
+    >
+      <option value="">Whole system</option>
+      {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
     </select>
   );
 }
@@ -193,7 +213,14 @@ export default function PartsPanel({ instrumentId, parts, systemAssets, canEdit,
             <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#FAFBFD" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}{p.qty ? <span className="mut" style={{ fontWeight: 400 }}> × {p.qty}</span> : null}</span>
-                {assetLabel(p.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(p.assetId)}</span>}
+                {canEdit && systemAssets.length > 0 ? (
+                  <PartAssetSelect part={p} systemAssets={systemAssets} />
+                ) : assetLabel(p.assetId) ? (
+                  <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(p.assetId)}</span>
+                ) : null}
+                {p.assetId !== null && !assetLabel(p.assetId) && (
+                  <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>asset detached</span>
+                )}
                 {canEdit ? (
                   <PartStatusSelect part={p} />
                 ) : (
