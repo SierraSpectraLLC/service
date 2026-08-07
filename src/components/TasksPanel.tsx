@@ -5,15 +5,17 @@ import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
-  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, applyTemplate, setTaskDue,
+  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, applyTemplate, setTaskDue, setTaskAsset,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; thread: Note[] };
 type Task = {
   id: number; title: string; body: string; state: string; assignee: string; dueDate: string;
+  assetId: number | null;
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
 };
+type SystemAsset = { id: number; label: string };
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -69,14 +71,15 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   );
 }
 
-export default function TasksPanel({ instrumentId, tasks, templates, people, today, canEdit, isStaff }: {
+export default function TasksPanel({ instrumentId, tasks, templates, people, systemAssets, today, canEdit, isStaff }: {
   instrumentId: number; tasks: Task[]; templates: { id: number; name: string }[]; people: string[];
-  today: string; canEdit: boolean; isStaff: boolean;
+  systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
 }) {
+  const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
-  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "" });
+  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null });
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
   const [inputs, setInputs] = useState<Record<string, string | boolean>>({});
@@ -130,7 +133,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, tod
     if (!draft.title.trim()) return;
     startTransition(async () => {
       await createTask(instrumentId, draft);
-      setDraft({ title: "", body: "", assignee: "", dueDate: "" });
+      setDraft({ title: "", body: "", assignee: "", dueDate: "", assetId: null });
       setShowNew(false);
     });
   };
@@ -145,6 +148,7 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, tod
           <span className="pill" style={{ background: TASK_COLOR[t.state]?.bg, color: TASK_COLOR[t.state]?.fg }}>{t.state}</span>
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {t.checklist.length > 0 && <span className="mut" style={{ fontSize: 11 }}>{done}/{t.checklist.length}</span>}
+          {assetLabel(t.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(t.assetId)}</span>}
           <DueChip due={t.dueDate} done={isDone} today={today} />
           <span style={{ fontSize: 12, fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
           <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
@@ -175,6 +179,16 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, tod
                 <TaskStateSelect task={t} />
                 <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
                 <AssigneeSelect task={t} people={people} />
+                {systemAssets.length > 0 && (
+                  <>
+                    <span className="mut" style={{ fontSize: 12 }}>For:</span>
+                    <select value={t.assetId ?? ""} onChange={(e) => startTransition(() => setTaskAsset(t.id, e.target.value ? parseInt(e.target.value) : null))}
+                      style={{ width: "auto", fontSize: 12 }}>
+                      <option value="">Whole system</option>
+                      {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                    </select>
+                  </>
+                )}
                 <span className="mut" style={{ fontSize: 12 }}>Due:</span>
                 <input type="date" value={t.dueDate} onChange={(e) => startTransition(() => setTaskDue(t.id, e.target.value))}
                   style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
@@ -291,6 +305,16 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, tod
             <span className="mut" style={{ fontSize: 12 }}>Due:</span>
             <input type="date" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
               style={{ width: "auto", fontSize: 12 }} />
+            {systemAssets.length > 0 && (
+              <>
+                <span className="mut" style={{ fontSize: 12 }}>For:</span>
+                <select value={draft.assetId ?? ""} onChange={(e) => setDraft({ ...draft, assetId: e.target.value ? parseInt(e.target.value) : null })}
+                  style={{ width: "auto", fontSize: 12 }}>
+                  <option value="">Whole system</option>
+                  {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                </select>
+              </>
+            )}
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submitNew} disabled={pending}>
               {pending ? "Creating..." : "Create task"}
             </button>

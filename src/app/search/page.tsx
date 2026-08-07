@@ -3,7 +3,7 @@ import Link from "next/link";
 import { desc, ilike, or, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  instruments, tasks, parts, attachments, discussionPosts, instrumentModules, auditLog,
+  instruments, tasks, parts, attachments, discussionPosts, assets, auditLog,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import SearchBox from "@/components/SearchBox";
@@ -36,8 +36,8 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       )).limit(25),
       db.select().from(attachments).where(or(ilike(attachments.fileName, like), ilike(attachments.description, like))).limit(25),
       db.select().from(discussionPosts).where(ilike(discussionPosts.body, like)).orderBy(desc(discussionPosts.createdAt)).limit(25),
-      db.select().from(instrumentModules).where(or(
-        ilike(instrumentModules.model, like), ilike(instrumentModules.serial, like), ilike(instrumentModules.note, like),
+      db.select().from(assets).where(or(
+        ilike(assets.model, like), ilike(assets.serial, like), ilike(assets.note, like), ilike(assets.manufacturer, like),
       )).limit(25),
       db.select().from(auditLog).where(ilike(auditLog.action, like)).orderBy(desc(auditLog.createdAt)).limit(15),
     ]);
@@ -45,7 +45,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     const ids = new Set<number>([
       ...instRows.map((i) => i.id),
       ...taskRows.map((t) => t.instrumentId), ...partRows.map((p) => p.instrumentId),
-      ...attachRows.map((a) => a.instrumentId), ...moduleRows.map((m) => m.instrumentId),
+      ...attachRows.map((a) => a.instrumentId), ...moduleRows.flatMap((m) => (m.instrumentId ? [m.instrumentId] : [])),
       ...postRows.flatMap((p) => (p.instrumentId ? [p.instrumentId] : [])),
       ...auditRows.flatMap((a) => (a.instrumentId ? [a.instrumentId] : [])),
     ]);
@@ -60,7 +60,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       ...instRows.map((i) => ({ id: i.id, instrumentId: i.id, group: "Systems", title: `${i.externalId} - ${i.model}`, sub: join([i.client, i.location, i.serial && `SN ${i.serial}`]) })),
       ...taskRows.map((t) => ({ id: t.id, instrumentId: t.instrumentId, group: "Tasks", title: t.title, sub: join([t.state, t.assignee, t.body]) })),
       ...partRows.map((p) => ({ id: p.id, instrumentId: p.instrumentId, group: p.kind === "consumable" ? "Consumables" : "Parts", title: p.name, sub: join([p.partNumber && `PN ${p.partNumber}`, p.serial && `SN ${p.serial}`, p.vendor, p.status]) })),
-      ...moduleRows.map((m) => ({ id: m.id, instrumentId: m.instrumentId, group: "Modules", title: `${m.kind}: ${m.model || "(no model)"}`, sub: join([m.serial && `SN ${m.serial}`, m.note]) })),
+      ...moduleRows.map((m) => ({ id: m.id, instrumentId: -m.id, group: "Assets", title: `${m.kind}: ${m.model || "(no model)"}`, sub: join([m.serial && `SN ${m.serial}`, m.status, m.note]) })),
       ...attachRows.map((a) => ({ id: a.id, instrumentId: a.instrumentId, group: "Files", title: a.fileName, sub: join([a.kind, a.description]) })),
       ...postRows.map((p) => ({ id: p.id, instrumentId: p.instrumentId ?? 0, group: "Discussion", title: p.body.slice(0, 120), sub: p.author })),
       ...auditRows.map((a) => ({ id: a.id, instrumentId: a.instrumentId ?? 0, group: "History", title: a.action.slice(0, 120), sub: a.actor.split("@")[0] })),
@@ -85,11 +85,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         <div key={g} className="card">
           <div className="eyebrow" style={{ marginBottom: 6 }}>{g}</div>
           {hits.filter((h) => h.group === g).map((h) => (
-            <Link key={`${g}-${h.id}`} href={h.instrumentId ? `/instruments/${h.instrumentId}` : "/discussions"} className="row-hover"
+            <Link key={`${g}-${h.id}`} href={h.instrumentId < 0 ? `/assets/${-h.instrumentId}` : h.instrumentId ? `/instruments/${h.instrumentId}` : "/discussions"} className="row-hover"
               style={{ display: "block", padding: "7px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
               <div style={{ fontSize: 13 }}>{h.title}</div>
               <div className="mut" style={{ fontSize: 11 }}>
-                {h.instrumentId ? labels.get(h.instrumentId) ?? "" : "General discussion"}{h.sub ? ` · ${h.sub}` : ""}
+                {h.instrumentId < 0 ? "Asset" : h.instrumentId ? labels.get(h.instrumentId) ?? "" : "General discussion"}{h.sub ? ` · ${h.sub}` : ""}
               </div>
             </Link>
           ))}

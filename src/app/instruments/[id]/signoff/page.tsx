@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, tasks, checklistItems, parts, attachments, instrumentModules } from "@/db/schema";
+import { instruments, tasks, checklistItems, parts, attachments, assets } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
@@ -30,7 +30,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id)),
     db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(asc(attachments.createdAt)),
-    db.select().from(instrumentModules).where(eq(instrumentModules.instrumentId, instId)).orderBy(asc(instrumentModules.sortOrder), asc(instrumentModules.id)),
+    db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
   ]);
   if (!inst) notFound();
 
@@ -73,7 +73,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
         <Row label="Stages" value={inst.stages.join(", ")} />
         <Row label="Prepared" value={`${shopTime(new Date())} by ${user.name}`} />
 
-        <div className="eyebrow" style={{ margin: "16px 0 6px" }}>Modules</div>
+        <div className="eyebrow" style={{ margin: "16px 0 6px" }}>Assets</div>
         {moduleRows.map((m) => (
           <div key={m.id} style={{ fontSize: 12, padding: "2px 0" }}>
             {m.kind}: <b>{m.model || "(no model)"}</b>{m.serial ? ` · SN ${m.serial}` : ""}

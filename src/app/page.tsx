@@ -1,7 +1,7 @@
 import { and, asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people, tasks } from "@/db/schema";
-import { GAS_SYMBOL, gasAttention, partOpen } from "@/lib/stages";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people, tasks, assets } from "@/db/schema";
+import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getStageSince, ageDays } from "@/lib/stageAges";
 import { shopToday } from "@/lib/shopday";
@@ -15,7 +15,7 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows, taskRows] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows, taskRows, assetRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
@@ -25,6 +25,7 @@ export default async function Home() {
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks),
+    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, status: assets.status }).from(assets),
   ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
@@ -71,6 +72,9 @@ export default async function Home() {
       gasIssues,
       aging,
       overdue: overdueBy.get(i.id) ?? 0,
+      assetIssues: assetRows
+        .filter((a) => a.instrumentId === i.id && assetAttention(a.status))
+        .map((a) => `${a.kind.toLowerCase()} ${a.status === "Down" ? "down" : "attn"}`),
       missingFromSheet: droppedFromSheet.has(i.externalId),
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
     };

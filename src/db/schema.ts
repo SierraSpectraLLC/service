@@ -82,6 +82,7 @@ export const tasks = pgTable("tasks", {
   state: text("state").notNull().default("Open"),
   assignee: text("assignee").notNull().default(""),
   dueDate: text("due_date").notNull().default(""), // YYYY-MM-DD in shop time, blank = no date
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset this is about
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
@@ -131,6 +132,7 @@ export const parts = pgTable("parts", {
   // part | consumable - consumables (ferrules, septa, liners) share the same
   // lifecycle/cost/audit but get a lighter-weight form.
   kind: text("kind").notNull().default("part"),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset it went into
   name: text("name").notNull(),
   partNumber: text("part_number").notNull().default(""),
   serial: text("serial").notNull().default(""),
@@ -212,6 +214,7 @@ export const sheetDiffs = pgTable("sheet_diffs", {
 export const timeEntries = pgTable("time_entries", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset the hours went into
   person: text("person").notNull().default(""),
   date: text("date").notNull(),           // YYYY-MM-DD in shop time
   minutes: integer("minutes").notNull().default(0),
@@ -220,19 +223,38 @@ export const timeEntries = pgTable("time_entries", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("time_instrument_idx").on(t.instrumentId)]);
 
-// Modules that make up a system - an LC stack's pump, autosampler, column
-// oven, detector, or a GC's headspace unit. Each carries its own model and
-// serial so a swapped pump is traceable.
-export const instrumentModules = pgTable("instrument_modules", {
+// Assets: the individual units systems are built from - an LC stack's pump,
+// autosampler, detector, a GC's headspace unit. First-class citizens: each has
+// its own identity, status, and lifecycle, and can be attached to a system,
+// sit on the shelf as a spare (instrument_id null), or be decommissioned.
+// Service history is derived: tasks/parts/time tagged with asset_id plus the
+// lifecycle rows in asset_events.
+export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }), // null = unattached
   kind: text("kind").notNull().default("Other"), // Pump, Autosampler, ... (vocabulary in lib/stages.ts)
   model: text("model").notNull().default(""),
   serial: text("serial").notNull().default(""),
+  manufacturer: text("manufacturer").notNull().default(""),
+  // In service | Spare | Needs attention | Down | Decommissioned (lib/stages.ts)
+  status: text("status").notNull().default("In service"),
+  location: text("location").notNull().default(""), // where a spare lives: "shelf B"
   note: text("note").notNull().default(""),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("modules_instrument_idx").on(t.instrumentId)]);
+}, (t) => [index("assets_instrument_idx").on(t.instrumentId)]);
+
+// Asset lifecycle: installed / removed / moved / status changes, with the
+// system involved. Merged with tagged work into the asset's service history.
+export const assetEvents = pgTable("asset_events", {
+  id: serial("id").primaryKey(),
+  assetId: integer("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(), // installed | removed | moved | status | note
+  instrumentId: integer("instrument_id"), // the system involved, if any (no FK: survives system deletion)
+  detail: text("detail").notNull().default(""),
+  actor: text("actor").notNull().default(""),
+  at: timestamp("at").notNull().defaultNow(),
+}, (t) => [index("asset_events_asset_idx").on(t.assetId)]);
 
 // Shared discussion threads between Sierra Spectra and the client. One thread
 // per instrument, plus a General board (instrument_id null) for lab-wide items

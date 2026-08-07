@@ -67,11 +67,25 @@ export const ORDER_STATES = ["Ordered", "In transit", "Received", "Backordered"]
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;
 export const ATTACH_KINDS = ["Tune report", "Test data", "Report", "Photo", "Manual", "Other"] as const;
 
-/** Modules that make up a system - LC stack components, GC front ends, MS pieces. */
+/** Asset kinds - LC stack components, GC front ends, MS pieces. */
 export const MODULE_KINDS = [
   "Pump", "Autosampler", "Column oven", "Detector", "Mass spec", "Degasser",
   "Controller", "Headspace", "GC", "Injector", "Vacuum pump", "Computer", "Other",
 ] as const;
+
+// "Spare" is unattached-but-fine; "Decommissioned" is end of life.
+export const ASSET_STATES = ["In service", "Spare", "Needs attention", "Down", "Decommissioned"] as const;
+export const ASSET_COLOR: Record<string, { bg: string; fg: string }> = {
+  "In service": { bg: "#E5F3E5", fg: "#2E6B2E" },
+  Spare: { bg: "#EEF1F5", fg: "#475569" },
+  "Needs attention": { bg: "#FAF0DC", fg: "#8A5410" },
+  Down: { bg: "#FBE9E9", fg: "#A32D2D" },
+  Decommissioned: { bg: "#EEF1F5", fg: "#94A3B8" },
+};
+/** True when an asset status should surface on the system row / dashboard. */
+export function assetAttention(status: string): boolean {
+  return status === "Needs attention" || status === "Down";
+}
 
 // Matched to the client sheet's dropdown chips (their "Waiting" = our
 // "Waiting / blocked"; their "Packing" purple = our "Waiting to ship").

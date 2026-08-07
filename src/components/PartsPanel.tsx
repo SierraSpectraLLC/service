@@ -6,7 +6,7 @@ import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/li
 import { createPart, updatePart, setPartStatus, deletePart } from "@/app/actions";
 
 type Part = {
-  id: number; kind: string; name: string; partNumber: string; serial: string; qty: string; specs: string;
+  id: number; kind: string; assetId: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
   installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
@@ -26,11 +26,14 @@ function PartStatusSelect({ part }: { part: Part }) {
   );
 }
 
-const empty = { kind: "part", name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
+const empty = { kind: "part", assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { instrumentId: number; parts: Part[]; canEdit: boolean; isStaff: boolean }) {
+export default function PartsPanel({ instrumentId, parts, systemAssets, canEdit, isStaff }: {
+  instrumentId: number; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
+}) {
+  const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
   const [draft, setDraft] = useState<typeof empty>(empty);
   const [specPairs, setSpecPairs] = useState<SpecPair[]>([]);
@@ -38,7 +41,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
 
   const openNew = () => { setDraft(empty); setSpecPairs([]); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
-    setDraft({ kind: p.kind, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
+    setDraft({ kind: p.kind, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -109,6 +112,15 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
             <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Restek" /></div>
             <div><label>Qty</label><input value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="1" /></div>
           </div>
+          {systemAssets.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <label>For asset</label>
+              <select value={draft.assetId ?? ""} onChange={(e) => setDraft({ ...draft, assetId: e.target.value ? parseInt(e.target.value) : null })}>
+                <option value="">Whole system</option>
+                {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+              </select>
+            </div>
+          )}
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>
             <div>
@@ -181,6 +193,7 @@ export default function PartsPanel({ instrumentId, parts, canEdit, isStaff }: { 
             <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#FAFBFD" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}{p.qty ? <span className="mut" style={{ fontWeight: 400 }}> × {p.qty}</span> : null}</span>
+                {assetLabel(p.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(p.assetId)}</span>}
                 {canEdit ? (
                   <PartStatusSelect part={p} />
                 ) : (

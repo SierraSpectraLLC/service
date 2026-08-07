@@ -185,15 +185,27 @@ CREATE TABLE IF NOT EXISTS "time_entries" (
   "logged_by" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
-CREATE TABLE IF NOT EXISTS "instrument_modules" (
+CREATE TABLE IF NOT EXISTS "assets" (
   "id" serial PRIMARY KEY NOT NULL,
-  "instrument_id" integer NOT NULL,
+  "instrument_id" integer,
   "kind" text NOT NULL DEFAULT 'Other',
   "model" text NOT NULL DEFAULT '',
   "serial" text NOT NULL DEFAULT '',
+  "manufacturer" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'In service',
+  "location" text NOT NULL DEFAULT '',
   "note" text NOT NULL DEFAULT '',
   "sort_order" integer NOT NULL DEFAULT 0,
   "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "asset_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "asset_id" integer NOT NULL,
+  "kind" text NOT NULL,
+  "instrument_id" integer,
+  "detail" text NOT NULL DEFAULT '',
+  "actor" text NOT NULL DEFAULT '',
+  "at" timestamp NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS "discussion_posts" (
   "id" serial PRIMARY KEY NOT NULL,
@@ -298,6 +310,9 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "qty" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "specs" text NOT NULL DEFAULT '';
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "skipped" boolean NOT NULL DEFAULT false;
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "due_date" text NOT NULL DEFAULT '';
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "asset_id" integer;
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "asset_id" integer;
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
@@ -315,7 +330,8 @@ CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
 CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "time_instrument_idx" ON "time_entries" ("instrument_id");
-CREATE INDEX IF NOT EXISTS "modules_instrument_idx" ON "instrument_modules" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "assets_instrument_idx" ON "assets" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "asset_events_asset_idx" ON "asset_events" ("asset_id");
 CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
@@ -391,9 +407,25 @@ DO $$ BEGIN
     ALTER TABLE "time_entries" ADD CONSTRAINT "time_entries_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instrument_modules_instrument_id_instruments_id_fk') THEN
-    ALTER TABLE "instrument_modules" ADD CONSTRAINT "instrument_modules_instrument_id_instruments_id_fk"
-      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'assets_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "assets" ADD CONSTRAINT "assets_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'asset_events_asset_id_assets_id_fk') THEN
+    ALTER TABLE "asset_events" ADD CONSTRAINT "asset_events_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_asset_id_assets_id_fk') THEN
+    ALTER TABLE "tasks" ADD CONSTRAINT "tasks_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parts_asset_id_assets_id_fk') THEN
+    ALTER TABLE "parts" ADD CONSTRAINT "parts_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'time_entries_asset_id_assets_id_fk') THEN
+    ALTER TABLE "time_entries" ADD CONSTRAINT "time_entries_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_instrument_id_instruments_id_fk"

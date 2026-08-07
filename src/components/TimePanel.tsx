@@ -4,12 +4,14 @@ import { useState, useTransition } from "react";
 import { formatHours } from "@/lib/hours";
 import { logTime, deleteTimeEntry } from "@/app/actions";
 
-export type TimeRow = { id: number; person: string; date: string; minutes: number; note: string };
+export type TimeRow = { id: number; person: string; date: string; minutes: number; note: string; assetId: number | null };
 
-export default function TimePanel({ instrumentId, entries, today, people, canEdit, isStaff }: {
-  instrumentId: number; entries: TimeRow[]; today: string; people: string[]; canEdit: boolean; isStaff: boolean;
+export default function TimePanel({ instrumentId, entries, today, people, systemAssets, canEdit, isStaff }: {
+  instrumentId: number; entries: TimeRow[]; today: string; people: string[];
+  systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
 }) {
-  const [draft, setDraft] = useState({ person: "", date: today, hours: "", note: "" });
+  const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
+  const [draft, setDraft] = useState({ person: "", date: today, hours: "", note: "", assetId: null as number | null });
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -23,7 +25,7 @@ export default function TimePanel({ instrumentId, entries, today, people, canEdi
     startTransition(async () => {
       const res = await logTime(instrumentId, draft);
       if (res?.error) setError(res.error);
-      else setDraft({ person: draft.person, date: today, hours: "", note: "" });
+      else setDraft({ person: draft.person, date: today, hours: "", note: "", assetId: draft.assetId });
     });
   };
 
@@ -59,9 +61,18 @@ export default function TimePanel({ instrumentId, entries, today, people, canEdi
             <div><label>Date</label><input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></div>
             <div><label>Hours</label><input value={draft.hours} onChange={(e) => setDraft({ ...draft, hours: e.target.value })} placeholder="1.5 or 1:30" /></div>
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <label>Note</label>
-            <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="e.g. source cleaning + retune" />
+          <div className="pf2" style={{ marginBottom: 10 }}>
+            <div>
+              <label>Note</label>
+              <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder="e.g. source cleaning + retune" />
+            </div>
+            <div>
+              <label>For asset</label>
+              <select value={draft.assetId ?? ""} onChange={(e) => setDraft({ ...draft, assetId: e.target.value ? parseInt(e.target.value) : null })}>
+                <option value="">Whole system</option>
+                {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+              </select>
+            </div>
           </div>
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
           <button className="btn sm accent" onClick={submit} disabled={pending || !draft.hours.trim()}>
@@ -75,6 +86,7 @@ export default function TimePanel({ instrumentId, entries, today, people, canEdi
           <span className="mono mut" style={{ fontSize: 11 }}>{e.date}</span>
           <b>{formatHours(e.minutes)}</b>
           <span>{e.person}</span>
+          {assetLabel(e.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(e.assetId)}</span>}
           {e.note && <span className="mut" style={{ fontSize: 12 }}>{e.note}</span>}
           {isStaff && (
             <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}

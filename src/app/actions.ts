@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, instrumentModules, timeEntries, discussionReads,
+  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, assets, assetEvents, timeEntries, discussionReads,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -15,7 +15,7 @@ import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssig
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, autoFg } from "@/lib/stages";
+import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
@@ -242,7 +242,7 @@ export async function deleteInstrument(instrumentId: number) {
 
 // ---------------- Time log ----------------
 
-export async function logTime(instrumentId: number, data: { person: string; date: string; hours: string; note: string }): Promise<{ error?: string }> {
+export async function logTime(instrumentId: number, data: { person: string; date: string; hours: string; note: string; assetId?: number | null }): Promise<{ error?: string }> {
   const u = await requireEditor();
   const minutes = parseHours(data.hours);
   if (minutes === null || minutes <= 0) return { error: 'Enter time like "1.5", "1:30" or "45m"' };
@@ -250,10 +250,11 @@ export async function logTime(instrumentId: number, data: { person: string; date
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
   const person = data.person.trim() || u.name;
-  await db.insert(timeEntries).values({ instrumentId, person, date, minutes, note: data.note.trim(), loggedBy: u.email });
+  const taggedAsset = await validAssetTag(data.assetId, instrumentId);
+  await db.insert(timeEntries).values({ instrumentId, assetId: taggedAsset?.id ?? null, person, date, minutes, note: data.note.trim(), loggedBy: u.email });
   await audit({
     actor: u.email, instrumentId, entityType: "time", entityId: inst.externalId,
-    action: `logged ${formatHours(minutes)} for ${person} on ${date}${data.note.trim() ? ` - ${data.note.trim()}` : ""}`,
+    action: `logged ${formatHours(minutes)} for ${person} on ${date}${taggedAsset ? ` [${assetLabel(taggedAsset)}]` : ""}${data.note.trim() ? ` - ${data.note.trim()}` : ""}`,
   });
   rev(instrumentId);
   return {};
@@ -271,62 +272,187 @@ export async function deleteTimeEntry(entryId: number) {
   rev(e.instrumentId);
 }
 
-// ---------------- Modules ----------------
-// The pieces a system is built from (LC pump, autosampler, detector...), each
-// with its own model and serial so a swapped module stays traceable.
+// ---------------- Assets ----------------
+// First-class units systems are built from. Work is recorded on the system
+// and tagged with the asset; lifecycle rows here give the dossier its spine.
 
-type ModuleInput = { kind: string; model: string; serial: string; note: string };
+type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; location: string; note: string };
 
-const cleanModule = (d: ModuleInput) => ({
+const cleanAsset = (d: AssetInput) => ({
   kind: (MODULE_KINDS as readonly string[]).includes(d.kind) ? d.kind : "Other",
   model: d.model.trim(),
   serial: d.serial.trim(),
+  manufacturer: d.manufacturer.trim(),
+  location: d.location.trim(),
   note: d.note.trim(),
 });
 
-export async function addModule(instrumentId: number, data: ModuleInput): Promise<{ error?: string }> {
+const assetLabel = (a: { kind: string; model: string; serial: string }) =>
+  `${a.kind.toLowerCase()} ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}`;
+
+async function logAssetEvent(assetId: number, kind: string, instrumentId: number | null, detail: string, actor: string) {
+  await db.insert(assetEvents).values({ assetId, kind, instrumentId, detail, actor });
+}
+
+export async function createAsset(instrumentId: number | null, data: AssetInput): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
-  const m = cleanModule(data);
-  if (!m.model && !m.serial) return { error: "Give the module a model or a serial number" };
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) return { error: "Not found" };
-  const siblings = await db.select().from(instrumentModules).where(eq(instrumentModules.instrumentId, instrumentId));
+  const a = cleanAsset(data);
+  if (!a.model && !a.serial) return { error: "Give the asset a model or a serial number" };
+  let externalId = "";
+  if (instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+    if (!inst) return { error: "Not found" };
+    externalId = inst.externalId;
+  }
+  const siblings = instrumentId !== null
+    ? await db.select().from(assets).where(eq(assets.instrumentId, instrumentId)) : [];
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
-  await db.insert(instrumentModules).values({ ...m, instrumentId, sortOrder });
+  const [row] = await db.insert(assets).values({
+    ...a, instrumentId, sortOrder, status: instrumentId !== null ? "In service" : "Spare",
+  }).returning();
+  if (instrumentId !== null) {
+    await logAssetEvent(row.id, "installed", instrumentId, `into ${externalId}`, u.name);
+    await audit({
+      actor: u.email, instrumentId, entityType: "asset", entityId: row.id,
+      action: `added ${assetLabel(row)}`,
+    });
+    rev(instrumentId);
+  } else {
+    await logAssetEvent(row.id, "note", null, "created as spare", u.name);
+    await audit({ actor: u.email, entityType: "asset", entityId: row.id, action: `added spare ${assetLabel(row)}` });
+  }
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${row.id}`);
+  return { id: row.id };
+}
+
+export async function updateAsset(assetId: number, data: AssetInput): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const a = cleanAsset(data);
+  if (!a.model && !a.serial) return { error: "Give the asset a model or a serial number" };
+  const [before] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!before) return { error: "Not found" };
+  await db.update(assets).set(a).where(eq(assets.id, assetId));
   await audit({
-    actor: u.email, instrumentId, entityType: "module", entityId: inst.externalId,
-    action: `added ${m.kind.toLowerCase()}: ${m.model || "(no model)"}${m.serial ? ` SN ${m.serial}` : ""}`,
+    actor: u.email, instrumentId: before.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
+    action: `edited ${assetLabel({ ...before, ...a })}`,
+  });
+  if (before.instrumentId !== null) rev(before.instrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+  return {};
+}
+
+export async function setAssetStatus(assetId: number, status: string) {
+  const u = await requireEditor();
+  if (!(ASSET_STATES as readonly string[]).includes(status)) throw new Error("Unknown asset status");
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a || a.status === status) return;
+  await db.update(assets).set({ status }).where(eq(assets.id, assetId));
+  await logAssetEvent(assetId, "status", a.instrumentId, `${a.status} -> ${status}`, u.name);
+  await audit({
+    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
+    action: `${assetLabel(a)}: ${a.status} -> ${status}`, field: "status", oldValue: a.status, newValue: status,
+  });
+  if (a.instrumentId !== null) rev(a.instrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+}
+
+/** Attach a spare to a system. */
+export async function attachAsset(assetId: number, instrumentId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!a || !inst) return { error: "Not found" };
+  if (a.instrumentId !== null) return { error: "Already attached to a system - use Move instead" };
+  if (a.status === "Decommissioned") return { error: "This asset is decommissioned" };
+  await db.update(assets).set({ instrumentId, status: "In service" }).where(eq(assets.id, assetId));
+  await logAssetEvent(assetId, "installed", instrumentId, `into ${inst.externalId}`, u.name);
+  await audit({
+    actor: u.email, instrumentId, entityType: "asset", entityId: assetId,
+    action: `installed ${assetLabel(a)}${a.location ? ` (from ${a.location})` : ""}`,
   });
   rev(instrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
   return {};
 }
 
-export async function updateModule(moduleId: number, data: ModuleInput): Promise<{ error?: string }> {
+/** Take an asset off its system; it becomes a spare. */
+export async function detachAsset(assetId: number) {
   const u = await requireEditor();
-  const m = cleanModule(data);
-  if (!m.model && !m.serial) return { error: "Give the module a model or a serial number" };
-  const [before] = await db.select().from(instrumentModules).where(eq(instrumentModules.id, moduleId));
-  if (!before) return { error: "Not found" };
-  await db.update(instrumentModules).set(m).where(eq(instrumentModules.id, moduleId));
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a || a.instrumentId === null) return;
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, a.instrumentId));
+  await db.update(assets).set({ instrumentId: null, status: "Spare" }).where(eq(assets.id, assetId));
+  await logAssetEvent(assetId, "removed", a.instrumentId, `from ${inst?.externalId ?? "?"}`, u.name);
   await audit({
-    actor: u.email, instrumentId: before.instrumentId, entityType: "module", entityId: moduleId,
-    action: `edited ${m.kind.toLowerCase()}: ${m.model || "(no model)"}${m.serial ? ` SN ${m.serial}` : ""}`,
-    field: "serial", oldValue: before.serial, newValue: m.serial,
+    actor: u.email, instrumentId: a.instrumentId, entityType: "asset", entityId: assetId,
+    action: `removed ${assetLabel(a)} (now a spare)`,
   });
-  rev(before.instrumentId);
+  rev(a.instrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+}
+
+/** Move an asset straight from one system to another; history follows the asset. */
+export async function moveAsset(assetId: number, toInstrumentId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  const [to] = await db.select().from(instruments).where(eq(instruments.id, toInstrumentId));
+  if (!a || !to) return { error: "Not found" };
+  if (a.instrumentId === toInstrumentId) return {};
+  const from = a.instrumentId !== null
+    ? (await db.select().from(instruments).where(eq(instruments.id, a.instrumentId)))[0] : null;
+  await db.update(assets).set({ instrumentId: toInstrumentId, status: "In service" }).where(eq(assets.id, assetId));
+  await logAssetEvent(assetId, "moved", toInstrumentId, `${from?.externalId ?? "spare"} -> ${to.externalId}`, u.name);
+  if (from) {
+    await audit({
+      actor: u.email, instrumentId: from.id, entityType: "asset", entityId: assetId,
+      action: `moved ${assetLabel(a)} to ${to.externalId}`,
+    });
+    rev(from.id);
+  }
+  await audit({
+    actor: u.email, instrumentId: toInstrumentId, entityType: "asset", entityId: assetId,
+    action: `installed ${assetLabel(a)}${from ? ` (moved from ${from.externalId})` : ""}`,
+  });
+  rev(toInstrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
   return {};
 }
 
-export async function removeModule(moduleId: number) {
+/** End of life: detach + Decommissioned. The dossier and history stay. */
+export async function decommissionAsset(assetId: number) {
   const u = await requireStaff();
-  const [m] = await db.select().from(instrumentModules).where(eq(instrumentModules.id, moduleId));
-  if (!m) return;
-  await db.delete(instrumentModules).where(eq(instrumentModules.id, moduleId));
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a || a.status === "Decommissioned") return;
+  const fromId = a.instrumentId;
+  await db.update(assets).set({ instrumentId: null, status: "Decommissioned" }).where(eq(assets.id, assetId));
+  await logAssetEvent(assetId, "status", fromId, `${a.status} -> Decommissioned`, u.name);
   await audit({
-    actor: u.email, instrumentId: m.instrumentId, entityType: "module", entityId: moduleId,
-    action: `removed ${m.kind.toLowerCase()}: ${m.model || "(no model)"}${m.serial ? ` SN ${m.serial}` : ""}`,
+    actor: u.email, instrumentId: fromId ?? undefined, entityType: "asset", entityId: assetId,
+    action: `decommissioned ${assetLabel(a)}`,
   });
-  rev(m.instrumentId);
+  if (fromId !== null) rev(fromId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+}
+
+/** Hard delete, for records created by mistake. History goes with it. */
+export async function removeAsset(assetId: number) {
+  const u = await requireStaff();
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a) return;
+  await db.delete(assets).where(eq(assets.id, assetId)); // events cascade; tags null out
+  await audit({
+    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
+    action: `deleted asset record ${assetLabel(a)}`,
+  });
+  if (a.instrumentId !== null) rev(a.instrumentId);
+  revalidatePath("/assets");
 }
 
 // ---------------- Gases ----------------
@@ -396,18 +522,26 @@ export async function removeInstrumentGas(gasId: number) {
   rev(g.instrumentId);
 }
 
+/** An asset tag is only valid if the asset is currently attached to that system. */
+async function validAssetTag(assetId: number | null | undefined, instrumentId: number) {
+  if (!assetId) return null;
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  return a && a.instrumentId === instrumentId ? a : null;
+}
+
 // ---------------- Tasks ----------------
 
-export async function createTask(instrumentId: number, data: { title: string; body: string; assignee: string; dueDate?: string }) {
+export async function createTask(instrumentId: number, data: { title: string; body: string; assignee: string; dueDate?: string; assetId?: number | null }) {
   const u = await requireEditor();
   if (!data.title.trim()) throw new Error("Title required");
+  const tagged = await validAssetTag(data.assetId, instrumentId);
   const [t] = await db.insert(tasks).values({
     instrumentId, title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
-    dueDate: (data.dueDate ?? "").trim(),
+    dueDate: (data.dueDate ?? "").trim(), assetId: tagged?.id ?? null,
   }).returning();
   await audit({
     actor: u.email, instrumentId, entityType: "task", entityId: t.id,
-    action: `created task '${t.title}'${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
+    action: `created task '${t.title}'${tagged ? ` [${assetLabel(tagged)}]` : ""}${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
   });
   if (t.assignee) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -417,6 +551,21 @@ export async function createTask(instrumentId: number, data: { title: string; bo
     });
   }
   rev(instrumentId);
+}
+
+export async function setTaskAsset(taskId: number, assetId: number | null) {
+  const u = await requireEditor();
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t) return;
+  const tagged = await validAssetTag(assetId, t.instrumentId);
+  const next = tagged?.id ?? null;
+  if (t.assetId === next) return;
+  await db.update(tasks).set({ assetId: next }).where(eq(tasks.id, taskId));
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    action: tagged ? `tagged '${t.title}' to ${assetLabel(tagged)}` : `untagged '${t.title}' (whole system)`,
+  });
+  rev(t.instrumentId);
 }
 
 export async function setTaskDue(taskId: number, dueDate: string) {
@@ -634,7 +783,7 @@ export async function deleteItemNote(noteId: number) {
 // ---------------- Parts ----------------
 
 type PartInput = {
-  kind: string; name: string; partNumber: string; serial: string; qty: string; specs: string;
+  kind: string; assetId?: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
 };
@@ -668,7 +817,8 @@ export async function createPart(instrumentId: number, raw: PartInput) {
   const data = cleanPartInput(raw);
   if (!data.name.trim()) throw new Error("Name required");
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
-  const [p] = await db.insert(parts).values({ ...data, ...stamps, name: data.name.trim(), note: data.note.trim(), instrumentId }).returning();
+  const taggedAsset = await validAssetTag(data.assetId, instrumentId);
+  const [p] = await db.insert(parts).values({ ...data, ...stamps, assetId: taggedAsset?.id ?? null, name: data.name.trim(), note: data.note.trim(), instrumentId }).returning();
   const verb = partStatusVerb(p.status);
   const noun = p.kind === "consumable" ? "consumable" : "part";
   const pn = p.partNumber ? ` (PN ${p.partNumber})` : "";
@@ -676,9 +826,9 @@ export async function createPart(instrumentId: number, raw: PartInput) {
   const note = p.note ? ` - ${p.note}` : "";
   await audit({
     actor: u.email, instrumentId, entityType: "part", entityId: p.id,
-    action: verb
-      ? `${verb} ${noun} '${p.name}'${qty}${pn}${note}`
-      : `added ${noun} '${p.name}'${qty}${pn} - ${p.status}${note}`,
+    action: (verb
+      ? `${verb} ${noun} '${p.name}'${qty}${pn}`
+      : `added ${noun} '${p.name}'${qty}${pn} - ${p.status}`) + (taggedAsset ? ` [${assetLabel(taggedAsset)}]` : "") + note,
   });
   rev(instrumentId);
 }
@@ -689,7 +839,8 @@ export async function updatePart(partId: number, raw: PartInput) {
   const [before] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!before) return;
   const stamps = partStamps(before, data.status);
-  await db.update(parts).set({ ...data, ...stamps, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
+  const taggedAsset = await validAssetTag(data.assetId, before.instrumentId);
+  await db.update(parts).set({ ...data, ...stamps, assetId: taggedAsset?.id ?? null, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
     ? verb
