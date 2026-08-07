@@ -234,6 +234,15 @@ CREATE TABLE IF NOT EXISTS "stage_events" (
   "kind" text NOT NULL,
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "checkout_rules" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "kind" text NOT NULL,
+  "model_match" text NOT NULL DEFAULT '',
+  "title" text NOT NULL,
+  "criteria" text NOT NULL DEFAULT '',
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "task_templates" (
   "id" serial PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
@@ -311,6 +320,7 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "specs" text NOT NULL DEFAULT '';
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "skipped" boolean NOT NULL DEFAULT false;
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "due_date" text NOT NULL DEFAULT '';
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "asset_id" integer;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "origin" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
@@ -349,6 +359,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_defs_name_unique') THEN
     ALTER TABLE "stage_defs" ADD CONSTRAINT "stage_defs_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'checkout_rule_unique') THEN
+    ALTER TABLE "checkout_rules" ADD CONSTRAINT "checkout_rule_unique" UNIQUE ("kind","model_match","title");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'task_templates_name_unique') THEN
     ALTER TABLE "task_templates" ADD CONSTRAINT "task_templates_name_unique" UNIQUE ("name");
@@ -459,6 +472,19 @@ INSERT INTO "stage_defs" ("name","bg","fg","sort_order","builtin") VALUES
   ('Waiting to ship','#D9D2E9','#674EA7',8,true),
   ('Shipped','#38761D','#D9EAD3',9,true)
 ON CONFLICT ("name") DO NOTHING;
+-- The engineer's "Basic Testing Results" matrix as starter checkout rules;
+-- fully editable (and extendable per model) on /templates.
+INSERT INTO "checkout_rules" ("kind","model_match","title","criteria","sort_order") VALUES
+  ('Pump','','Leak/Pulse Check','Pass/Fail',1),
+  ('Pump','','Flow Check','Pass/Fail +/- 10%',2),
+  ('Autosampler','','Temperature Check','Pass/Fail +/- 2.0 C',1),
+  ('Autosampler','','Injection Check','Pass/Fail +/- 10 uL on total injection volume; +/- 3 uL on each injection',2),
+  ('Column oven','','Temperature Check','Pass/Fail +/- 2.0 C',1),
+  ('Detector','','Calibration','Pass/Fail',1),
+  ('Mass spec','','Tuning and Calibration','Pass/Fail',1),
+  ('Full system','','Caffeine Checkout','',1)
+ON CONFLICT ("kind","model_match","title") DO NOTHING;
+
 -- Assignee roster starters; emails and LabZen people are added in Settings.
 INSERT INTO "people" ("name","email","org") VALUES
   ('Joe','','sierra'),

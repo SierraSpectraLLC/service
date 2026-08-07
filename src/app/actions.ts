@@ -8,6 +8,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, assets, assetEvents, timeEntries, discussionReads,
+  checkoutRules,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -20,6 +21,7 @@ import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseHours, formatHours } from "@/lib/hours";
+import { matchRules } from "@/lib/checkout";
 import { sendEmail } from "@/lib/email";
 
 const rev = (id?: number) => {
@@ -221,6 +223,7 @@ export async function createInstrument(
     });
   }
   if (templateId) await copyTemplateOnto(row.id, row.externalId, templateId, u.email);
+  await generateCheckout(row.id, { id: null, kind: "Full system", model: row.model, serial: "" }, u.email);
   rev(row.id);
   return row.id;
 }
@@ -294,6 +297,38 @@ async function logAssetEvent(assetId: number, kind: string, instrumentId: number
   await db.insert(assetEvents).values({ assetId, kind, instrumentId, detail, actor });
 }
 
+/**
+ * Auto-create checkout tests when an asset lands on a system (or, with a
+ * "Full system" target, when a system is created). Skips any test that is
+ * already open for the same asset on that system, so re-attach churn is safe.
+ */
+async function generateCheckout(
+  instrumentId: number,
+  target: { id: number | null; kind: string; model: string; serial: string },
+  actorEmail: string,
+) {
+  const rules = await db.select().from(checkoutRules).where(eq(checkoutRules.kind, target.kind));
+  const picked = matchRules(rules, target.kind, target.model);
+  if (!picked.length) return;
+  const existing = await db.select().from(tasks).where(eq(tasks.instrumentId, instrumentId));
+  const openTitles = new Set(
+    existing.filter((t) => t.state !== "Done" && t.assetId === target.id).map((t) => t.title.toLowerCase())
+  );
+  const fresh = picked.filter((r) => !openTitles.has(r.title.toLowerCase()));
+  if (!fresh.length) return;
+  for (const r of fresh) {
+    await db.insert(tasks).values({
+      instrumentId, title: r.title, body: r.criteria, origin: "checkout",
+      assetId: target.id, sortOrder: r.sortOrder,
+    });
+  }
+  const label = target.id !== null ? assetLabel(target as { kind: string; model: string; serial: string }) : "the system";
+  await audit({
+    actor: actorEmail, instrumentId, entityType: "task", entityId: target.id ?? instrumentId,
+    action: `generated ${fresh.length} checkout test${fresh.length === 1 ? "" : "s"} for ${label}`,
+  });
+}
+
 export async function createAsset(instrumentId: number | null, data: AssetInput): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
   const a = cleanAsset(data);
@@ -316,6 +351,7 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       actor: u.email, instrumentId, entityType: "asset", entityId: row.id,
       action: `added ${assetLabel(row)}`,
     });
+    await generateCheckout(instrumentId, row, u.email);
     rev(instrumentId);
   } else {
     await logAssetEvent(row.id, "note", null, "created as spare", u.name);
@@ -373,6 +409,7 @@ export async function attachAsset(assetId: number, instrumentId: number): Promis
     actor: u.email, instrumentId, entityType: "asset", entityId: assetId,
     action: `installed ${assetLabel(a)}${a.location ? ` (from ${a.location})` : ""}`,
   });
+  await generateCheckout(instrumentId, a, u.email);
   rev(instrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -418,6 +455,7 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
     actor: u.email, instrumentId: toInstrumentId, entityType: "asset", entityId: assetId,
     action: `installed ${assetLabel(a)}${from ? ` (moved from ${from.externalId})` : ""}`,
   });
+  await generateCheckout(toInstrumentId, a, u.email);
   rev(toInstrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -607,9 +645,11 @@ export async function updateTask(taskId: number, data: { title: string; body: st
 }
 
 export async function deleteTask(taskId: number) {
-  const u = await requireStaff();
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
-  if (!t) return;
+  if (!t) { await requireStaff(); return; }
+  // Checkout tests are auto-generated, so any editor may clear ones that
+  // don't apply; hand-written tasks stay staff-only to delete.
+  const u = t.origin === "checkout" ? await requireEditor() : await requireStaff();
   await db.delete(tasks).where(eq(tasks.id, taskId)); // checklist + notes cascade
   await audit({
     actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
@@ -1316,6 +1356,72 @@ export async function applyTemplate(instrumentId: number, templateId: number) {
   if (!inst) throw new Error("Not found");
   await copyTemplateOnto(instrumentId, inst.externalId, templateId, u.email);
   rev(instrumentId);
+}
+
+// ---------------- Checkout rules ----------------
+// Tests auto-created when an asset lands on a system ("Full system" rules
+// fire when a system is created). A rule with a model filter replaces the
+// kind's generic rules for matching models.
+
+const CHECKOUT_KINDS: readonly string[] = [...MODULE_KINDS, "Full system"];
+
+export async function addCheckoutRule(
+  data: { kind: string; modelMatch: string; title: string; criteria: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!CHECKOUT_KINDS.includes(data.kind)) return { error: "Pick an asset type" };
+  const title = data.title.trim();
+  if (!title || title.length > 120) return { error: "Test name must be 1-120 characters" };
+  const modelMatch = data.modelMatch.trim();
+  const criteria = data.criteria.trim();
+  const siblings = await db.select().from(checkoutRules).where(eq(checkoutRules.kind, data.kind));
+  if (siblings.some((r) => r.title.toLowerCase() === title.toLowerCase() && r.modelMatch.toLowerCase() === modelMatch.toLowerCase()))
+    return { error: `"${title}" already exists for ${data.kind}${modelMatch ? ` (${modelMatch})` : ""}` };
+  const sortOrder = Math.max(0, ...siblings.map((r) => r.sortOrder)) + 1;
+  const [row] = await db.insert(checkoutRules).values({ kind: data.kind, modelMatch, title, criteria, sortOrder }).returning();
+  await audit({
+    actor: u.email, entityType: "checkout", entityId: row.id,
+    action: `added checkout test "${title}" for ${data.kind}${modelMatch ? ` (${modelMatch} models only)` : ""}`,
+  });
+  revalidatePath("/templates");
+  return {};
+}
+
+export async function updateCheckoutRule(
+  ruleId: number,
+  data: { modelMatch: string; title: string; criteria: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [r] = await db.select().from(checkoutRules).where(eq(checkoutRules.id, ruleId));
+  if (!r) return { error: "Not found" };
+  const title = data.title.trim();
+  if (!title || title.length > 120) return { error: "Test name must be 1-120 characters" };
+  const modelMatch = data.modelMatch.trim();
+  const criteria = data.criteria.trim();
+  if (r.title === title && r.modelMatch === modelMatch && r.criteria === criteria) return {};
+  const siblings = await db.select().from(checkoutRules).where(eq(checkoutRules.kind, r.kind));
+  if (siblings.some((x) => x.id !== ruleId && x.title.toLowerCase() === title.toLowerCase() && x.modelMatch.toLowerCase() === modelMatch.toLowerCase()))
+    return { error: `"${title}" already exists for ${r.kind}${modelMatch ? ` (${modelMatch})` : ""}` };
+  await db.update(checkoutRules).set({ title, modelMatch, criteria }).where(eq(checkoutRules.id, ruleId));
+  await audit({
+    actor: u.email, entityType: "checkout", entityId: ruleId,
+    action: `edited checkout test "${title}" for ${r.kind}`,
+    field: "rule", oldValue: `${r.title} | ${r.modelMatch} | ${r.criteria}`, newValue: `${title} | ${modelMatch} | ${criteria}`,
+  });
+  revalidatePath("/templates");
+  return {};
+}
+
+export async function deleteCheckoutRule(ruleId: number) {
+  const u = await requireStaff();
+  const [r] = await db.select().from(checkoutRules).where(eq(checkoutRules.id, ruleId));
+  if (!r) return;
+  await db.delete(checkoutRules).where(eq(checkoutRules.id, ruleId));
+  await audit({
+    actor: u.email, entityType: "checkout", entityId: ruleId,
+    action: `removed checkout test "${r.title}" for ${r.kind}${r.modelMatch ? ` (${r.modelMatch} models only)` : ""}`,
+  });
+  revalidatePath("/templates");
 }
 
 // ---------------- Stage vocabulary ----------------

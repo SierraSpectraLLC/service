@@ -12,7 +12,7 @@ type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; thread: Note[] };
 type Task = {
   id: number; title: string; body: string; state: string; assignee: string; dueDate: string;
-  assetId: number | null;
+  assetId: number | null; origin: string;
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
 };
 type SystemAsset = { id: number; label: string };
@@ -86,7 +86,9 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, sys
   const [pending, startTransition] = useTransition();
   const setInput = (k: string, v: string | boolean) => setInputs((s) => ({ ...s, [k]: v }));
 
-  const active = tasks.filter((t) => t.state !== "Done");
+  // Auto-generated checkout tests sit under their own header until done.
+  const checkout = tasks.filter((t) => t.state !== "Done" && t.origin === "checkout");
+  const active = tasks.filter((t) => t.state !== "Done" && t.origin !== "checkout");
   const complete = tasks.filter((t) => t.state === "Done");
 
   // One renderer for both note threads; staff get inline edit / delete.
@@ -193,10 +195,13 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, sys
                 <input type="date" value={t.dueDate} onChange={(e) => startTransition(() => setTaskDue(t.id, e.target.value))}
                   style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
                 <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
-                {isStaff && (
+                {(isStaff || t.origin === "checkout") && (
                   <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
                     onClick={() => {
-                      if (!window.confirm(`Delete task "${t.title}"? Its checklist and notes go with it.`)) return;
+                      const msg = t.origin === "checkout"
+                        ? `Delete checkout test "${t.title}"? Use this for tests that don't apply here.`
+                        : `Delete task "${t.title}"? Its checklist and notes go with it.`;
+                      if (!window.confirm(msg)) return;
                       startTransition(async () => { await deleteTask(t.id); setExpanded(null); });
                     }}>Delete</button>
                 )}
@@ -322,9 +327,20 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, sys
         </div>
       )}
 
+      {checkout.length > 0 && (
+        <div style={{ marginBottom: active.length ? 12 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+            <span className="eyebrow">Checkout</span>
+            <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{checkout.length}</span>
+            <span className="mut" style={{ fontSize: 11 }}>auto-generated tests · delete any that don&apos;t apply</span>
+          </div>
+          {checkout.map((t) => renderTask(t, false))}
+          {active.length > 0 && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Tasks</div>}
+        </div>
+      )}
       {active.map((t) => renderTask(t, false))}
-      {active.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
-      {active.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
+      {checkout.length === 0 && active.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
+      {checkout.length === 0 && active.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
 
       {complete.length > 0 && (
         <div style={{ marginTop: active.length ? 8 : 0 }}>

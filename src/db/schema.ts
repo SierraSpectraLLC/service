@@ -82,6 +82,7 @@ export const tasks = pgTable("tasks", {
   state: text("state").notNull().default("Open"),
   assignee: text("assignee").notNull().default(""),
   dueDate: text("due_date").notNull().default(""), // YYYY-MM-DD in shop time, blank = no date
+  origin: text("origin").notNull().default(""), // '' = hand-made | 'checkout' = auto-generated test
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset this is about
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -298,6 +299,21 @@ export const stageEvents = pgTable("stage_events", {
   kind: text("kind").notNull(), // added | removed
   at: timestamp("at").notNull().defaultNow(),
 }, (t) => [index("stage_events_instrument_idx").on(t.instrumentId)]);
+
+// Checkout rules: the "Basic Testing Results" matrix. Each asset kind (or
+// "Full system") has standard tests; an optional model filter narrows a rule
+// ("LC-40"), and filtered rules REPLACE the kind's generic rules when any
+// match. Generation happens when an asset is added/attached/moved (and on
+// system creation for "Full system"). Managed on /templates.
+export const checkoutRules = pgTable("checkout_rules", {
+  id: serial("id").primaryKey(),
+  kind: text("kind").notNull(),                     // MODULE_KINDS entry or "Full system"
+  modelMatch: text("model_match").notNull().default(""), // substring, case-insensitive; '' = all models
+  title: text("title").notNull(),
+  criteria: text("criteria").notNull().default(""), // becomes the task body
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("checkout_rule_unique").on(t.kind, t.modelMatch, t.title)]);
 
 // SOP templates: a named bundle of tasks (each with a checklist) that can be
 // applied to an instrument in one tap - e.g. "GC/MS refurb SOP". Managed by

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { taskTemplates, templateTasks, templateItems } from "@/db/schema";
+import { taskTemplates, templateTasks, templateItems, checkoutRules } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import TemplatesPanel from "@/components/TemplatesPanel";
+import CheckoutRulesPanel from "@/components/CheckoutRulesPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,8 @@ export default async function TemplatesPage() {
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
 
   const tpls = await db.select().from(taskTemplates).orderBy(asc(taskTemplates.name));
+  const ruleRows = await db.select().from(checkoutRules)
+    .orderBy(asc(checkoutRules.kind), asc(checkoutRules.sortOrder), asc(checkoutRules.id));
   const tplIds = tpls.map((t) => t.id);
   const tTasks = tplIds.length
     ? await db.select().from(templateTasks).where(inArray(templateTasks.templateId, tplIds))
@@ -36,6 +39,11 @@ export default async function TemplatesPage() {
   return (
     <div className="container" style={{ maxWidth: 720 }}>
       <TemplatesPanel templates={templates} />
+      <CheckoutRulesPanel
+        rules={ruleRows.map((r) => ({
+          id: r.id, kind: r.kind, modelMatch: r.modelMatch, title: r.title, criteria: r.criteria, sortOrder: r.sortOrder,
+        }))}
+      />
     </div>
   );
 }
