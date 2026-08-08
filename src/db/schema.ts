@@ -319,6 +319,18 @@ export const stageEvents = pgTable("stage_events", {
   at: timestamp("at").notNull().defaultNow(),
 }, (t) => [index("stage_events_instrument_idx").on(t.instrumentId)]);
 
+// Shop vocabulary, defined ahead of use: system categories ("LC-MS") and
+// asset models per type ("Autosampler" / "ASI-L"). Pickers everywhere combine
+// these terms with values already in use, so a checkout test can be scoped to
+// a model the shop hasn't stocked yet. Managed in Settings.
+export const vocabTerms = pgTable("vocab_terms", {
+  id: serial("id").primaryKey(),
+  kind: text("kind").notNull(),                        // 'category' | 'model'
+  assetType: text("asset_type").notNull().default(""), // models only: which asset type
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("vocab_term_unique").on(t.kind, t.assetType, t.name)]);
+
 // Checkout items: tasks and tests auto-created when a system or asset is
 // added. Each asset type (or "system" for instrument-level items) carries an
 // ordered list; a non-empty model scope narrows an item to those models and,

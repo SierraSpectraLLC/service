@@ -1,5 +1,6 @@
 "use client";
 
+import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_COLOR } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, updateAsset } from "@/app/actions";
@@ -65,7 +66,11 @@ export default function AssetControls({ asset, systems, owners, kinds, canEdit, 
         )}
         {isStaff && (
           <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
-            onClick={() => { if (window.confirm("Permanently delete this asset record AND its history? Only for records created by mistake.")) run(() => removeAsset(asset.id)); }}>
+            onClick={() => {
+              const reason = promptReason("Permanently delete this asset record AND its history? Only for records created by mistake.");
+              if (!reason) return;
+              run(() => removeAsset(asset.id, reason));
+            }}>
             delete record
           </button>
         )}

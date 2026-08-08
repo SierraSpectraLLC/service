@@ -243,6 +243,13 @@ CREATE TABLE IF NOT EXISTS "checkout_rules" (
   "sort_order" integer NOT NULL DEFAULT 0,
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "vocab_terms" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "kind" text NOT NULL,
+  "asset_type" text NOT NULL DEFAULT '',
+  "name" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "checkout_items" (
   "id" serial PRIMARY KEY NOT NULL,
   "asset_type" text NOT NULL,
@@ -396,6 +403,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_defs_name_unique') THEN
     ALTER TABLE "stage_defs" ADD CONSTRAINT "stage_defs_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vocab_term_unique') THEN
+    ALTER TABLE "vocab_terms" ADD CONSTRAINT "vocab_term_unique" UNIQUE ("kind","asset_type","name");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'checkout_rule_unique') THEN
     ALTER TABLE "checkout_rules" ADD CONSTRAINT "checkout_rule_unique" UNIQUE ("kind","model_match","title");

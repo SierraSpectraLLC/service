@@ -1,5 +1,6 @@
 "use client";
 
+import { promptReason } from "@/lib/reason";
 import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
@@ -132,7 +133,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Restek" /></div>
             <div><label>Qty</label><input value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="1" /></div>
           </div>
-          {systemAssets.length > 0 && (
+          {systemAssets.length > 0 ? (
             <div style={{ marginBottom: 8 }}>
               <label>For asset</label>
               <select value={draft.assetId ?? ""} onChange={(e) => setDraft({ ...draft, assetId: e.target.value ? parseInt(e.target.value) : null })}>
@@ -140,7 +141,12 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
               </select>
             </div>
-          )}
+          ) : target.instrumentId !== null ? (
+            <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+              To tag this part to a specific unit, first list the system&apos;s assets (pump, detector...) in
+              the Assets section above - then a &quot;For asset&quot; picker appears here and on each part row.
+            </div>
+          ) : null}
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>
             <div>
@@ -204,7 +210,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             {form.mode === "edit" && isStaff && (
               <button
                 className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
-                onClick={() => startTransition(async () => { await deletePart((form as { id: number }).id); close(); })}
+                onClick={() => {
+                  const reason = promptReason(`Delete part record "${draft.name}"? This removes it from the record entirely.`);
+                  if (!reason) return;
+                  startTransition(async () => { await deletePart((form as { id: number }).id, reason); close(); });
+                }}
               >Remove</button>
             )}
           </div>

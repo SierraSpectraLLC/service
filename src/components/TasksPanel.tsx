@@ -1,5 +1,6 @@
 "use client";
 
+import { promptReason } from "@/lib/reason";
 import { useOptimistic, useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
@@ -206,8 +207,9 @@ export default function TasksPanel({ target, tasks, people, systemAssets, today,
                       const msg = t.origin === "checkout"
                         ? `Delete checkout item "${t.title}"? Use this for items that don't apply here.`
                         : `Delete task "${t.title}"? Its checklist and notes go with it.`;
-                      if (!window.confirm(msg)) return;
-                      startTransition(async () => { await deleteTask(t.id); setExpanded(null); });
+                      const reason = promptReason(msg);
+                      if (!reason) return;
+                      startTransition(async () => { await deleteTask(t.id, reason); setExpanded(null); });
                     }}>Delete</button>
                 )}
               </div>

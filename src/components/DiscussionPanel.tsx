@@ -1,5 +1,6 @@
 "use client";
 
+import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
 import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
 import ThreadSeen from "./ThreadSeen";
@@ -64,8 +65,9 @@ export default function DiscussionPanel({ instrumentId, posts, canEdit, newCount
                       onClick={() => setEdits((e) => ({ ...e, [p.id]: p.body }))}>edit</button>
                     <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }} disabled={pending}
                       onClick={() => {
-                        if (!window.confirm("Delete this post? It stays in the audit history.")) return;
-                        startTransition(() => deleteDiscussionPost(p.id));
+                        const reason = promptReason("Delete this post? It stays in the audit history.");
+                        if (!reason) return;
+                        startTransition(async () => { await deleteDiscussionPost(p.id, reason); });
                       }}>×</button>
                   </>
                 )}

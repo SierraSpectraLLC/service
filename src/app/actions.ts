@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads,
+  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms,
   checkoutItems,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
@@ -73,6 +73,17 @@ async function resolveTarget(t: WorkTarget): Promise<
   }
   if (t.instrumentId === null && !asset) return { error: "Not found" };
   return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset };
+}
+
+/**
+ * 21 CFR Part 11 discipline: destroying a record requires a stated reason,
+ * captured in the append-only audit trail alongside who and when. Server-side
+ * so no client can skip it.
+ */
+function requireReason(reason: string | undefined): string | { error: string } {
+  const r = (reason ?? "").trim();
+  if (r.length < 3) return { error: "A reason is required for this action (21 CFR 11)" };
+  return r;
 }
 
 /** Where work is recorded, for audit lines: "T-003" or "pump LC-40D". */
@@ -284,16 +295,19 @@ export async function createInstrument(
   return row.id;
 }
 
-export async function deleteInstrument(instrumentId: number) {
+export async function deleteInstrument(instrumentId: number, reason: string): Promise<{ error?: string }> {
   const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) return;
+  if (!inst) return {};
   const files = await db.select({ url: attachments.url }).from(attachments).where(eq(attachments.instrumentId, instrumentId));
   await db.delete(instruments).where(eq(instruments.id, instrumentId)); // tasks, parts, gases, attachments cascade
   await deleteBlobs(files.map((f) => f.url)); // cascade covers rows; blobs need explicit removal
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
-    action: `deleted instrument ${inst.externalId} (${inst.client})`,
+    action: `deleted instrument ${inst.externalId} (${inst.client}) - reason: ${why}`,
+    field: "reason", newValue: why,
   });
   rev(instrumentId);
   redirect("/");
@@ -554,17 +568,20 @@ export async function decommissionAsset(assetId: number) {
 }
 
 /** Hard delete, for records created by mistake. History goes with it. */
-export async function removeAsset(assetId: number) {
+export async function removeAsset(assetId: number, reason: string): Promise<{ error?: string }> {
   const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
-  if (!a) return;
+  if (!a) return {};
   await db.delete(assets).where(eq(assets.id, assetId)); // events cascade; tags null out
   await audit({
     actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
-    action: `deleted asset record ${assetLabel(a)}`,
+    action: `deleted asset record ${assetLabel(a)} - reason: ${why}`, field: "reason", newValue: why,
   });
   if (a.instrumentId !== null) rev(a.instrumentId);
   revalidatePath("/assets");
+  return {};
 }
 
 // ---------------- Gases ----------------
@@ -746,18 +763,22 @@ export async function updateTask(taskId: number, data: { title: string; body: st
   revWork(t);
 }
 
-export async function deleteTask(taskId: number) {
+export async function deleteTask(taskId: number, reason: string): Promise<{ error?: string }> {
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
-  if (!t) { await requireStaff(); return; }
+  if (!t) { await requireStaff(); return {}; }
   // Checkout tests are auto-generated, so any editor may clear ones that
   // don't apply; hand-written tasks stay staff-only to delete.
   const u = t.origin === "checkout" ? await requireEditor() : await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
   await db.delete(tasks).where(eq(tasks.id, taskId)); // checklist + notes cascade
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
-    action: `deleted task '${t.title}'${t.state !== "Done" ? ` (was ${t.state})` : ""}`,
+    action: `deleted task '${t.title}'${t.state !== "Done" ? ` (was ${t.state})` : ""} - reason: ${why}`,
+    field: "reason", newValue: why,
   });
   revWork(t);
+  return {};
 }
 
 export async function setTaskState(taskId: number, state: string) {
@@ -1072,16 +1093,19 @@ export async function setPartStatus(partId: number, status: string) {
   revWork(p);
 }
 
-export async function deletePart(partId: number) {
+export async function deletePart(partId: number, reason: string): Promise<{ error?: string }> {
   const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
   const [p] = await db.select().from(parts).where(eq(parts.id, partId));
-  if (!p) return;
+  if (!p) return {};
   await db.delete(parts).where(eq(parts.id, partId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
-    action: `deleted part record '${p.name}'`,
+    action: `deleted part record '${p.name}' - reason: ${why}`, field: "reason", newValue: why,
   });
   revWork(p);
+  return {};
 }
 
 // ---------------- Attachments ----------------
@@ -1148,17 +1172,21 @@ async function deleteBlobs(urls: string[]) {
   }
 }
 
-export async function deleteAttachment(attachmentId: number) {
+export async function deleteAttachment(attachmentId: number, reason: string): Promise<{ error?: string }> {
   const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
-  if (!a) return;
+  if (!a) return {};
   await db.delete(attachments).where(eq(attachments.id, attachmentId));
   await deleteBlobs([a.url]); // remove the actual file from Vercel Blob, not just our record
   await audit({
     actor: u.email, instrumentId: a.instrumentId, assetId: a.assetId, entityType: "attachment", entityId: attachmentId,
-    action: `removed attachment: ${a.fileName} (file deleted from storage)`,
+    action: `removed attachment: ${a.fileName} (file deleted from storage) - reason: ${why}`,
+    field: "reason", newValue: why,
   });
   revWork(a);
+  return {};
 }
 
 // ---------------- Sheet diffs ----------------
@@ -1367,17 +1395,20 @@ export async function updateDiscussionPost(postId: number, body: string) {
   revalidatePath("/discussions");
 }
 
-export async function deleteDiscussionPost(postId: number) {
+export async function deleteDiscussionPost(postId: number, reason: string): Promise<{ error?: string }> {
   const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
   const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
-  if (!p) return;
+  if (!p) return {};
   await db.delete(discussionPosts).where(eq(discussionPosts.id, postId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
-    action: `deleted a discussion post by ${p.author}`, field: "body", oldValue: p.body,
+    action: `deleted a discussion post by ${p.author} - reason: ${why}`, field: "body", oldValue: p.body, newValue: why,
   });
   if (p.instrumentId !== null) rev(p.instrumentId);
   revalidatePath("/discussions");
+  return {};
 }
 
 // ---------------- Checkout items ----------------
@@ -1680,6 +1711,48 @@ export async function removeClientAccess(id: number) {
     action: `removed client sign-in: ${row.entry}`,
   });
   revalidatePath("/settings");
+}
+
+// ---------------- Vocabulary ----------------
+// Categories and models defined ahead of use, so a checkout test can be
+// scoped to a model the shop hasn't stocked yet. Pickers merge these with
+// values already in use.
+
+export async function addVocabTerm(kind: string, assetType: string, name: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  if (kind !== "category" && kind !== "model") return { error: "Unknown vocabulary kind" };
+  const at = kind === "model" ? assetType.trim() : "";
+  if (kind === "model" && !at) return { error: "Pick which asset type the model belongs to" };
+  const n = name.trim();
+  if (!n || n.length > 60) return { error: "Name must be 1-60 characters" };
+  const existing = await db.select().from(vocabTerms).where(eq(vocabTerms.kind, kind));
+  if (existing.some((t) => t.assetType.toLowerCase() === at.toLowerCase() && t.name.toLowerCase() === n.toLowerCase()))
+    return { error: `${n} is already defined` };
+  const [row] = await db.insert(vocabTerms).values({ kind, assetType: at, name: n }).returning();
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: row.id,
+    action: kind === "category" ? `defined system category "${n}"` : `defined model "${n}" for ${at}`,
+  });
+  revalidatePath("/settings");
+  revalidatePath("/checkout");
+  rev();
+  return {};
+}
+
+export async function deleteVocabTerm(termId: number) {
+  const u = await requireOwner();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t) return;
+  await db.delete(vocabTerms).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId,
+    action: t.kind === "category"
+      ? `removed system category "${t.name}" from the vocabulary (systems using it keep it)`
+      : `removed model "${t.name}" (${t.assetType}) from the vocabulary`,
+  });
+  revalidatePath("/settings");
+  revalidatePath("/checkout");
+  rev();
 }
 
 // ---------------- Settings ----------------

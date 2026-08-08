@@ -1,5 +1,6 @@
 "use client";
 
+import { promptReason } from "@/lib/reason";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
@@ -398,8 +399,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <button
                 className="btn link" style={{ color: "#A32D2D", fontSize: 12, flexShrink: 0 }}
                 onClick={() => {
-                  if (!window.confirm(`Remove "${a.fileName}"? The file is permanently deleted from storage.`)) return;
-                  startTransition(() => deleteAttachment(a.id));
+                  const reason = promptReason(`Remove "${a.fileName}"? The file is permanently deleted from storage.`);
+                  if (!reason) return;
+                  startTransition(async () => { await deleteAttachment(a.id, reason); });
                 }}
               >remove</button>
             )}

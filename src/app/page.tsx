@@ -1,6 +1,6 @@
 import { and, asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
 import { composeSystemLabel } from "@/lib/systemLabel";
@@ -15,7 +15,7 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, peopleRows, taskRows, assetRows, allSystems] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, peopleRows, taskRows, assetRows, allSystems, vocabCats] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
@@ -28,6 +28,7 @@ export default async function Home() {
     // Archived systems included, so retiring the last system for a client (or
     // in a category) doesn't drop it out of the pickers.
     db.select({ client: instruments.client, category: instruments.category }).from(instruments),
+    db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
   ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
@@ -80,7 +81,7 @@ export default async function Home() {
       stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
       people={peopleRows.map((p) => p.name)}
       clients={allSystems.map((c) => c.client).filter(Boolean)}
-      categories={allSystems.map((c) => c.category).filter(Boolean)}
+      categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
       canEdit={user.role !== "client_viewer"}
       isStaff={isStaff}
     />

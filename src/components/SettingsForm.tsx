@@ -5,6 +5,7 @@ import {
   updateSettings, addClientAccess, removeClientAccess,
   addStage, setStageColor, renameStage, deleteStage,
   addPerson, removePerson, updateEodRecipients,
+  addVocabTerm, deleteVocabTerm,
 } from "@/app/actions";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
@@ -17,12 +18,14 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 }
 
 type AllowRow = { id: number; entry: string; addedBy: string };
+type VocabRow = { id: number; kind: string; assetType: string; name: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
 type PersonRow = { id: number; name: string; email: string; org: string };
 
 export default function SettingsForm(props: {
   clientAccessEnabled: boolean; clientCanEdit: boolean; allowlist: AllowRow[]; envClients: string[];
   stageDefs: StageRow[]; people: PersonRow[]; eodRecipients: string;
+  vocab: VocabRow[]; assetTypes: string[];
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [edit, setEdit] = useState(props.clientCanEdit);
@@ -47,6 +50,23 @@ export default function SettingsForm(props: {
       else setNewEntry("");
     });
   };
+
+  // Vocabulary: categories + models defined ahead of use.
+  const [catDraft, setCatDraft] = useState("");
+  const [modelDraft, setModelDraft] = useState({ assetType: props.assetTypes[0] ?? "Pump", name: "" });
+  const [vocabError, setVocabError] = useState("");
+  const submitVocab = (kind: "category" | "model") => {
+    const name = kind === "category" ? catDraft : modelDraft.name;
+    if (!name.trim()) return;
+    setVocabError("");
+    startTransition(async () => {
+      const res = await addVocabTerm(kind, kind === "model" ? modelDraft.assetType : "", name);
+      if (res?.error) setVocabError(res.error);
+      else kind === "category" ? setCatDraft("") : setModelDraft((d) => ({ ...d, name: "" }));
+    });
+  };
+  const categories = props.vocab.filter((v) => v.kind === "category");
+  const models = props.vocab.filter((v) => v.kind === "model");
 
   // People roster + EOD recipients.
   const [personDraft, setPersonDraft] = useState({ name: "", email: "", org: "sierra" });
@@ -176,6 +196,58 @@ export default function SettingsForm(props: {
         {recipientsMsg && (
           <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
         )}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Categories &amp; models</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          The shared vocabulary everything references. Define a model here (say, an ASI-L you don&apos;t
+          stock yet) and it shows up wherever models are picked - like scoping a checkout test to both
+          the ASI-V and the ASI-L. Removing a term never touches records already using it.
+        </div>
+
+        <div className="eyebrow" style={{ marginBottom: 4 }}>System categories</div>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+          {categories.map((c) => (
+            <span key={c.id} className="pill" style={{ background: "#E7F2FA", color: "#1D6396", display: "inline-flex", alignItems: "center", gap: 4 }}>
+              {c.name}
+              <button className="btn link" aria-label={`Remove ${c.name}`} style={{ color: "inherit", padding: 0, fontSize: 12 }}
+                disabled={pending} onClick={() => startTransition(() => deleteVocabTerm(c.id))}>×</button>
+            </span>
+          ))}
+          {categories.length === 0 && <span className="mut" style={{ fontSize: 12 }}>None defined - the pickers offer categories already in use.</span>}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+          <input value={catDraft} onChange={(e) => setCatDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submitVocab("category"); }}
+            placeholder='New category, e.g. "LC-MS"' style={{ flex: 1, fontSize: 13, maxWidth: 260 }} />
+          <button className="btn sm" onClick={() => submitVocab("category")} disabled={pending || !catDraft.trim()}>Add</button>
+        </div>
+
+        <div className="eyebrow" style={{ marginBottom: 4 }}>Asset models</div>
+        {[...new Set(models.map((m) => m.assetType))].map((at) => (
+          <div key={at} style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
+            <span className="mut" style={{ fontSize: 12, width: 110, flexShrink: 0 }}>{at}</span>
+            {models.filter((m) => m.assetType === at).map((m) => (
+              <span key={m.id} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                {m.name}
+                <button className="btn link" aria-label={`Remove ${m.name}`} style={{ color: "inherit", padding: 0, fontSize: 12 }}
+                  disabled={pending} onClick={() => startTransition(() => deleteVocabTerm(m.id))}>×</button>
+              </span>
+            ))}
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+          <select value={modelDraft.assetType} onChange={(e) => setModelDraft({ ...modelDraft, assetType: e.target.value })}
+            style={{ width: "auto", fontSize: 12 }}>
+            {props.assetTypes.map((t) => <option key={t}>{t}</option>)}
+          </select>
+          <input value={modelDraft.name} onChange={(e) => setModelDraft({ ...modelDraft, name: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") submitVocab("model"); }}
+            placeholder='New model, e.g. "ASI-L"' style={{ flex: "1 1 160px", fontSize: 13, maxWidth: 220 }} />
+          <button className="btn sm" onClick={() => submitVocab("model")} disabled={pending || !modelDraft.name.trim()}>Add</button>
+        </div>
+        {vocabError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{vocabError}</div>}
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
