@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, systemShares } from "@/db/schema";
+import { assets, assetShares, systemShares } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
 
 // Who can see what. Sierra Spectra staff (owner/staff, from STAFF_EMAILS) are
@@ -65,9 +65,11 @@ export async function canEditSystem(user: SessionUser, instrumentId: number): Pr
 }
 
 /**
- * An asset is visible when it sits on a system the viewer can see, or when the
- * viewer's own organization owns it (their spare on our bench). Editing follows
- * the system it's on; an org's own unattached asset is editable by its editors.
+ * An asset is visible when it sits on a system the viewer can see, when the
+ * viewer's own organization owns it (their spare on our bench), or when the
+ * asset itself has been shared with their organization. Editing follows the
+ * system it's on, ownership, or an edit-level asset share - always gated by
+ * the editor role.
  */
 export async function assetAccess(user: SessionUser, assetId: number): Promise<{ see: boolean; edit: boolean }> {
   const [a] = await db.select({ instrumentId: assets.instrumentId, ownerOrgId: assets.ownerOrgId })
@@ -75,14 +77,18 @@ export async function assetAccess(user: SessionUser, assetId: number): Promise<{
   if (!a) return { see: false, edit: false };
   const scope = await scopeFor(user);
   if (scope.all) return { see: true, edit: user.role !== "client_viewer" };
+  const [share] = user.orgId === null ? [] : await db.select({ access: assetShares.access })
+    .from(assetShares).where(and(eq(assetShares.assetId, assetId), eq(assetShares.orgId, user.orgId)));
   const ownedByViewer = a.ownerOrgId !== null && a.ownerOrgId === user.orgId;
+  const editorRights = user.role === "client_editor" &&
+    (ownedByViewer || share?.access === "edit");
   if (a.instrumentId === null) {
-    return { see: ownedByViewer, edit: ownedByViewer && user.role === "client_editor" };
+    return { see: ownedByViewer || !!share, edit: editorRights };
   }
   const onVisible = scope.ids.includes(a.instrumentId);
   return {
-    see: onVisible || ownedByViewer,
-    edit: scope.editable.has(a.instrumentId) || (ownedByViewer && user.role === "client_editor"),
+    see: onVisible || ownedByViewer || !!share,
+    edit: scope.editable.has(a.instrumentId) || editorRights,
   };
 }
 
@@ -90,10 +96,14 @@ export async function assetAccess(user: SessionUser, assetId: number): Promise<{
 export async function visibleAssetIds(user: SessionUser): Promise<number[] | null> {
   const scope = await scopeFor(user);
   if (scope.all) return null;
+  const shared = user.orgId === null ? [] : (
+    await db.select({ assetId: assetShares.assetId }).from(assetShares).where(eq(assetShares.orgId, user.orgId))
+  ).map((s) => s.assetId);
   const rows = await db.select({ id: assets.id }).from(assets).where(
     or(
       scope.ids.length ? inArray(assets.instrumentId, scope.ids) : undefined,
       user.orgId === null ? undefined : and(isNull(assets.instrumentId), eq(assets.ownerOrgId, user.orgId)),
+      shared.length ? inArray(assets.id, shared) : undefined,
     )
   );
   return rows.map((r) => r.id);

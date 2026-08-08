@@ -104,7 +104,7 @@ export default async function AccessAdminPage() {
                 </span>
               )}
             </div>
-            <SharePanel instrumentId={inst.id} shares={shares.map((s) => ({ orgId: s.orgId, name: s.name, kind: s.kind, access: s.access }))}
+            <SharePanel targetId={inst.id} shares={shares.map((s) => ({ orgId: s.orgId, name: s.name, kind: s.kind, access: s.access }))}
               orgOptions={orgRows} ownerOrgId={inst.ownerOrgId} canManageAll canAddProvider={false} />
             {records.length > 0 && (
               <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>

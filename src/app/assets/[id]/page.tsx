@@ -4,11 +4,13 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
-  attachments, checklistItems, itemNotes, taskNotes, auditLog, people,
+  attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
+import SharePanel from "@/components/SharePanel";
+import SalePanel from "@/components/SalePanel";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES, MODULE_KINDS } from "@/lib/stages";
@@ -70,6 +72,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   const canEdit = access.edit;
   const isStaff = user.role === "owner" || user.role === "staff";
+  const canSell = isStaff || (asset.ownerOrgId !== null && asset.ownerOrgId === user.orgId && user.role === "client_editor");
+
+  // Who this asset's dossier is shared with (beyond its system and its owner).
+  const [shareRows, orgRows] = await Promise.all([
+    db.select({ orgId: assetShares.orgId, access: assetShares.access, name: orgs.name, kind: orgs.kind })
+      .from(assetShares).innerJoin(orgs, eq(orgs.id, assetShares.orgId))
+      .where(eq(assetShares.assetId, assetId)).orderBy(asc(orgs.name)),
+    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+  ]);
   // Costs follow the owner of whatever the part sits on: the home system's
   // owning org while installed, the asset's own org on the shelf.
   const [homeOwner] = asset.instrumentId !== null
@@ -116,8 +127,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div className="card">
-        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
-          {asset.kind} — {asset.model || "(no model)"}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
+            {asset.kind} — {asset.model || "(no model)"}
+          </div>
+          {asset.forSale && <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>}
         </div>
         <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
           {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
@@ -151,13 +165,21 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         />
         <GasPanel target={target} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
           knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]} canEdit={canEdit} isStaff={isStaff} />
+        <SharePanel target="asset" targetId={asset.id}
+          shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
+          orgOptions={orgRows} ownerOrgId={asset.ownerOrgId}
+          canManageAll={isStaff} canAddProvider={!isStaff && canSell} />
+        {canSell && (
+          <SalePanel target="asset" targetId={asset.id} forSale={asset.forSale}
+            saleNote={asset.saleNote} listingToken={asset.listingToken} />
+        )}
       </div>
 
       <PartsPanel target={target} parts={redactParts(taggedParts, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} />
 
       <AttachmentsPanel target={target} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
-        canEdit={canEdit} isStaff={isStaff} />
+        canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell} />
 
       <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
         systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />

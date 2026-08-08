@@ -80,6 +80,23 @@ export const systemShares = pgTable("system_shares", {
   index("system_shares_org_idx").on(t.orgId),
 ]);
 
+// Per-asset visibility, one row per (asset, org) - the standalone-asset twin
+// of system_shares, so a spare's dossier can be shown to any number of
+// organizations. An asset that sits on a system is normally reached through
+// the system's shares; these rows matter for shelf stock and for units whose
+// dossier should outlive a system detachment.
+export const assetShares = pgTable("asset_shares", {
+  id: serial("id").primaryKey(),
+  assetId: integer("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  access: text("access").notNull().default("view"), // view | edit
+  addedBy: text("added_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("asset_share_unique").on(t.assetId, t.orgId),
+  index("asset_shares_org_idx").on(t.orgId),
+]);
+
 // Stage vocabulary lives in src/lib/stages.ts; stored here as a text array.
 export const instruments = pgTable("instruments", {
   id: serial("id").primaryKey(),
@@ -338,6 +355,11 @@ export const assets = pgTable("assets", {
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   // Condition on arrival, in the tech's words. Written once at intake and kept.
   asFound: text("as_found").notNull().default(""),
+  // Resale state - same contract as the instruments columns: while for_sale is
+  // true the listing_token URL serves a public, redacted view of this unit.
+  forSale: boolean("for_sale").notNull().default(false),
+  saleNote: text("sale_note").notNull().default(""),
+  listingToken: text("listing_token").notNull().default(""),
   // In service | Spare | Needs attention | Down | Decommissioned (lib/stages.ts)
   status: text("status").notNull().default("In service"),
   location: text("location").notNull().default(""), // where a spare lives: "shelf B"

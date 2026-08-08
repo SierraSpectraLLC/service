@@ -310,6 +310,14 @@ CREATE TABLE IF NOT EXISTS "client_allowlist" (
   "added_by" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "asset_shares" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "asset_id" integer NOT NULL,
+  "org_id" integer NOT NULL,
+  "access" text NOT NULL DEFAULT 'view',
+  "added_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "engagement_records" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -398,6 +406,9 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "for_sale" boolean NOT NULL D
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFAULT '';
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "show_on_listing" boolean NOT NULL DEFAULT false;
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "for_sale" boolean NOT NULL DEFAULT false;
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEFAULT '';
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_name" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_tagline" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "operator_org_id" integer;
@@ -425,6 +436,7 @@ CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("templ
 
 CREATE INDEX IF NOT EXISTS "system_shares_org_idx" ON "system_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "engagement_records_org_idx" ON "engagement_records" ("org_id");
+CREATE INDEX IF NOT EXISTS "asset_shares_org_idx" ON "asset_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "access_requests_instrument_idx" ON "access_requests" ("instrument_id");
 
 -- ── Optional owners (widening only; no data is touched) ───────────────────
@@ -463,6 +475,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_share_unique') THEN
     ALTER TABLE "system_shares" ADD CONSTRAINT "system_share_unique" UNIQUE ("instrument_id","org_id");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'asset_share_unique') THEN
+    ALTER TABLE "asset_shares" ADD CONSTRAINT "asset_share_unique" UNIQUE ("asset_id","org_id");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vocab_term_unique') THEN
     ALTER TABLE "vocab_terms" ADD CONSTRAINT "vocab_term_unique" UNIQUE ("kind","asset_type","name");
@@ -594,6 +609,14 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_owner_org_id_orgs_id_fk') THEN
     ALTER TABLE "instruments" ADD CONSTRAINT "instruments_owner_org_id_orgs_id_fk"
       FOREIGN KEY ("owner_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'asset_shares_asset_id_assets_id_fk') THEN
+    ALTER TABLE "asset_shares" ADD CONSTRAINT "asset_shares_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'asset_shares_org_id_orgs_id_fk') THEN
+    ALTER TABLE "asset_shares" ADD CONSTRAINT "asset_shares_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engagement_records_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "engagement_records" ADD CONSTRAINT "engagement_records_instrument_id_instruments_id_fk"

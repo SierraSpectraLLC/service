@@ -9,7 +9,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
-  checkoutItems, engagementRecords, accessRequests,
+  checkoutItems, engagementRecords, accessRequests, assetShares,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
@@ -2033,6 +2033,87 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
   return {};
 }
 
+// ---------------- Asset sharing ----------------
+// The standalone-asset twin of system sharing: a spare's dossier shown to any
+// number of organizations. Staff share with anyone; the asset's owner-org
+// editors may bring in (and withdraw) provider orgs only - same split as
+// systems, enforced here regardless of what the UI offers.
+
+async function assetShareGate(u: SessionUser, assetId: number, org: { id: number; kind: string }): Promise<{ error?: string; asset?: typeof assets.$inferSelect }> {
+  const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!asset) return { error: "Not found" };
+  if (!isHouse(u.role)) {
+    const ownerEditor = asset.ownerOrgId !== null && asset.ownerOrgId === u.orgId && u.role === "client_editor";
+    if (!ownerEditor) return { error: "Not found" };
+    if (org.kind !== "provider") return { error: "You can only bring in a service provider" };
+    if (org.id === u.orgId) return { error: "That's your own organization" };
+  }
+  return { asset };
+}
+
+export async function shareAsset(assetId: number, orgId: number, access: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Pick an organization" };
+  const gate = await assetShareGate(u, assetId, org);
+  if (gate.error || !gate.asset) return { error: gate.error };
+  const level = access === "edit" ? "edit" : "view";
+  const [existing] = await db.select().from(assetShares)
+    .where(and(eq(assetShares.assetId, assetId), eq(assetShares.orgId, orgId)));
+  if (existing) {
+    if (existing.access === level) return {};
+    await db.update(assetShares).set({ access: level }).where(eq(assetShares.id, existing.id));
+  } else {
+    await db.insert(assetShares).values({ assetId, orgId, access: level, addedBy: u.email });
+  }
+  await audit({
+    actor: u.email, assetId, entityType: "share", entityId: assetLabel(gate.asset),
+    action: `${existing ? "changed" : "granted"} ${org.name} ${level} access to ${assetLabel(gate.asset)}`,
+    field: "access", oldValue: existing?.access ?? "", newValue: level,
+  });
+  revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/assets");
+  return {};
+}
+
+export async function unshareAsset(assetId: number, orgId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  const gate = await assetShareGate(u, assetId, org);
+  if (gate.error || !gate.asset) return { error: gate.error };
+  await db.delete(assetShares).where(and(eq(assetShares.assetId, assetId), eq(assetShares.orgId, orgId)));
+  await audit({
+    actor: u.email, assetId, entityType: "share", entityId: assetLabel(gate.asset),
+    action: `removed ${org.name}'s access to ${assetLabel(gate.asset)}`,
+  });
+  revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/assets");
+  return {};
+}
+
+/** Staff-only owner reassign, matching setSystemOwner. */
+export async function setAssetOwnerOrg(assetId: number, orgId: number | null): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!asset) return { error: "Not found" };
+  let org: typeof orgs.$inferSelect | undefined;
+  if (orgId !== null) {
+    [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!org) return { error: "Not found" };
+    if (org.kind !== "client") return { error: "Only a client organization can own an asset" };
+  }
+  if (asset.ownerOrgId === orgId) return {};
+  await db.update(assets).set({ ownerOrgId: orgId }).where(eq(assets.id, assetId));
+  await audit({
+    actor: u.email, assetId, entityType: "asset", entityId: assetId,
+    action: org ? `made ${org.name} the owner of ${assetLabel(asset)}` : `returned ${assetLabel(asset)} to house stewardship`,
+    field: "owner", newValue: org?.name ?? "",
+  });
+  revalidatePath(`/assets/${assetId}`);
+  return {};
+}
+
 // ---------------- For sale ----------------
 // Resale is the owner's call: staff, or the owning organization's editors.
 // While a system is for sale, its listing token serves a public, heavily
@@ -2068,21 +2149,61 @@ export async function setForSale(instrumentId: number, on: boolean, saleNote: st
   return { token };
 }
 
+/** The asset twin of setForSale - same contract, gated on the asset's owner. */
+export async function setAssetForSale(assetId: number, on: boolean, saleNote: string): Promise<{ error?: string; token?: string }> {
+  const u = await requireEditor();
+  const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!asset) return { error: "Not found" };
+  const seller = isHouse(u.role) || (asset.ownerOrgId !== null && asset.ownerOrgId === u.orgId && u.role === "client_editor");
+  if (!seller) {
+    const a = await assetAccess(u, assetId);
+    return { error: a.see ? "Only the asset's owner can list it for sale" : "Not found" };
+  }
+  const token = asset.listingToken || crypto.randomBytes(18).toString("base64url");
+  await db.update(assets)
+    .set({ forSale: on, saleNote: saleNote.trim().slice(0, 500), listingToken: token })
+    .where(eq(assets.id, assetId));
+  await audit({
+    actor: u.email, assetId, instrumentId: asset.instrumentId, entityType: "asset", entityId: assetId,
+    action: on
+      ? `listed ${assetLabel(asset)} for sale - the public listing shows its history and chosen files only`
+      : `took ${assetLabel(asset)} off the market - its listing page is dead`,
+    field: "for_sale", oldValue: String(asset.forSale), newValue: String(on),
+  });
+  revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/assets");
+  return { token };
+}
+
 export async function setAttachmentListed(attachmentId: number, on: boolean): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [file] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
-  if (!file || file.instrumentId === null) return { error: "Not found" }; // listings are per-system
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, file.instrumentId));
-  if (!inst) return { error: "Not found" };
-  if (!canSell(u, inst)) {
-    return { error: (await canSeeSystemSafe(u, file.instrumentId)) ? "Only the system's owner curates the listing" : "Not found" };
+  if (!file) return { error: "Not found" };
+  // Curation follows whoever may sell the thing the file belongs to.
+  if (file.instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, file.instrumentId));
+    if (!inst) return { error: "Not found" };
+    if (!canSell(u, inst)) {
+      return { error: (await canSeeSystemSafe(u, file.instrumentId)) ? "Only the owner curates the listing" : "Not found" };
+    }
+  } else if (file.assetId !== null) {
+    const [asset] = await db.select().from(assets).where(eq(assets.id, file.assetId));
+    if (!asset) return { error: "Not found" };
+    const seller = isHouse(u.role) || (asset.ownerOrgId !== null && asset.ownerOrgId === u.orgId && u.role === "client_editor");
+    if (!seller) {
+      const a = await assetAccess(u, file.assetId);
+      return { error: a.see ? "Only the owner curates the listing" : "Not found" };
+    }
+  } else {
+    return { error: "Not found" };
   }
   await db.update(attachments).set({ showOnListing: on }).where(eq(attachments.id, attachmentId));
   await audit({
-    actor: u.email, instrumentId: file.instrumentId, entityType: "attachment", entityId: attachmentId,
+    actor: u.email, instrumentId: file.instrumentId, assetId: file.assetId, entityType: "attachment", entityId: attachmentId,
     action: `${on ? "added" : "removed"} '${file.fileName}' ${on ? "to" : "from"} the public listing`,
   });
-  rev(file.instrumentId);
+  if (file.instrumentId !== null) rev(file.instrumentId);
+  if (file.assetId !== null) revalidatePath(`/assets/${file.assetId}`);
   return {};
 }
 

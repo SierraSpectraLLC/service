@@ -184,11 +184,11 @@ export default function SystemPanel({ instrument, label, clients, categories, st
 
       <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
       <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
-      <SharePanel instrumentId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}
+      <SharePanel targetId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}
         canManageAll={isStaff} canAddProvider={!isStaff && canEdit} />
       <AccessRequestsPanel requests={accessRequests} isOperator={isStaff} />
       {canSell && (
-        <SalePanel instrumentId={instrument.id} forSale={instrument.forSale}
+        <SalePanel targetId={instrument.id} forSale={instrument.forSale}
           saleNote={instrument.saleNote} listingToken={instrument.listingToken} />
       )}
     </div>

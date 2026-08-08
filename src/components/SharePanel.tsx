@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { shareSystem, unshareSystem, setSystemOwner } from "@/app/actions";
+import { shareSystem, unshareSystem, setSystemOwner, shareAsset, unshareAsset, setAssetOwnerOrg } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 
 export type ShareEntry = { orgId: number; name: string; kind: string; access: string };
@@ -10,19 +10,22 @@ type OrgOption = { id: number; name: string; kind: string };
 const LEVEL = { view: { label: "can view", bg: "#EEF1F5", fg: "#475569" }, edit: { label: "can edit", bg: "#E5F3E5", fg: "#2E6B2E" } };
 
 /**
- * Who else can see this system. Staff manage every organization; an org with
- * edit rights can bring in a service provider (and withdraw one) but never
- * touch its own access - the server enforces the same split.
+ * Who else can see this system or asset. Staff manage every organization; an
+ * org with edit rights can bring in a service provider (and withdraw one) but
+ * never touch its own access - the server enforces the same split.
  */
-export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgId, canManageAll, canAddProvider }: {
-  instrumentId: number; shares: ShareEntry[]; orgOptions: OrgOption[];
-  // Which client org owns the system (null = the house stewards it). Owners
-  // decide access requests; staff assign ownership - it's also the claim flow.
+export default function SharePanel({ target = "system", targetId, shares, orgOptions, ownerOrgId, canManageAll, canAddProvider }: {
+  target?: "system" | "asset"; targetId: number; shares: ShareEntry[]; orgOptions: OrgOption[];
+  // Which client org owns it (null = the house stewards it). Owners decide
+  // access requests; staff assign ownership - it's also the claim flow.
   ownerOrgId: number | null;
   canManageAll: boolean; canAddProvider: boolean;
 }) {
+  const doShare = target === "asset" ? shareAsset : shareSystem;
+  const doUnshare = target === "asset" ? unshareAsset : unshareSystem;
+  const doSetOwner = target === "asset" ? setAssetOwnerOrg : setSystemOwner;
   const [adding, setAdding] = useState(false);
-  const [pick, setPick] = useState("");
+  const [picked, setPicked] = useState<number[]>([]);
   const [level, setLevel] = useState("view");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -32,27 +35,31 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
     .filter((o) => canManageAll || o.kind === "provider")
     .filter((o) => !shares.some((s) => s.orgId === o.id));
 
+  const toggle = (id: number) =>
+    setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+
+  // Several orgs can go on in one step; failures report together.
   const add = () => {
-    const orgId = parseInt(pick);
-    if (!orgId) return;
+    if (!picked.length) return;
     setError("");
     startTransition(async () => {
-      const res = await shareSystem(instrumentId, orgId, canManageAll ? level : "edit");
-      if (res?.error) setError(res.error);
-      else { setPick(""); setAdding(false); }
+      const results = await Promise.all(picked.map((orgId) => doShare(targetId, orgId, canManageAll ? level : "edit")));
+      const errors = results.map((r) => r?.error).filter(Boolean);
+      if (errors.length) setError([...new Set(errors)].join(" · "));
+      else { setPicked([]); setAdding(false); }
     });
   };
 
   const remove = (s: ShareEntry) => {
     const reason = promptReason(
-      s.kind === "provider"
-        ? `End ${s.name}'s engagement on this system? They lose live access immediately but keep a frozen, read-only record of the work up to today.`
-        : `Remove ${s.name}'s access to this system? They lose sight of it immediately.`
+      target === "system" && s.kind === "provider"
+        ? `End ${s.name}'s engagement? They keep a frozen, read-only record of the work up to today.`
+        : `Remove ${s.name}'s access? They lose sight of it immediately.`
     );
     if (!reason) return; // the confirm doubles as the "are you sure"
     setError("");
     startTransition(async () => {
-      const res = await unshareSystem(instrumentId, s.orgId);
+      const res = await doUnshare(targetId, s.orgId);
       if (res?.error) setError(res.error);
     });
   };
@@ -75,7 +82,7 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
               {canManageAll && (
                 <select value={s.access} disabled={pending}
                   onChange={(e) => startTransition(async () => {
-                    const res = await shareSystem(instrumentId, s.orgId, e.target.value);
+                    const res = await doShare(targetId, s.orgId, e.target.value);
                     if (res?.error) setError(res.error);
                   })}
                   aria-label={`Access level for ${s.name}`}
@@ -92,7 +99,7 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
           );
         })}
         {shares.length === 0 && (
-          <span className="mut" style={{ fontSize: 12 }}>Nobody outside the platform staff can see this system.</span>
+          <span className="mut" style={{ fontSize: 12 }}>Not shared with anyone.</span>
         )}
         {(canManageAll || canAddProvider) && options.length > 0 && !adding && (
           <button className="btn link" onClick={() => setAdding(true)}>
@@ -102,19 +109,28 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
       </div>
 
       {adding && (
-        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
-            <option value="">Choose an organization...</option>
-            {options.map((o) => <option key={o.id} value={o.id}>{o.name}{o.kind === "provider" ? " (provider)" : ""}</option>)}
-          </select>
-          {canManageAll && (
-            <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
-              <option value="view">can view</option>
-              <option value="edit">can edit</option>
-            </select>
-          )}
-          <button className="btn sm accent" onClick={add} disabled={pending || !pick}>{pending ? "Sharing..." : "Share"}</button>
-          <button className="btn link" onClick={() => { setAdding(false); setPick(""); setError(""); }}>cancel</button>
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {options.map((o) => (
+              <label key={o.id} style={{ display: "flex", alignItems: "center", gap: 5, margin: 0, fontSize: 12, fontWeight: 400, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 999, padding: "3px 10px", cursor: "pointer", background: picked.includes(o.id) ? "#EEF6EE" : "#fff" }}>
+                <input type="checkbox" checked={picked.includes(o.id)} onChange={() => toggle(o.id)}
+                  style={{ width: 13, height: 13 }} />
+                {o.name}{o.kind === "provider" ? <span className="mut">(provider)</span> : null}
+              </label>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {canManageAll && (
+              <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+                <option value="view">can view</option>
+                <option value="edit">can edit</option>
+              </select>
+            )}
+            <button className="btn sm accent" onClick={add} disabled={pending || !picked.length}>
+              {pending ? "Sharing..." : picked.length > 1 ? `Share with ${picked.length}` : "Share"}
+            </button>
+            <button className="btn link" onClick={() => { setAdding(false); setPicked([]); setError(""); }}>cancel</button>
+          </div>
         </div>
       )}
       {canManageAll && (
@@ -122,7 +138,7 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
           <span className="mut" style={{ fontSize: 12 }}>Owner:</span>
           <select value={ownerOrgId ?? ""} disabled={pending}
             onChange={(e) => startTransition(async () => {
-              const res = await setSystemOwner(instrumentId, e.target.value ? parseInt(e.target.value) : null);
+              const res = await doSetOwner(targetId, e.target.value ? parseInt(e.target.value) : null);
               if (res?.error) setError(res.error);
             })}
             style={{ width: "auto", fontSize: 12 }}>
@@ -131,7 +147,6 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
               <option key={o.id} value={o.id}>{o.name}</option>
             ))}
           </select>
-          <span className="mut" style={{ fontSize: 11 }}>The owner&apos;s editors decide serial-lookup access requests.</span>
         </div>
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
