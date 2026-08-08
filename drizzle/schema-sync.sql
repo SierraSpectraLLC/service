@@ -725,6 +725,16 @@ BEGIN
   END IF;
 END $$;
 
+-- ── Invariant: only client organizations own things ─────────────────────────
+-- A service provider records a client's instrument; it never becomes theirs.
+-- An ownership stamp on a provider org would outlive a revoked share and hand
+-- back the access the unshare removed, so heal any that exist. Naturally
+-- idempotent: by this rule a provider is never a legitimate owner.
+UPDATE "assets" SET "owner_org_id" = NULL
+  WHERE "owner_org_id" IN (SELECT "id" FROM "orgs" WHERE "kind" = 'provider');
+UPDATE "instruments" SET "owner_org_id" = NULL
+  WHERE "owner_org_id" IN (SELECT "id" FROM "orgs" WHERE "kind" = 'provider');
+
 -- ── Migration: formal system ownership ──────────────────────────────────────
 -- owner_org_id says whose system it is (null = stewarded by the house). Seed it
 -- once: a system whose shares include exactly one client-kind org at 'edit'

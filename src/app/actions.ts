@@ -333,9 +333,9 @@ export async function createInstrument(
     // A client creating its own system owns it outright. A provider doesn't:
     // their creation stays house-stewarded ("unclaimed") until the instrument's
     // real owner joins the platform and staff hand it over.
-    const [creatorOrg] = await db.select().from(orgs).where(eq(orgs.id, u.orgId));
-    if (creatorOrg?.kind === "client") {
-      await db.update(instruments).set({ ownerOrgId: u.orgId }).where(eq(instruments.id, row.id));
+    const owner = await creatorOwns(u.orgId);
+    if (owner !== null) {
+      await db.update(instruments).set({ ownerOrgId: owner }).where(eq(instruments.id, row.id));
     }
   }
   if (lead) {
@@ -365,6 +365,18 @@ export async function deleteInstrument(instrumentId: number, reason: string): Pr
   });
   rev(instrumentId);
   redirect("/");
+}
+
+/**
+ * Does this organization own the things it creates? Clients do - their stock
+ * and their systems stay theirs. Service providers don't: a provider typing in
+ * a client's pump is recording it, not acquiring it, and stamping ownership
+ * would survive revocation and hand them back what the unshare took away.
+ */
+async function creatorOwns(orgId: number | null): Promise<number | null> {
+  if (orgId === null) return null;
+  const [org] = await db.select({ kind: orgs.kind }).from(orgs).where(eq(orgs.id, orgId));
+  return org?.kind === "client" ? orgId : null;
 }
 
 // ---------------- Assets ----------------
@@ -467,9 +479,10 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
   const [row] = await db.insert(assets).values({
     ...a, instrumentId, sortOrder, status: instrumentId !== null ? "In service" : "Spare",
-    // Stock added by an organization stays theirs, so they keep seeing it while
-    // it sits on no system.
-    ownerOrgId: u.orgId,
+    // Stock added by a client organization stays theirs, so they keep seeing it
+    // while it sits on no system. A provider's entries are records, not
+    // property - see creatorOwns.
+    ownerOrgId: await creatorOwns(u.orgId),
   }).returning();
   if (instrumentId !== null) {
     await logAssetEvent(row.id, "installed", instrumentId, `into ${externalId}`, u.name);
