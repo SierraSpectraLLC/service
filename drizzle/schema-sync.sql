@@ -52,6 +52,20 @@ CREATE TABLE IF NOT EXISTS "verification_tokens" (
 );
 
 -- Domain
+CREATE TABLE IF NOT EXISTS "orgs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "name" text NOT NULL,
+  "kind" text NOT NULL DEFAULT 'client',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "system_shares" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "org_id" integer NOT NULL,
+  "access" text NOT NULL DEFAULT 'view',
+  "added_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "instruments" (
   "id" serial PRIMARY KEY NOT NULL,
   "external_id" text NOT NULL,
@@ -317,6 +331,9 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "priority" integer NOT NULL D
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "category" text NOT NULL DEFAULT '';
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "owner" text NOT NULL DEFAULT '';
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "as_found" text NOT NULL DEFAULT '';
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
+ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "org_id" integer;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "sheet_org_id" integer;
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "audit_log" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "instrument_gases" ADD COLUMN IF NOT EXISTS "asset_id" integer;
@@ -373,6 +390,8 @@ CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("i
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
+CREATE INDEX IF NOT EXISTS "system_shares_org_idx" ON "system_shares" ("org_id");
+
 -- ── Optional owners (widening only; no data is touched) ───────────────────
 -- Tasks, parts, files and gases can belong to a standalone asset - a spare
 -- being refurbished on the bench - so their instrument_id is optional. DROP
@@ -403,6 +422,12 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_defs_name_unique') THEN
     ALTER TABLE "stage_defs" ADD CONSTRAINT "stage_defs_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'org_name_unique') THEN
+    ALTER TABLE "orgs" ADD CONSTRAINT "org_name_unique" UNIQUE ("name");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_share_unique') THEN
+    ALTER TABLE "system_shares" ADD CONSTRAINT "system_share_unique" UNIQUE ("instrument_id","org_id");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vocab_term_unique') THEN
     ALTER TABLE "vocab_terms" ADD CONSTRAINT "vocab_term_unique" UNIQUE ("kind","asset_type","name");
@@ -498,6 +523,26 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_tasks_template_id_task_templates_id_fk') THEN
     ALTER TABLE "template_tasks" ADD CONSTRAINT "template_tasks_template_id_task_templates_id_fk"
       FOREIGN KEY ("template_id") REFERENCES "task_templates"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_shares_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "system_shares" ADD CONSTRAINT "system_shares_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'system_shares_org_id_orgs_id_fk') THEN
+    ALTER TABLE "system_shares" ADD CONSTRAINT "system_shares_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'assets_owner_org_id_orgs_id_fk') THEN
+    ALTER TABLE "assets" ADD CONSTRAINT "assets_owner_org_id_orgs_id_fk"
+      FOREIGN KEY ("owner_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_allowlist_org_id_orgs_id_fk') THEN
+    ALTER TABLE "client_allowlist" ADD CONSTRAINT "client_allowlist_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'app_settings_sheet_org_id_orgs_id_fk') THEN
+    ALTER TABLE "app_settings" ADD CONSTRAINT "app_settings_sheet_org_id_orgs_id_fk"
+      FOREIGN KEY ("sheet_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_asset_id_assets_id_fk') THEN
     ALTER TABLE "attachments" ADD CONSTRAINT "attachments_asset_id_assets_id_fk"
@@ -607,5 +652,31 @@ BEGIN
         'test', r."title", r."sort_order", v_result, v_target, v_tol, v_scope
       );
     END LOOP;
+  END IF;
+END $$;
+
+-- ── Migration: one shared room -> organizations + per-system shares ────────
+-- Before this, every signed-in client saw every system. Preserve exactly that
+-- for the people who already have logins: create the org their allowlist
+-- entries belong to, and share every existing system with it at 'edit' (the
+-- client-edit toggle governed what they could actually change). Sierra keeps
+-- seeing everything via STAFF_EMAILS - staff are not an org.
+--
+-- Guarded on orgs being empty, so it runs once and is a no-op forever after.
+-- A brand-new database (no allowlist rows) gets nothing: orgs are created in
+-- Settings as they are needed.
+DO $$
+DECLARE v_org integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "orgs") AND EXISTS (SELECT 1 FROM "client_allowlist") THEN
+    INSERT INTO "orgs" ("name","kind") VALUES ('LabZen','client') RETURNING "id" INTO v_org;
+    UPDATE "client_allowlist" SET "org_id" = v_org WHERE "org_id" IS NULL;
+    INSERT INTO "system_shares" ("instrument_id","org_id","access","added_by")
+      SELECT "id", v_org, 'edit', 'schema-sync' FROM "instruments"
+      ON CONFLICT ("instrument_id","org_id") DO NOTHING;
+    UPDATE "app_settings" SET "sheet_org_id" = v_org WHERE "id" = 1 AND "sheet_org_id" IS NULL;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','org', v_org::text,
+            'created organization "LabZen" from the existing sign-in allowlist and shared every system with it (edit) - unshare what should be private');
   END IF;
 END $$;

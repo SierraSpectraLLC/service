@@ -50,6 +50,32 @@ export const verificationTokens = pgTable("verification_tokens", {
 // Domain tables
 // ---------------------------------------------------------------------------
 
+// Organizations the portal is shared WITH. Sierra Spectra itself is not a row
+// here - staff/owner come from STAFF_EMAILS and see everything. A `client` owns
+// or operates systems; a `provider` is an outside service outfit either side
+// brings onto specific systems.
+export const orgs = pgTable("orgs", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("client"), // client | provider
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("org_name_unique").on(t.name)]);
+
+// The visibility rule, one row per (system, org): an org sees exactly the
+// systems shared with it. `access` 'view' is read-only however the org's role
+// is set; 'edit' lets its editors work the system.
+export const systemShares = pgTable("system_shares", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  access: text("access").notNull().default("view"), // view | edit
+  addedBy: text("added_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("system_share_unique").on(t.instrumentId, t.orgId),
+  index("system_shares_org_idx").on(t.orgId),
+]);
+
 // Stage vocabulary lives in src/lib/stages.ts; stored here as a text array.
 export const instruments = pgTable("instruments", {
   id: serial("id").primaryKey(),
@@ -254,6 +280,9 @@ export const assets = pgTable("assets", {
   // Whose unit it is - a client name, or blank for our own stock. Independent
   // of whatever system it currently sits in.
   owner: text("owner").notNull().default(""),
+  // When the owner is an organization in the portal, this is the visibility
+  // link: they see this unit even when it sits on no system of theirs.
+  ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   // Condition on arrival, in the tech's words. Written once at intake and kept.
   asFound: text("as_found").notNull().default(""),
   // In service | Spare | Needs attention | Down | Decommissioned (lib/stages.ts)
@@ -400,6 +429,9 @@ export const stageDefs = pgTable("stage_defs", {
 export const clientAllowlist = pgTable("client_allowlist", {
   id: serial("id").primaryKey(),
   entry: text("entry").notNull(),
+  // Which organization this entry signs in as. Null = unusable (the sign-in
+  // gate rejects it), so an entry can't grant access with no scope.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);
@@ -411,4 +443,7 @@ export const appSettings = pgTable("app_settings", {
   clientCanEdit: boolean("client_can_edit").notNull().default(false),
   // Comma-separated list the EOD "Send to LabZen" button emails.
   eodRecipients: text("eod_recipients").notNull().default(""),
+  // Which org the Google-sheet tracker and the EOD report belong to. Only
+  // systems shared with this org take part in either.
+  sheetOrgId: integer("sheet_org_id").references(() => orgs.id, { onDelete: "set null" }),
 });

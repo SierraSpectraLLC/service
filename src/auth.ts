@@ -3,7 +3,7 @@ import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { users, accounts, sessions, verificationTokens, appSettings, clientAllowlist } from "@/db/schema";
+import { users, accounts, sessions, verificationTokens, appSettings, clientAllowlist, orgs } from "@/db/schema";
 
 import { parseList, matchesEntry, roleForEmail } from "@/lib/allowMatch";
 
@@ -11,8 +11,24 @@ export { parseList, matchesEntry, roleForEmail };
 
 /** Owner-managed sign-in list in the DB (Settings page), unioned with CLIENT_EMAILS. */
 export async function emailInClientAllowlist(email: string): Promise<boolean> {
+  return (await orgForEmail(email)) !== null;
+}
+
+/**
+ * Which organization an email signs in as, from the allowlist. An entry with no
+ * org assigned grants nothing - a scope-less client login would see the whole
+ * shop, so it is safer to refuse until Settings assigns one. Exact-email
+ * entries win over @domain entries, so one person can be split out of their
+ * company's default org.
+ */
+export async function orgForEmail(email: string): Promise<{ id: number; name: string; kind: string } | null> {
+  const e = email.toLowerCase();
   const rows = await db.select().from(clientAllowlist);
-  return rows.some((r) => matchesEntry(email.toLowerCase(), r.entry));
+  const hits = rows.filter((r) => r.orgId !== null && matchesEntry(e, r.entry));
+  if (!hits.length) return null;
+  const exact = hits.find((r) => !r.entry.trim().startsWith("@"));
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, (exact ?? hits[0]).orgId!));
+  return org ? { id: org.id, name: org.name, kind: org.kind } : null;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -58,6 +74,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (s?.clientCanEdit) role = "client_editor";
       }
       (session.user as { role?: string }).role = role;
+      // Clients are scoped to one organization; staff and owner are the house
+      // and see everything, so they carry no org.
+      if (role === "client_viewer" || role === "client_editor") {
+        const org = await orgForEmail(email);
+        (session.user as { orgId?: number | null; orgName?: string }).orgId = org?.id ?? null;
+        (session.user as { orgName?: string }).orgName = org?.name ?? "";
+      }
       return session;
     },
   },
