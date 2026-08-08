@@ -20,5 +20,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/auth|api/cron|api/upload|login|_next/static|_next/image|favicon.ico).*)"],
+  // `listing` is the one public page: a for-sale system's buyer-facing view,
+  // keyed by its unguessable token. The page itself 404s anything not live.
+  matcher: ["/((?!api/auth|api/cron|api/upload|login|listing|_next/static|_next/image|favicon.ico).*)"],
 };

@@ -7,12 +7,14 @@ import GasPanel, { type GasRow } from "./GasPanel";
 import PickOrAdd from "./PickOrAdd";
 import SharePanel, { type ShareEntry } from "./SharePanel";
 import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
+import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 
 type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
   lead: string; notes: string; archived: boolean; archivedBy: string;
   location: string;
+  forSale: boolean; saleNote: string; listingToken: string;
 };
 
 function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead: string; people: string[] }) {
@@ -28,7 +30,7 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
-export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner }: {
+export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
   instrument: Inst; label: string; clients: string[]; categories: string[];
   stages: string[]; stageDefs: StageDefLite[];
@@ -36,6 +38,8 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   shares: ShareEntry[]; orgOptions: { id: number; name: string; kind: string }[];
   accessRequests: AccessRequestRow[]; ownerOrgId: number | null;
   canEdit: boolean; isStaff: boolean; isOwner: boolean;
+  /** Staff or the owning org's editors: may list the system for sale. */
+  canSell: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "" });
@@ -94,6 +98,9 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                 </div>
                 {instrument.category && (
                   <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{instrument.category}</span>
+                )}
+                {instrument.forSale && (
+                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
                 )}
               </div>
               {instrument.location && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{instrument.location}</div>}
@@ -180,6 +187,10 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       <SharePanel instrumentId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}
         canManageAll={isStaff} canAddProvider={!isStaff && canEdit} />
       <AccessRequestsPanel requests={accessRequests} isOperator={isStaff} />
+      {canSell && (
+        <SalePanel instrumentId={instrument.id} forSale={instrument.forSale}
+          saleNote={instrument.saleNote} listingToken={instrument.listingToken} />
+      )}
     </div>
   );
 }

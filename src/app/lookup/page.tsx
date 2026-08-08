@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
-import { assets, accessRequests } from "@/db/schema";
+import { assets, accessRequests, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, canSeeSystem } from "@/lib/tenancy";
 import { normalizeSerial, serialSearchable } from "@/lib/serial";
@@ -48,6 +48,14 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
     }
     // A hidden shelf spare in someone else's workspace stays undisclosed.
   }
+
+  // A hidden match that's on the market shows its public listing - the seller
+  // wants buyers to find it. The link is the same one anyone could be handed.
+  const listed = requestable.size
+    ? await db.select({ id: instruments.id, saleNote: instruments.saleNote, listingToken: instruments.listingToken })
+        .from(instruments).where(and(inArray(instruments.id, [...requestable.keys()]), eq(instruments.forSale, true)))
+    : [];
+  const listedBy = new Map(listed.map((l) => [l.id, l]));
 
   const pendingIds = user.orgId !== null && requestable.size
     ? (await db.select({ instrumentId: accessRequests.instrumentId }).from(accessRequests).where(and(
@@ -95,10 +103,26 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
         {requestable.size > 0 && (
           <>
             <div className="eyebrow" style={{ marginTop: 14, marginBottom: 0 }}>Found, in another workspace</div>
-            {[...requestable.entries()].map(([instId, desc]) => (
-              <RequestAccessCard key={instId} serial={sn} assetDesc={desc} requested={pendingIds.includes(instId)}
-                canClaim={user.orgKind === "client"} />
-            ))}
+            {[...requestable.entries()].map(([instId, desc]) => {
+              const sale = listedBy.get(instId);
+              return (
+                <div key={instId}>
+                  {sale && (
+                    <div style={{ border: "1px solid #BFDDBF", background: "#F3FAF3", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                        <b style={{ fontSize: 14, color: "var(--navy)" }}>{desc}</b>
+                        <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+                      </div>
+                      {sale.saleNote && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{sale.saleNote}</div>}
+                      <a href={`/listing/${sale.listingToken}`} target="_blank" rel="noreferrer" className="btn sm accent"
+                        style={{ display: "inline-block", marginTop: 8, textDecoration: "none" }}>View listing</a>
+                    </div>
+                  )}
+                  <RequestAccessCard serial={sn} assetDesc={desc} requested={pendingIds.includes(instId)}
+                    canClaim={user.orgKind === "client"} />
+                </div>
+              );
+            })}
           </>
         )}
 

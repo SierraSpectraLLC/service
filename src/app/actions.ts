@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { eq, and, asc, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
@@ -2029,6 +2030,59 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
     field: "owner", newValue: org?.name ?? "",
   });
   rev(instrumentId);
+  return {};
+}
+
+// ---------------- For sale ----------------
+// Resale is the owner's call: staff, or the owning organization's editors.
+// While a system is for sale, its listing token serves a public, heavily
+// redacted page (app/listing) - history and opted-in reports, never location,
+// client identity, internal notes, or pricing.
+
+function canSell(u: SessionUser, inst: { ownerOrgId: number | null }): boolean {
+  if (isHouse(u.role)) return true;
+  return inst.ownerOrgId !== null && inst.ownerOrgId === u.orgId && u.role === "client_editor";
+}
+
+export async function setForSale(instrumentId: number, on: boolean, saleNote: string): Promise<{ error?: string; token?: string }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!canSell(u, inst)) {
+    return { error: (await canSeeSystemSafe(u, instrumentId)) ? "Only the system's owner can list it for sale" : "Not found" };
+  }
+  // The token survives unmarking - the URL just goes dead - so a re-list keeps
+  // any links already shared with buyers.
+  const token = inst.listingToken || crypto.randomBytes(18).toString("base64url");
+  await db.update(instruments)
+    .set({ forSale: on, saleNote: saleNote.trim().slice(0, 500), listingToken: token })
+    .where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: on
+      ? `listed ${inst.externalId} for sale - the public listing shows service history and chosen files only`
+      : `took ${inst.externalId} off the market - its listing page is dead`,
+    field: "for_sale", oldValue: String(inst.forSale), newValue: String(on),
+  });
+  rev(instrumentId);
+  return { token };
+}
+
+export async function setAttachmentListed(attachmentId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [file] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  if (!file || file.instrumentId === null) return { error: "Not found" }; // listings are per-system
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, file.instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!canSell(u, inst)) {
+    return { error: (await canSeeSystemSafe(u, file.instrumentId)) ? "Only the system's owner curates the listing" : "Not found" };
+  }
+  await db.update(attachments).set({ showOnListing: on }).where(eq(attachments.id, attachmentId));
+  await audit({
+    actor: u.email, instrumentId: file.instrumentId, entityType: "attachment", entityId: attachmentId,
+    action: `${on ? "added" : "removed"} '${file.fileName}' ${on ? "to" : "from"} the public listing`,
+  });
+  rev(file.instrumentId);
   return {};
 }
 

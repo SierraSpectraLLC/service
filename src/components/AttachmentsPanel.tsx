@@ -4,12 +4,12 @@ import { promptReason } from "@/lib/reason";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachments, deleteAttachment, updateAttachment , type WorkTarget } from "@/app/actions";
+import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
 type Attachment = {
   id: number; fileName: string; kind: string; description: string; url: string; size: number;
-  uploadedBy: string; createdAt: string;
+  uploadedBy: string; createdAt: string; showOnListing: boolean;
 };
 
 type Staged = {
@@ -154,8 +154,11 @@ async function relayUpload(file: File): Promise<{ url: string }> {
   throw lastErr;
 }
 
-export default function AttachmentsPanel({ target, attachments, canEdit, isStaff }: {
+export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false }: {
   target: WorkTarget; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
+  // True when the system is for sale AND the viewer may curate its listing
+  // (staff or the owning org's editors): each file gets a show-on-listing toggle.
+  listingCuration?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [staged, setStaged] = useState<Staged[]>([]);
@@ -389,6 +392,14 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 </span>
               </div>
             </div>
+            {listingCuration && (
+              <label style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontSize: 11, fontWeight: 400, color: a.showOnListing ? "#2E6B2E" : "var(--mut)", flexShrink: 0, textTransform: "none", letterSpacing: 0 }}
+                title="Public buyers see this file on the listing page">
+                <input type="checkbox" checked={a.showOnListing} style={{ width: 14, height: 14 }}
+                  onChange={(e) => startTransition(async () => { await setAttachmentListed(a.id, e.target.checked); })} />
+                on listing
+              </label>
+            )}
             <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>download</a>
             {canEdit && (
               <button className="btn link" style={{ fontSize: 12, flexShrink: 0 }}

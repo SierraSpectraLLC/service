@@ -133,7 +133,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <SystemPanel
         instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy,
-          location: inst.location }}
+          location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken }}
         label={composeSystemLabel(assetRows, inst.model)}
         clients={systemRows.map((c) => c.client)}
         categories={[...systemRows.map((c) => c.category), ...vocabCats.map((v) => v.name)]}
@@ -149,6 +149,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         }))}
         ownerOrgId={inst.ownerOrgId}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
+        canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
       />
 
       <AssetsPanel
@@ -174,7 +175,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
         canEdit={canEdit} isStaff={isStaff} showCosts={canSeeCosts(user, inst.ownerOrgId)} />
 
-      <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
+      <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff}
+        listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))} />
 
       <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
 
