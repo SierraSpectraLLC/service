@@ -310,6 +310,27 @@ CREATE TABLE IF NOT EXISTS "client_allowlist" (
   "added_by" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "engagement_records" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer,
+  "org_id" integer NOT NULL,
+  "external_id" text NOT NULL DEFAULT '',
+  "label" text NOT NULL DEFAULT '',
+  "revoked_by" text NOT NULL DEFAULT '',
+  "revoked_at" timestamp NOT NULL DEFAULT now(),
+  "data" jsonb NOT NULL
+);
+CREATE TABLE IF NOT EXISTS "access_requests" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "org_id" integer NOT NULL,
+  "requested_by" text NOT NULL DEFAULT '',
+  "message" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'pending',
+  "decided_by" text NOT NULL DEFAULT '',
+  "decided_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "eod_updates" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,
@@ -368,6 +389,7 @@ ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "origin" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -391,6 +413,8 @@ CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("crea
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 CREATE INDEX IF NOT EXISTS "system_shares_org_idx" ON "system_shares" ("org_id");
+CREATE INDEX IF NOT EXISTS "engagement_records_org_idx" ON "engagement_records" ("org_id");
+CREATE INDEX IF NOT EXISTS "access_requests_instrument_idx" ON "access_requests" ("instrument_id");
 
 -- ── Optional owners (widening only; no data is touched) ───────────────────
 -- Tasks, parts, files and gases can belong to a standalone asset - a spare
@@ -552,6 +576,26 @@ DO $$ BEGIN
     ALTER TABLE "instrument_gases" ADD CONSTRAINT "instrument_gases_asset_id_assets_id_fk"
       FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_owner_org_id_orgs_id_fk') THEN
+    ALTER TABLE "instruments" ADD CONSTRAINT "instruments_owner_org_id_orgs_id_fk"
+      FOREIGN KEY ("owner_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engagement_records_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "engagement_records" ADD CONSTRAINT "engagement_records_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'engagement_records_org_id_orgs_id_fk') THEN
+    ALTER TABLE "engagement_records" ADD CONSTRAINT "engagement_records_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'access_requests_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "access_requests" ADD CONSTRAINT "access_requests_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'access_requests_org_id_orgs_id_fk') THEN
+    ALTER TABLE "access_requests" ADD CONSTRAINT "access_requests_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_items_template_task_id_template_tasks_id_fk') THEN
     ALTER TABLE "template_items" ADD CONSTRAINT "template_items_template_task_id_template_tasks_id_fk"
       FOREIGN KEY ("template_task_id") REFERENCES "template_tasks"("id") ON DELETE CASCADE;
@@ -678,5 +722,35 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','org', v_org::text,
             'created organization "LabZen" from the existing sign-in allowlist and shared every system with it (edit) - unshare what should be private');
+  END IF;
+END $$;
+
+-- ── Migration: formal system ownership ──────────────────────────────────────
+-- owner_org_id says whose system it is (null = stewarded by the house). Seed it
+-- once: a system whose shares include exactly one client-kind org at 'edit'
+-- clearly belongs to that client; anything ambiguous stays house-stewarded and
+-- is assigned by hand. One-time: an audit marker keeps a rerun from undoing a
+-- deliberately cleared owner.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'org' AND "entity_id" = 'ownership-backfill') THEN
+    UPDATE "instruments" i SET "owner_org_id" = one_owner.org_id
+    FROM (
+      SELECT s."instrument_id", min(s."org_id") AS org_id
+      FROM "system_shares" s
+      JOIN "orgs" o ON o."id" = s."org_id" AND o."kind" = 'client'
+      WHERE s."access" = 'edit'
+      GROUP BY s."instrument_id"
+      HAVING count(*) = 1
+    ) one_owner
+    WHERE i."id" = one_owner."instrument_id" AND i."owner_org_id" IS NULL;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    -- Marker always written, even at zero rows - a rerun must never assign
+    -- owners to systems deliberately left with the house.
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','org','ownership-backfill',
+            'assigned ' || v_count || ' system(s) to the single client organization holding an edit share - review owners in each system''s sharing panel');
   END IF;
 END $$;

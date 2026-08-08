@@ -3,7 +3,7 @@
 // The build's verify-schema gate fails the deploy if a column is missing, so a
 // forgotten mirror is caught loudly - never shipped silently.
 import {
-  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique, numeric,
+  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique, numeric, jsonb,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -91,6 +91,11 @@ export const instruments = pgTable("instruments", {
   manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
   serial: text("serial").notNull().default(""),             // the instrument's own serial
   location: text("location").notNull().default(""),         // room / bench on the client's floor
+  // Which client organization owns this system. Null = stewarded by the house:
+  // Sierra-managed work and systems a provider logged before the real owner
+  // joined the platform ("unclaimed"). The owner's editors approve access
+  // requests; visibility itself still comes only from system_shares.
+  ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   priority: integer("priority").notNull().default(99),
   // Who's driving this system - a people-roster name (Sierra or LabZen), assignable by either side.
   lead: text("lead").notNull().default(""),
@@ -104,6 +109,37 @@ export const instruments = pgTable("instruments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// A service provider's frozen copy of a system's record, written the moment its
+// share is revoked ("they keep their own service reports"). `data` is the full
+// dossier as of that instant - immutable by construction, later edits to the
+// live system can never reach it. Only provider-kind orgs get one; unsharing a
+// client stays a clean delete. The record outlives the system (FK set null) and
+// carries its own external_id/label so it still reads on its own.
+export const engagementRecords = pgTable("engagement_records", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  externalId: text("external_id").notNull().default(""),
+  label: text("label").notNull().default(""),
+  revokedBy: text("revoked_by").notNull().default(""),
+  revokedAt: timestamp("revoked_at").notNull().defaultNow(),
+  data: jsonb("data").notNull(),
+}, (t) => [index("engagement_records_org_idx").on(t.orgId)]);
+
+// A provider knocking on the door: they matched a serial in /lookup and asked
+// to be let onto the system. Decided by staff or the owning org's editors.
+export const accessRequests = pgTable("access_requests", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  requestedBy: text("requested_by").notNull().default(""),
+  message: text("message").notNull().default(""),
+  status: text("status").notNull().default("pending"), // pending | approved | denied
+  decidedBy: text("decided_by").notNull().default(""),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("access_requests_instrument_idx").on(t.instrumentId)]);
 
 // A task belongs to a system, to an asset on its own (a spare on the bench), or
 // to both (system work tagged to the unit it happened on). At least one is set.
