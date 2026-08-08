@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people } from "@/db/schema";
+import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people, systemShares } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { requireUser } from "@/lib/authz";
 import { partOpen, gasAttention } from "@/lib/stages";
@@ -35,12 +35,20 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   if (isToday) {
     // Today: every active Sierra-led system, editable, with autofill suggestions.
     // LabZen-led systems stay out of Sierra's report (their own work).
-    const [rows, roster] = await Promise.all([
+    const [rows, roster, [cfg]] = await Promise.all([
       db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
       db.select().from(people),
+      db.select().from(appSettings).where(eq(appSettings.id, 1)),
     ]);
     const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
-    const active = rows.filter((i) => !i.stages.includes("Shipped") && !labzenLed.has(i.lead));
+    // The report belongs to one organization, so only their systems appear -
+    // matching what composeEodEmail will actually send.
+    const sharedIds = cfg?.sheetOrgId
+      ? new Set((await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
+          .where(eq(systemShares.orgId, cfg.sheetOrgId))).map((r) => r.instrumentId))
+      : null;
+    const active = rows.filter((i) =>
+      !i.stages.includes("Shipped") && !labzenLed.has(i.lead) && (sharedIds === null || sharedIds.has(i.id)));
     const ids = active.map((i) => i.id);
 
     const [saved, taskRows, partRows, gasRows, recentAudit, [settings]] = await Promise.all([

@@ -113,6 +113,9 @@ export async function notifySystemAssigned(opts: {
 export async function notifyDiscussion(opts: {
   actorEmail: string; actorName: string; actorIsClient: boolean;
   body: string; instrumentId: number | null; label: string; // label: externalId or "General"
+  // Emails quote the post, so only people who can see the thread may be
+  // notified: staff, plus the organizations the system is shared with.
+  allowedEmails?: string[] | null;
 }) {
   try {
     const staff = parseList(process.env.STAFF_EMAILS);
@@ -129,6 +132,10 @@ export async function notifyDiscussion(opts: {
     }
     // A client post always reaches all staff - their questions must never be missed.
     if (opts.actorIsClient) for (const e of staff) if (e !== actor) to.add(e);
+    if (opts.allowedEmails) {
+      const allowed = new Set(opts.allowedEmails.map((e) => e.toLowerCase()));
+      for (const e of [...to]) if (!allowed.has(e)) to.delete(e);
+    }
     if (!to.size) return;
     const url = appUrl();
     const link = opts.instrumentId != null ? `${url}/instruments/${opts.instrumentId}` : `${url}/discussions`;

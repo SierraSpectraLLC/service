@@ -4,7 +4,7 @@
 // so replies migrate into discussions instead of reply-all email.
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, people } from "@/db/schema";
+import { instruments, eodUpdates, people, appSettings, systemShares } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
 
 const SEP = "-".repeat(50);
@@ -18,14 +18,23 @@ const appUrl = () =>
 export async function composeEodEmail(date: string, dateMDY: string): Promise<{
   subject: string; html: string; filled: number; total: number;
 }> {
-  const [rows, saved, roster] = await Promise.all([
+  const [rows, saved, roster, [settings]] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
     db.select().from(people),
+    db.select().from(appSettings).where(eq(appSettings.id, 1)),
   ]);
+  // The report goes to one organization, so it covers only their systems -
+  // other clients' work can't ride along in it.
+  const sheetOrgId = settings?.sheetOrgId ?? null;
+  const shared = sheetOrgId === null ? null : new Set(
+    (await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
+      .where(eq(systemShares.orgId, sheetOrgId))).map((r) => r.instrumentId)
+  );
   // Sierra's report covers Sierra-led work; LabZen-led systems are theirs.
   const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
-  const active = rows.filter((i) => !i.stages.includes("Shipped") && !labzenLed.has(i.lead));
+  const active = rows.filter((i) =>
+    !i.stages.includes("Shipped") && !labzenLed.has(i.lead) && (shared === null || shared.has(i.id)));
   const included = active.filter((i) => !saved.find((s) => s.instrumentId === i.id)?.skipped);
   const labels = await getSystemLabels(included);
   const url = appUrl();

@@ -11,6 +11,7 @@ import {
   checkoutItems,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
+import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
 import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned } from "@/lib/notify";
 import { audit } from "@/lib/audit";
@@ -236,6 +237,14 @@ export async function pushInstrumentToSheet(instrumentId: number): Promise<{ err
   const u = await requireStaff();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
+  // The tracker belongs to one organization: pushing a system they can't see
+  // would hand them a row for someone else's work.
+  const [cfg] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  if (cfg?.sheetOrgId) {
+    const [onSheetOrg] = await db.select().from(systemShares)
+      .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, cfg.sheetOrgId)));
+    if (!onSheetOrg) return { error: "Share this system with the tracker's organization first (Settings shows which one that is)" };
+  }
   try {
     await appendInstrumentToSheet({
       externalId: inst.externalId, client: inst.client, model: await systemLabelFor(inst),
@@ -1425,6 +1434,28 @@ export async function setEodSkip(instrumentId: number, skipped: boolean) {
 }
 
 // ---------------- Discussions ----------------
+
+/**
+ * Who may be emailed about a thread: staff always, plus the sign-in entries of
+ * the organizations the system is shared with. The email quotes the post, so a
+ * roster @mention must not carry another client's words out of the portal.
+ * Null = staff-only (no restriction beyond that), for the General board.
+ */
+async function threadAudience(instrumentId: number | null): Promise<string[] | null> {
+  const staff = parseList(process.env.STAFF_EMAILS);
+  if (instrumentId === null) return null;
+  const shares = await db.select({ orgId: systemShares.orgId }).from(systemShares)
+    .where(eq(systemShares.instrumentId, instrumentId));
+  if (!shares.length) return staff;
+  const entries = await db.select().from(clientAllowlist);
+  const orgIds = new Set(shares.map((s) => s.orgId));
+  // Exact-email entries are addressable; a @domain entry names no one in
+  // particular, so it can't be a recipient on its own.
+  const orgEmails = entries
+    .filter((e) => e.orgId !== null && orgIds.has(e.orgId) && !e.entry.trim().startsWith("@"))
+    .map((e) => e.entry.toLowerCase());
+  return [...new Set([...staff, ...orgEmails])];
+}
 // Posting only needs a signed-in user: talking is not record-editing, so
 // client viewers may post even while the edit toggle is off.
 
@@ -1453,6 +1484,7 @@ export async function postDiscussion(instrumentId: number | null, body: string) 
     actorEmail: u.email, actorName: u.name,
     actorIsClient: u.role === "client_viewer" || u.role === "client_editor",
     body: text, instrumentId, label: externalId || "General",
+    allowedEmails: await threadAudience(instrumentId),
   });
   if (instrumentId !== null) rev(instrumentId);
   revalidatePath("/discussions");

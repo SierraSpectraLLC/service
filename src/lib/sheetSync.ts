@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, sheetDiffs } from "@/db/schema";
+import { instruments, sheetDiffs, appSettings, systemShares } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { STAGES, SHEET_STAGES } from "@/lib/stages";
 
@@ -248,7 +248,16 @@ export async function pushValueToSheet(externalId: string, field: string, value:
 export async function runSheetSync(): Promise<{ checked: number; diffs: number; updated: number; skipped: number; cleared: number }> {
   const sheetRows = parseTrackerRows(await fetchSheetRows());
 
-  const dbRows = await db.select().from(instruments);
+  // One sheet belongs to one organization; comparing every system against it
+   // would report another client's systems as "missing from the sheet".
+  const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const sheetOrgId = settings?.sheetOrgId ?? null;
+  const sharedIds = sheetOrgId === null ? null : new Set(
+    (await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
+      .where(eq(systemShares.orgId, sheetOrgId))).map((r) => r.instrumentId)
+  );
+  const allRows = await db.select().from(instruments);
+  const dbRows = sharedIds === null ? allRows : allRows.filter((r) => sharedIds.has(r.id));
   const byId = new Map(dbRows.map((r) => [r.externalId, r]));
 
   // Memory of prior runs: at most one open diff per (system, field), and the
