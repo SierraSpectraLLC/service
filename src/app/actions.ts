@@ -2073,6 +2073,104 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
   return {};
 }
 
+// ---------------- CSV import ----------------
+// The Excel migration path: rows become systems and their assets. Rows that
+// share a System ID build one system; rows with no System ID become standalone
+// shelf assets. Reuses createInstrument/createAsset so imported records get
+// exactly the treatment hand-entered ones do (auto-share, ownership, checkout
+// generation, audit).
+
+export type ImportRow = {
+  systemId: string; client: string; category: string; location: string;
+  kind: string; model: string; serial: string; manufacturer: string; note: string;
+};
+export type ImportRowResult = { row: number; action: string; error?: string };
+
+const IMPORT_MAX_ROWS = 500;
+
+export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
+  error?: string; results?: ImportRowResult[]; systems?: number; assets?: number;
+}> {
+  const u = await requireEditor();
+  if (!rows.length) return { error: "Nothing to import" };
+  if (rows.length > IMPORT_MAX_ROWS) return { error: `Import ${IMPORT_MAX_ROWS} rows at a time (got ${rows.length})` };
+
+  const existing = await db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments);
+  const byExt = new Map(existing.map((i) => [i.externalId.toLowerCase(), i.id]));
+  const createdThisRun = new Map<string, number>(); // externalId -> new instrument id
+  const results: ImportRowResult[] = [];
+  let systemsMade = 0, assetsMade = 0;
+
+  for (let n = 0; n < rows.length; n++) {
+    const r = rows[n];
+    const sysId = r.systemId.trim();
+    const kind = r.kind.trim();
+    try {
+      if (!kind && !sysId) { results.push({ row: n + 1, action: "skipped", error: "No system ID and no asset type" }); continue; }
+      if (!kind) {
+        // A row can name a system alone (header row for its assets).
+        if (byExt.has(sysId.toLowerCase()) || createdThisRun.has(sysId.toLowerCase())) {
+          results.push({ row: n + 1, action: `system ${sysId} already exists` });
+          continue;
+        }
+        if (!dryRun) {
+          const id = await createInstrument({ externalId: sysId, client: r.client.trim(), category: r.category.trim(), priority: 99 });
+          createdThisRun.set(sysId.toLowerCase(), id);
+        } else createdThisRun.set(sysId.toLowerCase(), -1);
+        systemsMade++;
+        results.push({ row: n + 1, action: `create system ${sysId}` });
+        continue;
+      }
+
+      let instrumentId: number | null = null;
+      let sysAction = "";
+      if (sysId) {
+        const known = createdThisRun.get(sysId.toLowerCase()) ?? byExt.get(sysId.toLowerCase()) ?? null;
+        if (known !== null) {
+          // Appending to an existing system needs edit rights on it.
+          if (byExt.has(sysId.toLowerCase()) && !(await canEditSystem(u, known))) {
+            results.push({ row: n + 1, action: "skipped", error: `No edit access to ${sysId}` });
+            continue;
+          }
+          instrumentId = known;
+          sysAction = `into ${sysId}`;
+        } else {
+          if (!dryRun) {
+            instrumentId = await createInstrument({ externalId: sysId, client: r.client.trim(), category: r.category.trim(), priority: 99 });
+            createdThisRun.set(sysId.toLowerCase(), instrumentId);
+          } else { createdThisRun.set(sysId.toLowerCase(), -1); instrumentId = -1; }
+          systemsMade++;
+          sysAction = `into new system ${sysId}`;
+        }
+      } else {
+        sysAction = "standalone (shelf)";
+      }
+
+      if (!dryRun) {
+        const res = await createAsset(instrumentId === -1 ? null : instrumentId, {
+          kind, model: r.model.trim(), serial: r.serial.trim(), manufacturer: r.manufacturer.trim(),
+          owner: r.client.trim(), asFound: "", location: r.location.trim(), note: r.note.trim(),
+        });
+        if (res.error) { results.push({ row: n + 1, action: "failed", error: res.error }); continue; }
+      }
+      assetsMade++;
+      results.push({ row: n + 1, action: `add ${kind}${r.model ? ` ${r.model.trim()}` : ""} ${sysAction}` });
+    } catch (e) {
+      results.push({ row: n + 1, action: "failed", error: (e as Error).message });
+    }
+  }
+
+  if (!dryRun && (systemsMade || assetsMade)) {
+    await audit({
+      actor: u.email, entityType: "settings", entityId: "csv-import",
+      action: `imported ${systemsMade} system(s) and ${assetsMade} asset(s) from CSV`,
+    });
+    rev();
+    revalidatePath("/assets");
+  }
+  return { results, systems: systemsMade, assets: assetsMade };
+}
+
 // ---------------- View as ----------------
 
 /**

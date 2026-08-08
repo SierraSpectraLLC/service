@@ -46,7 +46,14 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   return (
     <div className="container" style={{ maxWidth: 720 }}>
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Assets</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <div className="card-title" style={{ marginBottom: 4 }}>Assets</div>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+            {user.role !== "client_viewer" && <a className="btn link" href="/import">Import CSV</a>}
+            <a className="btn link" href="/api/export/assets">Export assets</a>
+            <a className="btn link" href="/api/export/systems">Export systems</a>
+          </span>
+        </div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           Every unit we track - in a system, on the shelf, or retired. Tap one for its full service
           history.{unattached > 0 ? ` ${unattached} not in a system right now.` : ""}
