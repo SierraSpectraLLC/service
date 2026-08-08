@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  discussionPosts, people, assets, discussionReads, vocabTerms,
+  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -38,7 +38,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, vocabCats, discussion, peopleRows, assetRows, unassignedRows, kindRows, readRows] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, vocabCats, discussion, peopleRows, assetRows, unassignedRows, kindRows, readRows, shareRows, orgRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -58,6 +58,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       user.orgId === null ? undefined : eq(assets.ownerOrgId, user.orgId))).orderBy(asc(assets.kind), asc(assets.model)),
     db.selectDistinct({ kind: assets.kind }).from(assets),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
+    // Who this system is shared with, and who it could be shared with.
+    db.select({ orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
+      .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
+      .where(eq(systemShares.instrumentId, instId)).orderBy(asc(orgs.name)),
+    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
   ]);
   if (!inst) notFound();
 
@@ -125,6 +130,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
         knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]}
         people={peopleRows.map((p) => p.name)}
+        shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
+        orgOptions={orgRows}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />
 

@@ -1777,17 +1777,37 @@ export async function updateEodRecipients(value: string): Promise<{ error?: stri
 const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 
-export async function addClientAccess(raw: string): Promise<{ error?: string }> {
+export async function addClientAccess(raw: string, orgId: number): Promise<{ error?: string }> {
   const u = await requireOwner();
   const entry = raw.trim().toLowerCase();
   if (!ALLOW_EMAIL.test(entry) && !ALLOW_DOMAIN.test(entry)) {
     // Returned, not thrown: prod masks thrown server-action messages.
     return { error: 'Enter an email like "jane@labzenllc.com" or a domain like "@labzenllc.com"' };
   }
-  await db.insert(clientAllowlist).values({ entry, addedBy: u.name }).onConflictDoNothing();
+  // An entry with no organization would be a login with no scope, so require it.
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Pick which organization they sign in as" };
+  await db.insert(clientAllowlist).values({ entry, orgId, addedBy: u.name }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: entry,
-    action: `allowed client sign-in: ${entry}`,
+    action: `allowed client sign-in: ${entry} as ${org.name}`,
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
+export async function setClientAccessOrg(id: number, orgId: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Pick an organization" };
+  if (row.orgId === orgId) return {};
+  await db.update(clientAllowlist).set({ orgId }).where(eq(clientAllowlist.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: `${row.entry} now signs in as ${org.name}`, field: "orgId",
+    oldValue: String(row.orgId ?? ""), newValue: String(orgId),
   });
   revalidatePath("/settings");
   return {};

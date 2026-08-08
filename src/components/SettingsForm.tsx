@@ -6,7 +6,9 @@ import {
   addStage, setStageColor, renameStage, deleteStage,
   addPerson, removePerson, updateEodRecipients,
   addVocabTerm, deleteVocabTerm,
+  addOrg, removeOrg, setSheetOrg, setClientAccessOrg,
 } from "@/app/actions";
+import { promptReason } from "@/lib/reason";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
@@ -17,7 +19,8 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
   );
 }
 
-type AllowRow = { id: number; entry: string; addedBy: string };
+type AllowRow = { id: number; entry: string; addedBy: string; orgId: number | null };
+type OrgRow = { id: number; name: string; kind: string; systems: number; logins: number };
 type VocabRow = { id: number; kind: string; assetType: string; name: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
 type PersonRow = { id: number; name: string; email: string; org: string };
@@ -26,6 +29,7 @@ export default function SettingsForm(props: {
   clientAccessEnabled: boolean; clientCanEdit: boolean; allowlist: AllowRow[]; envClients: string[];
   stageDefs: StageRow[]; people: PersonRow[]; eodRecipients: string;
   vocab: VocabRow[]; assetTypes: string[];
+  orgs: OrgRow[]; sheetOrgId: number | null;
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [edit, setEdit] = useState(props.clientCanEdit);
@@ -45,9 +49,34 @@ export default function SettingsForm(props: {
     if (!v) return;
     setError("");
     startTransition(async () => {
-      const res = await addClientAccess(v);
+      const res = await addClientAccess(v, parseInt(newEntryOrg));
       if (res?.error) setError(res.error);
       else setNewEntry("");
+    });
+  };
+
+  // Organizations: who the portal is shared with.
+  const [newEntryOrg, setNewEntryOrg] = useState("");
+  const [orgDraft, setOrgDraft] = useState({ name: "", kind: "client" });
+  const [orgError, setOrgError] = useState("");
+  const submitOrg = () => {
+    if (!orgDraft.name.trim()) return;
+    setOrgError("");
+    startTransition(async () => {
+      const res = await addOrg(orgDraft.name, orgDraft.kind);
+      if (res?.error) setOrgError(res.error);
+      else setOrgDraft({ name: "", kind: orgDraft.kind });
+    });
+  };
+  const dropOrg = (o: OrgRow) => {
+    const reason = promptReason(
+      `Remove ${o.name}? Their ${o.logins} sign-in entr${o.logins === 1 ? "y" : "ies"} stop working and they lose access to ${o.systems} system${o.systems === 1 ? "" : "s"}. The systems and their history are untouched.`
+    );
+    if (!reason) return;
+    setOrgError("");
+    startTransition(async () => {
+      const res = await removeOrg(o.id, reason);
+      if (res?.error) setOrgError(res.error);
     });
   };
 
@@ -284,9 +313,57 @@ export default function SettingsForm(props: {
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Organizations</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Who the portal is shared with. A <b>client</b> owns or operates systems; a <b>provider</b> is an
+          outside service outfit brought onto specific systems. Each organization sees only the systems
+          shared with it - set that on a system&apos;s own page. Sierra Spectra always sees everything.
+        </div>
+        {props.orgs.map((o) => (
+          <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>{o.name}</span>
+            <span className="pill" style={{ background: o.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: o.kind === "provider" ? "#8A5410" : "#1D6396" }}>{o.kind}</span>
+            <span className="mut" style={{ fontSize: 11 }}>
+              {o.systems} system{o.systems === 1 ? "" : "s"} · {o.logins} sign-in entr{o.logins === 1 ? "y" : "ies"}
+            </span>
+            {props.sheetOrgId === o.id && (
+              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>tracker + EOD</span>
+            )}
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              {props.sheetOrgId !== o.id && o.kind === "client" && (
+                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  onClick={() => startTransition(() => setSheetOrg(o.id))}>use for tracker/EOD</button>
+              )}
+              <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }} disabled={pending}
+                onClick={() => dropOrg(o)}>remove</button>
+            </span>
+          </div>
+        ))}
+        {props.orgs.length === 0 && (
+          <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
+            None yet - add one, then share systems with it from each system&apos;s page.
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          <input value={orgDraft.name} onChange={(e) => setOrgDraft({ ...orgDraft, name: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") submitOrg(); }}
+            placeholder="Organization name" style={{ flex: "1 1 160px", fontSize: 13 }} />
+          <select value={orgDraft.kind} onChange={(e) => setOrgDraft({ ...orgDraft, kind: e.target.value })}
+            style={{ width: "auto", fontSize: 12 }}>
+            <option value="client">client</option>
+            <option value="provider">provider</option>
+          </select>
+          <button className="btn sm accent" onClick={submitOrg} disabled={pending || !orgDraft.name.trim()}>Add</button>
+        </div>
+        {orgError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{orgError}</div>}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Who can sign in as a client</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           An email allows one person; <span className="mono">@company.com</span> allows everyone at that domain.
+          Each entry signs in as one organization and sees only what&apos;s shared with it; an exact email
+          beats a domain entry, so one person can be split out of their company&apos;s organization.
           Removing an entry signs those people out immediately.
         </div>
 
@@ -303,7 +380,13 @@ export default function SettingsForm(props: {
           <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
             <span className="mono" style={{ fontSize: 13 }}>{r.entry}</span>
             {r.entry.startsWith("@") && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>whole domain</span>}
-            {r.addedBy && <span className="mut" style={{ fontSize: 11 }}>added by {r.addedBy}</span>}
+            <select value={r.orgId ?? ""} disabled={pending} aria-label={`Organization for ${r.entry}`}
+              onChange={(e) => { const v = parseInt(e.target.value); if (v) startTransition(async () => { await setClientAccessOrg(r.id, v); }); }}
+              style={{ width: "auto", fontSize: 11, padding: "2px 4px" }}>
+              <option value="">no organization - cannot sign in</option>
+              {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+            {r.addedBy && <span className="mut hide-m" style={{ fontSize: 11 }}>added by {r.addedBy}</span>}
             <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
               onClick={() => {
                 if (!window.confirm(`Remove ${r.entry}? Anyone covered only by this entry is signed out immediately.`)) return;
@@ -318,8 +401,12 @@ export default function SettingsForm(props: {
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <input className="mono" value={newEntry} onChange={(e) => setNewEntry(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") add(); }}
-            placeholder="jane@labzenllc.com or @labzenllc.com" style={{ flex: 1, fontSize: 13 }} />
-          <button className="btn sm accent" onClick={add} disabled={pending || !newEntry.trim()}>
+            placeholder="jane@labzenllc.com or @labzenllc.com" style={{ flex: "1 1 180px", fontSize: 13 }} />
+          <select value={newEntryOrg} onChange={(e) => setNewEntryOrg(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+            <option value="">signs in as...</option>
+            {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <button className="btn sm accent" onClick={add} disabled={pending || !newEntry.trim() || !newEntryOrg}>
             {pending ? "..." : "Add"}
           </button>
         </div>
