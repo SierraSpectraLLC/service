@@ -7,8 +7,10 @@ import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
+// No `url`: raw blob URLs never reach the client. Every read goes through
+// /api/files/[id], which applies the same authorization as the pages.
 type Attachment = {
-  id: number; fileName: string; kind: string; description: string; url: string; size: number;
+  id: number; fileName: string; kind: string; description: string; size: number;
   uploadedBy: string; createdAt: string; showOnListing: boolean;
 };
 
@@ -34,9 +36,7 @@ function guessKind(name: string): string {
   return "Other";
 }
 
-/** Blob URLs are direct file links, so images can be shown inline. */
-const isImage = (name: string, url: string) =>
-  /\.(jpe?g|png|gif|webp|heic|heif|avif)(\?|$)/i.test(name) || /\.(jpe?g|png|gif|webp|avif)(\?|$)/i.test(url);
+const isImage = (name: string) => /\.(jpe?g|png|gif|webp|heic|heif|avif)(\?|$)/i.test(name);
 
 function fmtSize(bytes: number): string {
   if (!bytes) return "-";
@@ -373,10 +373,10 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
         }
         return (
           <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
-            {isImage(a.fileName, a.url) ? (
-              <a href={a.url} target="_blank" rel="noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
+            {isImage(a.fileName) ? (
+              <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={a.url} alt={a.description || a.fileName} loading="lazy"
+                <img src={`/api/files/${a.id}`} alt={a.description || a.fileName} loading="lazy"
                   style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} />
               </a>
             ) : (
@@ -400,7 +400,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 on listing
               </label>
             )}
-            <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>download</a>
+            <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>download</a>
             {canEdit && (
               <button className="btn link" style={{ fontSize: 12, flexShrink: 0 }}
                 onClick={() => { setEditDraft({ fileName: a.fileName, kind: a.kind, description: a.description }); setEditing(a.id); }}

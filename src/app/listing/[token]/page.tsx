@@ -118,7 +118,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
           <div className="card-title">Documentation</div>
           {fileRows.map((a) => (
             <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-              <a href={a.url} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{a.fileName}</a>
+              <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{a.fileName}</a>
               <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
               {a.description && <span className="mut" style={{ fontSize: 12 }}>{a.description}</span>}
             </div>

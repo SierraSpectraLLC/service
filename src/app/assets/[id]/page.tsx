@@ -178,7 +178,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <PartsPanel target={target} parts={redactParts(taggedParts, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} />
 
-      <AttachmentsPanel target={target} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+      <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell} />
 
       <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
