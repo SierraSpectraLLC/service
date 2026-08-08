@@ -117,9 +117,12 @@ export async function assertSystemEditable(user: SessionUser, instrumentId: numb
  */
 export async function assertWorkEditable(
   user: SessionUser,
-  row: { instrumentId: number | null; assetId?: number | null },
+  // Undefined when the parent row is gone (an orphaned note, say) - treat that
+  // as not found rather than letting a property access throw.
+  row: { instrumentId: number | null; assetId?: number | null } | null | undefined,
 ) {
   if (isHouse(user.role)) return;
+  if (!row) throw new Error("Not found");
   if (row.instrumentId !== null) { await assertSystemEditable(user, row.instrumentId); return; }
   if (row.assetId) {
     const a = await assetAccess(user, row.assetId);

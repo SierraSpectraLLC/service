@@ -7,14 +7,14 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms,
+  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
   checkoutItems,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
 import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned } from "@/lib/notify";
 import { audit } from "@/lib/audit";
-import { requireUser, requireEditor, requireStaff, requireOwner } from "@/lib/authz";
+import { requireUser, requireEditor, requireStaff, requireOwner, type SessionUser } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
@@ -22,6 +22,10 @@ import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { composeSystemLabel } from "@/lib/systemLabel";
+import {
+  assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess,
+  canEditSystem, isHouse, visibleSystemIds,
+} from "@/lib/tenancy";
 import { sendEmail } from "@/lib/email";
 
 /** A system is named by its assets; the stored description is the fallback. */
@@ -57,10 +61,16 @@ const revWork = (t: { instrumentId: number | null; assetId?: number | null }) =>
 async function resolveTarget(t: WorkTarget): Promise<
   { error: string } | { instrumentId: number | null; assetId: number | null; externalId: string; asset: typeof assets.$inferSelect | null }
 > {
+  // Every created task/part/gas/file/note comes through here, so this is where
+  // "may this caller write to this system or asset?" is answered once.
+  const u = await requireEditor();
   let externalId = "";
   if (t.instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, t.instrumentId));
     if (!inst) return { error: "Not found" };
+    if (!(await canEditSystem(u, t.instrumentId))) {
+      return { error: (await canSeeSystemSafe(u, t.instrumentId)) ? "Read-only access to this system" : "Not found" };
+    }
     externalId = inst.externalId;
   }
   let asset: typeof assets.$inferSelect | null = null;
@@ -69,6 +79,11 @@ async function resolveTarget(t: WorkTarget): Promise<
     if (!a) return { error: "Not found" };
     // On a system page the tag has to be an asset that's actually installed.
     if (t.instrumentId !== null && a.instrumentId !== t.instrumentId) return { error: "That asset is not on this system" };
+    if (t.instrumentId === null) {
+      const acc = await assetAccess(u, t.assetId);
+      if (!acc.see) return { error: "Not found" };
+      if (!acc.edit) return { error: "Read-only access to this asset" };
+    }
     asset = a;
   }
   if (t.instrumentId === null && !asset) return { error: "Not found" };
@@ -86,6 +101,11 @@ function requireReason(reason: string | undefined): string | { error: string } {
   return r;
 }
 
+/** Distinguish "you can't touch it" from "it isn't yours to know about". */
+async function canSeeSystemSafe(u: Awaited<ReturnType<typeof requireUser>>, instrumentId: number) {
+  try { await assertSystemVisible(u, instrumentId); return true; } catch { return false; }
+}
+
 /** Where work is recorded, for audit lines: "T-003" or "pump LC-40D". */
 const targetLabel = (externalId: string, asset: { kind: string; model: string; serial: string } | null) =>
   externalId || (asset ? assetLabel(asset) : "");
@@ -98,6 +118,7 @@ export async function toggleStage(instrumentId: number, stage: string) {
   if (!defs.some((s) => s.name === stage)) throw new Error("Unknown stage");
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) throw new Error("Not found");
+  await assertSystemEditable(u, instrumentId);
   const has = inst.stages.includes(stage);
   if (has && inst.stages.length === 1) return; // keep at least one stage
   const next = has ? inst.stages.filter((s) => s !== stage) : [...inst.stages, stage];
@@ -115,6 +136,7 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) throw new Error("Not found");
+  await assertSystemEditable(u, instrumentId);
   await db.update(instruments).set({ notes, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
@@ -130,6 +152,7 @@ export async function updateInstrument(
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
+  await assertSystemEditable(u, instrumentId);
   const client = data.client.trim();
   const externalId = (data.externalId ?? inst.externalId).trim();
   if (!externalId) return { error: "System ID required" };
@@ -191,6 +214,7 @@ export async function setInstrumentArchived(instrumentId: number, archived: bool
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst || inst.archived === archived) return;
+  await assertSystemEditable(u, instrumentId);
   await db.update(instruments)
     .set({ archived, archivedAt: archived ? new Date() : null, archivedBy: archived ? u.name : "", updatedAt: new Date() })
     .where(eq(instruments.id, instrumentId));
@@ -246,6 +270,7 @@ export async function setInstrumentLead(instrumentId: number, lead: string) {
   }
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst || inst.lead === name) return;
+  await assertSystemEditable(u, instrumentId);
   await db.update(instruments).set({ lead: name, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
@@ -284,6 +309,17 @@ export async function createInstrument(
     actor: u.email, instrumentId: row.id, entityType: "instrument", entityId: row.externalId,
     action: `created instrument ${row.externalId} (${row.client || "no client"})${lead ? ` - lead ${lead}` : ""}`,
   });
+  // A system created by an organization belongs to that organization, or they
+  // would immediately lose the thing they just made.
+  if (u.orgId !== null) {
+    await db.insert(systemShares).values({
+      instrumentId: row.id, orgId: u.orgId, access: "edit", addedBy: u.email,
+    }).onConflictDoNothing();
+    await audit({
+      actor: u.email, instrumentId: row.id, entityType: "share", entityId: row.externalId,
+      action: `shared ${row.externalId} with ${u.orgName} (edit) - created by them`,
+    });
+  }
   if (lead) {
     await notifySystemAssigned({
       actorEmail: u.email, actorName: u.name, lead,
@@ -296,7 +332,7 @@ export async function createInstrument(
 }
 
 export async function deleteInstrument(instrumentId: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requireOwner(); // owner is always the house, so no share check needed
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -386,6 +422,9 @@ export async function runAssetCheckout(assetId: number): Promise<{ error?: strin
   const u = await requireEditor();
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return { error: "Not found" };
+  const acc = await assetAccess(u, assetId);
+  if (!acc.see) return { error: "Not found" };
+  if (!acc.edit) return { error: "Read-only access to this asset" };
   const created = await generateCheckout(a.instrumentId, a, u.email);
   revWork({ instrumentId: a.instrumentId, assetId });
   if (!created) return { error: "Nothing new to add - its checkout items are already open (or none are defined for this type)" };
@@ -400,6 +439,9 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   if (instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     if (!inst) return { error: "Not found" };
+    if (!(await canEditSystem(u, instrumentId))) {
+      return { error: (await canSeeSystemSafe(u, instrumentId)) ? "Read-only access to this system" : "Not found" };
+    }
     externalId = inst.externalId;
   }
   const siblings = instrumentId !== null
@@ -407,6 +449,9 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
   const [row] = await db.insert(assets).values({
     ...a, instrumentId, sortOrder, status: instrumentId !== null ? "In service" : "Spare",
+    // Stock added by an organization stays theirs, so they keep seeing it while
+    // it sits on no system.
+    ownerOrgId: u.orgId,
   }).returning();
   if (instrumentId !== null) {
     await logAssetEvent(row.id, "installed", instrumentId, `into ${externalId}`, u.name);
@@ -435,6 +480,9 @@ export async function updateAsset(assetId: number, data: AssetInput): Promise<{ 
   if (!a.model && !a.serial) return { error: "Give the asset a model or a serial number" };
   const [before] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!before) return { error: "Not found" };
+  const acc = await assetAccess(u, assetId);
+  if (!acc.see) return { error: "Not found" };
+  if (!acc.edit) return { error: "Read-only access to this asset" };
   await db.update(assets).set(a).where(eq(assets.id, assetId));
   await audit({
     actor: u.email, instrumentId: before.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
@@ -451,6 +499,7 @@ export async function setAssetStatus(assetId: number, status: string) {
   if (!(ASSET_STATES as readonly string[]).includes(status)) throw new Error("Unknown asset status");
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a || a.status === status) return;
+  if (!(await assetAccess(u, assetId)).edit) throw new Error("Not found");
   await db.update(assets).set({ status }).where(eq(assets.id, assetId));
   await logAssetEvent(assetId, "status", a.instrumentId, `${a.status} -> ${status}`, u.name);
   await audit({
@@ -463,9 +512,11 @@ export async function setAssetStatus(assetId: number, status: string) {
 }
 
 /** Shared install step, so one asset and a whole batch behave identically. */
-async function attachOne(assetId: number, instrumentId: number, externalId: string, u: { email: string; name: string }) {
+async function attachOne(assetId: number, instrumentId: number, externalId: string, u: SessionUser) {
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return { error: "Not found" };
+  // You may only install a unit you can see, into a system you can edit.
+  if (!(await assetAccess(u, assetId)).see) return { error: "Not found" };
   if (a.instrumentId !== null) return { error: `${assetLabel(a)} is already on a system - use Move instead` };
   if (a.status === "Decommissioned") return { error: `${assetLabel(a)} is decommissioned` };
   await db.update(assets).set({ instrumentId, status: "In service" }).where(eq(assets.id, assetId));
@@ -488,6 +539,7 @@ export async function attachAssets(assetIds: number[], instrumentId: number): Pr
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
+  try { await assertSystemEditable(u, instrumentId); } catch { return { error: "Not found" }; }
   const ids = [...new Set(assetIds)].filter((id) => Number.isInteger(id));
   if (!ids.length) return { error: "Pick at least one asset" };
   const problems: string[] = [];
@@ -509,6 +561,7 @@ export async function detachAsset(assetId: number) {
   const u = await requireEditor();
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a || a.instrumentId === null) return;
+  await assertSystemEditable(u, a.instrumentId);
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, a.instrumentId));
   await db.update(assets).set({ instrumentId: null, status: "Spare" }).where(eq(assets.id, assetId));
   await logAssetEvent(assetId, "removed", a.instrumentId, `from ${inst?.externalId ?? "?"}`, u.name);
@@ -528,6 +581,12 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
   const [to] = await db.select().from(instruments).where(eq(instruments.id, toInstrumentId));
   if (!a || !to) return { error: "Not found" };
   if (a.instrumentId === toInstrumentId) return {};
+  // A move touches two systems; an org must be able to edit both, or it could
+  // pull a unit out of a workspace it doesn't own.
+  try {
+    await assertSystemEditable(u, toInstrumentId);
+    if (a.instrumentId !== null) await assertSystemEditable(u, a.instrumentId);
+  } catch { return { error: "Not found" }; }
   const from = a.instrumentId !== null
     ? (await db.select().from(instruments).where(eq(instruments.id, a.instrumentId)))[0] : null;
   await db.update(assets).set({ instrumentId: toInstrumentId, status: "In service" }).where(eq(assets.id, assetId));
@@ -623,6 +682,7 @@ export async function setGasStatus(gasId: number, status: string) {
   if (g.status === status) return;
   const [inst] = g.instrumentId !== null
     ? await db.select().from(instruments).where(eq(instruments.id, g.instrumentId)) : [];
+  await assertWorkEditable(u, g);
   await db.update(instrumentGases).set({ status, updatedAt: new Date() }).where(eq(instrumentGases.id, gasId));
   await audit({
     actor: u.email, instrumentId: g.instrumentId, assetId: g.assetId, entityType: "gas", entityId: inst?.externalId ?? "",
@@ -647,6 +707,7 @@ export async function updateGasNote(gasId: number, note: string) {
   if (g.note === t) return;
   const [inst] = g.instrumentId !== null
     ? await db.select().from(instruments).where(eq(instruments.id, g.instrumentId)) : [];
+  await assertWorkEditable(u, g);
   await db.update(instrumentGases).set({ note: t, updatedAt: new Date() }).where(eq(instrumentGases.id, gasId));
   await audit({
     actor: u.email, instrumentId: g.instrumentId, assetId: g.assetId, entityType: "gas", entityId: inst?.externalId ?? "",
@@ -661,6 +722,7 @@ export async function removeInstrumentGas(gasId: number) {
   if (!g) throw new Error("Not found");
   const [inst] = g.instrumentId !== null
     ? await db.select().from(instruments).where(eq(instruments.id, g.instrumentId)) : [];
+  await assertWorkEditable(u, g);
   await db.delete(instrumentGases).where(eq(instrumentGases.id, gasId));
   await audit({
     actor: u.email, instrumentId: g.instrumentId, assetId: g.assetId, entityType: "gas", entityId: inst?.externalId ?? "",
@@ -717,6 +779,7 @@ export async function setTaskAsset(taskId: number, assetId: number | null) {
   const tagged = await validAssetTag(assetId, t.instrumentId);
   const next = tagged?.id ?? null;
   if (t.assetId === next) return;
+  await assertWorkEditable(u, t);
   await db.update(tasks).set({ assetId: next }).where(eq(tasks.id, taskId));
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
@@ -731,6 +794,7 @@ export async function setTaskDue(taskId: number, dueDate: string) {
   if (due && !/^\d{4}-\d{2}-\d{2}$/.test(due)) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t || t.dueDate === due) return;
+  await assertWorkEditable(u, t);
   await db.update(tasks).set({ dueDate: due }).where(eq(tasks.id, taskId));
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
@@ -747,6 +811,7 @@ export async function updateTask(taskId: number, data: { title: string; body: st
   const body = data.body.trim();
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t || (t.title === title && t.body === body)) return;
+  await assertWorkEditable(u, t);
   await db.update(tasks).set({ title, body }).where(eq(tasks.id, taskId));
   if (t.title !== title) {
     await audit({
@@ -771,6 +836,7 @@ export async function deleteTask(taskId: number, reason: string): Promise<{ erro
   const u = t.origin === "checkout" ? await requireEditor() : await requireStaff();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
+  await assertWorkEditable(u, t);
   await db.delete(tasks).where(eq(tasks.id, taskId)); // checklist + notes cascade
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
@@ -791,6 +857,7 @@ export async function setTaskState(taskId: number, state: string) {
     const items = await db.select().from(checklistItems).where(and(eq(checklistItems.taskId, taskId), eq(checklistItems.done, false)));
     if (items.length) suffix = ` (closed with ${items.length} checklist item${items.length > 1 ? "s" : ""} incomplete)`;
   }
+  await assertWorkEditable(u, t);
   await db.update(tasks).set({ state, completedAt: state === "Done" ? new Date() : null }).where(eq(tasks.id, taskId));
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
@@ -803,6 +870,7 @@ export async function assignTask(taskId: number, assignee: string) {
   const u = await requireEditor();
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t) return;
+  await assertWorkEditable(u, t);
   await db.update(tasks).set({ assignee }).where(eq(tasks.id, taskId));
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
@@ -826,6 +894,7 @@ export async function addChecklistItem(taskId: number, text: string) {
   if (!text.trim()) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t) return;
+  await assertWorkEditable(u, t);
   await db.insert(checklistItems).values({ taskId, text: text.trim() });
   await audit({
     actor: u.email, instrumentId: t.instrumentId, entityType: "checklist_item", entityId: taskId,
@@ -839,6 +908,7 @@ export async function toggleChecklistItem(itemId: number) {
   const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, itemId));
   if (!item) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, item.taskId));
+  await assertWorkEditable(u, t);
   await db.update(checklistItems).set({ done: !item.done }).where(eq(checklistItems.id, itemId));
   await audit({
     actor: u.email, instrumentId: t?.instrumentId, entityType: "checklist_item", entityId: itemId,
@@ -853,6 +923,7 @@ export async function deleteChecklistItem(itemId: number) {
   const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, itemId));
   if (!item) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, item.taskId));
+  await assertWorkEditable(u, t);
   await db.delete(checklistItems).where(eq(checklistItems.id, itemId)); // item notes cascade
   await audit({
     actor: u.email, instrumentId: t?.instrumentId, entityType: "checklist_item", entityId: itemId,
@@ -867,6 +938,7 @@ export async function addItemNote(itemId: number, text: string) {
   const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, itemId));
   if (!item) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, item.taskId));
+  await assertWorkEditable(u, t);
   await db.insert(itemNotes).values({ itemId, author: u.name, text: text.trim() });
   await audit({
     actor: u.email, instrumentId: t?.instrumentId, entityType: "item_note", entityId: itemId,
@@ -880,6 +952,7 @@ export async function addTaskNote(taskId: number, text: string) {
   if (!text.trim()) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t) return;
+  await assertWorkEditable(u, t);
   await db.insert(taskNotes).values({ taskId, author: u.name, text: text.trim() });
   await audit({
     actor: u.email, instrumentId: t.instrumentId, entityType: "task_note", entityId: taskId,
@@ -895,6 +968,7 @@ export async function updateTaskNote(noteId: number, text: string) {
   const [n] = await db.select().from(taskNotes).where(eq(taskNotes.id, noteId));
   if (!n || n.text === t) return;
   const [task] = await db.select().from(tasks).where(eq(tasks.id, n.taskId));
+  await assertWorkEditable(u, task);
   await db.update(taskNotes).set({ text: t }).where(eq(taskNotes.id, noteId));
   await audit({
     actor: u.email, instrumentId: task?.instrumentId, entityType: "task_note", entityId: noteId,
@@ -908,6 +982,7 @@ export async function deleteTaskNote(noteId: number) {
   const [n] = await db.select().from(taskNotes).where(eq(taskNotes.id, noteId));
   if (!n) return;
   const [task] = await db.select().from(tasks).where(eq(tasks.id, n.taskId));
+  await assertWorkEditable(u, task);
   await db.delete(taskNotes).where(eq(taskNotes.id, noteId));
   await audit({
     actor: u.email, instrumentId: task?.instrumentId, entityType: "task_note", entityId: noteId,
@@ -924,6 +999,7 @@ export async function updateItemNote(noteId: number, text: string) {
   if (!n || n.text === t) return;
   const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, n.itemId));
   const [task] = item ? await db.select().from(tasks).where(eq(tasks.id, item.taskId)) : [];
+  await assertWorkEditable(u, task);
   await db.update(itemNotes).set({ text: t }).where(eq(itemNotes.id, noteId));
   await audit({
     actor: u.email, instrumentId: task?.instrumentId, entityType: "item_note", entityId: noteId,
@@ -938,6 +1014,7 @@ export async function deleteItemNote(noteId: number) {
   if (!n) return;
   const [item] = await db.select().from(checklistItems).where(eq(checklistItems.id, n.itemId));
   const [task] = item ? await db.select().from(tasks).where(eq(tasks.id, item.taskId)) : [];
+  await assertWorkEditable(u, task);
   await db.delete(itemNotes).where(eq(itemNotes.id, noteId));
   await audit({
     actor: u.email, instrumentId: task?.instrumentId, entityType: "item_note", entityId: noteId,
@@ -1037,6 +1114,7 @@ export async function updatePart(partId: number, raw: PartInput) {
   const retagged = (data.assetId ?? null) !== before.assetId;
   const taggedAsset = retagged ? await validAssetTag(data.assetId, before.instrumentId) : null;
   const assetId = retagged ? taggedAsset?.id ?? null : before.assetId;
+  await assertWorkEditable(u, before);
   await db.update(parts).set({ ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
@@ -1070,6 +1148,7 @@ export async function setPartAsset(partId: number, assetId: number | null) {
   const tagged = await validAssetTag(assetId, p.instrumentId);
   const next = tagged?.id ?? null;
   if (p.assetId === next) return;
+  await assertWorkEditable(u, p);
   await db.update(parts).set({ assetId: next }).where(eq(parts.id, partId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
@@ -1083,6 +1162,7 @@ export async function setPartStatus(partId: number, status: string) {
   const [p] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!p || p.status === status) return;
   const stamps = partStamps(p, status);
+  await assertWorkEditable(u, p);
   await db.update(parts).set({ status, ...stamps }).where(eq(parts.id, partId));
   const verb = partStatusVerb(status);
   await audit({
@@ -1099,6 +1179,7 @@ export async function deletePart(partId: number, reason: string): Promise<{ erro
   if (typeof why !== "string") return why;
   const [p] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!p) return {};
+  await assertWorkEditable(u, p);
   await db.delete(parts).where(eq(parts.id, partId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
@@ -1148,6 +1229,7 @@ export async function updateAttachment(attachmentId: number, data: { fileName: s
   const description = data.description.trim();
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
   if (!a || (a.fileName === fileName && a.kind === kind && a.description === description)) return;
+  await assertWorkEditable(u, a);
   await db.update(attachments).set({ fileName, kind, description }).where(eq(attachments.id, attachmentId));
   const changes: string[] = [];
   if (a.fileName !== fileName) changes.push(`renamed to '${fileName}'`);
@@ -1178,6 +1260,7 @@ export async function deleteAttachment(attachmentId: number, reason: string): Pr
   if (typeof why !== "string") return why;
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
   if (!a) return {};
+  await assertWorkEditable(u, a);
   await db.delete(attachments).where(eq(attachments.id, attachmentId));
   await deleteBlobs([a.url]); // remove the actual file from Vercel Blob, not just our record
   await audit({
@@ -1353,7 +1436,13 @@ export async function postDiscussion(instrumentId: number | null, body: string) 
   if (instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     if (!inst) throw new Error("Not found");
+    // A thread lives with its system: you can only post where you can see.
+    await assertSystemVisible(u, instrumentId);
     externalId = inst.externalId;
+  } else if (u.orgId !== null) {
+    // The General board is the house's room with the tracker's organization.
+    const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+    if (s?.sheetOrgId !== u.orgId) throw new Error("Not found");
   }
   await db.insert(discussionPosts).values({ instrumentId, author: u.name, authorEmail: u.email, body: text });
   await audit({
@@ -1372,6 +1461,9 @@ export async function postDiscussion(instrumentId: number | null, body: string) 
 /** Mark a thread read for the current user (0 = the General board). */
 export async function markThreadRead(threadId: number) {
   const u = await requireUser();
+  // 0 is the General board; anything else must be a system the caller can see,
+  // so a read marker can't be used to probe which system ids exist.
+  if (threadId !== 0) await assertSystemVisible(u, threadId);
   await db.insert(discussionReads)
     .values({ userEmail: u.email, threadId, lastSeenAt: new Date() })
     .onConflictDoUpdate({
@@ -1386,6 +1478,12 @@ export async function updateDiscussionPost(postId: number, body: string) {
   if (!text) throw new Error("Post text required");
   const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
   if (!p || p.body === text) return;
+  // Editing someone else's words was possible for any editor - your own posts
+  // (or staff) only.
+  if (!isHouse(u.role) && p.authorEmail.toLowerCase() !== u.email.toLowerCase()) {
+    throw new Error("You can only edit your own posts");
+  }
+  if (p.instrumentId !== null) await assertSystemVisible(u, p.instrumentId);
   await db.update(discussionPosts).set({ body: text }).where(eq(discussionPosts.id, postId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
@@ -1401,6 +1499,10 @@ export async function deleteDiscussionPost(postId: number, reason: string): Prom
   if (typeof why !== "string") return why;
   const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
   if (!p) return {};
+  if (!isHouse(u.role) && p.authorEmail.toLowerCase() !== u.email.toLowerCase()) {
+    return { error: "You can only delete your own posts" };
+  }
+  if (p.instrumentId !== null) await assertSystemVisible(u, p.instrumentId);
   await db.delete(discussionPosts).where(eq(discussionPosts.id, postId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
@@ -1711,6 +1813,110 @@ export async function removeClientAccess(id: number) {
     action: `removed client sign-in: ${row.entry}`,
   });
   revalidatePath("/settings");
+}
+
+// ---------------- Sharing ----------------
+// Who a system is visible to. Staff share with anyone; an organization with
+// edit rights may bring in a service provider on a system it works, which is
+// how both sides get outside help without discovering each other's clients.
+
+export async function shareSystem(instrumentId: number, orgId: number, access: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const level = access === "edit" ? "edit" : "view";
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Pick an organization" };
+  if (!isHouse(u.role)) {
+    // An org may only add providers, only to systems it can edit, and never
+    // itself (which would be a self-granted upgrade).
+    try { await assertSystemEditable(u, instrumentId); } catch { return { error: "Not found" }; }
+    if (org.kind !== "provider") return { error: "You can only bring in a service provider" };
+    if (org.id === u.orgId) return { error: "That's your own organization" };
+  }
+  const [existing] = await db.select().from(systemShares)
+    .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, orgId)));
+  if (existing) {
+    if (existing.access === level) return {};
+    await db.update(systemShares).set({ access: level }).where(eq(systemShares.id, existing.id));
+  } else {
+    await db.insert(systemShares).values({ instrumentId, orgId, access: level, addedBy: u.email });
+  }
+  await audit({
+    actor: u.email, instrumentId, entityType: "share", entityId: inst.externalId,
+    action: `${existing ? "changed" : "granted"} ${org.name} ${level} access to ${inst.externalId}`,
+    field: "access", oldValue: existing?.access ?? "", newValue: level,
+  });
+  rev(instrumentId);
+  return {};
+}
+
+export async function unshareSystem(instrumentId: number, orgId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  if (!isHouse(u.role)) {
+    try { await assertSystemEditable(u, instrumentId); } catch { return { error: "Not found" }; }
+    // An org can withdraw a provider it brought in, but not its own access
+    // (that's the house's call) and not another client's.
+    if (org.kind !== "provider") return { error: "You can only remove a service provider" };
+  }
+  await db.delete(systemShares)
+    .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, orgId)));
+  await audit({
+    actor: u.email, instrumentId, entityType: "share", entityId: inst.externalId,
+    action: `removed ${org.name}'s access to ${inst.externalId}`,
+  });
+  rev(instrumentId);
+  return {};
+}
+
+export async function addOrg(name: string, kind: string): Promise<{ error?: string; id?: number }> {
+  const u = await requireOwner();
+  const n = name.trim();
+  if (!n || n.length > 60) return { error: "Name must be 1-60 characters" };
+  const k = kind === "provider" ? "provider" : "client";
+  const existing = await db.select().from(orgs);
+  if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
+  const [row] = await db.insert(orgs).values({ name: n, kind: k }).returning();
+  await audit({ actor: u.email, entityType: "org", entityId: row.id, action: `created ${k} organization "${n}"` });
+  revalidatePath("/settings");
+  return { id: row.id };
+}
+
+export async function removeOrg(orgId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return {};
+  // Cascades take the shares and allowlist entries with it, which is the point:
+  // their logins stop working and their access disappears in one step.
+  await db.delete(orgs).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId,
+    action: `removed organization "${org.name}" - its shares and sign-in entries went with it - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/settings");
+  rev();
+  return {};
+}
+
+export async function setSheetOrg(orgId: number | null) {
+  const u = await requireOwner();
+  const [org] = orgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (orgId !== null && !org) return;
+  await db.update(appSettings).set({ sheetOrgId: orgId }).where(eq(appSettings.id, 1));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "sheet_org",
+    action: org ? `the tracker sheet and EOD report now cover ${org.name}` : "cleared the tracker/EOD organization",
+  });
+  revalidatePath("/settings");
+  revalidatePath("/eod");
+  return;
 }
 
 // ---------------- Vocabulary ----------------
