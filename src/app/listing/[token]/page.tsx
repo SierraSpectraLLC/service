@@ -24,22 +24,38 @@ export const metadata: Metadata = { robots: { index: false, follow: false } };
 export default async function ListingPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   if (!token || token.length < 12) notFound();
+  // A token names either a whole system or a single asset - resolve in that order.
   const [inst] = await db.select().from(instruments)
     .where(and(eq(instruments.listingToken, token), eq(instruments.forSale, true)));
-  if (!inst) notFound();
+  const [soloAsset] = inst ? [] : await db.select().from(assets)
+    .where(and(eq(assets.listingToken, token), eq(assets.forSale, true)));
+  if (!inst && !soloAsset) notFound();
 
   const [brand, assetRows, taskRows, partRows, fileRows] = await Promise.all([
     getBrand(),
-    db.select().from(assets).where(eq(assets.instrumentId, inst.id)).orderBy(asc(assets.sortOrder), asc(assets.id)),
-    db.select().from(tasks).where(and(eq(tasks.instrumentId, inst.id), eq(tasks.state, "Done"))).orderBy(asc(tasks.completedAt)),
-    db.select().from(parts).where(eq(parts.instrumentId, inst.id)).orderBy(asc(parts.id)),
-    db.select().from(attachments).where(and(eq(attachments.instrumentId, inst.id), eq(attachments.showOnListing, true)))
+    inst
+      ? db.select().from(assets).where(eq(assets.instrumentId, inst.id)).orderBy(asc(assets.sortOrder), asc(assets.id))
+      : [soloAsset],
+    inst
+      ? db.select().from(tasks).where(and(eq(tasks.instrumentId, inst.id), eq(tasks.state, "Done"))).orderBy(asc(tasks.completedAt))
+      : db.select().from(tasks).where(and(eq(tasks.assetId, soloAsset.id), eq(tasks.state, "Done"))).orderBy(asc(tasks.completedAt)),
+    inst
+      ? db.select().from(parts).where(eq(parts.instrumentId, inst.id)).orderBy(asc(parts.id))
+      : db.select().from(parts).where(eq(parts.assetId, soloAsset.id)).orderBy(asc(parts.id)),
+    db.select().from(attachments)
+      .where(and(
+        inst ? eq(attachments.instrumentId, inst.id) : eq(attachments.assetId, soloAsset.id),
+        eq(attachments.showOnListing, true)))
       .orderBy(asc(attachments.fileName)),
   ]);
   // Only parts that ended up in (or came out of) the machine tell a buyer
   // anything; the procurement pipeline is internal.
   const fitted = partRows.filter((p) => p.status === "Installed" || p.status === "Removed");
-  const label = composeSystemLabel(assetRows, inst.model);
+  const label = inst
+    ? composeSystemLabel(assetRows, inst.model)
+    : `${soloAsset.kind}${soloAsset.model ? ` — ${soloAsset.model}` : ""}`;
+  const category = inst?.category ?? "";
+  const saleNote = inst?.saleNote ?? soloAsset?.saleNote ?? "";
 
   // The root layout already draws the platform header (it renders for
   // anonymous viewers too), so this page starts straight at the listing.
@@ -50,14 +66,14 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}>{label || "Instrument system"}</div>
-          {inst.category && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{inst.category}</span>}
+          {category && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{category}</span>}
           <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
         </div>
-        {inst.saleNote && <div style={{ fontSize: 14, marginTop: 8, whiteSpace: "pre-wrap" }}>{inst.saleNote}</div>}
+        {saleNote && <div style={{ fontSize: 14, marginTop: 8, whiteSpace: "pre-wrap" }}>{saleNote}</div>}
 
         {assetRows.length > 0 && (
           <>
-            <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>What&apos;s in the system</div>
+            <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>{inst ? "What's in the system" : "The unit"}</div>
             {assetRows.map((a) => (
               <div key={a.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
                 <b>{a.kind}</b>{a.model ? ` — ${a.model}` : ""}{a.manufacturer ? ` · ${a.manufacturer}` : ""}
@@ -111,7 +127,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
       )}
 
       <div className="mut" style={{ fontSize: 11, padding: "0 2px 24px" }}>
-        Listed on {brand.name}. Service history shown as recorded; contact the seller through the channel that sent you this link.
+        Listed on {brand.name}. History shown as recorded.
       </div>
     </div>
   );

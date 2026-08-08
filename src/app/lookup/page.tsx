@@ -34,6 +34,7 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
 
   const visible: { assetId: number; instrumentId: number | null; desc: string }[] = [];
   const requestable = new Map<number, string>(); // instrumentId -> asset description
+  const assetListings: { desc: string; saleNote: string; listingToken: string }[] = [];
   for (const a of matches) {
     const desc = `${a.kind}${a.model ? ` — ${a.model}` : ""}`;
     const access = await assetAccess(user, a.id);
@@ -45,8 +46,11 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
       });
     } else if (a.instrumentId !== null) {
       requestable.set(a.instrumentId, desc);
+    } else if (a.forSale) {
+      // A hidden shelf spare stays undisclosed - unless its owner put it on
+      // the market, in which case the listing is the disclosure.
+      assetListings.push({ desc, saleNote: a.saleNote, listingToken: a.listingToken });
     }
-    // A hidden shelf spare in someone else's workspace stays undisclosed.
   }
 
   // A hidden match that's on the market shows its public listing - the seller
@@ -64,7 +68,7 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
       ))).map((r) => r.instrumentId)
     : [];
 
-  const nothingFound = searched && visible.length === 0 && requestable.size === 0;
+  const nothingFound = searched && visible.length === 0 && requestable.size === 0 && assetListings.length === 0;
   const mayCreate = user.role !== "client_viewer";
   const kinds = searched && nothingFound && mayCreate
     ? [...new Set([...MODULE_KINDS, ...(await db.selectDistinct({ kind: assets.kind }).from(assets)).map((k) => k.kind)].filter(Boolean))]
@@ -74,9 +78,7 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
     <div className="container">
       <div className="card">
         <div className="card-title">Find an instrument by serial number</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Exact match only. If the unit is in another workspace you can ask its owner for access; if nobody has it, you can start its service record.
-        </div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>Exact match only.</div>
         <form method="GET" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input className="mono" name="sn" defaultValue={sn} placeholder="Serial number, e.g. L20505500123"
             style={{ flex: "1 1 220px", maxWidth: 340 }} autoFocus />
@@ -123,6 +125,23 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
                 </div>
               );
             })}
+          </>
+        )}
+
+        {assetListings.length > 0 && (
+          <>
+            <div className="eyebrow" style={{ marginTop: 14, marginBottom: 0 }}>For sale</div>
+            {assetListings.map((l, i) => (
+              <div key={i} style={{ border: "1px solid #BFDDBF", background: "#F3FAF3", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <b style={{ fontSize: 14, color: "var(--navy)" }}>{l.desc}</b>
+                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+                </div>
+                {l.saleNote && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{l.saleNote}</div>}
+                <a href={`/listing/${l.listingToken}`} target="_blank" rel="noreferrer" className="btn sm accent"
+                  style={{ display: "inline-block", marginTop: 8, textDecoration: "none" }}>View listing</a>
+              </div>
+            ))}
           </>
         )}
 

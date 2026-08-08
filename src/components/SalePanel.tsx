@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setForSale } from "@/app/actions";
+import { setForSale, setAssetForSale } from "@/app/actions";
 
 /**
- * Resale controls, shown only to the system's owner (or staff). The listing
- * URL is public by design - hand it to prospective buyers; it goes dead the
- * moment the system is taken off the market.
+ * Resale controls for a system or a single asset, shown only to its owner (or
+ * staff). The listing URL is public by design - hand it to prospective buyers;
+ * it goes dead the moment the listing ends.
  */
-export default function SalePanel({ instrumentId, forSale, saleNote, listingToken }: {
-  instrumentId: number; forSale: boolean; saleNote: string; listingToken: string;
+export default function SalePanel({ target = "system", targetId, forSale, saleNote, listingToken }: {
+  target?: "system" | "asset"; targetId: number; forSale: boolean; saleNote: string; listingToken: string;
 }) {
+  const apply = target === "asset" ? setAssetForSale : setForSale;
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState(saleNote);
   const [error, setError] = useState("");
@@ -44,8 +45,7 @@ export default function SalePanel({ instrumentId, forSale, saleNote, listingToke
             </div>
           )}
           <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
-            The listing is public - no sign-in needed. It shows the system&apos;s makeup, completed work, parts fitted,
-            and only the files marked &quot;show on listing&quot;. Location, client, notes and pricing never appear.
+            Public page, no sign-in. Shows history and chosen files only - never location, client, notes or pricing.
           </div>
           <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
             placeholder='Public blurb, e.g. "Refurbished 2025, new pump seals, full checkout passed. Contact sales@..."'
@@ -56,7 +56,7 @@ export default function SalePanel({ instrumentId, forSale, saleNote, listingToke
               onClick={() => {
                 setError("");
                 startTransition(async () => {
-                  const res = await setForSale(instrumentId, true, note);
+                  const res = await apply(targetId, true, note);
                   if (res?.error) setError(res.error);
                   else setEditing(false);
                 });
@@ -64,9 +64,9 @@ export default function SalePanel({ instrumentId, forSale, saleNote, listingToke
             {forSale ? (
               <button className="btn sm" disabled={pending}
                 onClick={() => {
-                  if (!window.confirm("Take this system off the market? The listing link stops working immediately.")) return;
+                  if (!window.confirm("End the listing? Its link stops working immediately.")) return;
                   startTransition(async () => {
-                    const res = await setForSale(instrumentId, false, note);
+                    const res = await apply(targetId, false, note);
                     if (res?.error) setError(res.error);
                   });
                 }}>End listing</button>
