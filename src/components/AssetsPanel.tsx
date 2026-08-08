@@ -114,7 +114,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
       {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
 
       {assets.length === 0 && !open && (
-        <div className="mut" style={{ fontSize: 13 }}>No assets listed - add the pump, autosampler, detector and so on.</div>
+        <div className="mut" style={{ fontSize: 13 }}>No assets listed yet.</div>
       )}
       {assets.map((a) => {
         const c = ASSET_COLOR[a.status] ?? ASSET_COLOR.Spare;

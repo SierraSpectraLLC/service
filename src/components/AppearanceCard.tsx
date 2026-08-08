@@ -56,7 +56,7 @@ export default function AppearanceCard({ orgName, themeColor, logoUrl, platformN
     <div className="card">
       <div className="card-title">Workspace appearance</div>
       <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
-        How {platformName} looks for everyone signing in as {orgName}. Other workspaces keep their own look.
+        Applies to everyone signing in as {orgName}.
       </div>
 
       {/* Live preview using the same color math as the real header. */}

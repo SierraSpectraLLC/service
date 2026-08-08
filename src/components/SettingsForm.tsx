@@ -329,9 +329,7 @@ export default function SettingsForm(props: {
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Platform identity</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          What this portal calls itself, everywhere it names itself: the header, the browser tab, the sign-in
-          page and the notification emails. Changing it takes effect immediately - the web address is set
-          separately, with your host.
+          The portal&apos;s name, shown in the header, browser tab, sign-in page and emails.
         </div>
         <div className="pf2" style={{ marginBottom: 8 }}>
           <div>
@@ -372,19 +370,14 @@ export default function SettingsForm(props: {
           </select>
         </div>
         <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-          The service organization running this instance. Its name goes on sign-off packets and the daily
-          reports - documents a service company signs, not the platform - and systems you create as staff
-          are shared with it so its engineers can work them. It is an ordinary provider organization
-          otherwise, with no special sight of anything.
+          Named on sign-off packets and daily reports; systems staff create are shared with it.
         </div>
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Organizations</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Who the portal is shared with. A <b>client</b> owns or operates systems; a <b>provider</b> is an
-          outside service outfit brought onto specific systems. Each organization sees only the systems
-          shared with it - set that on a system&apos;s own page. Platform staff always see everything.
+          A <b>client</b> owns systems; a <b>provider</b> services them. Each sees only what&apos;s shared with it.
         </div>
         {props.orgs.map((o) => (
           <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>

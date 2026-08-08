@@ -120,7 +120,7 @@ export default async function Home() {
           <div className="card">
             <div className="card-title">Past engagements</div>
             <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
-              Engagements that ended. Each keeps a frozen, read-only copy of the record as it stood that day - it stays yours even if you are brought back onto the system later.
+              Frozen, read-only records from engagements that ended.
             </div>
             {pastEngagements.map((r) => (
               <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>

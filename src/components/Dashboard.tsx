@@ -192,7 +192,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
             </div>
           </div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            The system is named by the assets you add to it - pump, autosampler, detector - on its page.
+            The system is named by the assets you add on its page.
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {people.length > 0 && (

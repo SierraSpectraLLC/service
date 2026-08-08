@@ -26,13 +26,10 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>{assetDesc}</div>
-      <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
-        This unit sits on a system in another workspace.
-      </div>
       {state === "sent" ? (
         <div style={{ marginTop: 8 }}>
           <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>Requested</span>
-          <span className="mut" style={{ fontSize: 12, marginLeft: 6 }}>Under review. The system appears on your dashboard once it&apos;s granted.</span>
+          <span className="mut" style={{ fontSize: 12, marginLeft: 6 }}>Under review.</span>
         </div>
       ) : (
         <div style={{ marginTop: 8 }}>
@@ -49,11 +46,6 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
               ? "How you came to own it - e.g. \"Purchased from Acme Instruments, PO 4471, March 2024.\" Ownership is granted by review, not by knowing the serial."
               : "Who you are and why you're asking, e.g. \"We service this instrument for Acme Labs.\""}
             style={{ resize: "vertical", fontSize: 13 }} />
-          {claiming && (
-            <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-              Granting a claim hands you the system and the right to decide who else gets on it, so it is reviewed by hand.
-            </div>
-          )}
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 4 }}>{error}</div>}
           <button className="btn sm accent" style={{ marginTop: 6 }} disabled={pending}
             onClick={() => {
@@ -95,7 +87,7 @@ export function CreateSystemForm({ serial, kinds }: { serial: string; kinds: str
   return (
     <div className="dash-form" style={{ marginTop: 10, marginBottom: 0 }}>
       <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-        Start its service record here. It goes into your workspace; if the owner joins the platform later, the system can be handed over to them.
+        Nobody has this serial yet - create it and start its service record.
       </div>
       <div className="pf3" style={{ marginBottom: 8 }}>
         <div>

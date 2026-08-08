@@ -40,9 +40,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
           <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>Frozen record</span>
-          <span className="mut" style={{ fontSize: 12 }}>
-            Engagement ended {shopTime(rec.revokedAt)}. This is the record as it stood that day - it never updates.
-          </span>
+          <span className="mut" style={{ fontSize: 12 }}>Engagement ended {shopTime(rec.revokedAt)}. Never updates.</span>
         </div>
 
         <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
@@ -164,7 +162,6 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
 
       <div className="card">
         <div className="card-title">Activity</div>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>The append-only feed, up to the day the engagement ended.</div>
         <ActivityFeed items={d.activity.map((a, i) => ({
           id: i, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue, when: when(a.createdAt),
         }))} />
