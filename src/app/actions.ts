@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  taskTemplates, templateTasks, templateItems, stageEvents, discussionPosts, people, assets, assetEvents, discussionReads,
+  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads,
   checkoutItems,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
@@ -70,7 +70,7 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; priority: number; location?: string },
+  data: { externalId?: string; client: string; category?: string; priority: number; location?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -86,13 +86,15 @@ export async function updateInstrument(
   }
   const priority = data.priority || inst.priority;
   const location = (data.location ?? inst.location).trim();
+  const category = (data.category ?? inst.category).trim();
   const changed: [string, string, string][] = [];
   if (externalId !== inst.externalId) changed.push(["externalId", inst.externalId, externalId]);
   if (location !== inst.location) changed.push(["location", inst.location, location]);
   if (client !== inst.client) changed.push(["client", inst.client, client]);
+  if (category !== inst.category) changed.push(["category", inst.category, category]);
   if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, priority, location, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments).set({ externalId, client, category, priority, location, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.
@@ -195,8 +197,7 @@ export async function setInstrumentLead(instrumentId: number, lead: string) {
 }
 
 export async function createInstrument(
-  data: { externalId: string; client: string; priority: number; lead?: string },
-  templateId?: number,
+  data: { externalId: string; client: string; category?: string; priority: number; lead?: string },
 ) {
   // Editors, not just staff: LabZen adds their internal systems themselves.
   const u = await requireEditor();
@@ -209,7 +210,8 @@ export async function createInstrument(
     // model stays blank: the system is named by the assets added to it
     // (lib/systemLabel). The column lives on only as the pre-asset fallback
     // for older records and sheet imports.
-    externalId: data.externalId.trim(), client: data.client.trim(), model: "",
+    externalId: data.externalId.trim(), client: data.client.trim(),
+    category: (data.category ?? "").trim(), model: "",
     priority: data.priority || 99, lead, stages: ["Intake"],
   }).returning();
   await db.insert(stageEvents).values({ instrumentId: row.id, stage: "Intake", kind: "added" });
@@ -223,7 +225,6 @@ export async function createInstrument(
       instrumentId: row.id, externalId: row.externalId, label: "",
     });
   }
-  if (templateId) await copyTemplateOnto(row.id, row.externalId, templateId, u.email);
   await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email);
   rev(row.id);
   return row.id;
@@ -366,25 +367,46 @@ export async function setAssetStatus(assetId: number, status: string) {
   revalidatePath(`/assets/${assetId}`);
 }
 
-/** Attach a spare to a system. */
-export async function attachAsset(assetId: number, instrumentId: number): Promise<{ error?: string }> {
-  const u = await requireEditor();
+/** Shared install step, so one asset and a whole batch behave identically. */
+async function attachOne(assetId: number, instrumentId: number, externalId: string, u: { email: string; name: string }) {
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!a || !inst) return { error: "Not found" };
-  if (a.instrumentId !== null) return { error: "Already attached to a system - use Move instead" };
-  if (a.status === "Decommissioned") return { error: "This asset is decommissioned" };
+  if (!a) return { error: "Not found" };
+  if (a.instrumentId !== null) return { error: `${assetLabel(a)} is already on a system - use Move instead` };
+  if (a.status === "Decommissioned") return { error: `${assetLabel(a)} is decommissioned` };
   await db.update(assets).set({ instrumentId, status: "In service" }).where(eq(assets.id, assetId));
-  await logAssetEvent(assetId, "installed", instrumentId, `into ${inst.externalId}`, u.name);
+  await logAssetEvent(assetId, "installed", instrumentId, `into ${externalId}`, u.name);
   await audit({
     actor: u.email, instrumentId, entityType: "asset", entityId: assetId,
     action: `installed ${assetLabel(a)}${a.location ? ` (from ${a.location})` : ""}`,
   });
   await generateCheckout(instrumentId, a, u.email);
-  rev(instrumentId);
-  revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
   return {};
+}
+
+/**
+ * Attach several unassigned assets in one go - building a system out of the
+ * shelf is normally a list, not one part at a time. Attaches what it can and
+ * reports the rest.
+ */
+export async function attachAssets(assetIds: number[], instrumentId: number): Promise<{ error?: string; attached?: number }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  const ids = [...new Set(assetIds)].filter((id) => Number.isInteger(id));
+  if (!ids.length) return { error: "Pick at least one asset" };
+  const problems: string[] = [];
+  let attached = 0;
+  for (const id of ids) {
+    const res = await attachOne(id, instrumentId, inst.externalId, u);
+    if (res.error) problems.push(res.error);
+    else attached++;
+  }
+  rev(instrumentId);
+  revalidatePath("/assets");
+  if (attached && problems.length) return { attached, error: `Attached ${attached}. Skipped: ${problems.join("; ")}` };
+  if (!attached) return { error: problems.join("; ") || "Nothing to attach" };
+  return { attached };
 }
 
 /** Take an asset off its system; it becomes a spare. */
@@ -466,20 +488,27 @@ export async function removeAsset(assetId: number) {
 
 // ---------------- Gases ----------------
 
-export async function addInstrumentGas(instrumentId: number, gas: string) {
+/**
+ * Add a gas requirement. Any name is allowed - GASES in lib/stages.ts is just
+ * the starter list, so the shop can add its own (CO2, Zero air, ...) without a
+ * settings trip.
+ */
+export async function addInstrumentGas(instrumentId: number, gas: string): Promise<{ error?: string }> {
   const u = await requireEditor();
-  if (!(GASES as readonly string[]).includes(gas)) throw new Error("Unknown gas");
+  const name = gas.trim();
+  if (!name || name.length > 40) return { error: "Gas name must be 1-40 characters" };
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
+  if (!inst) return { error: "Not found" };
   const existing = await db.select().from(instrumentGases)
-    .where(and(eq(instrumentGases.instrumentId, instrumentId), eq(instrumentGases.gas, gas)));
-  if (existing.length) return;
-  await db.insert(instrumentGases).values({ instrumentId, gas });
+    .where(eq(instrumentGases.instrumentId, instrumentId));
+  if (existing.some((g) => g.gas.toLowerCase() === name.toLowerCase())) return { error: `${name} is already listed` };
+  await db.insert(instrumentGases).values({ instrumentId, gas: name });
   await audit({
     actor: u.email, instrumentId, entityType: "gas", entityId: inst.externalId,
-    action: `added gas requirement: ${gas}`, field: "gas", newValue: gas,
+    action: `added gas requirement: ${name}`, field: "gas", newValue: name,
   });
   rev(instrumentId);
+  return {};
 }
 
 export async function setGasStatus(gasId: number, status: string) {
@@ -1206,154 +1235,6 @@ export async function deleteDiscussionPost(postId: number) {
   revalidatePath("/discussions");
 }
 
-// ---------------- SOP templates ----------------
-// Shop-wide SOPs, so staff (not just owner) manage them. Applying a template
-// copies its tasks + checklist items onto an instrument.
-
-export async function createTemplate(name: string): Promise<{ error?: string; id?: number }> {
-  const u = await requireStaff();
-  const n = name.trim();
-  if (!n || n.length > 80) return { error: "Template name must be 1-80 characters" };
-  const existing = await db.select().from(taskTemplates);
-  if (existing.some((t) => t.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
-  const [row] = await db.insert(taskTemplates).values({ name: n }).returning();
-  await audit({ actor: u.email, entityType: "template", entityId: row.id, action: `created template "${n}"` });
-  revalidatePath("/templates");
-  return { id: row.id };
-}
-
-export async function renameTemplate(templateId: number, name: string): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const n = name.trim();
-  if (!n || n.length > 80) return { error: "Template name must be 1-80 characters" };
-  const [t] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
-  if (!t || t.name === n) return {};
-  const existing = await db.select().from(taskTemplates);
-  if (existing.some((x) => x.id !== templateId && x.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
-  await db.update(taskTemplates).set({ name: n }).where(eq(taskTemplates.id, templateId));
-  await audit({
-    actor: u.email, entityType: "template", entityId: templateId,
-    action: `renamed template "${t.name}" to "${n}"`, field: "name", oldValue: t.name, newValue: n,
-  });
-  revalidatePath("/templates");
-  return {};
-}
-
-export async function deleteTemplate(templateId: number) {
-  const u = await requireStaff();
-  const [t] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
-  if (!t) return;
-  await db.delete(taskTemplates).where(eq(taskTemplates.id, templateId)); // tasks + items cascade
-  await audit({ actor: u.email, entityType: "template", entityId: templateId, action: `deleted template "${t.name}"` });
-  revalidatePath("/templates");
-}
-
-export async function addTemplateTask(templateId: number, data: { title: string; body: string }) {
-  const u = await requireStaff();
-  const title = data.title.trim();
-  if (!title) return;
-  const [t] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
-  if (!t) return;
-  const siblings = await db.select().from(templateTasks).where(eq(templateTasks.templateId, templateId));
-  const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
-  await db.insert(templateTasks).values({ templateId, title, body: data.body.trim(), sortOrder });
-  await audit({
-    actor: u.email, entityType: "template", entityId: templateId,
-    action: `added task "${title}" to template "${t.name}"`,
-  });
-  revalidatePath("/templates");
-}
-
-export async function updateTemplateTask(taskId: number, data: { title: string; body: string }) {
-  const u = await requireStaff();
-  const title = data.title.trim();
-  if (!title) return;
-  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, taskId));
-  if (!tt || (tt.title === title && tt.body === data.body.trim())) return;
-  await db.update(templateTasks).set({ title, body: data.body.trim() }).where(eq(templateTasks.id, taskId));
-  await audit({
-    actor: u.email, entityType: "template", entityId: tt.templateId,
-    action: `edited template task "${title}"`,
-  });
-  revalidatePath("/templates");
-}
-
-export async function deleteTemplateTask(taskId: number) {
-  const u = await requireStaff();
-  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, taskId));
-  if (!tt) return;
-  await db.delete(templateTasks).where(eq(templateTasks.id, taskId)); // items cascade
-  await audit({
-    actor: u.email, entityType: "template", entityId: tt.templateId,
-    action: `removed template task "${tt.title}"`,
-  });
-  revalidatePath("/templates");
-}
-
-export async function addTemplateItem(templateTaskId: number, text: string) {
-  const u = await requireStaff();
-  const t = text.trim();
-  if (!t) return;
-  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, templateTaskId));
-  if (!tt) return;
-  const siblings = await db.select().from(templateItems).where(eq(templateItems.templateTaskId, templateTaskId));
-  const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
-  await db.insert(templateItems).values({ templateTaskId, text: t, sortOrder });
-  await audit({
-    actor: u.email, entityType: "template", entityId: tt.templateId,
-    action: `added checklist item "${t}" to template task "${tt.title}"`,
-  });
-  revalidatePath("/templates");
-}
-
-export async function deleteTemplateItem(itemId: number) {
-  const u = await requireStaff();
-  const [item] = await db.select().from(templateItems).where(eq(templateItems.id, itemId));
-  if (!item) return;
-  const [tt] = await db.select().from(templateTasks).where(eq(templateTasks.id, item.templateTaskId));
-  await db.delete(templateItems).where(eq(templateItems.id, itemId));
-  await audit({
-    actor: u.email, entityType: "template", entityId: tt?.templateId,
-    action: `removed checklist item "${item.text}" from template task "${tt?.title ?? "?"}"`,
-  });
-  revalidatePath("/templates");
-}
-
-/** Shared copy step for applyTemplate and createInstrument-with-template. */
-async function copyTemplateOnto(instrumentId: number, externalId: string, templateId: number, actor: string) {
-  const [tpl] = await db.select().from(taskTemplates).where(eq(taskTemplates.id, templateId));
-  if (!tpl) throw new Error("Template not found");
-  const tplTasks = await db.select().from(templateTasks).where(eq(templateTasks.templateId, templateId))
-    .orderBy(asc(templateTasks.sortOrder), asc(templateTasks.id));
-  const taskIds = tplTasks.map((t) => t.id);
-  const tplItems = taskIds.length
-    ? await db.select().from(templateItems).where(inArray(templateItems.templateTaskId, taskIds))
-      .orderBy(asc(templateItems.sortOrder), asc(templateItems.id))
-    : [];
-  for (const tt of tplTasks) {
-    const [task] = await db.insert(tasks).values({
-      instrumentId, title: tt.title, body: tt.body, sortOrder: tt.sortOrder,
-    }).returning();
-    const items = tplItems.filter((i) => i.templateTaskId === tt.id);
-    for (const item of items) {
-      await db.insert(checklistItems).values({ taskId: task.id, text: item.text, sortOrder: item.sortOrder });
-    }
-  }
-  await audit({
-    actor, instrumentId, entityType: "template", entityId: externalId,
-    action: `applied template "${tpl.name}": ${tplTasks.length} task${tplTasks.length === 1 ? "" : "s"}, ${tplItems.length} checklist item${tplItems.length === 1 ? "" : "s"}`,
-  });
-}
-
-/** Copy a template's tasks + checklists onto an instrument. */
-export async function applyTemplate(instrumentId: number, templateId: number) {
-  const u = await requireEditor();
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
-  await copyTemplateOnto(instrumentId, inst.externalId, templateId, u.email);
-  rev(instrumentId);
-}
-
 // ---------------- Checkout items ----------------
 // Tasks and tests auto-created when an asset lands on a system (assetType
 // "system" items fire when a system is created). Per kind, model-scoped
@@ -1413,7 +1294,7 @@ export async function addCheckoutItem(data: CheckoutItemInput): Promise<{ error?
     actor: u.email, entityType: "checkout", entityId: row.id,
     action: `added checkout ${clean.kind} "${clean.name}" for ${clean.assetType}${checkoutScopeLabel(clean.modelScope)}`,
   });
-  revalidatePath("/templates");
+  revalidatePath("/checkout");
   return {};
 }
 
@@ -1438,7 +1319,7 @@ export async function updateCheckoutItem(itemId: number, data: CheckoutItemInput
     field: "item", oldValue: `${before.kind} | ${before.name} | ${before.modelScope.join(", ")}`,
     newValue: `${clean.kind} | ${clean.name} | ${clean.modelScope.join(", ")}`,
   });
-  revalidatePath("/templates");
+  revalidatePath("/checkout");
   return {};
 }
 
@@ -1451,7 +1332,7 @@ export async function deleteCheckoutItem(itemId: number) {
     actor: u.email, entityType: "checkout", entityId: itemId,
     action: `removed checkout ${i.kind} "${i.name}" for ${i.assetType}${checkoutScopeLabel(i.modelScope)}`,
   });
-  revalidatePath("/templates");
+  revalidatePath("/checkout");
 }
 
 /** Persist a drag-reorder within one asset type's list. */
@@ -1473,7 +1354,7 @@ export async function reorderCheckoutItems(assetType: string, orderedIds: number
     actor: u.email, entityType: "checkout", entityId: assetType,
     action: `reordered the ${assetType} checkout list`,
   });
-  revalidatePath("/templates");
+  revalidatePath("/checkout");
 }
 
 // ---------------- Stage vocabulary ----------------

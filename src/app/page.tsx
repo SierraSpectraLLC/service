@@ -1,6 +1,6 @@
 import { and, asc, eq, desc } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people, tasks, assets } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
 import { composeSystemLabel } from "@/lib/systemLabel";
@@ -15,20 +15,19 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows, taskRows, assetRows, clientRows] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, peopleRows, taskRows, assetRows, allSystems] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
     db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200),
     db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
     getStageDefs(),
-    db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets),
-    // Archived systems included, so retiring the last system for a client
-    // doesn't drop them out of the picker.
-    db.selectDistinct({ client: instruments.client }).from(instruments),
+    // Archived systems included, so retiring the last system for a client (or
+    // in a category) doesn't drop it out of the pickers.
+    db.select({ client: instruments.client, category: instruments.category }).from(instruments),
   ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
@@ -55,6 +54,7 @@ export default async function Home() {
       id: i.id,
       externalId: i.externalId,
       client: i.client,
+      category: i.category,
       // A system is what it's built from; the stored description is only a
       // fallback for systems whose assets haven't been entered yet.
       label: composeSystemLabel(assetRows.filter((a) => a.instrumentId === i.id), i.model),
@@ -77,9 +77,9 @@ export default async function Home() {
     <Dashboard
       data={data}
       stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
-      templates={templateList}
       people={peopleRows.map((p) => p.name)}
-      clients={clientRows.map((c) => c.client).filter(Boolean)}
+      clients={allSystems.map((c) => c.client).filter(Boolean)}
+      categories={allSystems.map((c) => c.category).filter(Boolean)}
       canEdit={user.role !== "client_viewer"}
       isStaff={isStaff}
     />

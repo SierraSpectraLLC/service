@@ -3,13 +3,13 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import ClientSelect from "./ClientSelect";
+import PickOrAdd from "./PickOrAdd";
 import { createInstrument } from "@/app/actions";
 
 type StageDefLite = { name: string; bg: string; fg: string };
 
 type Row = {
-  id: number; externalId: string; client: string; label: string; priority: number; lead: string;
+  id: number; externalId: string; client: string; category: string; label: string; priority: number; lead: string;
   stages: string[]; notes: string; openParts: number; gasIssues: string[];
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
 };
@@ -18,9 +18,9 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, templates, people, clients, canEdit, isStaff }: {
-  data: Row[]; stageDefs: StageDefLite[]; templates: { id: number; name: string }[]; people: string[];
-  clients: string[]; canEdit: boolean; isStaff: boolean;
+export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff }: {
+  data: Row[]; stageDefs: StageDefLite[]; people: string[];
+  clients: string[]; categories: string[]; canEdit: boolean; isStaff: boolean;
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
@@ -29,12 +29,13 @@ export default function Dashboard({ data, stageDefs, templates, people, clients,
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", priority: "", lead: "" });
-  const [tpl, setTpl] = useState("");
+  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", lead: "" });
   const [pending, startTransition] = useTransition();
 
   const FLAGS = ["Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention", ...(isStaff ? ["Not on sheet"] : [])];
   const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
+  const CATS = [...new Set(data.map((i) => i.category).filter(Boolean))].sort();
+  const catKey = (c: string) => `cat:${c}`;
   const leadKey = (l: string) => `lead:${l}`;
   const toggleFilter = (f: string) =>
     setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
@@ -52,14 +53,16 @@ export default function Dashboard({ data, stageDefs, templates, people, clients,
     // Stages and leads each combine as OR within their group; flags combine as AND.
     const stageSel = selected.filter((f) => stageNames.includes(f));
     const leadSel = selected.filter((f) => f.startsWith("lead:")).map((f) => f.slice(5));
-    const flagSel = selected.filter((f) => !stageNames.includes(f) && !f.startsWith("lead:"));
+    const catSel = selected.filter((f) => f.startsWith("cat:")).map((f) => f.slice(4));
+    const flagSel = selected.filter((f) => !stageNames.includes(f) && !f.startsWith("lead:") && !f.startsWith("cat:"));
     if (stageSel.length) list = list.filter((i) => stageSel.some((s) => i.stages.includes(s)));
     if (leadSel.length) list = list.filter((i) => leadSel.includes(i.lead));
+    if (catSel.length) list = list.filter((i) => catSel.includes(i.category));
     for (const f of flagSel) list = list.filter((i) => matchesFlag(i, f));
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
-        [i.externalId, i.client, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "),
+        [i.externalId, i.client, i.category, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "),
           i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
       );
     }
@@ -78,12 +81,11 @@ export default function Dashboard({ data, stageDefs, templates, people, clients,
     if (!draft.externalId.trim()) return;
     startTransition(async () => {
       const id = await createInstrument({
-        externalId: draft.externalId, client: draft.client,
+        externalId: draft.externalId, client: draft.client, category: draft.category,
         priority: parseInt(draft.priority) || 99, lead: draft.lead,
-      }, parseInt(tpl) || undefined);
+      });
       setShowNew(false);
-      setDraft({ externalId: "", client: "", priority: "", lead: "" });
-      setTpl("");
+      setDraft({ externalId: "", client: "", category: "", priority: "", lead: "" });
       router.push(`/instruments/${id}`);
     });
   };
@@ -177,9 +179,17 @@ export default function Dashboard({ data, stageDefs, templates, people, clients,
             <div><label>System ID *</label><input value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} placeholder="G-012" /></div>
             <div>
               <label>Client</label>
-              <ClientSelect value={draft.client} clients={clients} onChange={(client) => setDraft({ ...draft, client })} />
+              <PickOrAdd value={draft.client} options={clients} newLabel="+ New client..." placeholder="New client name"
+                onChange={(client) => setDraft({ ...draft, client })} />
             </div>
             <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} placeholder="11" /></div>
+          </div>
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Category</label>
+              <PickOrAdd value={draft.category} options={categories} newLabel="+ New category..." placeholder="e.g. LC-MS"
+                onChange={(category) => setDraft({ ...draft, category })} />
+            </div>
           </div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
             The system is named by the assets you add to it - pump, autosampler, detector - on its page.
@@ -191,15 +201,6 @@ export default function Dashboard({ data, stageDefs, templates, people, clients,
                 <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
                   <option value="">-</option>
                   {people.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </>
-            )}
-            {templates.length > 0 && (
-              <>
-                <span className="mut" style={{ fontSize: 12 }}>Apply SOP:</span>
-                <select value={tpl} onChange={(e) => setTpl(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
-                  <option value="">None</option>
-                  {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
               </>
             )}
@@ -221,7 +222,7 @@ export default function Dashboard({ data, stageDefs, templates, people, clients,
             <span style={{ minWidth: 0 }}>
               <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.label || <span className="mut">No assets listed yet</span>}</span>
               <span className="mut" style={{ fontSize: 11 }}>
-                {i.client} · P{i.priority}
+                {i.client}{i.category ? ` · ${i.category}` : ""} · P{i.priority}
                 {i.lead && <span style={{ color: "var(--navy)", fontWeight: 700 }}> · {i.lead}</span>}
                 {i.missingFromSheet && <span style={{ color: "#A32D2D", fontWeight: 700 }}> · not on sheet</span>}
               </span>

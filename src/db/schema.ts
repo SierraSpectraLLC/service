@@ -55,6 +55,12 @@ export const instruments = pgTable("instruments", {
   id: serial("id").primaryKey(),
   externalId: text("external_id").unique().notNull(), // e.g. T-003, CASA-001
   client: text("client").notNull(),                   // Testen, GMI, Utah, Casablanca
+  // Shop-defined grouping, e.g. "LC-MS", "GC", "N2 generator". Added on the fly
+  // from the system form; the vocabulary is whatever is in use.
+  category: text("category").notNull().default(""),
+  // Legacy free-text description. No longer edited: a system is named by its
+  // assets (lib/systemLabel). Kept as the fallback for pre-asset records and
+  // sheet imports.
   model: text("model").notNull(),
   manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
   serial: text("serial").notNull().default(""),             // the instrument's own serial
@@ -306,7 +312,7 @@ export const stageEvents = pgTable("stage_events", {
 // per kind, scoped items REPLACE the type's all-model items when any match.
 // Superseded checkout_rules stays in the DB (additive pipeline) but is only
 // read by the schema-sync migration that seeds this table. Managed on
-// /templates.
+// /checkout.
 export const checkoutItems = pgTable("checkout_items", {
   id: serial("id").primaryKey(),
   assetType: text("asset_type").notNull(),          // MODULE_KINDS entry or "system"
@@ -326,9 +332,9 @@ export const checkoutItems = pgTable("checkout_items", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// SOP templates: a named bundle of tasks (each with a checklist) that can be
-// applied to an instrument in one tap - e.g. "GC/MS refurb SOP". Managed by
-// staff on /templates; applying copies rows into tasks/checklist_items.
+// RETIRED: SOP templates (a named bundle of tasks applied to an instrument in
+// one tap). The feature went unused and its UI and actions were removed; the
+// tables stay because the sync pipeline is additive-only. Nothing reads them.
 export const taskTemplates = pgTable("task_templates", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),

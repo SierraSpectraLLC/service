@@ -42,7 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {isStaff && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {isStaff && (
                   <NavMore items={[
-                    { href: "/templates", label: "Templates" },
+                    { href: "/checkout", label: "Checkout" },
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     { href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` },

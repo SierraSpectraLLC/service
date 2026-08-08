@@ -1,7 +1,8 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { GASES, GAS_STATES, GAS_COLOR } from "@/lib/stages";
+import { GAS_STATES, GAS_COLOR } from "@/lib/stages";
+import PickOrAdd from "./PickOrAdd";
 import { addInstrumentGas, setGasStatus, updateGasNote, removeInstrumentGas } from "@/app/actions";
 
 export type GasRow = { id: number; gas: string; status: string; note: string };
@@ -20,14 +21,28 @@ function GasStatusSelect({ row }: { row: GasRow }) {
   );
 }
 
-export default function GasPanel({ instrumentId, gases, canEdit, isStaff }: {
-  instrumentId: number; gases: GasRow[]; canEdit: boolean; isStaff: boolean;
+export default function GasPanel({ instrumentId, gases, knownGases, canEdit, isStaff }: {
+  // knownGases: every gas name in use across the shop, plus the starter list.
+  instrumentId: number; gases: GasRow[]; knownGases: string[]; canEdit: boolean; isStaff: boolean;
 }) {
   const [adding, setAdding] = useState(false);
+  const [pick, setPick] = useState("");
+  const [error, setError] = useState("");
   const [noteDrafts, setNoteDrafts] = useState<Record<number, string>>({});
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
 
-  const available = GASES.filter((g) => !gases.some((r) => r.gas === g));
+  const available = knownGases.filter((g) => !gases.some((r) => r.gas.toLowerCase() === g.toLowerCase()));
+
+  const add = () => {
+    const name = pick.trim();
+    if (!name) return;
+    setError("");
+    startTransition(async () => {
+      const res = await addInstrumentGas(instrumentId, name);
+      if (res?.error) setError(res.error);
+      else { setPick(""); setAdding(false); }
+    });
+  };
 
   const saveNote = (g: GasRow) => {
     const draft = noteDrafts[g.id];
@@ -69,19 +84,22 @@ export default function GasPanel({ instrumentId, gases, canEdit, isStaff }: {
         ))}
         {gases.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No gas requirements recorded.</div>}
       </div>
-      {canEdit && available.length > 0 && (
+      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {canEdit && (
         <div style={{ marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           {adding ? (
             <>
-              {available.map((g) => (
-                <button key={g} className="btn sm" onClick={() => { setAdding(false); startTransition(() => addInstrumentGas(instrumentId, g)); }}>
-                  {g}
-                </button>
-              ))}
-              <button className="btn link" onClick={() => setAdding(false)}>cancel</button>
+              <div style={{ flex: "1 1 200px", maxWidth: 260 }}>
+                <PickOrAdd value={pick} options={available} newLabel="+ New gas..." placeholder="e.g. Zero air"
+                  onChange={setPick} />
+              </div>
+              <button className="btn sm accent" onClick={add} disabled={pending || !pick.trim()}>
+                {pending ? "Adding..." : "Add"}
+              </button>
+              <button className="btn link" onClick={() => { setAdding(false); setPick(""); setError(""); }}>cancel</button>
             </>
           ) : (
-            <button className="btn link" onClick={() => setAdding(true)}>+ Add gas</button>
+            <button className="btn link" onClick={() => setAdding(true)}>+ New gas</button>
           )}
         </div>
       )}

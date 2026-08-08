@@ -5,7 +5,7 @@ import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
-  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, applyTemplate, setTaskDue, setTaskAsset,
+  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, setTaskDue, setTaskAsset,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
@@ -71,8 +71,8 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   );
 }
 
-export default function TasksPanel({ instrumentId, tasks, templates, people, systemAssets, today, canEdit, isStaff }: {
-  instrumentId: number; tasks: Task[]; templates: { id: number; name: string }[]; people: string[];
+export default function TasksPanel({ instrumentId, tasks, people, systemAssets, today, canEdit, isStaff }: {
+  instrumentId: number; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
@@ -280,14 +280,6 @@ export default function TasksPanel({ instrumentId, tasks, templates, people, sys
         <div className="card-title">Tasks</div>
         {canEdit && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {templates.length > 0 && (
-              <select value="" disabled={pending}
-                onChange={(e) => { const id = parseInt(e.target.value); if (id) startTransition(() => applyTemplate(instrumentId, id)); }}
-                style={{ width: "auto", fontSize: 12 }}>
-                <option value="">Apply template...</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            )}
             <button className="btn sm primary" onClick={() => setShowNew((v) => !v)}>
               {showNew ? "Cancel" : "+ New task"}
             </button>

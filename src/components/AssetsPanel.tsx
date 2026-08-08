@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { MODULE_KINDS, ASSET_COLOR } from "@/lib/stages";
-import { createAsset, attachAsset } from "@/app/actions";
+import { createAsset, attachAssets } from "@/app/actions";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
@@ -11,13 +11,14 @@ export type AssetRow = {
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, spares, canEdit, embedded }: {
-  instrumentId: number; assets: AssetRow[]; spares: { id: number; label: string }[]; canEdit: boolean;
-  // Embedded: rendered inside the system card (the system *is* its assets), so
-  // no card chrome of its own.
-  embedded?: boolean;
+export default function AssetsPanel({ instrumentId, assets, unassigned, canEdit }: {
+  // `unassigned`: every asset not currently on a system (spares, shelf stock).
+  instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[]; canEdit: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [checked, setChecked] = useState<number[]>([]);
+  const [filter, setFilter] = useState("");
   const [draft, setDraft] = useState<typeof empty>(empty);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -31,29 +32,61 @@ export default function AssetsPanel({ instrumentId, assets, spares, canEdit, emb
     });
   };
 
-  if (!canEdit && assets.length === 0 && !embedded) return null;
+  const attachChecked = () => {
+    if (!checked.length) return;
+    setError("");
+    startTransition(async () => {
+      const res = await attachAssets(checked, instrumentId);
+      if (res?.error) setError(res.error);
+      if (res?.attached) { setChecked([]); setPicking(false); }
+    });
+  };
+
+  const shown = unassigned.filter((s) => s.label.toLowerCase().includes(filter.trim().toLowerCase()));
+
+  if (!canEdit && assets.length === 0) return null;
 
   return (
-    <div className={embedded ? "" : "card"} style={embedded ? { marginTop: 14 } : undefined}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: embedded ? 4 : 10, flexWrap: "wrap" }}>
-        {embedded ? <div className="eyebrow">Assets</div> : <div className="card-title">Assets</div>}
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <div className="card-title">Assets</div>
         {canEdit && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {spares.length > 0 && (
-              <select value="" disabled={pending}
-                onChange={(e) => {
-                  const id = parseInt(e.target.value);
-                  if (id) startTransition(async () => { const r = await attachAsset(id, instrumentId); if (r?.error) setError(r.error); });
-                }}
-                style={{ width: "auto", fontSize: 12 }}>
-                <option value="">Attach spare...</option>
-                {spares.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
+            {unassigned.length > 0 && (
+              <button className="btn sm" onClick={() => { setPicking((v) => !v); setOpen(false); }}>
+                {picking ? "Cancel" : "Add existing"}
+              </button>
             )}
-            <button className="btn sm primary" onClick={() => setOpen((v) => !v)}>{open ? "Cancel" : "+ New asset"}</button>
+            <button className="btn sm primary" onClick={() => { setOpen((v) => !v); setPicking(false); }}>
+              {open ? "Cancel" : "+ New asset"}
+            </button>
           </div>
         )}
       </div>
+
+      {picking && (
+        <div className="dash-form">
+          <label>Unassigned assets - check everything going into this system</label>
+          {unassigned.length > 6 && (
+            <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by type, model or serial..."
+              style={{ marginBottom: 6, fontSize: 12 }} />
+          )}
+          <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff", padding: 4, marginBottom: 8 }}>
+            {shown.map((s) => (
+              <label key={s.id} className="row-hover"
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", fontSize: 13, fontWeight: 400, color: "var(--ink)", margin: 0, textTransform: "none", letterSpacing: 0 }}>
+                <input type="checkbox" checked={checked.includes(s.id)} style={{ width: 15, height: 15, flexShrink: 0 }}
+                  onChange={(e) => setChecked((c) => (e.target.checked ? [...c, s.id] : c.filter((x) => x !== s.id)))} />
+                {s.label}
+              </label>
+            ))}
+            {shown.length === 0 && <div className="mut" style={{ fontSize: 12, padding: 6 }}>Nothing matches.</div>}
+          </div>
+          <button className="btn sm accent" onClick={attachChecked} disabled={pending || !checked.length}>
+            {pending ? "Adding..." : `Add ${checked.length || ""} asset${checked.length === 1 ? "" : "s"}`.replace("  ", " ")}
+          </button>
+        </div>
+      )}
 
       {open && (
         <div className="dash-form">

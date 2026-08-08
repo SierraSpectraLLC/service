@@ -1,13 +1,13 @@
 "use client";
 
-import { useOptimistic, useState, useTransition, type ReactNode } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
-import ClientSelect from "./ClientSelect";
+import PickOrAdd from "./PickOrAdd";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 
 type Inst = {
-  id: number; externalId: string; client: string; priority: number;
+  id: number; externalId: string; client: string; category: string; priority: number;
   lead: string; notes: string; archived: boolean; archivedBy: string;
   location: string;
 };
@@ -25,20 +25,21 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
-export default function SystemPanel({ instrument, label, clients, stages, stageDefs, gases, people, canEdit, isStaff, isOwner, children }: {
+export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, canEdit, isStaff, isOwner }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
-  instrument: Inst; label: string; clients: string[]; stages: string[]; stageDefs: StageDefLite[];
-  gases: GasRow[]; people: string[]; canEdit: boolean; isStaff: boolean; isOwner: boolean;
-  children?: ReactNode; // the assets list: a system is what it's built from
+  instrument: Inst; label: string; clients: string[]; categories: string[];
+  stages: string[]; stageDefs: StageDefLite[];
+  gases: GasRow[]; knownGases: string[]; people: string[];
+  canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", priority: "", notes: "", location: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
   const openEdit = () => {
     setDraft({
-      externalId: instrument.externalId, client: instrument.client,
+      externalId: instrument.externalId, client: instrument.client, category: instrument.category,
       priority: String(instrument.priority), notes: instrument.notes, location: instrument.location,
     });
     setError("");
@@ -50,7 +51,7 @@ export default function SystemPanel({ instrument, label, clients, stages, stageD
     startTransition(async () => {
       if (canEdit) {
         const res = await updateInstrument(instrument.id, {
-          externalId: draft.externalId, client: draft.client,
+          externalId: draft.externalId, client: draft.client, category: draft.category,
           priority: parseInt(draft.priority) || instrument.priority,
           location: draft.location,
         });
@@ -82,8 +83,13 @@ export default function SystemPanel({ instrument, label, clients, stages, stageD
           </div>
           {!editing && (
             <>
-              <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)", marginTop: 2 }}>
-                {label || <span className="mut" style={{ fontWeight: 400, fontSize: 15 }}>No assets listed yet</span>}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
+                  {label || <span className="mut" style={{ fontWeight: 400, fontSize: 15 }}>No assets listed yet</span>}
+                </div>
+                {instrument.category && (
+                  <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{instrument.category}</span>
+                )}
               </div>
               {instrument.location && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{instrument.location}</div>}
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
@@ -112,13 +118,21 @@ export default function SystemPanel({ instrument, label, clients, stages, stageD
                 </div>
                 <div>
                   <label>Client</label>
-                  <ClientSelect value={draft.client} clients={clients} onChange={(client) => setDraft({ ...draft, client })} />
+                  <PickOrAdd value={draft.client} options={clients} newLabel="+ New client..." placeholder="New client name"
+                    onChange={(client) => setDraft({ ...draft, client })} />
                 </div>
                 <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} /></div>
               </div>
-              <div style={{ marginBottom: 8 }}>
-                <label>Location</label>
-                <input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Corner room, bench 3" />
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Category</label>
+                  <PickOrAdd value={draft.category} options={categories} newLabel="+ New category..." placeholder="e.g. LC-MS"
+                    onChange={(category) => setDraft({ ...draft, category })} />
+                </div>
+                <div>
+                  <label>Location</label>
+                  <input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Corner room, bench 3" />
+                </div>
               </div>
             </>
           )}
@@ -154,10 +168,8 @@ export default function SystemPanel({ instrument, label, clients, stages, stageD
         </div>
       )}
 
-      {/* The system's composition sits with its identity, not in a section of its own. */}
-      {children}
       <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
-      <GasPanel instrumentId={instrument.id} gases={gases} canEdit={canEdit} isStaff={isStaff} />
+      <GasPanel instrumentId={instrument.id} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
     </div>
   );
 }
