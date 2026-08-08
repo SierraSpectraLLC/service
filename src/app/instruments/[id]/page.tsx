@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs,
+  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -92,6 +92,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const canEdit = await canEditSystem(user, instId);
   const isStaff = user.role === "owner" || user.role === "staff";
 
+  // Pending serial-lookup access requests, for the people who decide them:
+  // staff, or the owning organization's editors.
+  const isDecider = isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor");
+  const requestRows = isDecider
+    ? await db.select({ id: accessRequests.id, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind })
+        .from(accessRequests).innerJoin(orgs, eq(orgs.id, accessRequests.orgId))
+        .where(and(eq(accessRequests.instrumentId, instId), eq(accessRequests.status, "pending")))
+        .orderBy(asc(accessRequests.createdAt))
+    : [];
+
   const fullTasks = taskRows.map((t) => ({
     ...t,
     createdAt: t.createdAt.toISOString(),
@@ -132,6 +142,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         people={peopleRows.map((p) => p.name)}
         shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
         orgOptions={orgRows}
+        accessRequests={requestRows.map((r) => ({
+          id: r.id, orgName: r.orgName, orgKind: r.orgKind, requestedBy: r.requestedBy,
+          message: r.message, when: shopTime(r.createdAt),
+        }))}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />
 

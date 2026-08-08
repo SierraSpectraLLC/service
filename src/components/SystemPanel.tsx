@@ -6,6 +6,7 @@ import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
 import PickOrAdd from "./PickOrAdd";
 import SharePanel, { type ShareEntry } from "./SharePanel";
+import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 
 type Inst = {
@@ -27,12 +28,13 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
-export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, canEdit, isStaff, isOwner }: {
+export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, canEdit, isStaff, isOwner }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
   instrument: Inst; label: string; clients: string[]; categories: string[];
   stages: string[]; stageDefs: StageDefLite[];
   gases: GasRow[]; knownGases: string[]; people: string[];
   shares: ShareEntry[]; orgOptions: { id: number; name: string; kind: string }[];
+  accessRequests: AccessRequestRow[];
   canEdit: boolean; isStaff: boolean; isOwner: boolean;
 }) {
   const [editing, setEditing] = useState(false);
@@ -177,6 +179,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
       <SharePanel instrumentId={instrument.id} shares={shares} orgOptions={orgOptions}
         canManageAll={isStaff} canAddProvider={!isStaff && canEdit} />
+      <AccessRequestsPanel requests={accessRequests} />
     </div>
   );
 }

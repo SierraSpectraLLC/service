@@ -151,6 +151,27 @@ export async function notifyDiscussion(opts: {
   }
 }
 
+export async function notifyAccessRequest(opts: {
+  // Recipients are computed by the caller: staff plus the owning org's
+  // sign-in emails - the people who can actually decide.
+  to: string[]; actorName: string; orgName: string;
+  externalId: string; instrumentId: number; assetDesc: string; message: string;
+}) {
+  try {
+    if (!opts.to.length) return;
+    const url = appUrl();
+    await sendEmail(
+      opts.to,
+      `${opts.externalId}: access request from ${opts.orgName || opts.actorName}`,
+      wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and is asking for access to <b>${esc(opts.externalId)}</b>.
+        ${opts.message ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.message)}</div>` : ""}
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Approve or deny on ${esc(opts.externalId)}</a></div>` : ""}`),
+    );
+  } catch (e) {
+    console.error("[notify] access-request email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyGasEmpty(opts: { actorEmail: string; actorName: string; gas: string; instrumentId: number; externalId: string }) {
   try {
     const to = parseList(process.env.STAFF_EMAILS).filter((e) => e !== opts.actorEmail.toLowerCase());

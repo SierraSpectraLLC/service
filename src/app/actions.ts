@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, and, asc, inArray, isNull } from "drizzle-orm";
+import { eq, and, asc, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
@@ -13,7 +13,8 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest } from "@/lib/notify";
+import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner, type SessionUser } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
@@ -1944,6 +1945,143 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
   });
   rev(instrumentId);
   return {};
+}
+
+// ---------------- Serial lookup & access requests ----------------
+// The way in from outside: a provider matches an instrument by its exact
+// serial number. If someone on the platform owns it, they knock (access
+// request, decided by staff or the owning org's editors); if nobody does,
+// they create it as an unclaimed system and start its service history.
+
+/** Who decides on (and hears about) an access request: staff, plus the owning org's sign-in emails. */
+async function ownerAudience(ownerOrgId: number | null): Promise<string[]> {
+  const staff = parseList(process.env.STAFF_EMAILS);
+  if (ownerOrgId === null) return staff;
+  const entries = await db.select().from(clientAllowlist).where(eq(clientAllowlist.orgId, ownerOrgId));
+  // A @domain entry names no one in particular, so it can't be a recipient.
+  const ownerEmails = entries.filter((e) => !e.entry.trim().startsWith("@")).map((e) => e.entry.toLowerCase());
+  return [...new Set([...staff, ...ownerEmails])];
+}
+
+export async function requestAccess(serial: string, message: string): Promise<{ error?: string; ok?: boolean }> {
+  const u = await requireUser();
+  if (u.orgId === null) return { error: "Staff already see every system" };
+  const norm = normalizeSerial(serial);
+  if (norm.length < MIN_SERIAL_LOOKUP) return { error: "Serial number too short" };
+  // Re-resolve the serial here: a request must come from a real match typed
+  // into /lookup, never from a guessed system id.
+  const rows = await db.select().from(assets).where(sql`lower(btrim(${assets.serial})) = ${norm}`);
+  const target = rows.find((a) => a.instrumentId !== null);
+  if (!target || target.instrumentId === null) return { error: "No system with that serial" };
+  const instrumentId = target.instrumentId;
+  if (await canSeeSystemSafe(u, instrumentId)) return { error: "You already have access to this system" };
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "No system with that serial" };
+  const pending = await db.select().from(accessRequests).where(and(
+    eq(accessRequests.instrumentId, instrumentId), eq(accessRequests.orgId, u.orgId), eq(accessRequests.status, "pending")));
+  if (pending.length) return { ok: true }; // already asked; asking louder wouldn't help
+  await db.insert(accessRequests).values({
+    instrumentId, orgId: u.orgId, requestedBy: u.email, message: message.trim().slice(0, 500),
+  });
+  await audit({
+    actor: u.email, instrumentId, entityType: "access_request", entityId: inst.externalId,
+    action: `${u.orgName || u.email} requested access to ${inst.externalId} (matched serial ${target.serial})`,
+  });
+  await notifyAccessRequest({
+    to: await ownerAudience(inst.ownerOrgId), actorName: u.name, orgName: u.orgName ?? "",
+    externalId: inst.externalId, instrumentId,
+    assetDesc: `${target.kind}${target.model ? ` ${target.model}` : ""} · SN ${target.serial}`,
+    message: message.trim(),
+  });
+  rev(instrumentId);
+  return { ok: true };
+}
+
+/** Approve/deny is for the house or the owning organization's editors. */
+async function assertRequestDecider(u: SessionUser, instrumentId: number) {
+  if (isHouse(u.role)) return;
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst || inst.ownerOrgId === null || inst.ownerOrgId !== u.orgId || u.role !== "client_editor") {
+    throw new Error("Not found");
+  }
+}
+
+export async function approveAccessRequest(requestId: number, access: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [req] = await db.select().from(accessRequests).where(eq(accessRequests.id, requestId));
+  if (!req || req.status !== "pending") return { error: "Not found" };
+  try { await assertRequestDecider(u, req.instrumentId); } catch { return { error: "Not found" }; }
+  const level = access === "edit" ? "edit" : "view";
+  const [[org], [inst]] = await Promise.all([
+    db.select().from(orgs).where(eq(orgs.id, req.orgId)),
+    db.select().from(instruments).where(eq(instruments.id, req.instrumentId)),
+  ]);
+  if (!org || !inst) return { error: "Not found" };
+  await db.insert(systemShares)
+    .values({ instrumentId: req.instrumentId, orgId: req.orgId, access: level, addedBy: u.email })
+    .onConflictDoUpdate({ target: [systemShares.instrumentId, systemShares.orgId], set: { access: level } });
+  await db.update(accessRequests)
+    .set({ status: "approved", decidedBy: u.email, decidedAt: new Date() })
+    .where(eq(accessRequests.id, requestId));
+  await audit({
+    actor: u.email, instrumentId: req.instrumentId, entityType: "access_request", entityId: inst.externalId,
+    action: `approved ${org.name}'s access request for ${inst.externalId} (${level})`,
+    field: "access", newValue: level,
+  });
+  rev(req.instrumentId);
+  return {};
+}
+
+export async function denyAccessRequest(requestId: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [req] = await db.select().from(accessRequests).where(eq(accessRequests.id, requestId));
+  if (!req || req.status !== "pending") return { error: "Not found" };
+  try { await assertRequestDecider(u, req.instrumentId); } catch { return { error: "Not found" }; }
+  const [[org], [inst]] = await Promise.all([
+    db.select().from(orgs).where(eq(orgs.id, req.orgId)),
+    db.select().from(instruments).where(eq(instruments.id, req.instrumentId)),
+  ]);
+  await db.update(accessRequests)
+    .set({ status: "denied", decidedBy: u.email, decidedAt: new Date() })
+    .where(eq(accessRequests.id, requestId));
+  await audit({
+    actor: u.email, instrumentId: req.instrumentId, entityType: "access_request", entityId: inst?.externalId ?? "",
+    action: `denied ${org?.name ?? "an organization"}'s access request for ${inst?.externalId ?? "a system"}`,
+  });
+  rev(req.instrumentId);
+  return {};
+}
+
+/**
+ * The no-match path on /lookup: create the instrument as a new system and put
+ * the serial on it as its first asset. Created by a provider it stays
+ * unclaimed (owner_org_id null, house-stewarded) until the real owner joins
+ * the platform and staff hand it over.
+ */
+export async function createSystemFromSerial(data: {
+  externalId: string; client: string; category: string;
+  kind: string; model: string; manufacturer: string; serial: string;
+}): Promise<{ error?: string; id?: number }> {
+  await requireEditor();
+  const ext = data.externalId.trim();
+  if (!ext) return { error: "Give the system an ID" };
+  const norm = normalizeSerial(data.serial);
+  if (norm.length < MIN_SERIAL_LOOKUP) return { error: "Serial number too short" };
+  const [dup] = await db.select().from(instruments).where(eq(instruments.externalId, ext));
+  if (dup) return { error: `${ext} is already taken` };
+  // Same instrument, two records helps no one - if the serial sits on a
+  // system somewhere, the door is the access request, not a twin entry.
+  const existing = await db.select().from(assets).where(sql`lower(btrim(${assets.serial})) = ${norm}`);
+  if (existing.some((a) => a.instrumentId !== null)) {
+    return { error: "That serial is already on a system here - request access instead" };
+  }
+  const id = await createInstrument({ externalId: ext, client: data.client, category: data.category, priority: 99 });
+  const res = await createAsset(id, {
+    kind: data.kind, model: data.model, serial: data.serial.trim(), manufacturer: data.manufacturer,
+    owner: data.client, asFound: "", location: "", note: "",
+  });
+  if (res.error) return { error: res.error };
+  return { id };
 }
 
 export async function addOrg(name: string, kind: string): Promise<{ error?: string; id?: number }> {
