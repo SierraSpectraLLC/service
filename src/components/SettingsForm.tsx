@@ -6,7 +6,7 @@ import {
   addStage, setStageColor, renameStage, deleteStage,
   addPerson, removePerson, updateEodRecipients,
   addVocabTerm, deleteVocabTerm,
-  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setBranding, setOperatorOrg,
+  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setBranding, setOperatorOrg, setOrgAppearance,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 
@@ -20,7 +20,7 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 }
 
 type AllowRow = { id: number; entry: string; addedBy: string; orgId: number | null };
-type OrgRow = { id: number; name: string; kind: string; systems: number; logins: number };
+type OrgRow = { id: number; name: string; kind: string; themeColor: string; logoUrl: string; systems: number; logins: number };
 type VocabRow = { id: number; kind: string; assetType: string; name: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
 type PersonRow = { id: number; name: string; email: string; org: string };
@@ -397,6 +397,21 @@ export default function SettingsForm(props: {
               <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>tracker + EOD</span>
             )}
             <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              {/* Owner override: repaint any org (orgs style themselves on their dashboard). */}
+              <input type="color" value={o.themeColor || "#172A4A"} disabled={pending}
+                aria-label={`Header color for ${o.name}`} title={`Header color for ${o.name}`}
+                onChange={(e) => startTransition(async () => {
+                  const res = await setOrgAppearance({ themeColor: e.target.value, logoUrl: o.logoUrl }, o.id);
+                  if (res?.error) setOrgError(res.error);
+                })}
+                style={{ width: 26, height: 22, padding: 1, border: "1px solid var(--line)", borderRadius: 5, background: "#fff", cursor: "pointer" }} />
+              {(o.themeColor || o.logoUrl) && (
+                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  onClick={() => startTransition(async () => {
+                    const res = await setOrgAppearance({ themeColor: "", logoUrl: "" }, o.id);
+                    if (res?.error) setOrgError(res.error);
+                  })}>default look</button>
+              )}
               {props.sheetOrgId !== o.id && o.kind === "client" && (
                 <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                   onClick={() => startTransition(() => setSheetOrg(o.id))}>use for tracker/EOD</button>

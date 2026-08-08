@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { sheetDiffs } from "@/db/schema";
+import { orgs, sheetDiffs } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
+import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import { signOut } from "@/auth";
 import NavMore from "@/components/NavMore";
 import { getBrand } from "@/lib/brand";
@@ -28,13 +29,30 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     : [];
   const openDiffs = diffRows.length;
 
+  // The viewer's organization paints its own workspace; staff and org-less
+  // sessions keep the platform look. Bad hex stored by any path degrades to
+  // the default rather than an unreadable header.
+  const [orgTheme] = user?.orgId != null
+    ? await db.select({ themeColor: orgs.themeColor, logoUrl: orgs.logoUrl }).from(orgs).where(eq(orgs.id, user.orgId))
+    : [];
+  const themed = orgTheme && isValidHex(orgTheme.themeColor) ? orgTheme.themeColor : null;
+  const headerBg = themed ?? "var(--navy)";
+  const headerFg = themed ? readableTextOn(themed) : "#fff";
+  const logoUrl = orgTheme?.logoUrl || "";
+
   return (
     <html lang="en">
-      <body>
-        <div className="app-header" style={{ background: "var(--navy)", color: "#fff" }}>
+      <body style={themed ? ({ ["--bg" as string]: tint(themed, 0.93) } as React.CSSProperties) : undefined}>
+        <div className="app-header" style={{ background: headerBg, color: headerFg }}>
           <div className="spectrum" />
           <div className="container" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingTop: 14, paddingBottom: 14 }}>
-            <Link href="/" style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.3, color: "#fff", textDecoration: "none" }}>
+            {logoUrl && (
+              // Plain img: the logo lives on Blob, outside next/image's domain allowlist.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt={`${user?.orgName || "workspace"} logo`}
+                style={{ height: 26, maxWidth: 120, objectFit: "contain", display: "block" }} />
+            )}
+            <Link href="/" style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.3, color: headerFg, textDecoration: "none" }}>
               {brand.name.toUpperCase()}
             </Link>
             <span style={{ fontSize: 12, opacity: 0.75 }}>

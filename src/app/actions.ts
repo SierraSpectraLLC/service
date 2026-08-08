@@ -15,6 +15,8 @@ import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
 import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
+import { isValidHex } from "@/lib/theme";
+import { canSeeCosts } from "@/lib/redact";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner, type SessionUser } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
@@ -2198,6 +2200,44 @@ export async function createSystemFromSerial(data: {
   });
   if (res.error) return { error: res.error };
   return { id };
+}
+
+/**
+ * Workspace appearance: an organization's editors paint their own workspace;
+ * the platform owner may repaint any org (including the operator's, and
+ * anything that came out unreadable). Color is validated server-side and the
+ * logo must be a blob URL this app minted - no hot-linking arbitrary hosts
+ * into every page header.
+ */
+export async function setOrgAppearance(
+  data: { themeColor: string; logoUrl: string },
+  orgId?: number,
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  let target: number;
+  if (orgId !== undefined && orgId !== u.orgId) {
+    if (u.role !== "owner") return { error: "Not found" };
+    target = orgId;
+  } else {
+    if (u.orgId === null) return { error: "Pick an organization" }; // staff use the Settings controls
+    target = u.orgId;
+  }
+  const color = data.themeColor.trim();
+  if (color && !isValidHex(color)) return { error: "Color must be a hex value like #2E6B2E" };
+  const logo = data.logoUrl.trim();
+  if (logo && !/^https:\/\/[^/]+\.public\.blob\.vercel-storage\.com\//.test(logo)) {
+    return { error: "Upload the logo here rather than linking one" };
+  }
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, target));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ themeColor: color, logoUrl: logo }).where(eq(orgs.id, target));
+  await audit({
+    actor: u.email, entityType: "org", entityId: target,
+    action: `updated ${org.name}'s workspace appearance${color ? ` (${color})` : " (default look)"}${logo ? " with a logo" : ""}`,
+  });
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+  return {};
 }
 
 export async function addOrg(name: string, kind: string): Promise<{ error?: string; id?: number }> {

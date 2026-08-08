@@ -34,7 +34,7 @@ export default async function SettingsPage() {
         people={peopleRows.map((p) => ({ id: p.id, name: p.name, email: p.email, org: p.org }))}
         eodRecipients={s?.eodRecipients ?? ""}
         orgs={orgRows.map((o) => ({
-          id: o.id, name: o.name, kind: o.kind,
+          id: o.id, name: o.name, kind: o.kind, themeColor: o.themeColor, logoUrl: o.logoUrl,
           systems: shareCounts.filter((c) => c.orgId === o.id).length,
           logins: allowRows.filter((r) => r.orgId === o.id).length,
         }))}

@@ -1,7 +1,9 @@
 import { and, asc, eq, desc, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
+import { getBrand } from "@/lib/brand";
+import AppearanceCard from "@/components/AppearanceCard";
 import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -43,10 +45,14 @@ export default async function Home() {
 
   // A service provider's shelf of past engagements: frozen records kept from
   // systems whose access was later revoked. Only their own org's records.
-  const pastEngagements = user.orgId === null ? [] : await db
-    .select({ id: engagementRecords.id, externalId: engagementRecords.externalId, label: engagementRecords.label, revokedAt: engagementRecords.revokedAt })
-    .from(engagementRecords).where(eq(engagementRecords.orgId, user.orgId))
-    .orderBy(desc(engagementRecords.revokedAt));
+  const [pastEngagements, [ownOrg]] = await Promise.all([
+    user.orgId === null ? [] : db
+      .select({ id: engagementRecords.id, externalId: engagementRecords.externalId, label: engagementRecords.label, revokedAt: engagementRecords.revokedAt })
+      .from(engagementRecords).where(eq(engagementRecords.orgId, user.orgId))
+      .orderBy(desc(engagementRecords.revokedAt)),
+    user.orgId === null ? [] : db
+      .select({ name: orgs.name, themeColor: orgs.themeColor, logoUrl: orgs.logoUrl }).from(orgs).where(eq(orgs.id, user.orgId)),
+  ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
   // Internal parity detail, so staff eyes only.
@@ -103,6 +109,12 @@ export default async function Home() {
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
       />
+      {ownOrg && user.role === "client_editor" && (
+        <div className="container" style={{ paddingTop: 0 }}>
+          <AppearanceCard orgName={ownOrg.name} themeColor={ownOrg.themeColor} logoUrl={ownOrg.logoUrl}
+            platformName={(await getBrand()).name} />
+        </div>
+      )}
       {pastEngagements.length > 0 && (
         <div className="container" style={{ paddingTop: 0 }}>
           <div className="card">

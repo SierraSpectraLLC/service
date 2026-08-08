@@ -16,6 +16,8 @@ export type Brand = {
   /** The service organization running this instance, for documents it signs. */
   operatorName: string;
   operatorOrgId: number | null;
+  /** The operator org's logo (blob URL), shown on those same documents. */
+  operatorLogoUrl: string;
 };
 
 /**
@@ -28,9 +30,11 @@ export const getBrand = cache(async (): Promise<Brand> => {
     const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
     const name = s?.platformName?.trim() || DEFAULT_BRAND;
     let operatorName = "";
+    let operatorLogoUrl = "";
     if (s?.operatorOrgId != null) {
-      const [org] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, s.operatorOrgId));
+      const [org] = await db.select({ name: orgs.name, logoUrl: orgs.logoUrl }).from(orgs).where(eq(orgs.id, s.operatorOrgId));
       operatorName = org?.name ?? "";
+      operatorLogoUrl = org?.logoUrl ?? "";
     }
     return {
       name,
@@ -38,8 +42,9 @@ export const getBrand = cache(async (): Promise<Brand> => {
       // Documents fall back to the platform name when no operator org is set.
       operatorName: operatorName || name,
       operatorOrgId: s?.operatorOrgId ?? null,
+      operatorLogoUrl,
     };
   } catch {
-    return { name: DEFAULT_BRAND, tagline: "instrument portal", operatorName: DEFAULT_BRAND, operatorOrgId: null };
+    return { name: DEFAULT_BRAND, tagline: "instrument portal", operatorName: DEFAULT_BRAND, operatorOrgId: null, operatorLogoUrl: "" };
   }
 });

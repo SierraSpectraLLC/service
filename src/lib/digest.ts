@@ -66,6 +66,7 @@ export async function composeDigest(): Promise<{ subject: string; html: string }
   <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:680px;margin:auto;background:#fff;border-radius:12px;border:1px solid #E2E8F0;">
     <tr><td style="height:4px;border-radius:12px 12px 0 0;background:#172A4A;"></td></tr>
     <tr><td style="padding:18px 20px 6px;">
+      ${brand.operatorLogoUrl ? `<img src="${brand.operatorLogoUrl}" alt="" style="height:30px;max-width:150px;object-fit:contain;display:block;margin-bottom:4px;" />` : ""}
       <div style="font-family:Helvetica,Arial,sans-serif;font-weight:bold;font-size:16px;color:#172A4A;letter-spacing:0.3px;">${esc(brand.operatorName).toUpperCase()}</div>
       <div style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#64748B;margin-bottom:14px;">Daily system status &middot; ${today}</div>
       ${attentionBlock}
