@@ -2015,9 +2015,14 @@ async function ownerAudience(ownerOrgId: number | null): Promise<string[]> {
   return [...new Set([...staff, ...ownerEmails])];
 }
 
-export async function requestAccess(serial: string, message: string): Promise<{ error?: string; ok?: boolean }> {
+export async function requestAccess(serial: string, message: string, kind = "access"): Promise<{ error?: string; ok?: boolean }> {
   const u = await requireUser();
   if (u.orgId === null) return { error: "Staff already see every system" };
+  // Only a client organization can own a system, so only a client may claim one.
+  const want = kind === "claim" ? "claim" : "access";
+  if (want === "claim" && u.orgKind !== "client") {
+    return { error: "Only a client organization can claim ownership" };
+  }
   const norm = normalizeSerial(serial);
   if (norm.length < MIN_SERIAL_LOOKUP) return { error: "Serial number too short" };
   // Re-resolve the serial here: a request must come from a real match typed
@@ -2033,25 +2038,34 @@ export async function requestAccess(serial: string, message: string): Promise<{ 
     eq(accessRequests.instrumentId, instrumentId), eq(accessRequests.orgId, u.orgId), eq(accessRequests.status, "pending")));
   if (pending.length) return { ok: true }; // already asked; asking louder wouldn't help
   await db.insert(accessRequests).values({
-    instrumentId, orgId: u.orgId, requestedBy: u.email, message: message.trim().slice(0, 500),
+    instrumentId, orgId: u.orgId, kind: want, requestedBy: u.email, message: message.trim().slice(0, 500),
   });
   await audit({
     actor: u.email, instrumentId, entityType: "access_request", entityId: inst.externalId,
-    action: `${u.orgName || u.email} requested access to ${inst.externalId} (matched serial ${target.serial})`,
+    action: want === "claim"
+      ? `${u.orgName || u.email} claimed ownership of ${inst.externalId} (matched serial ${target.serial}) - awaiting review`
+      : `${u.orgName || u.email} requested access to ${inst.externalId} (matched serial ${target.serial})`,
   });
   await notifyAccessRequest({
     to: await ownerAudience(inst.ownerOrgId), actorName: u.name, orgName: u.orgName ?? "",
     externalId: inst.externalId, instrumentId,
     assetDesc: `${target.kind}${target.model ? ` ${target.model}` : ""} · SN ${target.serial}`,
-    message: message.trim(),
+    message: message.trim(), kind: want,
   });
   rev(instrumentId);
   return { ok: true };
 }
 
-/** Approve/deny is for the house or the owning organization's editors. */
-async function assertRequestDecider(u: SessionUser, instrumentId: number) {
+/**
+ * Who decides a request: the platform operator always, and for a plain access
+ * request the owning organization's editors too. A claim is different - it
+ * asserts ownership, so the current owner is the counterparty to it and cannot
+ * rule on it. Only the operator can, which is also what makes a wrongly
+ * granted claim fixable.
+ */
+async function assertRequestDecider(u: SessionUser, instrumentId: number, kind = "access") {
   if (isHouse(u.role)) return;
+  if (kind === "claim") throw new Error("Not found");
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst || inst.ownerOrgId === null || inst.ownerOrgId !== u.orgId || u.role !== "client_editor") {
     throw new Error("Not found");
@@ -2062,7 +2076,7 @@ export async function approveAccessRequest(requestId: number, access: string): P
   const u = await requireUser();
   const [req] = await db.select().from(accessRequests).where(eq(accessRequests.id, requestId));
   if (!req || req.status !== "pending") return { error: "Not found" };
-  try { await assertRequestDecider(u, req.instrumentId); } catch { return { error: "Not found" }; }
+  try { await assertRequestDecider(u, req.instrumentId, req.kind); } catch { return { error: "Not found" }; }
   const level = access === "edit" ? "edit" : "view";
   const [[org], [inst]] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, req.orgId)),
@@ -2077,8 +2091,48 @@ export async function approveAccessRequest(requestId: number, access: string): P
     .where(eq(accessRequests.id, requestId));
   await audit({
     actor: u.email, instrumentId: req.instrumentId, entityType: "access_request", entityId: inst.externalId,
-    action: `approved ${org.name}'s access request for ${inst.externalId} (${level})`,
+    action: req.kind === "claim"
+      // Access without ownership: the third answer to a claim, when someone
+      // should see the record but hasn't shown the instrument is theirs.
+      ? `gave ${org.name} ${level} access to ${inst.externalId} without granting their ownership claim`
+      : `approved ${org.name}'s access request for ${inst.externalId} (${level})`,
     field: "access", newValue: level,
+  });
+  rev(req.instrumentId);
+  return {};
+}
+
+/**
+ * Grant an ownership claim: the share and the owner seat in one action, so a
+ * verified owner doesn't need a second trip through the sharing panel. Operator
+ * only, and only a client organization can end up owning the system.
+ */
+export async function approveClaim(requestId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [req] = await db.select().from(accessRequests).where(eq(accessRequests.id, requestId));
+  if (!req || req.status !== "pending") return { error: "Not found" };
+  const [[org], [inst]] = await Promise.all([
+    db.select().from(orgs).where(eq(orgs.id, req.orgId)),
+    db.select().from(instruments).where(eq(instruments.id, req.instrumentId)),
+  ]);
+  if (!org || !inst) return { error: "Not found" };
+  if (org.kind !== "client") return { error: "Only a client organization can own a system" };
+  const previous = inst.ownerOrgId;
+  const [prevOrg] = previous === null ? [] : await db.select().from(orgs).where(eq(orgs.id, previous));
+  // An owner must be able to work the system it owns, so the share is edit.
+  await db.insert(systemShares)
+    .values({ instrumentId: req.instrumentId, orgId: req.orgId, access: "edit", addedBy: u.email })
+    .onConflictDoUpdate({ target: [systemShares.instrumentId, systemShares.orgId], set: { access: "edit" } });
+  await db.update(instruments).set({ ownerOrgId: req.orgId }).where(eq(instruments.id, req.instrumentId));
+  await db.update(accessRequests)
+    .set({ status: "approved", decidedBy: u.email, decidedAt: new Date() })
+    .where(eq(accessRequests.id, requestId));
+  // The displaced owner keeps whatever share it had - taking a system away is a
+  // separate, deliberate act in the operator console.
+  await audit({
+    actor: u.email, instrumentId: req.instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: `granted ${org.name}'s ownership claim on ${inst.externalId}${prevOrg ? ` - taken over from ${prevOrg.name}, whose access was left in place` : ""}`,
+    field: "owner", oldValue: prevOrg?.name ?? "", newValue: org.name,
   });
   rev(req.instrumentId);
   return {};
@@ -2088,7 +2142,7 @@ export async function denyAccessRequest(requestId: number): Promise<{ error?: st
   const u = await requireUser();
   const [req] = await db.select().from(accessRequests).where(eq(accessRequests.id, requestId));
   if (!req || req.status !== "pending") return { error: "Not found" };
-  try { await assertRequestDecider(u, req.instrumentId); } catch { return { error: "Not found" }; }
+  try { await assertRequestDecider(u, req.instrumentId, req.kind); } catch { return { error: "Not found" }; }
   const [[org], [inst]] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, req.orgId)),
     db.select().from(instruments).where(eq(instruments.id, req.instrumentId)),

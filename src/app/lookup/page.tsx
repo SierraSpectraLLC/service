@@ -96,7 +96,8 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
           <>
             <div className="eyebrow" style={{ marginTop: 14, marginBottom: 0 }}>Found, in another workspace</div>
             {[...requestable.entries()].map(([instId, desc]) => (
-              <RequestAccessCard key={instId} serial={sn} assetDesc={desc} requested={pendingIds.includes(instId)} />
+              <RequestAccessCard key={instId} serial={sn} assetDesc={desc} requested={pendingIds.includes(instId)}
+                canClaim={user.orgKind === "client"} />
             ))}
           </>
         )}

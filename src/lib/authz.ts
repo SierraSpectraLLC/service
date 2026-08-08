@@ -7,19 +7,25 @@ export type Role = "owner" | "staff" | "client_viewer" | "client_editor";
  * Staff/owner have `orgId: null` and see everything. A client belongs to one
  * organization and sees only what is shared with it - see lib/tenancy.ts.
  */
-export type SessionUser = { email: string; name: string; role: Role; orgId: number | null; orgName: string };
+export type SessionUser = {
+  email: string; name: string; role: Role;
+  orgId: number | null; orgName: string;
+  /** "client" | "provider" | "" for the house. Only clients may own systems. */
+  orgKind: string;
+};
 
 // cache() dedupes the session DB lookup across layout + page within a request.
 export const currentUser = cache(async () => {
   const session = await auth();
   if (!session?.user?.email) return null;
-  const su = session.user as { role?: string; orgId?: number | null; orgName?: string };
+  const su = session.user as { role?: string; orgId?: number | null; orgName?: string; orgKind?: string };
   return {
     email: session.user.email,
     name: session.user.name || session.user.email.split("@")[0],
     role: (su.role || "client_viewer") as Role,
     orgId: su.orgId ?? null,
     orgName: su.orgName ?? "",
+    orgKind: su.orgKind ?? "",
   } satisfies SessionUser;
 });
 
@@ -37,7 +43,7 @@ export async function requireEditor() {
   return u;
 }
 
-/** Throws unless the caller is Sierra Spectra staff (owner counts). */
+/** Throws unless the caller runs the platform - staff or owner. */
 export async function requireStaff() {
   const u = await requireUser();
   if (u.role !== "owner" && u.role !== "staff") throw new Error("Staff only");

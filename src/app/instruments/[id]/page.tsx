@@ -96,7 +96,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // staff, or the owning organization's editors.
   const isDecider = isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor");
   const requestRows = isDecider
-    ? await db.select({ id: accessRequests.id, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind })
+    ? await db.select({ id: accessRequests.id, kind: accessRequests.kind, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind })
         .from(accessRequests).innerJoin(orgs, eq(orgs.id, accessRequests.orgId))
         .where(and(eq(accessRequests.instrumentId, instId), eq(accessRequests.status, "pending")))
         .orderBy(asc(accessRequests.createdAt))
@@ -143,7 +143,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
         orgOptions={orgRows}
         accessRequests={requestRows.map((r) => ({
-          id: r.id, orgName: r.orgName, orgKind: r.orgKind, requestedBy: r.requestedBy,
+          id: r.id, orgName: r.orgName, orgKind: r.orgKind, kind: r.kind, requestedBy: r.requestedBy,
           message: r.message, when: shopTime(r.createdAt),
         }))}
         ownerOrgId={inst.ownerOrgId}

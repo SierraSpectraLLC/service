@@ -156,14 +156,20 @@ export async function notifyAccessRequest(opts: {
   // sign-in emails - the people who can actually decide.
   to: string[]; actorName: string; orgName: string;
   externalId: string; instrumentId: number; assetDesc: string; message: string;
+  // A claim asserts ownership, so it reads differently and is decided only by
+  // the platform operator.
+  kind?: string;
 }) {
   try {
     if (!opts.to.length) return;
     const url = appUrl();
+    const claim = opts.kind === "claim";
     await sendEmail(
       opts.to,
-      `${opts.externalId}: access request from ${opts.orgName || opts.actorName}`,
-      wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and is asking for access to <b>${esc(opts.externalId)}</b>.
+      claim
+        ? `${opts.externalId}: ownership claim from ${opts.orgName || opts.actorName}`
+        : `${opts.externalId}: access request from ${opts.orgName || opts.actorName}`,
+      wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
         ${opts.message ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.message)}</div>` : ""}
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Approve or deny on ${esc(opts.externalId)}</a></div>` : ""}`),
     );

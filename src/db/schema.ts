@@ -127,12 +127,16 @@ export const engagementRecords = pgTable("engagement_records", {
   data: jsonb("data").notNull(),
 }, (t) => [index("engagement_records_org_idx").on(t.orgId)]);
 
-// A provider knocking on the door: they matched a serial in /lookup and asked
-// to be let onto the system. Decided by staff or the owning org's editors.
+// Someone knocking on the door: they matched a serial in /lookup and asked to
+// be let onto the system. An 'access' request asks to be let in and is decided
+// by staff or the owning org's editors; a 'claim' asserts "this instrument is
+// ours" and only the platform operator may grant it, since approving one moves
+// ownership - and a serial number is not proof of purchase.
 export const accessRequests = pgTable("access_requests", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
   orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("access"), // access | claim
   requestedBy: text("requested_by").notNull().default(""),
   message: text("message").notNull().default(""),
   status: text("status").notNull().default("pending"), // pending | approved | denied
@@ -482,4 +486,15 @@ export const appSettings = pgTable("app_settings", {
   // Which org the Google-sheet tracker and the EOD report belong to. Only
   // systems shared with this org take part in either.
   sheetOrgId: integer("sheet_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // What this instance calls itself. The platform is a product, not a service
+  // company: every visible wordmark, page title and email header reads from
+  // here so renaming it never needs a deploy. Blank falls back to
+  // DEFAULT_BRAND in lib/brand.ts.
+  platformName: text("platform_name").notNull().default(""),
+  platformTagline: text("platform_tagline").notNull().default(""),
+  // The service organization that runs this instance - Sierra Spectra here.
+  // Distinct from the platform operator role: this is a provider org like any
+  // other, so its engagements are shares and its people are org members.
+  // Systems the operator creates are shared with it automatically.
+  operatorOrgId: integer("operator_org_id").references(() => orgs.id, { onDelete: "set null" }),
 });

@@ -80,6 +80,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const org = await orgForEmail(email);
         (session.user as { orgId?: number | null; orgName?: string }).orgId = org?.id ?? null;
         (session.user as { orgName?: string }).orgName = org?.name ?? "";
+        // Kind decides what the org may do rather than see: only a client can
+        // own a system, so only a client may claim one.
+        (session.user as { orgKind?: string }).orgKind = org?.kind ?? "";
       }
       return session;
     },

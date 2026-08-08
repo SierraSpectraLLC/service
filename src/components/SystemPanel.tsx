@@ -179,7 +179,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
       <SharePanel instrumentId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}
         canManageAll={isStaff} canAddProvider={!isStaff && canEdit} />
-      <AccessRequestsPanel requests={accessRequests} />
+      <AccessRequestsPanel requests={accessRequests} isOperator={isStaff} />
     </div>
   );
 }

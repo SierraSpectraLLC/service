@@ -324,6 +324,7 @@ CREATE TABLE IF NOT EXISTS "access_requests" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,
   "org_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'access',
   "requested_by" text NOT NULL DEFAULT '',
   "message" text NOT NULL DEFAULT '',
   "status" text NOT NULL DEFAULT 'pending',
@@ -390,6 +391,10 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
+ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'access';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_name" text NOT NULL DEFAULT '';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_tagline" text NOT NULL DEFAULT '';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "operator_org_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -576,6 +581,10 @@ DO $$ BEGIN
     ALTER TABLE "instrument_gases" ADD CONSTRAINT "instrument_gases_asset_id_assets_id_fk"
       FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'app_settings_operator_org_id_orgs_id_fk') THEN
+    ALTER TABLE "app_settings" ADD CONSTRAINT "app_settings_operator_org_id_orgs_id_fk"
+      FOREIGN KEY ("operator_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_owner_org_id_orgs_id_fk') THEN
     ALTER TABLE "instruments" ADD CONSTRAINT "instruments_owner_org_id_orgs_id_fk"
       FOREIGN KEY ("owner_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
@@ -722,6 +731,35 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','org', v_org::text,
             'created organization "LabZen" from the existing sign-in allowlist and shared every system with it (edit) - unshare what should be private');
+  END IF;
+END $$;
+
+-- ── Migration: the platform names itself; Sierra becomes a provider org ─────
+-- The portal is a product, not a service company. Its wordmark now comes from
+-- app_settings, seeded with the current name so nothing changes visibly on
+-- deploy - rename it in Settings whenever the new brand is ready. In the same
+-- step Sierra Spectra becomes a provider organization like any other, so its
+-- service engagements are ordinary shares. The platform-operator role
+-- (STAFF_EMAILS) is untouched and still sees everything.
+--
+-- ORDER MATTERS: this must stay below the organizations migration above, which
+-- is guarded on "orgs" being empty. Creating an org before it would silently
+-- skip the whole LabZen backfill.
+DO $$
+DECLARE v_org integer;
+BEGIN
+  UPDATE "app_settings" SET "platform_name" = 'Sierra Spectra'
+    WHERE "id" = 1 AND btrim("platform_name") = '';
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'org' AND "entity_id" = 'operator-org') THEN
+    SELECT "id" INTO v_org FROM "orgs" WHERE lower("name") = 'sierra spectra';
+    IF v_org IS NULL THEN
+      INSERT INTO "orgs" ("name","kind") VALUES ('Sierra Spectra','provider') RETURNING "id" INTO v_org;
+    END IF;
+    UPDATE "app_settings" SET "operator_org_id" = v_org WHERE "id" = 1 AND "operator_org_id" IS NULL;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','org','operator-org',
+            'created the "Sierra Spectra" service organization and set it as this instance''s operator - systems staff create are shared with it');
   END IF;
 END $$;
 
