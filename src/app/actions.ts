@@ -330,6 +330,13 @@ export async function createInstrument(
       actor: u.email, instrumentId: row.id, entityType: "share", entityId: row.externalId,
       action: `shared ${row.externalId} with ${u.orgName} (edit) - created by them`,
     });
+    // A client creating its own system owns it outright. A provider doesn't:
+    // their creation stays house-stewarded ("unclaimed") until the instrument's
+    // real owner joins the platform and staff hand it over.
+    const [creatorOrg] = await db.select().from(orgs).where(eq(orgs.id, u.orgId));
+    if (creatorOrg?.kind === "client") {
+      await db.update(instruments).set({ ownerOrgId: u.orgId }).where(eq(instruments.id, row.id));
+    }
   }
   if (lead) {
     await notifySystemAssigned({
@@ -1942,6 +1949,38 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
   await audit({
     actor: u.email, instrumentId, entityType: "share", entityId: inst.externalId,
     action: `removed ${org.name}'s access to ${inst.externalId}${org.kind === "provider" ? " - they keep a frozen record of the engagement" : ""}`,
+  });
+  rev(instrumentId);
+  return {};
+}
+
+/**
+ * Whose system it is. Ownership doesn't grant visibility (shares do) - it
+ * says which client org's editors decide access requests. Setting it is the
+ * house's call, and it's also the claim flow: when the real owner of an
+ * unclaimed, provider-created system joins the platform, staff hand it over.
+ */
+export async function setSystemOwner(instrumentId: number, orgId: number | null): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  let org: typeof orgs.$inferSelect | undefined;
+  if (orgId !== null) {
+    [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!org) return { error: "Not found" };
+    if (org.kind !== "client") return { error: "Only a client organization can own a system" };
+  }
+  if (inst.ownerOrgId === orgId) return {};
+  await db.update(instruments).set({ ownerOrgId: orgId }).where(eq(instruments.id, instrumentId));
+  // An owner who can't see their own system helps no one: guarantee a share
+  // (existing access levels are left alone).
+  if (orgId !== null) {
+    await db.insert(systemShares).values({ instrumentId, orgId, access: "edit", addedBy: u.email }).onConflictDoNothing();
+  }
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: org ? `made ${org.name} the owner of ${inst.externalId}` : `returned ${inst.externalId} to house stewardship`,
+    field: "owner", newValue: org?.name ?? "",
   });
   rev(instrumentId);
   return {};

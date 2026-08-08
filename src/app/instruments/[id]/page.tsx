@@ -146,6 +146,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           id: r.id, orgName: r.orgName, orgKind: r.orgKind, requestedBy: r.requestedBy,
           message: r.message, when: shopTime(r.createdAt),
         }))}
+        ownerOrgId={inst.ownerOrgId}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
       />
 

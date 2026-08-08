@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { shareSystem, unshareSystem } from "@/app/actions";
+import { shareSystem, unshareSystem, setSystemOwner } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 
 export type ShareEntry = { orgId: number; name: string; kind: string; access: string };
@@ -14,8 +14,11 @@ const LEVEL = { view: { label: "can view", bg: "#EEF1F5", fg: "#475569" }, edit:
  * edit rights can bring in a service provider (and withdraw one) but never
  * touch its own access - the server enforces the same split.
  */
-export default function SharePanel({ instrumentId, shares, orgOptions, canManageAll, canAddProvider }: {
+export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgId, canManageAll, canAddProvider }: {
   instrumentId: number; shares: ShareEntry[]; orgOptions: OrgOption[];
+  // Which client org owns the system (null = the house stewards it). Owners
+  // decide access requests; staff assign ownership - it's also the claim flow.
+  ownerOrgId: number | null;
   canManageAll: boolean; canAddProvider: boolean;
 }) {
   const [adding, setAdding] = useState(false);
@@ -67,6 +70,7 @@ export default function SharePanel({ instrumentId, shares, orgOptions, canManage
             <span key={s.orgId} className="pill"
               style={{ background: s.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: s.kind === "provider" ? "#8A5410" : "#1D6396", display: "inline-flex", alignItems: "center", gap: 5 }}>
               {s.name}
+              {s.orgId === ownerOrgId && <span style={{ fontWeight: 700 }}>· owner</span>}
               <span style={{ fontWeight: 400, opacity: 0.8 }}>· {l.label}</span>
               {canManageAll && (
                 <select value={s.access} disabled={pending}
@@ -111,6 +115,23 @@ export default function SharePanel({ instrumentId, shares, orgOptions, canManage
           )}
           <button className="btn sm accent" onClick={add} disabled={pending || !pick}>{pending ? "Sharing..." : "Share"}</button>
           <button className="btn link" onClick={() => { setAdding(false); setPick(""); setError(""); }}>cancel</button>
+        </div>
+      )}
+      {canManageAll && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+          <span className="mut" style={{ fontSize: 12 }}>Owner:</span>
+          <select value={ownerOrgId ?? ""} disabled={pending}
+            onChange={(e) => startTransition(async () => {
+              const res = await setSystemOwner(instrumentId, e.target.value ? parseInt(e.target.value) : null);
+              if (res?.error) setError(res.error);
+            })}
+            style={{ width: "auto", fontSize: 12 }}>
+            <option value="">Sierra Spectra (house)</option>
+            {orgOptions.filter((o) => o.kind === "client").map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+          <span className="mut" style={{ fontSize: 11 }}>The owner&apos;s editors decide serial-lookup access requests.</span>
         </div>
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
