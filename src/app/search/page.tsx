@@ -1,11 +1,12 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { desc, ilike, or, inArray } from "drizzle-orm";
+import { and, desc, ilike, or, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
   instruments, tasks, parts, attachments, discussionPosts, assets, auditLog,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { getSystemLabels } from "@/lib/systemLabel";
 import SearchBox from "@/components/SearchBox";
 
@@ -17,7 +18,8 @@ type Hit = { id: number; group: string; title: string; sub: string; href: string
 
 /** One box over everything: serials, POs, parts, tasks, modules, files, posts, history. */
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  try { await requireUser(); } catch { redirect("/login"); }
+  let user;
+  try { user = await requireUser(); } catch { redirect("/login"); }
   const { q: raw } = await searchParams;
   const q = (raw ?? "").trim();
   const like = `%${q}%`;
@@ -25,25 +27,36 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   let hits: Hit[] = [];
   let labels = new Map<number, string>();
 
+  // One search box over everything the viewer is allowed to see - nothing more.
+  const [seeSystems, seeAssets] = await Promise.all([visibleSystemIds(user), visibleAssetIds(user)]);
+  const inSystems = (col: AnyColumn): SQL | undefined =>
+    seeSystems === null ? undefined : seeSystems.length ? inArray(col, seeSystems) : sql`false`;
+  const inAssets = (col: AnyColumn): SQL | undefined =>
+    seeAssets === null ? undefined : seeAssets.length ? inArray(col, seeAssets) : sql`false`;
+  // A work row (task, part, file) belongs to a system, a standalone asset, or
+  // both - it's visible if either side is.
+  const workScope = (sysCol: AnyColumn, assetCol: AnyColumn): SQL | undefined =>
+    seeSystems === null ? undefined : or(inSystems(sysCol), inAssets(assetCol));
+
   if (q.length >= 2) {
     const [instRows, taskRows, partRows, attachRows, postRows, moduleRows, auditRows] = await Promise.all([
-      db.select().from(instruments).where(or(
+      db.select().from(instruments).where(and(inSystems(instruments.id), or(
         // Asset models/serials are searched through the assets table below;
         // the system itself is found by ID, client, notes, location or lead.
         ilike(instruments.externalId, like), ilike(instruments.client, like),
         ilike(instruments.notes, like), ilike(instruments.location, like), ilike(instruments.lead, like),
-      )).limit(25),
-      db.select().from(tasks).where(or(ilike(tasks.title, like), ilike(tasks.body, like), ilike(tasks.assignee, like))).limit(25),
-      db.select().from(parts).where(or(
+      ))).limit(25),
+      db.select().from(tasks).where(and(workScope(tasks.instrumentId, tasks.assetId), or(ilike(tasks.title, like), ilike(tasks.body, like), ilike(tasks.assignee, like)))).limit(25),
+      db.select().from(parts).where(and(workScope(parts.instrumentId, parts.assetId), or(
         ilike(parts.name, like), ilike(parts.partNumber, like), ilike(parts.serial, like),
         ilike(parts.vendor, like), ilike(parts.po, like), ilike(parts.note, like), ilike(parts.specs, like),
-      )).limit(25),
-      db.select().from(attachments).where(or(ilike(attachments.fileName, like), ilike(attachments.description, like))).limit(25),
-      db.select().from(discussionPosts).where(ilike(discussionPosts.body, like)).orderBy(desc(discussionPosts.createdAt)).limit(25),
-      db.select().from(assets).where(or(
+      ))).limit(25),
+      db.select().from(attachments).where(and(workScope(attachments.instrumentId, attachments.assetId), or(ilike(attachments.fileName, like), ilike(attachments.description, like)))).limit(25),
+      db.select().from(discussionPosts).where(and(inSystems(discussionPosts.instrumentId), ilike(discussionPosts.body, like))).orderBy(desc(discussionPosts.createdAt)).limit(25),
+      db.select().from(assets).where(and(inAssets(assets.id), or(
         ilike(assets.model, like), ilike(assets.serial, like), ilike(assets.note, like), ilike(assets.manufacturer, like),
-      )).limit(25),
-      db.select().from(auditLog).where(ilike(auditLog.action, like)).orderBy(desc(auditLog.createdAt)).limit(15),
+      ))).limit(25),
+      db.select().from(auditLog).where(and(inSystems(auditLog.instrumentId), ilike(auditLog.action, like))).orderBy(desc(auditLog.createdAt)).limit(15),
     ]);
 
     const ids = new Set<number>([
@@ -64,7 +77,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     const assetLabels = new Map(assetRows.map((a) => [a.id, `${a.kind} — ${a.model || a.serial || "(no model)"}`]));
     const named = ids.size
       ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model })
-          .from(instruments).where(inArray(instruments.id, [...ids]))
+          .from(instruments).where(and(inArray(instruments.id, [...ids]), inSystems(instruments.id)))
       : [];
     const composed = await getSystemLabels(named);
     labels = new Map(named.map((n) => {

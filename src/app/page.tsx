@@ -1,4 +1,4 @@
-import { and, asc, eq, desc } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
@@ -6,6 +6,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { composeSystemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { requireUser } from "@/lib/authz";
+import { visibleSystemIds } from "@/lib/tenancy";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 
@@ -15,19 +16,26 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
+  // Staff see the whole shop; an organization sees only what's shared with it.
+  // `null` means no restriction - an empty list means nothing, so every query
+  // below must go through `mine()`.
+  const visible = await visibleSystemIds(user);
+  const mine = (col: AnyColumn): SQL | undefined =>
+    visible === null ? undefined : visible.length ? inArray(col, visible) : sql`false`;
+
   const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, peopleRows, taskRows, assetRows, allSystems, vocabCats] = await Promise.all([
-    db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
-    db.select().from(parts),
-    db.select().from(instrumentGases),
-    db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200),
+    db.select().from(instruments).where(and(eq(instruments.archived, false), mine(instruments.id))).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(parts).where(mine(parts.instrumentId)),
+    db.select().from(instrumentGases).where(mine(instrumentGases.instrumentId)),
+    db.select().from(auditLog).where(mine(auditLog.instrumentId)).orderBy(desc(auditLog.createdAt)).limit(200),
     db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
     getStageDefs(),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
-    db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks),
-    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets),
+    db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks).where(mine(tasks.instrumentId)),
+    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
     // Archived systems included, so retiring the last system for a client (or
     // in a category) doesn't drop it out of the pickers.
-    db.select({ client: instruments.client, category: instruments.category }).from(instruments),
+    db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
   ]);
 

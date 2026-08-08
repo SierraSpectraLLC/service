@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { visibleSystemIds } from "@/lib/tenancy";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopMonthDay } from "@/lib/shopday";
@@ -11,10 +12,15 @@ import { shopMonthDay } from "@/lib/shopday";
 export const dynamic = "force-dynamic";
 
 export default async function ArchivePage() {
-  try { await requireUser(); } catch { redirect("/login"); }
+  let user;
+  try { user = await requireUser(); } catch { redirect("/login"); }
+  // This page was reachable by URL for anyone signed in; now it shows only
+  // what the viewer may see.
+  const visible = await visibleSystemIds(user);
 
   const [rows, defs] = await Promise.all([
-    db.select().from(instruments).where(eq(instruments.archived, true))
+    db.select().from(instruments).where(and(eq(instruments.archived, true),
+      visible === null ? undefined : visible.length ? inArray(instruments.id, visible) : sql`false`))
       .orderBy(desc(instruments.archivedAt), asc(instruments.externalId)),
     getStageDefs(),
   ]);

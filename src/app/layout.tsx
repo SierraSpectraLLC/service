@@ -14,14 +14,15 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Run auth and the diff count concurrently; the count only renders for staff.
-  const [user, diffRows] = await Promise.all([
-    currentUser(),
-    db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false))
-      .catch(() => []), // table may not exist before first push
-  ]);
-  const openDiffs = user ? diffRows.length : 0;
+  const user = await currentUser();
   const isStaff = user && (user.role === "owner" || user.role === "staff");
+  // Parity is an internal Sierra concern, so don't even ask the database for it
+  // on a client's request.
+  const diffRows = isStaff
+    ? await db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false))
+        .catch(() => []) // table may not exist before first push
+    : [];
+  const openDiffs = diffRows.length;
 
   return (
     <html lang="en">
@@ -32,7 +33,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Link href="/" style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.3, color: "#fff", textDecoration: "none" }}>
               SIERRA SPECTRA
             </Link>
-            <span style={{ fontSize: 12, opacity: 0.75 }}>Sierra Spectra × LabZen · instrument portal</span>
+            <span style={{ fontSize: 12, opacity: 0.75 }}>
+              {user?.orgName ? `Sierra Spectra × ${user.orgName} · instrument portal` : "Sierra Spectra · instrument portal"}
+            </span>
             {user && (
               <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>

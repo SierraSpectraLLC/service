@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { asc } from "drizzle-orm";
+import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { ASSET_COLOR, ASSET_STATES, MODULE_KINDS } from "@/lib/stages";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
@@ -15,9 +16,14 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { q = "", kind = "", status = "", owner = "" } = await searchParams;
 
+  // Units on systems shared with the viewer, plus any their own org owns.
+  const [seeAssets, seeSystems] = await Promise.all([visibleAssetIds(user), visibleSystemIds(user)]);
   const [rows, insts] = await Promise.all([
-    db.select().from(assets).orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
-    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client }).from(instruments),
+    db.select().from(assets)
+      .where(seeAssets === null ? undefined : seeAssets.length ? inArray(assets.id, seeAssets) : sql`false`)
+      .orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
+    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client }).from(instruments)
+      .where(seeSystems === null ? undefined : seeSystems.length ? inArray(instruments.id, seeSystems) : sql`false`),
   ]);
   const home = new Map(insts.map((i) => [i.id, i]));
   // Owner picker options: whoever already owns stock, plus the clients we work for.

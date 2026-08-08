@@ -1,12 +1,13 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, people,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES, MODULE_KINDS } from "@/lib/stages";
@@ -30,6 +31,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const { id } = await params;
   const assetId = parseInt(id);
   if (isNaN(assetId)) notFound();
+  const access = await assetAccess(user, assetId);
+  if (!access.see) notFound();
+  // History spans every system this unit has lived in - name only the ones the
+  // viewer is allowed to know about.
+  const visibleSystems = await visibleSystemIds(user);
 
   const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows, kindRows,
          gasRows, gasNames, attachRows, activity, peopleRows] = await Promise.all([
@@ -39,7 +45,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     db.select().from(parts).where(eq(parts.assetId, assetId)).orderBy(asc(parts.id)),
     db.select().from(timeEntries).where(eq(timeEntries.assetId, assetId)),
     db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, client: instruments.client, archived: instruments.archived })
-      .from(instruments).orderBy(asc(instruments.externalId)),
+      .from(instruments)
+      .where(visibleSystems === null ? undefined : visibleSystems.length ? inArray(instruments.id, visibleSystems) : sql`false`)
+      .orderBy(asc(instruments.externalId)),
     db.selectDistinct({ owner: assets.owner }).from(assets),
     db.selectDistinct({ kind: assets.kind }).from(assets),
     db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
@@ -59,7 +67,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const itemIds = items.map((i) => i.id);
   const iNotes = itemIds.length ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt)) : [];
 
-  const canEdit = user.role !== "client_viewer";
+  const canEdit = access.edit;
   const isStaff = user.role === "owner" || user.role === "staff";
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
@@ -156,11 +164,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         {history.map((h, i) => (
           <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap", alignItems: "baseline" }}>
             <span className="mut mono" style={{ fontSize: 11, flexShrink: 0, width: 108 }}>{shopTime(h.at)}</span>
-            {h.instrumentId !== null && label.get(h.instrumentId) && (
+            {h.instrumentId !== null && (label.get(h.instrumentId) ? (
               <Link href={`/instruments/${h.instrumentId}`} className="mono" style={{ fontSize: 11, fontWeight: 700, color: "var(--navy)", textDecoration: "none", flexShrink: 0 }}>
                 {label.get(h.instrumentId)}
               </Link>
-            )}
+            ) : (
+              // Work done while the unit lived somewhere the viewer can't see:
+              // the event stays in the history, the system stays anonymous.
+              <span className="mut mono" style={{ fontSize: 11, flexShrink: 0 }}>another system</span>
+            ))}
             {KIND_LABEL[h.kind] && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[h.kind]}</span>}
             <span style={{ flex: 1, minWidth: 160 }}>
               {h.text}

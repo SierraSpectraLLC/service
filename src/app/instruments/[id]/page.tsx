@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import {
@@ -7,6 +7,7 @@ import {
   discussionPosts, people, assets, discussionReads, vocabTerms,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES, MODULE_KINDS } from "@/lib/stages";
@@ -29,6 +30,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   const instId = parseInt(id);
   if (isNaN(instId)) notFound();
+  // A system nobody shared with you doesn't exist as far as you're concerned.
+  try { await assertSystemVisible(user, instId); } catch { notFound(); }
+  const visible = await visibleSystemIds(user);
+  const mine = (col: AnyColumn): SQL | undefined =>
+    visible === null ? undefined : visible.length ? inArray(col, visible) : sql`false`;
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
@@ -41,12 +47,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
     getStageDefs(),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
-    db.select({ client: instruments.client, category: instruments.category }).from(instruments),
+    db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
-    db.select().from(assets).where(isNull(assets.instrumentId)).orderBy(asc(assets.kind), asc(assets.model)),
+    // Shelf stock offered for attaching: the house sees all of it; an org sees
+    // only units it owns, never another client's spares.
+    db.select().from(assets).where(and(isNull(assets.instrumentId),
+      user.orgId === null ? undefined : eq(assets.ownerOrgId, user.orgId))).orderBy(asc(assets.kind), asc(assets.model)),
     db.selectDistinct({ kind: assets.kind }).from(assets),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
   ]);
@@ -74,7 +83,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const itemIds = items.map((i) => i.id);
   const iNotes = itemIds.length ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt)) : [];
 
-  const canEdit = user.role !== "client_viewer";
+  // A view-level share is read-only even for an org whose role can edit.
+  const canEdit = await canEditSystem(user, instId);
   const isStaff = user.role === "owner" || user.role === "staff";
 
   const fullTasks = taskRows.map((t) => ({
