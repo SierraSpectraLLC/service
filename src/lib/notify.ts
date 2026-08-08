@@ -59,7 +59,9 @@ const wrap = (body: string) => `
 
 export async function notifyTaskAssigned(opts: {
   actorEmail: string; actorName: string; assignee: string;
-  taskTitle: string; instrumentId: number; externalId: string;
+  // A task lives on a system, on a standalone asset, or both - the link points
+  // at whichever page owns it.
+  taskTitle: string; instrumentId?: number; assetId?: number; externalId: string;
 }) {
   try {
     const staff = parseList(process.env.STAFF_EMAILS);
@@ -74,7 +76,9 @@ export async function notifyTaskAssigned(opts: {
       [to],
       `${opts.externalId}: assigned "${opts.taskTitle}"`,
       wrap(`${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+        ${url && (opts.instrumentId || opts.assetId)
+          ? `<div style="margin-top:10px;"><a href="${url}${opts.instrumentId ? `/instruments/${opts.instrumentId}` : `/assets/${opts.assetId}`}">Open ${esc(opts.externalId)}</a></div>`
+          : ""}`),
     );
   } catch (e) {
     console.error("[notify] task-assigned email failed:", (e as Error).message);

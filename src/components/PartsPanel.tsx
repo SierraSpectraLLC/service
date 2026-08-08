@@ -3,7 +3,7 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
-import { createPart, updatePart, setPartStatus, setPartAsset, deletePart } from "@/app/actions";
+import { createPart, updatePart, setPartStatus, setPartAsset, deletePart, type WorkTarget } from "@/app/actions";
 
 type Part = {
   id: number; kind: string; assetId: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
@@ -50,8 +50,8 @@ const empty = { kind: "part", assetId: null as number | null, name: "", partNumb
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ instrumentId, parts, systemAssets, canEdit, isStaff }: {
-  instrumentId: number; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff }: {
+  target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -84,7 +84,7 @@ export default function PartsPanel({ instrumentId, parts, systemAssets, canEdit,
     if (!draft.name.trim() || !form) return;
     const payload = { ...draft, specs: serializeSpecs(specPairs) };
     startTransition(async () => {
-      if (form.mode === "new") await createPart(instrumentId, payload);
+      if (form.mode === "new") await createPart(target, payload);
       else await updatePart(form.id, payload);
       close();
     });

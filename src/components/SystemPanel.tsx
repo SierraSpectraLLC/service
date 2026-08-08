@@ -169,7 +169,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       )}
 
       <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
-      <GasPanel instrumentId={instrument.id} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
+      <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
     </div>
   );
 }

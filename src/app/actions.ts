@@ -30,10 +30,54 @@ async function systemLabelFor(inst: { id: number; model: string }) {
   return composeSystemLabel(rows, inst.model);
 }
 
-const rev = (id?: number) => {
+const rev = (id?: number | null) => {
   revalidatePath("/");
   if (id) revalidatePath(`/instruments/${id}`);
 };
+
+/**
+ * Work (a task, part, file, gas) belongs to a system, to a standalone asset, or
+ * to both. One target type covers all three so the same panels serve a system
+ * page and an asset page.
+ */
+export type WorkTarget = { instrumentId: number | null; assetId: number | null };
+
+const revWork = (t: { instrumentId: number | null; assetId?: number | null }) => {
+  rev(t.instrumentId);
+  if (t.assetId) {
+    revalidatePath("/assets");
+    revalidatePath(`/assets/${t.assetId}`);
+  }
+};
+
+/**
+ * Resolve a caller-supplied target: the system must exist, the asset must
+ * exist, and if both are given the asset must actually be on that system.
+ */
+async function resolveTarget(t: WorkTarget): Promise<
+  { error: string } | { instrumentId: number | null; assetId: number | null; externalId: string; asset: typeof assets.$inferSelect | null }
+> {
+  let externalId = "";
+  if (t.instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, t.instrumentId));
+    if (!inst) return { error: "Not found" };
+    externalId = inst.externalId;
+  }
+  let asset: typeof assets.$inferSelect | null = null;
+  if (t.assetId) {
+    const [a] = await db.select().from(assets).where(eq(assets.id, t.assetId));
+    if (!a) return { error: "Not found" };
+    // On a system page the tag has to be an asset that's actually installed.
+    if (t.instrumentId !== null && a.instrumentId !== t.instrumentId) return { error: "That asset is not on this system" };
+    asset = a;
+  }
+  if (t.instrumentId === null && !asset) return { error: "Not found" };
+  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset };
+}
+
+/** Where work is recorded, for audit lines: "T-003" or "pump LC-40D". */
+const targetLabel = (externalId: string, asset: { kind: string; model: string; serial: string } | null) =>
+  externalId || (asset ? assetLabel(asset) : "");
 
 // ---------------- Instruments ----------------
 
@@ -107,18 +151,28 @@ export async function updateInstrument(
   return {};
 }
 
-/** Freeform note straight into the activity log - for things that aren't a task or a part order. */
-export async function addInstrumentNote(instrumentId: number, text: string) {
+/**
+ * Freeform note straight into the activity log - for things that aren't a task
+ * or a part order. On an asset it also lands in the asset's service history.
+ */
+export async function addInstrumentNote(target: WorkTarget, text: string): Promise<{ error?: string }> {
   const u = await requireEditor();
   const t = text.trim();
-  if (!t) throw new Error("Note text required");
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
+  if (!t) return { error: "Note text required" };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
   await audit({
-    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: t0.instrumentId !== null ? "instrument" : "asset",
+    entityId: t0.instrumentId !== null ? t0.externalId : String(t0.assetId),
     action: "posted note", field: "note", newValue: t,
   });
-  rev(instrumentId);
+  // Asset notes belong in its history feed, not just the audit trail.
+  if (t0.instrumentId === null && t0.assetId) {
+    await logAssetEvent(t0.assetId, "note", null, t, u.name);
+  }
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
 }
 
 /** Retire a system from the active fleet (or bring it back). The editor-safe alternative to deleting. */
@@ -249,7 +303,7 @@ export async function deleteInstrument(instrumentId: number) {
 // First-class units systems are built from. Work is recorded on the system
 // and tagged with the asset; lifecycle rows here give the dossier its spine.
 
-type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; location: string; note: string };
+type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; asFound?: string; location: string; note: string };
 
 const cleanAsset = (d: AssetInput) => ({
   kind: (MODULE_KINDS as readonly string[]).includes(d.kind) ? d.kind : "Other",
@@ -257,6 +311,7 @@ const cleanAsset = (d: AssetInput) => ({
   serial: d.serial.trim(),
   manufacturer: d.manufacturer.trim(),
   owner: d.owner.trim(),
+  asFound: (d.asFound ?? "").trim(),
   location: d.location.trim(),
   note: d.note.trim(),
 });
@@ -498,21 +553,27 @@ export async function removeAsset(assetId: number) {
  * the starter list, so the shop can add its own (CO2, Zero air, ...) without a
  * settings trip.
  */
-export async function addInstrumentGas(instrumentId: number, gas: string): Promise<{ error?: string }> {
+export async function addInstrumentGas(target: WorkTarget, gas: string): Promise<{ error?: string }> {
   const u = await requireEditor();
   const name = gas.trim();
   if (!name || name.length > 40) return { error: "Gas name must be 1-40 characters" };
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) return { error: "Not found" };
-  const existing = await db.select().from(instrumentGases)
-    .where(eq(instrumentGases.instrumentId, instrumentId));
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const existing = await db.select().from(instrumentGases).where(
+    t0.instrumentId !== null
+      ? eq(instrumentGases.instrumentId, t0.instrumentId)
+      : eq(instrumentGases.assetId, t0.assetId!)
+  );
   if (existing.some((g) => g.gas.toLowerCase() === name.toLowerCase())) return { error: `${name} is already listed` };
-  await db.insert(instrumentGases).values({ instrumentId, gas: name });
+  await db.insert(instrumentGases).values({
+    instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null, gas: name,
+  });
   await audit({
-    actor: u.email, instrumentId, entityType: "gas", entityId: inst.externalId,
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "gas",
+    entityId: targetLabel(t0.externalId, t0.asset),
     action: `added gas requirement: ${name}`, field: "gas", newValue: name,
   });
-  rev(instrumentId);
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   return {};
 }
 
@@ -522,19 +583,22 @@ export async function setGasStatus(gasId: number, status: string) {
   const [g] = await db.select().from(instrumentGases).where(eq(instrumentGases.id, gasId));
   if (!g) throw new Error("Not found");
   if (g.status === status) return;
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, g.instrumentId));
+  const [inst] = g.instrumentId !== null
+    ? await db.select().from(instruments).where(eq(instruments.id, g.instrumentId)) : [];
   await db.update(instrumentGases).set({ status, updatedAt: new Date() }).where(eq(instrumentGases.id, gasId));
   await audit({
-    actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
+    actor: u.email, instrumentId: g.instrumentId, assetId: g.assetId, entityType: "gas", entityId: inst?.externalId ?? "",
     action: `${g.gas}: ${g.status} -> ${status}`, field: "status", oldValue: g.status, newValue: status,
   });
   if (status === "Empty") {
-    await notifyGasEmpty({
-      actorEmail: u.email, actorName: u.name, gas: g.gas,
-      instrumentId: g.instrumentId, externalId: inst?.externalId ?? "",
-    });
+    if (g.instrumentId !== null) {
+      await notifyGasEmpty({
+        actorEmail: u.email, actorName: u.name, gas: g.gas,
+        instrumentId: g.instrumentId, externalId: inst?.externalId ?? "",
+      });
+    }
   }
-  rev(g.instrumentId);
+  revWork(g);
 }
 
 export async function updateGasNote(gasId: number, note: string) {
@@ -543,57 +607,69 @@ export async function updateGasNote(gasId: number, note: string) {
   if (!g) throw new Error("Not found");
   const t = note.trim();
   if (g.note === t) return;
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, g.instrumentId));
+  const [inst] = g.instrumentId !== null
+    ? await db.select().from(instruments).where(eq(instruments.id, g.instrumentId)) : [];
   await db.update(instrumentGases).set({ note: t, updatedAt: new Date() }).where(eq(instrumentGases.id, gasId));
   await audit({
-    actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
+    actor: u.email, instrumentId: g.instrumentId, assetId: g.assetId, entityType: "gas", entityId: inst?.externalId ?? "",
     action: `updated ${g.gas} note`, field: "note", oldValue: g.note, newValue: t,
   });
-  rev(g.instrumentId);
+  revWork(g);
 }
 
 export async function removeInstrumentGas(gasId: number) {
   const u = await requireStaff();
   const [g] = await db.select().from(instrumentGases).where(eq(instrumentGases.id, gasId));
   if (!g) throw new Error("Not found");
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, g.instrumentId));
+  const [inst] = g.instrumentId !== null
+    ? await db.select().from(instruments).where(eq(instruments.id, g.instrumentId)) : [];
   await db.delete(instrumentGases).where(eq(instrumentGases.id, gasId));
   await audit({
-    actor: u.email, instrumentId: g.instrumentId, entityType: "gas", entityId: inst?.externalId ?? "",
+    actor: u.email, instrumentId: g.instrumentId, assetId: g.assetId, entityType: "gas", entityId: inst?.externalId ?? "",
     action: `removed gas requirement: ${g.gas}`, field: "gas", oldValue: g.gas,
   });
-  rev(g.instrumentId);
+  revWork(g);
 }
 
-/** An asset tag is only valid if the asset is currently attached to that system. */
-async function validAssetTag(assetId: number | null | undefined, instrumentId: number) {
-  if (!assetId) return null;
+/**
+ * An asset tag is only valid if the asset is currently attached to that system.
+ * A null system means the row already belongs to the asset itself.
+ */
+async function validAssetTag(assetId: number | null | undefined, instrumentId: number | null) {
+  if (!assetId || instrumentId === null) return null;
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   return a && a.instrumentId === instrumentId ? a : null;
 }
 
 // ---------------- Tasks ----------------
 
-export async function createTask(instrumentId: number, data: { title: string; body: string; assignee: string; dueDate?: string; assetId?: number | null }) {
+export async function createTask(
+  target: WorkTarget,
+  data: { title: string; body: string; assignee: string; dueDate?: string },
+): Promise<{ error?: string }> {
   const u = await requireEditor();
-  if (!data.title.trim()) throw new Error("Title required");
-  const tagged = await validAssetTag(data.assetId, instrumentId);
+  if (!data.title.trim()) return { error: "Title required" };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
   const [t] = await db.insert(tasks).values({
-    instrumentId, title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
-    dueDate: (data.dueDate ?? "").trim(), assetId: tagged?.id ?? null,
+    instrumentId: t0.instrumentId, assetId: t0.assetId,
+    title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
+    dueDate: (data.dueDate ?? "").trim(),
   }).returning();
   await audit({
-    actor: u.email, instrumentId, entityType: "task", entityId: t.id,
-    action: `created task '${t.title}'${tagged ? ` [${assetLabel(tagged)}]` : ""}${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "task", entityId: t.id,
+    action: `created task '${t.title}'${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
   });
   if (t.assignee) {
-    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     await notifyTaskAssigned({
       actorEmail: u.email, actorName: u.name, assignee: t.assignee,
-      taskTitle: t.title, instrumentId, externalId: inst?.externalId ?? "",
+      taskTitle: t.title, instrumentId: t0.instrumentId ?? undefined,
+      assetId: t0.assetId ?? undefined,
+      externalId: targetLabel(t0.externalId, t0.asset),
     });
   }
-  rev(instrumentId);
+  revWork(t);
+  return {};
 }
 
 export async function setTaskAsset(taskId: number, assetId: number | null) {
@@ -605,10 +681,10 @@ export async function setTaskAsset(taskId: number, assetId: number | null) {
   if (t.assetId === next) return;
   await db.update(tasks).set({ assetId: next }).where(eq(tasks.id, taskId));
   await audit({
-    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
     action: tagged ? `tagged '${t.title}' to ${assetLabel(tagged)}` : `untagged '${t.title}' (whole system)`,
   });
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function setTaskDue(taskId: number, dueDate: string) {
@@ -619,11 +695,11 @@ export async function setTaskDue(taskId: number, dueDate: string) {
   if (!t || t.dueDate === due) return;
   await db.update(tasks).set({ dueDate: due }).where(eq(tasks.id, taskId));
   await audit({
-    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
     action: due ? `set '${t.title}' due ${due}` : `cleared the due date on '${t.title}'`,
     field: "dueDate", oldValue: t.dueDate, newValue: due,
   });
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function updateTask(taskId: number, data: { title: string; body: string }) {
@@ -636,17 +712,17 @@ export async function updateTask(taskId: number, data: { title: string; body: st
   await db.update(tasks).set({ title, body }).where(eq(tasks.id, taskId));
   if (t.title !== title) {
     await audit({
-      actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+      actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
       action: `renamed task '${t.title}' to '${title}'`, field: "title", oldValue: t.title, newValue: title,
     });
   }
   if (t.body !== body) {
     await audit({
-      actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+      actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
       action: `edited task '${title}' description`, field: "body", oldValue: t.body, newValue: body,
     });
   }
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function deleteTask(taskId: number) {
@@ -657,10 +733,10 @@ export async function deleteTask(taskId: number) {
   const u = t.origin === "checkout" ? await requireEditor() : await requireStaff();
   await db.delete(tasks).where(eq(tasks.id, taskId)); // checklist + notes cascade
   await audit({
-    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
     action: `deleted task '${t.title}'${t.state !== "Done" ? ` (was ${t.state})` : ""}`,
   });
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function setTaskState(taskId: number, state: string) {
@@ -675,10 +751,10 @@ export async function setTaskState(taskId: number, state: string) {
   }
   await db.update(tasks).set({ state, completedAt: state === "Done" ? new Date() : null }).where(eq(tasks.id, taskId));
   await audit({
-    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
     action: `set task '${t.title}' to ${state}${suffix}`, field: "state", oldValue: t.state, newValue: state,
   });
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function assignTask(taskId: number, assignee: string) {
@@ -687,17 +763,20 @@ export async function assignTask(taskId: number, assignee: string) {
   if (!t) return;
   await db.update(tasks).set({ assignee }).where(eq(tasks.id, taskId));
   await audit({
-    actor: u.email, instrumentId: t.instrumentId, entityType: "task", entityId: taskId,
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
     action: `assigned '${t.title}' to ${assignee || "nobody"}`, field: "assignee", oldValue: t.assignee, newValue: assignee,
   });
   if (assignee && assignee !== t.assignee) {
-    const [inst] = await db.select().from(instruments).where(eq(instruments.id, t.instrumentId));
+    const [inst] = t.instrumentId !== null
+      ? await db.select().from(instruments).where(eq(instruments.id, t.instrumentId)) : [];
+    const [asset] = t.assetId ? await db.select().from(assets).where(eq(assets.id, t.assetId)) : [];
     await notifyTaskAssigned({
       actorEmail: u.email, actorName: u.name, assignee,
-      taskTitle: t.title, instrumentId: t.instrumentId, externalId: inst?.externalId ?? "",
+      taskTitle: t.title, instrumentId: t.instrumentId ?? undefined, assetId: t.assetId ?? undefined,
+      externalId: inst?.externalId || (asset ? assetLabel(asset) : ""),
     });
   }
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function addChecklistItem(taskId: number, text: string) {
@@ -710,7 +789,7 @@ export async function addChecklistItem(taskId: number, text: string) {
     actor: u.email, instrumentId: t.instrumentId, entityType: "checklist_item", entityId: taskId,
     action: `added checklist item '${text.trim()}' to '${t.title}'`,
   });
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function toggleChecklistItem(itemId: number) {
@@ -724,7 +803,7 @@ export async function toggleChecklistItem(itemId: number) {
     action: `${item.done ? "unchecked" : "checked off"} '${item.text}'${t ? ` on '${t.title}'` : ""}`,
     field: "done", oldValue: String(item.done), newValue: String(!item.done),
   });
-  if (t) rev(t.instrumentId);
+  if (t) revWork(t);
 }
 
 export async function deleteChecklistItem(itemId: number) {
@@ -737,7 +816,7 @@ export async function deleteChecklistItem(itemId: number) {
     actor: u.email, instrumentId: t?.instrumentId, entityType: "checklist_item", entityId: itemId,
     action: `removed checklist item '${item.text}'${t ? ` from '${t.title}'` : ""}`,
   });
-  if (t) rev(t.instrumentId);
+  if (t) revWork(t);
 }
 
 export async function addItemNote(itemId: number, text: string) {
@@ -751,7 +830,7 @@ export async function addItemNote(itemId: number, text: string) {
     actor: u.email, instrumentId: t?.instrumentId, entityType: "item_note", entityId: itemId,
     action: `noted on '${item.text}': "${text.trim()}"`,
   });
-  if (t) rev(t.instrumentId);
+  if (t) revWork(t);
 }
 
 export async function addTaskNote(taskId: number, text: string) {
@@ -764,7 +843,7 @@ export async function addTaskNote(taskId: number, text: string) {
     actor: u.email, instrumentId: t.instrumentId, entityType: "task_note", entityId: taskId,
     action: `commented on '${t.title}': "${text.trim()}"`,
   });
-  rev(t.instrumentId);
+  revWork(t);
 }
 
 export async function updateTaskNote(noteId: number, text: string) {
@@ -779,7 +858,7 @@ export async function updateTaskNote(noteId: number, text: string) {
     actor: u.email, instrumentId: task?.instrumentId, entityType: "task_note", entityId: noteId,
     action: `edited a note on '${task?.title ?? "?"}'`, field: "text", oldValue: n.text, newValue: t,
   });
-  if (task) rev(task.instrumentId);
+  if (task) revWork(task);
 }
 
 export async function deleteTaskNote(noteId: number) {
@@ -792,7 +871,7 @@ export async function deleteTaskNote(noteId: number) {
     actor: u.email, instrumentId: task?.instrumentId, entityType: "task_note", entityId: noteId,
     action: `deleted a note by ${n.author} on '${task?.title ?? "?"}'`, field: "text", oldValue: n.text,
   });
-  if (task) rev(task.instrumentId);
+  if (task) revWork(task);
 }
 
 export async function updateItemNote(noteId: number, text: string) {
@@ -808,7 +887,7 @@ export async function updateItemNote(noteId: number, text: string) {
     actor: u.email, instrumentId: task?.instrumentId, entityType: "item_note", entityId: noteId,
     action: `edited a note on '${item?.text ?? "?"}'`, field: "text", oldValue: n.text, newValue: t,
   });
-  if (task) rev(task.instrumentId);
+  if (task) revWork(task);
 }
 
 export async function deleteItemNote(noteId: number) {
@@ -822,7 +901,7 @@ export async function deleteItemNote(noteId: number) {
     actor: u.email, instrumentId: task?.instrumentId, entityType: "item_note", entityId: noteId,
     action: `deleted a note by ${n.author} on '${item?.text ?? "?"}'`, field: "text", oldValue: n.text,
   });
-  if (task) rev(task.instrumentId);
+  if (task) revWork(task);
 }
 
 // ---------------- Parts ----------------
@@ -857,25 +936,28 @@ function partStamps(before: { status: string; receivedAt: string; installedAt: s
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
 
-export async function createPart(instrumentId: number, raw: PartInput) {
+export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string }> {
   const u = await requireEditor();
   const data = cleanPartInput(raw);
-  if (!data.name.trim()) throw new Error("Name required");
+  if (!data.name.trim()) return { error: "Name required" };
+  const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: raw.assetId ?? target.assetId ?? null });
+  if ("error" in t0) return t0;
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
-  const taggedAsset = await validAssetTag(data.assetId, instrumentId);
-  const [p] = await db.insert(parts).values({ ...data, ...stamps, assetId: taggedAsset?.id ?? null, name: data.name.trim(), note: data.note.trim(), instrumentId }).returning();
+  const taggedAsset = t0.asset;
+  const [p] = await db.insert(parts).values({ ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId }).returning();
   const verb = partStatusVerb(p.status);
   const noun = p.kind === "consumable" ? "consumable" : "part";
   const pn = p.partNumber ? ` (PN ${p.partNumber})` : "";
   const qty = p.qty ? ` x${p.qty}` : "";
   const note = p.note ? ` - ${p.note}` : "";
   await audit({
-    actor: u.email, instrumentId, entityType: "part", entityId: p.id,
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "part", entityId: p.id,
     action: (verb
       ? `${verb} ${noun} '${p.name}'${qty}${pn}`
       : `added ${noun} '${p.name}'${qty}${pn} - ${p.status}`) + (taggedAsset ? ` [${assetLabel(taggedAsset)}]` : "") + note,
   });
-  rev(instrumentId);
+  revWork(p);
+  return {};
 }
 
 export async function updatePart(partId: number, raw: PartInput) {
@@ -897,16 +979,16 @@ export async function updatePart(partId: number, raw: PartInput) {
       : `part '${data.name}' status: ${before.status} -> ${data.status}`
     : `edited part '${data.name}'`;
   await audit({
-    actor: u.email, instrumentId: before.instrumentId, entityType: "part", entityId: partId,
+    actor: u.email, instrumentId: before.instrumentId, assetId: before.assetId, entityType: "part", entityId: partId,
     action, field: before.status !== data.status ? "status" : "", oldValue: before.status, newValue: data.status,
   });
   if (retagged) {
     await audit({
-      actor: u.email, instrumentId: before.instrumentId, entityType: "part", entityId: partId,
+      actor: u.email, instrumentId: before.instrumentId, assetId: before.assetId, entityType: "part", entityId: partId,
       action: taggedAsset ? `tagged part '${data.name.trim()}' to ${assetLabel(taggedAsset)}` : `untagged part '${data.name.trim()}' (whole system)`,
     });
   }
-  rev(before.instrumentId);
+  revWork(before);
 }
 
 export async function setPartAsset(partId: number, assetId: number | null) {
@@ -918,10 +1000,10 @@ export async function setPartAsset(partId: number, assetId: number | null) {
   if (p.assetId === next) return;
   await db.update(parts).set({ assetId: next }).where(eq(parts.id, partId));
   await audit({
-    actor: u.email, instrumentId: p.instrumentId, entityType: "part", entityId: partId,
+    actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
     action: tagged ? `tagged part '${p.name}' to ${assetLabel(tagged)}` : `untagged part '${p.name}' (whole system)`,
   });
-  rev(p.instrumentId);
+  revWork(p);
 }
 
 export async function setPartStatus(partId: number, status: string) {
@@ -932,11 +1014,11 @@ export async function setPartStatus(partId: number, status: string) {
   await db.update(parts).set({ status, ...stamps }).where(eq(parts.id, partId));
   const verb = partStatusVerb(status);
   await audit({
-    actor: u.email, instrumentId: p.instrumentId, entityType: "part", entityId: partId,
+    actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
     action: verb ? `${verb} part '${p.name}'` : `part '${p.name}' status: ${p.status} -> ${status}`,
     field: "status", oldValue: p.status, newValue: status,
   });
-  rev(p.instrumentId);
+  revWork(p);
 }
 
 export async function deletePart(partId: number) {
@@ -945,35 +1027,42 @@ export async function deletePart(partId: number) {
   if (!p) return;
   await db.delete(parts).where(eq(parts.id, partId));
   await audit({
-    actor: u.email, instrumentId: p.instrumentId, entityType: "part", entityId: partId,
+    actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
     action: `deleted part record '${p.name}'`,
   });
-  rev(p.instrumentId);
+  revWork(p);
 }
 
 // ---------------- Attachments ----------------
 
-export async function recordAttachment(instrumentId: number, data: { fileName: string; kind: string; url: string; size: number; description?: string }) {
-  await recordAttachments(instrumentId, [{ ...data, description: data.description ?? "" }]);
+export async function recordAttachment(target: WorkTarget, data: { fileName: string; kind: string; url: string; size: number; description?: string }) {
+  await recordAttachments(target, [{ ...data, description: data.description ?? "" }]);
 }
 
 /** Batch variant: one insert + one audit entry per file, single revalidation. */
 export async function recordAttachments(
-  instrumentId: number,
-  files: { fileName: string; kind: string; url: string; size: number; description: string }[]
-) {
+  target: WorkTarget,
+  files: { fileName: string; kind: string; url: string; size: number; description: string }[],
+): Promise<{ error?: string }> {
   const u = await requireEditor();
-  if (!files.length) return;
+  if (!files.length) return {};
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
   const rows = await db.insert(attachments)
-    .values(files.map((f) => ({ ...f, description: f.description.trim(), instrumentId, uploadedBy: u.name })))
+    .values(files.map((f) => ({
+      ...f, description: f.description.trim(),
+      instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+      uploadedBy: u.name,
+    })))
     .returning();
   for (const a of rows) {
     await audit({
-      actor: u.email, instrumentId, entityType: "attachment", entityId: a.id,
-      action: `attached ${a.kind.toLowerCase()}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}`,
+      actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "attachment", entityId: a.id,
+      action: `uploaded ${a.kind}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}`,
     });
   }
-  rev(instrumentId);
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
 }
 
 export async function updateAttachment(attachmentId: number, data: { fileName: string; kind: string; description: string }) {
@@ -990,11 +1079,11 @@ export async function updateAttachment(attachmentId: number, data: { fileName: s
   if (a.kind !== kind) changes.push(`${a.kind} -> ${kind}`);
   if (a.description !== description) changes.push("description updated");
   await audit({
-    actor: u.email, instrumentId: a.instrumentId, entityType: "attachment", entityId: attachmentId,
+    actor: u.email, instrumentId: a.instrumentId, assetId: a.assetId, entityType: "attachment", entityId: attachmentId,
     action: `edited attachment '${a.fileName}': ${changes.join(", ")}`,
     field: "description", oldValue: a.description, newValue: description,
   });
-  rev(a.instrumentId);
+  revWork(a);
 }
 
 /** Best-effort blob removal - never lets a storage hiccup block the record delete. */
@@ -1015,10 +1104,10 @@ export async function deleteAttachment(attachmentId: number) {
   await db.delete(attachments).where(eq(attachments.id, attachmentId));
   await deleteBlobs([a.url]); // remove the actual file from Vercel Blob, not just our record
   await audit({
-    actor: u.email, instrumentId: a.instrumentId, entityType: "attachment", entityId: attachmentId,
+    actor: u.email, instrumentId: a.instrumentId, assetId: a.assetId, entityType: "attachment", entityId: attachmentId,
     action: `removed attachment: ${a.fileName} (file deleted from storage)`,
   });
-  rev(a.instrumentId);
+  revWork(a);
 }
 
 // ---------------- Sheet diffs ----------------

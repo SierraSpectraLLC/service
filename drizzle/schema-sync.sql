@@ -309,6 +309,10 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "role" text NOT NULL DEFAULT 'clien
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "priority" integer NOT NULL DEFAULT 99;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "category" text NOT NULL DEFAULT '';
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "owner" text NOT NULL DEFAULT '';
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "as_found" text NOT NULL DEFAULT '';
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "asset_id" integer;
+ALTER TABLE "audit_log" ADD COLUMN IF NOT EXISTS "asset_id" integer;
+ALTER TABLE "instrument_gases" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "lead" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "manufacturer" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "serial" text NOT NULL DEFAULT '';
@@ -361,6 +365,23 @@ CREATE INDEX IF NOT EXISTS "asset_events_asset_idx" ON "asset_events" ("asset_id
 CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
+
+-- ── Optional owners (widening only; no data is touched) ───────────────────
+-- Tasks, parts, files and gases can belong to a standalone asset - a spare
+-- being refurbished on the bench - so their instrument_id is optional. DROP
+-- NOT NULL only ever accepts more rows than before, and each is guarded so a
+-- re-run is a no-op.
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['tasks','parts','attachments','instrument_gases'] LOOP
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'public' AND table_name = t
+                 AND column_name = 'instrument_id' AND is_nullable = 'NO') THEN
+      EXECUTE format('ALTER TABLE %I ALTER COLUMN "instrument_id" DROP NOT NULL', t);
+    END IF;
+  END LOOP;
+END $$;
 
 -- ── Unique constraints ────────────────────────────────────────────────────
 DO $$ BEGIN
@@ -467,6 +488,14 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_tasks_template_id_task_templates_id_fk') THEN
     ALTER TABLE "template_tasks" ADD CONSTRAINT "template_tasks_template_id_task_templates_id_fk"
       FOREIGN KEY ("template_id") REFERENCES "task_templates"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_asset_id_assets_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instrument_gases_asset_id_assets_id_fk') THEN
+    ALTER TABLE "instrument_gases" ADD CONSTRAINT "instrument_gases_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'template_items_template_task_id_template_tasks_id_fk') THEN
     ALTER TABLE "template_items" ADD CONSTRAINT "template_items_template_task_id_template_tasks_id_fk"

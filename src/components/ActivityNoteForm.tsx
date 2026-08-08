@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { addInstrumentNote } from "@/app/actions";
+import { addInstrumentNote, type WorkTarget } from "@/app/actions";
 
-export default function ActivityNoteForm({ instrumentId }: { instrumentId: number }) {
+export default function ActivityNoteForm({ target }: { target: WorkTarget }) {
   const [text, setText] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -11,7 +11,7 @@ export default function ActivityNoteForm({ instrumentId }: { instrumentId: numbe
     const t = text.trim();
     if (!t) return;
     startTransition(async () => {
-      await addInstrumentNote(instrumentId, t);
+      await addInstrumentNote(target, t);
       setText("");
     });
   };

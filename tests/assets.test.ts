@@ -28,6 +28,18 @@ describe("mergeAssetHistory", () => {
     expect(lines[3].text).toBe("✓ Flow calibration");
     expect(lines[1].text).toBe("1.5 h — Bill");
   });
+  it("keeps work the asset owns on its own, with no system attribution", () => {
+    const lines = mergeAssetHistory(
+      [],
+      [{ title: "Bench refurb", state: "Open", instrumentId: null, createdAt: d("2026-08-01"), completedAt: null }],
+      [{ name: "Pump seal kit", status: "Installed", instrumentId: null, createdAt: d("2026-08-02") }],
+      [], formatHours,
+    );
+    expect(lines.map((l) => l.instrumentId)).toEqual([null, null]);
+    expect(lines[0].text).toBe("Pump seal kit");
+    expect(lines[1].text).toBe("Bench refurb");
+  });
+
   it("uses completion time for done tasks and creation time for open ones", () => {
     const lines = mergeAssetHistory(
       [],

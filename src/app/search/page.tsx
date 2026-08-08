@@ -11,7 +11,9 @@ import SearchBox from "@/components/SearchBox";
 
 export const dynamic = "force-dynamic";
 
-type Hit = { id: number; instrumentId: number; group: string; title: string; sub: string };
+// Work can live on a system or on a standalone asset, so each hit carries its
+// own link and a "where it lives" line rather than an id we reinterpret.
+type Hit = { id: number; group: string; title: string; sub: string; href: string; where: string };
 
 /** One box over everything: serials, POs, parts, tasks, modules, files, posts, history. */
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
@@ -46,11 +48,20 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
     const ids = new Set<number>([
       ...instRows.map((i) => i.id),
-      ...taskRows.map((t) => t.instrumentId), ...partRows.map((p) => p.instrumentId),
-      ...attachRows.map((a) => a.instrumentId), ...moduleRows.flatMap((m) => (m.instrumentId ? [m.instrumentId] : [])),
-      ...postRows.flatMap((p) => (p.instrumentId ? [p.instrumentId] : [])),
-      ...auditRows.flatMap((a) => (a.instrumentId ? [a.instrumentId] : [])),
+      ...[...taskRows, ...partRows, ...attachRows, ...postRows, ...auditRows]
+        .flatMap((r) => (r.instrumentId ? [r.instrumentId] : [])),
+      ...moduleRows.flatMap((m) => (m.instrumentId ? [m.instrumentId] : [])),
     ]);
+    // Assets referenced by asset-owned work, so those rows can say whose they are.
+    const assetIds = new Set<number>([
+      ...moduleRows.map((m) => m.id),
+      ...[...taskRows, ...partRows, ...attachRows, ...auditRows].flatMap((r) => (r.assetId ? [r.assetId] : [])),
+    ]);
+    const assetRows = assetIds.size
+      ? await db.select({ id: assets.id, kind: assets.kind, model: assets.model, serial: assets.serial })
+          .from(assets).where(inArray(assets.id, [...assetIds]))
+      : [];
+    const assetLabels = new Map(assetRows.map((a) => [a.id, `${a.kind} — ${a.model || a.serial || "(no model)"}`]));
     const named = ids.size
       ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model })
           .from(instruments).where(inArray(instruments.id, [...ids]))
@@ -62,14 +73,21 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
     }));
 
     const join = (parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" · ");
+    // Where a row of work lives: its system, else the asset that owns it.
+    const place = (r: { instrumentId: number | null; assetId?: number | null }) =>
+      r.instrumentId
+        ? { href: `/instruments/${r.instrumentId}`, where: labels.get(r.instrumentId) ?? "" }
+        : r.assetId
+          ? { href: `/assets/${r.assetId}`, where: assetLabels.get(r.assetId) ?? "Asset" }
+          : { href: "/discussions", where: "General discussion" };
     hits = [
-      ...instRows.map((i) => ({ id: i.id, instrumentId: i.id, group: "Systems", title: labels.get(i.id) ?? i.externalId, sub: join([i.client, i.location, i.lead && `lead ${i.lead}`]) })),
-      ...taskRows.map((t) => ({ id: t.id, instrumentId: t.instrumentId, group: "Tasks", title: t.title, sub: join([t.state, t.assignee, t.body]) })),
-      ...partRows.map((p) => ({ id: p.id, instrumentId: p.instrumentId, group: p.kind === "consumable" ? "Consumables" : "Parts", title: p.name, sub: join([p.partNumber && `PN ${p.partNumber}`, p.serial && `SN ${p.serial}`, p.vendor, p.status]) })),
-      ...moduleRows.map((m) => ({ id: m.id, instrumentId: -m.id, group: "Assets", title: `${m.kind}: ${m.model || "(no model)"}`, sub: join([m.serial && `SN ${m.serial}`, m.status, m.note]) })),
-      ...attachRows.map((a) => ({ id: a.id, instrumentId: a.instrumentId, group: "Files", title: a.fileName, sub: join([a.kind, a.description]) })),
-      ...postRows.map((p) => ({ id: p.id, instrumentId: p.instrumentId ?? 0, group: "Discussion", title: p.body.slice(0, 120), sub: p.author })),
-      ...auditRows.map((a) => ({ id: a.id, instrumentId: a.instrumentId ?? 0, group: "History", title: a.action.slice(0, 120), sub: a.actor.split("@")[0] })),
+      ...instRows.map((i) => ({ id: i.id, group: "Systems", title: labels.get(i.id) ?? i.externalId, sub: join([i.client, i.location, i.lead && `lead ${i.lead}`]), href: `/instruments/${i.id}`, where: i.client })),
+      ...taskRows.map((t) => ({ id: t.id, group: "Tasks", title: t.title, sub: join([t.state, t.assignee, t.body]), ...place(t) })),
+      ...partRows.map((p) => ({ id: p.id, group: p.kind === "consumable" ? "Consumables" : "Parts", title: p.name, sub: join([p.partNumber && `PN ${p.partNumber}`, p.serial && `SN ${p.serial}`, p.vendor, p.status]), ...place(p) })),
+      ...moduleRows.map((m) => ({ id: m.id, group: "Assets", title: `${m.kind}: ${m.model || "(no model)"}`, sub: join([m.serial && `SN ${m.serial}`, m.status, m.note]), href: `/assets/${m.id}`, where: m.instrumentId ? labels.get(m.instrumentId) ?? "" : "On the shelf" })),
+      ...attachRows.map((a) => ({ id: a.id, group: "Files", title: a.fileName, sub: join([a.kind, a.description]), ...place(a) })),
+      ...postRows.map((p) => ({ id: p.id, group: "Discussion", title: p.body.slice(0, 120), sub: p.author, ...place({ instrumentId: p.instrumentId }) })),
+      ...auditRows.map((a) => ({ id: a.id, group: "History", title: a.action.slice(0, 120), sub: a.actor.split("@")[0], ...place(a) })),
     ];
   }
 
@@ -91,11 +109,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         <div key={g} className="card">
           <div className="eyebrow" style={{ marginBottom: 6 }}>{g}</div>
           {hits.filter((h) => h.group === g).map((h) => (
-            <Link key={`${g}-${h.id}`} href={h.instrumentId < 0 ? `/assets/${-h.instrumentId}` : h.instrumentId ? `/instruments/${h.instrumentId}` : "/discussions"} className="row-hover"
+            <Link key={`${g}-${h.id}`} href={h.href} className="row-hover"
               style={{ display: "block", padding: "7px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
               <div style={{ fontSize: 13 }}>{h.title}</div>
               <div className="mut" style={{ fontSize: 11 }}>
-                {h.instrumentId < 0 ? "Asset" : h.instrumentId ? labels.get(h.instrumentId) ?? "" : "General discussion"}{h.sub ? ` · ${h.sub}` : ""}
+                {h.where}{h.sub ? ` · ${h.sub}` : ""}
               </div>
             </Link>
           ))}

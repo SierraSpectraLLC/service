@@ -3,7 +3,7 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { GAS_STATES, GAS_COLOR } from "@/lib/stages";
 import PickOrAdd from "./PickOrAdd";
-import { addInstrumentGas, setGasStatus, updateGasNote, removeInstrumentGas } from "@/app/actions";
+import { addInstrumentGas, setGasStatus, updateGasNote, removeInstrumentGas, type WorkTarget } from "@/app/actions";
 
 export type GasRow = { id: number; gas: string; status: string; note: string };
 
@@ -21,9 +21,9 @@ function GasStatusSelect({ row }: { row: GasRow }) {
   );
 }
 
-export default function GasPanel({ instrumentId, gases, knownGases, canEdit, isStaff }: {
+export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }: {
   // knownGases: every gas name in use across the shop, plus the starter list.
-  instrumentId: number; gases: GasRow[]; knownGases: string[]; canEdit: boolean; isStaff: boolean;
+  target: WorkTarget; gases: GasRow[]; knownGases: string[]; canEdit: boolean; isStaff: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const [pick, setPick] = useState("");
@@ -38,7 +38,7 @@ export default function GasPanel({ instrumentId, gases, knownGases, canEdit, isS
     if (!name) return;
     setError("");
     startTransition(async () => {
-      const res = await addInstrumentGas(instrumentId, name);
+      const res = await addInstrumentGas(target, name);
       if (res?.error) setError(res.error);
       else { setPick(""); setAdding(false); }
     });

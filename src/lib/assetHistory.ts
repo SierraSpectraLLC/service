@@ -11,9 +11,9 @@ export type HistoryLine = {
 };
 
 type EventRow = { kind: string; instrumentId: number | null; detail: string; actor: string; at: Date };
-type TaskRow = { title: string; state: string; instrumentId: number; createdAt: Date; completedAt: Date | null };
-type PartRow = { name: string; status: string; instrumentId: number; createdAt: Date };
-type TimeRow = { person: string; minutes: number; note: string; instrumentId: number; createdAt: Date };
+type TaskRow = { title: string; state: string; instrumentId: number | null; createdAt: Date; completedAt: Date | null };
+type PartRow = { name: string; status: string; instrumentId: number | null; createdAt: Date };
+type TimeRow = { person: string; minutes: number; note: string; instrumentId: number | null; createdAt: Date };
 
 const EVENT_TEXT: Record<string, string> = {
   installed: "Installed",

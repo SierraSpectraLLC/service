@@ -8,7 +8,7 @@ import PickOrAdd from "./PickOrAdd";
 
 type Asset = {
   id: number; kind: string; model: string; serial: string; manufacturer: string;
-  owner: string; location: string; note: string; status: string; instrumentId: number | null;
+  owner: string; asFound: string; location: string; note: string; status: string; instrumentId: number | null;
 };
 
 export default function AssetControls({ asset, systems, owners, canEdit, isStaff }: {
@@ -17,7 +17,7 @@ export default function AssetControls({ asset, systems, owners, canEdit, isStaff
 }) {
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, location: asset.location, note: asset.note });
+  const [draft, setDraft] = useState({ kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note });
   const [pending, startTransition] = useTransition();
   const c = ASSET_COLOR[asset.status] ?? ASSET_COLOR.Spare;
 
@@ -92,9 +92,15 @@ export default function AssetControls({ asset, systems, owners, canEdit, isStaff
             </div>
             <div><label>Location (off-system)</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Warehouse, shelf B" /></div>
           </div>
+          <div style={{ marginBottom: 8 }}>
+            <label>As found (condition on arrival)</label>
+            <textarea value={draft.asFound} onChange={(e) => setDraft({ ...draft, asFound: e.target.value })} rows={2}
+              placeholder='e.g. "Pump head leaking, no error codes, missing drain line"' style={{ resize: "vertical" }} />
+          </div>
           <div style={{ marginBottom: 10 }}>
-            <label>Note</label>
-            <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
+            <label>Notes</label>
+            <textarea value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} rows={2}
+              style={{ resize: "vertical" }} />
           </div>
           <button className="btn sm accent" disabled={pending}
             onClick={() => run(async () => { const r = await updateAsset(asset.id, draft); if (!r?.error) setEditing(false); return r; })}>

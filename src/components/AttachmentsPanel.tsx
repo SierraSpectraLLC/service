@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachments, deleteAttachment, updateAttachment } from "@/app/actions";
+import { recordAttachments, deleteAttachment, updateAttachment , type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
 type Attachment = {
@@ -153,8 +153,8 @@ async function relayUpload(file: File): Promise<{ url: string }> {
   throw lastErr;
 }
 
-export default function AttachmentsPanel({ instrumentId, attachments, canEdit, isStaff }: {
-  instrumentId: number; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
+export default function AttachmentsPanel({ target, attachments, canEdit, isStaff }: {
+  target: WorkTarget; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [staged, setStaged] = useState<Staged[]>([]);
@@ -254,7 +254,7 @@ export default function AttachmentsPanel({ instrumentId, attachments, canEdit, i
     if (done.length) {
       const doneNames = new Set(done.map((d) => d.fileName));
       startTransition(async () => {
-        await recordAttachments(instrumentId, done);
+        await recordAttachments(target, done);
         // Keep only failed rows staged so they can be retried.
         setStaged((s) => s.filter((x) => !(x.state === "done" && doneNames.has(x.file.name))));
         setUploading(false);

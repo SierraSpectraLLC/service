@@ -50,6 +50,20 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   ]);
   if (!inst) notFound();
 
+  // An asset can carry work of its own (recorded on its page, with no system).
+  // Count it in the per-asset "open" badge so nothing hides on a subpage.
+  const assetIds = assetRows.map((a) => a.id);
+  const [ownTasks, ownParts] = await Promise.all([
+    assetIds.length
+      ? db.select({ assetId: tasks.assetId, state: tasks.state }).from(tasks)
+          .where(and(isNull(tasks.instrumentId), inArray(tasks.assetId, assetIds)))
+      : [],
+    assetIds.length
+      ? db.select({ assetId: parts.assetId, status: parts.status }).from(parts)
+          .where(and(isNull(parts.instrumentId), inArray(parts.assetId, assetIds)))
+      : [],
+  ]);
+
   const taskIds = taskRows.map((t) => t.id);
   const [items, tNotes] = await Promise.all([
     taskIds.length ? db.select().from(checklistItems).where(inArray(checklistItems.taskId, taskIds)).orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id)) : [],
@@ -108,7 +122,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
           openItems:
             taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
-            partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
+            partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +
+            ownTasks.filter((t) => t.assetId === a.id && t.state !== "Done").length +
+            ownParts.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
         }))}
         unassigned={unassignedRows.map((a) => ({
           id: a.id,
@@ -117,11 +133,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         canEdit={canEdit}
       />
 
-      <PartsPanel instrumentId={inst.id} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} canEdit={canEdit} isStaff={isStaff} />
+      <PartsPanel target={{ instrumentId: inst.id, assetId: null }} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} canEdit={canEdit} isStaff={isStaff} />
 
-      <AttachmentsPanel instrumentId={inst.id} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
+      <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 
-      <TasksPanel instrumentId={inst.id} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+      <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
 
       <DiscussionPanel
         instrumentId={inst.id}
@@ -136,7 +152,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <div className="card">
         <div className="card-title">Activity</div>
         <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>Append-only. Nothing here can be edited or erased.</div>
-        {canEdit && <ActivityNoteForm instrumentId={inst.id} />}
+        {canEdit && <ActivityNoteForm target={{ instrumentId: inst.id, assetId: null }} />}
         <ActivityFeed items={activity.map((a) => ({
           id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,
           when: shopTime(a.createdAt),

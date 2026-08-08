@@ -6,7 +6,7 @@ import { MODULE_KINDS } from "@/lib/stages";
 import { createAsset } from "@/app/actions";
 import PickOrAdd from "./PickOrAdd";
 
-const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", location: "", note: "" };
+const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
 /**
  * Add stock straight to the registry - a unit that was just bought and is on
@@ -65,6 +65,11 @@ export default function NewAssetForm({ owners }: { owners: string[] }) {
                 onChange={(owner) => setDraft({ ...draft, owner })} />
             </div>
             <div><label>Where it is</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Warehouse, shelf B" /></div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label>As found (optional)</label>
+            <input value={draft.asFound} onChange={(e) => setDraft({ ...draft, asFound: e.target.value })}
+              placeholder='Condition on arrival, e.g. "boxed, unopened"' />
           </div>
           <div style={{ marginBottom: 10 }}>
             <label>Note</label>

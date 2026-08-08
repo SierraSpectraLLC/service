@@ -2,6 +2,7 @@
 
 import { useOptimistic, useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
+import type { WorkTarget } from "@/app/actions";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
@@ -71,8 +72,8 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   );
 }
 
-export default function TasksPanel({ instrumentId, tasks, people, systemAssets, today, canEdit, isStaff }: {
-  instrumentId: number; tasks: Task[]; people: string[];
+export default function TasksPanel({ target, tasks, people, systemAssets, today, canEdit, isStaff }: {
+  target: WorkTarget; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
@@ -134,7 +135,11 @@ export default function TasksPanel({ instrumentId, tasks, people, systemAssets, 
   const submitNew = () => {
     if (!draft.title.trim()) return;
     startTransition(async () => {
-      await createTask(instrumentId, draft);
+      const res = await createTask(
+        { instrumentId: target.instrumentId, assetId: draft.assetId ?? target.assetId },
+        { title: draft.title, body: draft.body, assignee: draft.assignee, dueDate: draft.dueDate },
+      );
+      if (res?.error) return;
       setDraft({ title: "", body: "", assignee: "", dueDate: "", assetId: null });
       setShowNew(false);
     });

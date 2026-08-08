@@ -1,13 +1,23 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, assetEvents, tasks, parts, timeEntries, instruments } from "@/db/schema";
+import {
+  assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
+  attachments, checklistItems, itemNotes, taskNotes, auditLog, people,
+} from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { shopTime } from "@/lib/shopday";
+import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
+import { GASES } from "@/lib/stages";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import AssetControls from "@/components/AssetControls";
+import GasPanel from "@/components/GasPanel";
+import PartsPanel from "@/components/PartsPanel";
+import AttachmentsPanel from "@/components/AttachmentsPanel";
+import TasksPanel from "@/components/TasksPanel";
+import ActivityNoteForm from "@/components/ActivityNoteForm";
+import ActivityFeed from "@/components/ActivityFeed";
 
 export const dynamic = "force-dynamic";
 
@@ -20,23 +30,50 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const assetId = parseInt(id);
   if (isNaN(assetId)) notFound();
 
-  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows] = await Promise.all([
+  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows,
+         gasRows, gasNames, attachRows, activity, peopleRows] = await Promise.all([
     db.select().from(assets).where(eq(assets.id, assetId)),
     db.select().from(assetEvents).where(eq(assetEvents.assetId, assetId)),
-    db.select().from(tasks).where(eq(tasks.assetId, assetId)),
-    db.select().from(parts).where(eq(parts.assetId, assetId)),
+    db.select().from(tasks).where(eq(tasks.assetId, assetId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
+    db.select().from(parts).where(eq(parts.assetId, assetId)).orderBy(asc(parts.id)),
     db.select().from(timeEntries).where(eq(timeEntries.assetId, assetId)),
     db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, client: instruments.client, archived: instruments.archived })
       .from(instruments).orderBy(asc(instruments.externalId)),
     db.selectDistinct({ owner: assets.owner }).from(assets),
+    db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
+    db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
+    db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(desc(attachments.createdAt)),
+    db.select().from(auditLog).where(eq(auditLog.assetId, assetId)).orderBy(desc(auditLog.createdAt)).limit(100),
+    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
   ]);
   if (!asset) notFound();
+
+  // Checklists and note threads for this asset's tasks (same shape the system page uses).
+  const taskIds = taggedTasks.map((t) => t.id);
+  const [items, tNotes] = await Promise.all([
+    taskIds.length ? db.select().from(checklistItems).where(inArray(checklistItems.taskId, taskIds)).orderBy(asc(checklistItems.sortOrder), asc(checklistItems.id)) : [],
+    taskIds.length ? db.select().from(taskNotes).where(inArray(taskNotes.taskId, taskIds)).orderBy(asc(taskNotes.createdAt)) : [],
+  ]);
+  const itemIds = items.map((i) => i.id);
+  const iNotes = itemIds.length ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt)) : [];
 
   const canEdit = user.role !== "client_viewer";
   const isStaff = user.role === "owner" || user.role === "staff";
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
+  const target = { instrumentId: null, assetId: asset.id };
+
+  const fullTasks = taggedTasks.map((t) => ({
+    ...t,
+    createdAt: t.createdAt.toISOString(),
+    completedAt: t.completedAt?.toISOString() ?? null,
+    checklist: items.filter((c) => c.taskId === t.id).map((c) => ({
+      ...c,
+      thread: iNotes.filter((n) => n.itemId === c.id).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
+    })),
+    notes: tNotes.filter((n) => n.taskId === t.id).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
+  }));
 
   const history = mergeAssetHistory(
     events.map((e) => ({ kind: e.kind, instrumentId: e.instrumentId, detail: e.detail, actor: e.actor, at: e.at })),
@@ -72,19 +109,37 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           )}
           {totalMinutes > 0 && <span className="mut"> · {formatHours(totalMinutes)} logged lifetime</span>}
         </div>
-        {asset.note && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{asset.note}</div>}
+        {asset.asFound && (
+          <div style={{ fontSize: 13, background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
+            <span className="eyebrow" style={{ color: "#8A5410" }}>As found</span>
+            <div style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{asset.asFound}</div>
+          </div>
+        )}
+        {asset.note && <div className="mut" style={{ fontSize: 13, marginBottom: 10, whiteSpace: "pre-wrap" }}>{asset.note}</div>}
         <AssetControls
-          asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
+          asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
           systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
           owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
           canEdit={canEdit} isStaff={isStaff}
         />
+        <GasPanel target={target} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
+          knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]} canEdit={canEdit} isStaff={isStaff} />
       </div>
+
+      <PartsPanel target={target} parts={taggedParts.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        systemAssets={[]} canEdit={canEdit} isStaff={isStaff} />
+
+      <AttachmentsPanel target={target} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+        canEdit={canEdit} isStaff={isStaff} />
+
+      <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
+        systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Service history</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Lifecycle plus every task, part, and hour tagged to this asset - across all systems it has lived in.
+          Lifecycle plus every task, part, and hour on this asset - its own work and anything tagged to it
+          on a system, across every system it has lived in.
         </div>
         {history.map((h, i) => (
           <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap", alignItems: "baseline" }}>
@@ -102,6 +157,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           </div>
         ))}
         {history.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No history yet.</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 8 }}>Activity</div>
+        {canEdit && <ActivityNoteForm target={target} />}
+        <ActivityFeed items={activity.map((a) => ({
+          id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,
+          when: shopTime(a.createdAt),
+        }))} />
       </div>
     </div>
   );

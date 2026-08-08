@@ -79,9 +79,11 @@ export const instruments = pgTable("instruments", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// A task belongs to a system, to an asset on its own (a spare on the bench), or
+// to both (system work tagged to the unit it happened on). At least one is set.
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
   // Open | In progress | Blocked | Done
@@ -126,16 +128,18 @@ export const taskNotes = pgTable("task_notes", {
 // tank inventory is deliberately not modeled (yet).
 export const instrumentGases = pgTable("instrument_gases", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }), // gases for a standalone asset
   gas: text("gas").notNull(),                          // Helium, Nitrogen, ...
   status: text("status").notNull().default("Connected"), // Connected | Low | Empty | Not connected | Not needed
   note: text("note").notNull().default(""),            // tank #, psi, supplier
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("gases_instrument_idx").on(t.instrumentId), unique("gases_instrument_gas").on(t.instrumentId, t.gas)]);
 
+// Same ownership rule as tasks: a system, a standalone asset, or both.
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   // part | consumable - consumables (ferrules, septa, liners) share the same
   // lifecycle/cost/audit but get a lighter-weight form.
   kind: text("kind").notNull().default("part"),
@@ -165,7 +169,8 @@ export const parts = pgTable("parts", {
 
 export const attachments = pgTable("attachments", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }), // files for a standalone asset
   fileName: text("file_name").notNull(),
   // Tune report | Test data | Report | Photo | Manual | Other
   kind: text("kind").notNull().default("Other"),
@@ -195,6 +200,9 @@ export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
   actor: text("actor").notNull(),          // email or "sheet-sync"
   instrumentId: integer("instrument_id"),  // nullable: settings changes etc.
+  // Set whenever the change concerns an asset, so the asset page can show the
+  // same activity feed a system gets. No FK: the log outlives its subjects.
+  assetId: integer("asset_id"),
   entityType: text("entity_type").notNull(),
   entityId: text("entity_id").notNull().default(""),
   action: text("action").notNull(),        // human-readable summary
@@ -246,6 +254,8 @@ export const assets = pgTable("assets", {
   // Whose unit it is - a client name, or blank for our own stock. Independent
   // of whatever system it currently sits in.
   owner: text("owner").notNull().default(""),
+  // Condition on arrival, in the tech's words. Written once at intake and kept.
+  asFound: text("as_found").notNull().default(""),
   // In service | Spare | Needs attention | Down | Decommissioned (lib/stages.ts)
   status: text("status").notNull().default("In service"),
   location: text("location").notNull().default(""), // where a spare lives: "shelf B"

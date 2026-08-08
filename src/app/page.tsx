@@ -40,7 +40,8 @@ export default async function Home() {
   const today = shopToday();
   const overdueBy = new Map<number, number>();
   for (const t of taskRows) {
-    if (t.state === "Done" || !t.dueDate || t.dueDate >= today) continue;
+    // Asset-owned tasks have no system to count against.
+    if (t.instrumentId === null || t.state === "Done" || !t.dueDate || t.dueDate >= today) continue;
     overdueBy.set(t.instrumentId, (overdueBy.get(t.instrumentId) ?? 0) + 1);
   }
 
