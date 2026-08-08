@@ -58,6 +58,10 @@ export const orgs = pgTable("orgs", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   kind: text("kind").notNull().default("client"), // client | provider
+  // Workspace appearance, set by the org's own editors: header color (hex)
+  // and a logo shown beside the wordmark. Blank = the platform default look.
+  themeColor: text("theme_color").notNull().default(""),
+  logoUrl: text("logo_url").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("org_name_unique").on(t.name)]);
 
@@ -96,6 +100,13 @@ export const instruments = pgTable("instruments", {
   // joined the platform ("unclaimed"). The owner's editors approve access
   // requests; visibility itself still comes only from system_shares.
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // Resale state, set by the owning org (or staff). While for_sale is true the
+  // listing_token URL serves a public, heavily redacted view of the system:
+  // maintenance history and opted-in reports, never location/client/costs.
+  // The token survives unmarking (the URL just 404s) so re-listing keeps links.
+  forSale: boolean("for_sale").notNull().default(false),
+  saleNote: text("sale_note").notNull().default(""), // public blurb on the listing
+  listingToken: text("listing_token").notNull().default(""),
   priority: integer("priority").notNull().default(99),
   // Who's driving this system - a people-roster name (Sierra or LabZen), assignable by either side.
   lead: text("lead").notNull().default(""),
@@ -244,6 +255,8 @@ export const attachments = pgTable("attachments", {
   url: text("url").notNull(),         // Vercel Blob URL
   size: integer("size").notNull().default(0), // bytes
   uploadedBy: text("uploaded_by").notNull(),
+  // Files are opt-in on a for-sale listing, so no report leaks by accident.
+  showOnListing: boolean("show_on_listing").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("attachments_instrument_idx").on(t.instrumentId)]);
 
