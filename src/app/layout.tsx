@@ -50,7 +50,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     { href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` },
-                    ...(user.role === "owner" ? [{ href: "/settings", label: "Settings" }] : []),
+                    ...(user.role === "owner"
+                      ? [{ href: "/admin/access", label: "Access & ownership" }, { href: "/settings", label: "Settings" }]
+                      : []),
                   ]} />
                 )}
                 <form action={async () => { "use server"; await signOut({ redirectTo: "/login" }); }}>
