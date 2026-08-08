@@ -49,7 +49,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       db.select().from(tasks).where(and(workScope(tasks.instrumentId, tasks.assetId), or(ilike(tasks.title, like), ilike(tasks.body, like), ilike(tasks.assignee, like)))).limit(25),
       db.select().from(parts).where(and(workScope(parts.instrumentId, parts.assetId), or(
         ilike(parts.name, like), ilike(parts.partNumber, like), ilike(parts.serial, like),
-        ilike(parts.vendor, like), ilike(parts.po, like), ilike(parts.note, like), ilike(parts.specs, like),
+        ilike(parts.vendor, like), ilike(parts.note, like), ilike(parts.specs, like),
+        // PO numbers are redacted business data - matching on them would let a
+        // non-owner probe values it can't see, so only staff search by PO.
+        user.role === "owner" || user.role === "staff" ? ilike(parts.po, like) : undefined,
       ))).limit(25),
       db.select().from(attachments).where(and(workScope(attachments.instrumentId, attachments.assetId), or(ilike(attachments.fileName, like), ilike(attachments.description, like)))).limit(25),
       db.select().from(discussionPosts).where(and(inSystems(discussionPosts.instrumentId), ilike(discussionPosts.body, like))).orderBy(desc(discussionPosts.createdAt)).limit(25),

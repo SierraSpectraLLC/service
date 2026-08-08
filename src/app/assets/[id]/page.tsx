@@ -8,6 +8,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
+import { canSeeCosts, redactParts } from "@/lib/redact";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES, MODULE_KINDS } from "@/lib/stages";
@@ -69,6 +70,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   const canEdit = access.edit;
   const isStaff = user.role === "owner" || user.role === "staff";
+  // Costs follow the owner of whatever the part sits on: the home system's
+  // owning org while installed, the asset's own org on the shelf.
+  const [homeOwner] = asset.instrumentId !== null
+    ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
+    : [];
+  const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId);
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
@@ -146,8 +153,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]} canEdit={canEdit} isStaff={isStaff} />
       </div>
 
-      <PartsPanel target={target} parts={taggedParts.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-        systemAssets={[]} canEdit={canEdit} isStaff={isStaff} />
+      <PartsPanel target={target} parts={redactParts(taggedParts, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} />
 
       <AttachmentsPanel target={target} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         canEdit={canEdit} isStaff={isStaff} />

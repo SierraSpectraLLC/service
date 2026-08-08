@@ -25,9 +25,12 @@ export type SystemDossier = {
     checklist: { text: string; done: boolean; notes: { author: string; text: string; createdAt: string }[] }[];
     notes: { author: string; text: string; createdAt: string }[];
   }[];
+  // No cost or po fields: engagement records go to service providers, and
+  // pricing is the owner's business data (lib/redact) - it must not be frozen
+  // into a copy the provider keeps forever.
   parts: {
     kind: string; name: string; partNumber: string; serial: string; qty: string; specs: string;
-    vendor: string; po: string; cost: string; status: string; installedAt: string; removedAt: string;
+    vendor: string; status: string; installedAt: string; removedAt: string;
     note: string; createdAt: string;
   }[];
   // Blob URLs are kept for reference but can go dead if the live file is later
@@ -87,7 +90,7 @@ export async function composeSystemDossier(instrumentId: number): Promise<System
     })),
     parts: partRows.map((p) => ({
       kind: p.kind, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty,
-      specs: p.specs, vendor: p.vendor, po: p.po, cost: p.cost, status: p.status,
+      specs: p.specs, vendor: p.vendor, status: p.status,
       installedAt: p.installedAt, removedAt: p.removedAt, note: p.note, createdAt: p.createdAt.toISOString(),
     })),
     attachments: attachRows.map((a) => ({

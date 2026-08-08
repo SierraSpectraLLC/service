@@ -8,6 +8,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
+import { canSeeCosts, redactParts } from "@/lib/redact";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES, MODULE_KINDS } from "@/lib/stages";
@@ -168,7 +169,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         canEdit={canEdit}
       />
 
-      <PartsPanel target={{ instrumentId: inst.id, assetId: null }} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} canEdit={canEdit} isStaff={isStaff} />
+      <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
+        parts={redactParts(partRows, canSeeCosts(user, inst.ownerOrgId)).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
+        canEdit={canEdit} isStaff={isStaff} showCosts={canSeeCosts(user, inst.ownerOrgId)} />
 
       <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map((a) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff} />
 

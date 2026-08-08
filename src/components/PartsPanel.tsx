@@ -51,8 +51,11 @@ const empty = { kind: "part", assetId: null as number | null, name: "", partNumb
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
+  // Cost and PO are the owner's business data: hidden (and blanked by the
+  // server before they get here) for providers and other non-owner orgs.
+  showCosts: boolean;
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -148,7 +151,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             </div>
           ) : null}
           <div className="pf2" style={{ marginBottom: 8 }}>
-            <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>
+            {showCosts && <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>}
             <div>
               <label>Status</label>
               <select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
@@ -166,7 +169,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           {showOrderFields && (
             <>
               <div className="pf3" style={{ marginBottom: 8 }}>
-                <div><label>PO #</label><input value={draft.po} onChange={(e) => setDraft({ ...draft, po: e.target.value })} placeholder="SS-1042" /></div>
+                {showCosts && <div><label>PO #</label><input value={draft.po} onChange={(e) => setDraft({ ...draft, po: e.target.value })} placeholder="SS-1042" /></div>}
                 <div><label>Ordered</label><input value={draft.orderedAt} onChange={(e) => setDraft({ ...draft, orderedAt: e.target.value })} placeholder="Jul 18" /></div>
                 <div><label>ETA</label><input value={draft.eta} onChange={(e) => setDraft({ ...draft, eta: e.target.value })} placeholder="Jul 23" /></div>
               </div>
@@ -286,6 +289,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         );
       })()}
       {(() => {
+        if (!showCosts) return null; // server blanks costs too - this just skips an empty row
         const priced = parts.filter((p) => !isNaN(money(p.cost)));
         if (!priced.length) return null;
         const total = priced.reduce((sum, p) => sum + money(p.cost), 0);

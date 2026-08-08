@@ -1098,6 +1098,24 @@ async function fileReplacementRequest(
   });
 }
 
+/**
+ * Cost and PO follow the system's (or shelf asset's) owning organization -
+ * see lib/redact. A caller who can't see them gets them stripped from writes
+ * too, or a provider's routine edit would silently wipe values it was shown
+ * blank.
+ */
+async function costOwnerOrg(row: { instrumentId: number | null; assetId?: number | null }): Promise<number | null> {
+  if (row.instrumentId !== null) {
+    const [i] = await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, row.instrumentId));
+    return i?.ownerOrgId ?? null;
+  }
+  if (row.assetId) {
+    const [a] = await db.select({ ownerOrgId: assets.ownerOrgId }).from(assets).where(eq(assets.id, row.assetId));
+    return a?.ownerOrgId ?? null;
+  }
+  return null;
+}
+
 /** Normalize client-supplied kind/specs so only well-formed values are stored. */
 function cleanPartInput(data: PartInput): PartInput {
   return {
@@ -1128,6 +1146,7 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   if (!data.name.trim()) return { error: "Name required" };
   const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: raw.assetId ?? target.assetId ?? null });
   if ("error" in t0) return t0;
+  if (!isHouse(u.role) && !canSeeCosts(u, await costOwnerOrg(t0))) { data.cost = ""; data.po = ""; }
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
   const taggedAsset = t0.asset;
   const [p] = await db.insert(parts).values({ ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId }).returning();
@@ -1158,6 +1177,8 @@ export async function updatePart(partId: number, raw: PartInput) {
   const taggedAsset = retagged ? await validAssetTag(data.assetId, before.instrumentId) : null;
   const assetId = retagged ? taggedAsset?.id ?? null : before.assetId;
   await assertWorkEditable(u, before);
+  // An editor who can't see costs must not overwrite them blind.
+  if (!isHouse(u.role) && !canSeeCosts(u, await costOwnerOrg(before))) { data.cost = before.cost; data.po = before.po; }
   await db.update(parts).set({ ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
