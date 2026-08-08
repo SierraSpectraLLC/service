@@ -181,6 +181,21 @@ export async function notifyAccessRequest(opts: {
   }
 }
 
+export async function notifyInvite(opts: { to: string; inviterName: string; orgName: string }) {
+  try {
+    const brand = (await getBrand()).name;
+    const url = appUrl();
+    await sendEmail(
+      [opts.to],
+      `${opts.inviterName} invited you to ${brand}`,
+      await wrap(`${esc(opts.inviterName)} added you to <b>${esc(opts.orgName)}</b>'s workspace on ${esc(brand)}.
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/login">Sign in with this email address</a> - no password, a sign-in link is emailed to you.</div>` : ""}`),
+    );
+  } catch (e) {
+    console.error("[notify] invite email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyGasEmpty(opts: { actorEmail: string; actorName: string; gas: string; instrumentId: number; externalId: string }) {
   try {
     const to = parseList(process.env.STAFF_EMAILS).filter((e) => e !== opts.actorEmail.toLowerCase());

@@ -28,7 +28,7 @@ export default async function SettingsPage() {
       <SettingsForm
         clientAccessEnabled={s?.clientAccessEnabled ?? false}
         clientCanEdit={s?.clientCanEdit ?? false}
-        allowlist={allowRows.map((r) => ({ id: r.id, entry: r.entry, addedBy: r.addedBy, orgId: r.orgId }))}
+        allowlist={allowRows.map((r) => ({ id: r.id, entry: r.entry, addedBy: r.addedBy, orgId: r.orgId, canEdit: r.canEdit }))}
         envClients={parseList(process.env.CLIENT_EMAILS)}
         stageDefs={stageDefList}
         people={peopleRows.map((p) => ({ id: p.id, name: p.name, email: p.email, org: p.org }))}

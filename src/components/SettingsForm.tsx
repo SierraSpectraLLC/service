@@ -6,7 +6,7 @@ import {
   addStage, setStageColor, renameStage, deleteStage,
   addPerson, removePerson, updateEodRecipients,
   addVocabTerm, deleteVocabTerm,
-  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setBranding, setOperatorOrg, setOrgAppearance,
+  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setClientAccessRole, setBranding, setOperatorOrg, setOrgAppearance,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 
@@ -19,7 +19,7 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
   );
 }
 
-type AllowRow = { id: number; entry: string; addedBy: string; orgId: number | null };
+type AllowRow = { id: number; entry: string; addedBy: string; orgId: number | null; canEdit: boolean };
 type OrgRow = { id: number; name: string; kind: string; themeColor: string; logoUrl: string; systems: number; logins: number };
 type VocabRow = { id: number; kind: string; assetType: string; name: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
@@ -50,7 +50,7 @@ export default function SettingsForm(props: {
     if (!v) return;
     setError("");
     startTransition(async () => {
-      const res = await addClientAccess(v, parseInt(newEntryOrg));
+      const res = await addClientAccess(v, parseInt(newEntryOrg), newEntryRole === "editor");
       if (res?.error) setError(res.error);
       else setNewEntry("");
     });
@@ -71,6 +71,7 @@ export default function SettingsForm(props: {
 
   // Organizations: who the portal is shared with.
   const [newEntryOrg, setNewEntryOrg] = useState("");
+  const [newEntryRole, setNewEntryRole] = useState("viewer");
   const [orgDraft, setOrgDraft] = useState({ name: "", kind: "client" });
   const [orgError, setOrgError] = useState("");
   const submitOrg = () => {
@@ -174,20 +175,13 @@ export default function SettingsForm(props: {
     <div className="card">
       <div style={{ fontWeight: 700, fontSize: 15, color: "var(--navy)", marginBottom: 4 }}>Client access</div>
       <div className="mut" style={{ fontSize: 13, marginBottom: 14 }}>
-        Platform staff always have full access. These toggles control what client accounts (the sign-in list below) can do.
+        Platform staff always have full access. Editor/viewer is set per person in the sign-in list below.
       </div>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-        <Toggle on={view} label="Client can view" onClick={() => apply(!view, edit)} />
+        <Toggle on={view} label="Client sign-in" onClick={() => apply(!view, edit)} />
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Client can view</div>
-          <div className="mut" style={{ fontSize: 12 }}>Read-only dashboard and instrument detail. No settings, no parity view. Turning this off also blocks client sign-in.</div>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-        <Toggle on={edit} label="Client can edit" onClick={() => apply(edit && !view ? view : (edit ? view : true), !edit)} />
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700 }}>Client can edit</div>
-          <div className="mut" style={{ fontSize: 12 }}>Stages, tasks, parts, and notes. Every change is attributed in the audit log. Enabling this also enables viewing.</div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Client sign-in</div>
+          <div className="mut" style={{ fontSize: 12 }}>Master switch. Off blocks every non-staff sign-in.</div>
         </div>
       </div>
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
@@ -461,6 +455,12 @@ export default function SettingsForm(props: {
               <option value="">no organization - cannot sign in</option>
               {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
+            <select value={r.canEdit ? "editor" : "viewer"} disabled={pending} aria-label={`Role for ${r.entry}`}
+              onChange={(e) => startTransition(async () => { await setClientAccessRole(r.id, e.target.value === "editor"); })}
+              style={{ width: "auto", fontSize: 11, padding: "2px 4px" }}>
+              <option value="viewer">viewer</option>
+              <option value="editor">editor</option>
+            </select>
             {r.addedBy && <span className="mut hide-m" style={{ fontSize: 11 }}>added by {r.addedBy}</span>}
             <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
               onClick={() => {
@@ -481,8 +481,12 @@ export default function SettingsForm(props: {
             <option value="">signs in as...</option>
             {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
+          <select value={newEntryRole} onChange={(e) => setNewEntryRole(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+            <option value="viewer">viewer</option>
+            <option value="editor">editor</option>
+          </select>
           <button className="btn sm accent" onClick={add} disabled={pending || !newEntry.trim() || !newEntryOrg}>
-            {pending ? "..." : "Add"}
+            {pending ? "..." : "Invite"}
           </button>
         </div>
         {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}

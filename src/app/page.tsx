@@ -1,9 +1,10 @@
 import { and, asc, eq, desc, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords, orgs, clientAllowlist } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
 import AppearanceCard from "@/components/AppearanceCard";
+import MembersCard from "@/components/MembersCard";
 import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -109,8 +110,11 @@ export default async function Home() {
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
       />
-      {ownOrg && user.role === "client_editor" && (
+      {ownOrg && user.role === "client_editor" && user.orgId !== null && (
         <div className="container" style={{ paddingTop: 0 }}>
+          <MembersCard orgId={user.orgId} orgName={ownOrg.name}
+            entries={(await db.select({ id: clientAllowlist.id, entry: clientAllowlist.entry, canEdit: clientAllowlist.canEdit })
+              .from(clientAllowlist).where(eq(clientAllowlist.orgId, user.orgId)).orderBy(asc(clientAllowlist.entry)))} />
           <AppearanceCard orgName={ownOrg.name} themeColor={ownOrg.themeColor} logoUrl={ownOrg.logoUrl}
             platformName={(await getBrand()).name} />
         </div>

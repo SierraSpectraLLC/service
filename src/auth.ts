@@ -15,20 +15,21 @@ export async function emailInClientAllowlist(email: string): Promise<boolean> {
 }
 
 /**
- * Which organization an email signs in as, from the allowlist. An entry with no
- * org assigned grants nothing - a scope-less client login would see the whole
- * shop, so it is safer to refuse until Settings assigns one. Exact-email
- * entries win over @domain entries, so one person can be split out of their
- * company's default org.
+ * Which organization an email signs in as, and with what role, from the
+ * allowlist. An entry with no org assigned grants nothing - a scope-less
+ * client login would see the whole shop, so it is safer to refuse until
+ * Settings assigns one. Exact-email entries win over @domain entries, so one
+ * person can be split out of their company's default org - or given a
+ * different role than the rest of their domain.
  */
-export async function orgForEmail(email: string): Promise<{ id: number; name: string; kind: string } | null> {
+export async function orgForEmail(email: string): Promise<{ id: number; name: string; kind: string; canEdit: boolean } | null> {
   const e = email.toLowerCase();
   const rows = await db.select().from(clientAllowlist);
   const hits = rows.filter((r) => r.orgId !== null && matchesEntry(e, r.entry));
   if (!hits.length) return null;
-  const exact = hits.find((r) => !r.entry.trim().startsWith("@"));
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, (exact ?? hits[0]).orgId!));
-  return org ? { id: org.id, name: org.name, kind: org.kind } : null;
+  const entry = hits.find((r) => !r.entry.trim().startsWith("@")) ?? hits[0];
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, entry.orgId!));
+  return org ? { id: org.id, name: org.name, kind: org.kind, canEdit: entry.canEdit } : null;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -68,22 +69,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         await db.update(users).set({ role: envRole }).where(eq(users.id, user.id));
         role = envRole;
       }
-      // Client edit elevation is a settings toggle, applied at read time.
-      if (role === "client_viewer") {
-        const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
-        if (s?.clientCanEdit) role = "client_editor";
-      }
-      (session.user as { role?: string }).role = role;
       // Clients are scoped to one organization; staff and owner are the house
-      // and see everything, so they carry no org.
-      if (role === "client_viewer" || role === "client_editor") {
+      // and see everything, so they carry no org. Editor vs viewer comes from
+      // the person's own allowlist entry, resolved fresh on every read so a
+      // role change in Settings bites immediately.
+      if (role !== "owner" && role !== "staff") {
         const org = await orgForEmail(email);
+        role = org?.canEdit ? "client_editor" : "client_viewer";
         (session.user as { orgId?: number | null; orgName?: string }).orgId = org?.id ?? null;
         (session.user as { orgName?: string }).orgName = org?.name ?? "";
-        // Kind decides what the org may do rather than see: only a client can
-        // own a system, so only a client may claim one.
         (session.user as { orgKind?: string }).orgKind = org?.kind ?? "";
       }
+      (session.user as { role?: string }).role = role;
       return session;
     },
   },

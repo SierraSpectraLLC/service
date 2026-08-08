@@ -508,6 +508,10 @@ export const clientAllowlist = pgTable("client_allowlist", {
   // Which organization this entry signs in as. Null = unusable (the sign-in
   // gate rejects it), so an entry can't grant access with no scope.
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  // Per-person role: editors work the records, viewers read them. Replaces the
+  // old instance-wide "clients can edit" toggle (kept in app_settings for the
+  // one-time backfill, ignored since).
+  canEdit: boolean("can_edit").notNull().default(false),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);

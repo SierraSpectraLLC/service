@@ -15,7 +15,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -1870,20 +1870,48 @@ export async function updateEodRecipients(value: string): Promise<{ error?: stri
 const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 
-export async function addClientAccess(raw: string, orgId: number): Promise<{ error?: string }> {
-  const u = await requireOwner();
+export async function addClientAccess(raw: string, orgId: number, canEdit = false): Promise<{ error?: string }> {
+  // The owner invites anyone anywhere; an organization's editors invite their
+  // own colleagues - exact emails only, into their own org. Domains stay an
+  // operator-level grant.
+  const u = await requireEditor();
   const entry = raw.trim().toLowerCase();
-  if (!ALLOW_EMAIL.test(entry) && !ALLOW_DOMAIN.test(entry)) {
+  const selfService = u.role !== "owner";
+  if (selfService) {
+    if (u.role === "staff" || u.orgId === null || orgId !== u.orgId) return { error: "Not found" };
+    if (!ALLOW_EMAIL.test(entry)) return { error: 'Enter a colleague\'s email, like "jane@company.com"' };
+  } else if (!ALLOW_EMAIL.test(entry) && !ALLOW_DOMAIN.test(entry)) {
     // Returned, not thrown: prod masks thrown server-action messages.
-    return { error: 'Enter an email like "jane@labzenllc.com" or a domain like "@labzenllc.com"' };
+    return { error: 'Enter an email like "jane@company.com" or a domain like "@company.com"' };
   }
   // An entry with no organization would be a login with no scope, so require it.
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Pick which organization they sign in as" };
-  await db.insert(clientAllowlist).values({ entry, orgId, addedBy: u.name }).onConflictDoNothing();
+  await db.insert(clientAllowlist).values({ entry, orgId, canEdit, addedBy: u.name }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: entry,
-    action: `allowed client sign-in: ${entry} as ${org.name}`,
+    action: `allowed client sign-in: ${entry} as ${org.name} (${canEdit ? "editor" : "viewer"})`,
+  });
+  // A domain names no one, so only an exact email gets the invitation.
+  if (ALLOW_EMAIL.test(entry)) {
+    await notifyInvite({ to: entry, inviterName: u.name, orgName: org.name });
+  }
+  revalidatePath("/settings");
+  rev();
+  return {};
+}
+
+/** Owner-only: flip an entry between editor and viewer. Takes effect on their next page load. */
+export async function setClientAccessRole(id: number, canEdit: boolean): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row) return { error: "Not found" };
+  if (row.canEdit === canEdit) return {};
+  await db.update(clientAllowlist).set({ canEdit }).where(eq(clientAllowlist.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: `${row.entry} is now ${canEdit ? "an editor" : "a viewer"}`,
+    field: "can_edit", oldValue: String(row.canEdit), newValue: String(canEdit),
   });
   revalidatePath("/settings");
   return {};
@@ -1907,9 +1935,14 @@ export async function setClientAccessOrg(id: number, orgId: number): Promise<{ e
 }
 
 export async function removeClientAccess(id: number) {
-  const u = await requireOwner();
+  // Owner removes anyone; an org's editors remove their own colleagues
+  // (exact-email rows in their own org only).
+  const u = await requireEditor();
   const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
   if (!row) return;
+  if (u.role !== "owner") {
+    if (u.role === "staff" || u.orgId === null || row.orgId !== u.orgId || row.entry.trim().startsWith("@")) return;
+  }
   await db.delete(clientAllowlist).where(eq(clientAllowlist.id, id));
   // Revoke live sessions for anyone who just lost access - removal should
   // take effect now, not when their 30-day session happens to expire.

@@ -406,6 +406,7 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "for_sale" boolean NOT NULL D
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFAULT '';
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "show_on_listing" boolean NOT NULL DEFAULT false;
+ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_edit" boolean NOT NULL DEFAULT false;
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "for_sale" boolean NOT NULL DEFAULT false;
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEFAULT '';
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFAULT '';
@@ -806,6 +807,23 @@ END $$;
 -- never *acquires* ownership by recording someone else's instrument
 -- (creatorOwns in app/actions.ts); it only ever holds ownership that staff
 -- assigned deliberately.
+
+-- ── Migration: per-person roles replace the instance-wide edit toggle ───────
+-- Every sign-in entry now carries its own editor/viewer role. Seed it once
+-- from the old global "clients can edit" setting so nobody's rights change on
+-- deploy; from then on the per-entry value is the only one read.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'settings' AND "entity_id" = 'per-entry-roles') THEN
+    UPDATE "client_allowlist" SET "can_edit" = COALESCE((SELECT "client_can_edit" FROM "app_settings" WHERE "id" = 1), false);
+    -- Marker written even when no rows existed: a rerun must never clobber
+    -- roles chosen per entry after this migration.
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','settings','per-entry-roles',
+            'seeded each sign-in entry''s editor/viewer role from the old instance-wide toggle - roles are per person from here on');
+  END IF;
+END $$;
 
 -- ── Migration: formal system ownership ──────────────────────────────────────
 -- owner_org_id says whose system it is (null = stewarded by the house). Seed it
