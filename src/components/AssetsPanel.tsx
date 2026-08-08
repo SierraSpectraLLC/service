@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { MODULE_KINDS, ASSET_COLOR } from "@/lib/stages";
+import { ASSET_COLOR } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
+import PickOrAdd from "./PickOrAdd";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
@@ -11,9 +12,10 @@ export type AssetRow = {
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, unassigned, canEdit }: {
+export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).
-  instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[]; canEdit: boolean;
+  instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[];
+  kinds: string[]; canEdit: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -93,9 +95,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, canEdit 
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
-              <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-                {MODULE_KINDS.map((k) => <option key={k}>{k}</option>)}
-              </select>
+              <PickOrAdd value={draft.kind} options={kinds} newLabel="+ New type..." placeholder="e.g. N2 generator"
+                onChange={(kind) => setDraft({ ...draft, kind })} />
             </div>
             <div><label>Model</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="LC-40D XR" /></div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>

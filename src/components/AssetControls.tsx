@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_COLOR } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, updateAsset } from "@/app/actions";
-import { MODULE_KINDS } from "@/lib/stages";
 import PickOrAdd from "./PickOrAdd";
 
 type Asset = {
@@ -11,8 +10,8 @@ type Asset = {
   owner: string; asFound: string; location: string; note: string; status: string; instrumentId: number | null;
 };
 
-export default function AssetControls({ asset, systems, owners, canEdit, isStaff }: {
-  asset: Asset; systems: { id: number; externalId: string }[]; owners: string[];
+export default function AssetControls({ asset, systems, owners, kinds, canEdit, isStaff }: {
+  asset: Asset; systems: { id: number; externalId: string }[]; owners: string[]; kinds: string[];
   canEdit: boolean; isStaff: boolean;
 }) {
   const [error, setError] = useState("");
@@ -76,9 +75,8 @@ export default function AssetControls({ asset, systems, owners, canEdit, isStaff
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
-              <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-                {MODULE_KINDS.map((k) => <option key={k}>{k}</option>)}
-              </select>
+              <PickOrAdd value={draft.kind} options={kinds} newLabel="+ New type..." placeholder="e.g. N2 generator"
+                onChange={(kind) => setDraft({ ...draft, kind })} />
             </div>
             <div><label>Model</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} /></div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} /></div>

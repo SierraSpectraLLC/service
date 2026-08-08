@@ -2,16 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { addCheckoutItem, updateCheckoutItem, deleteCheckoutItem, reorderCheckoutItems } from "@/app/actions";
-import { MODULE_KINDS } from "@/lib/stages";
 import { summarizeItem, impactLine, RESULT_TYPES, RESULT_LABEL, type CheckoutItem } from "@/lib/checkout";
 
 type Item = CheckoutItem & { id: number };
-
-// System first - instrument-level items run once per system, not per asset.
-const GROUPS: { type: string; label: string; subtitle?: string }[] = [
-  { type: "system", label: "System", subtitle: "Runs once per instrument, not per asset." },
-  ...MODULE_KINDS.map((k) => ({ type: k, label: k })),
-];
 
 const KIND_GLYPH: Record<string, { glyph: string; bg: string; fg: string }> = {
   task: { glyph: "☐", bg: "#E7F2FA", fg: "#1D6396" },
@@ -62,11 +55,34 @@ function ScopeField({ scope, options, onChange }: {
   );
 }
 
-export default function CheckoutItemsPanel({ items, modelOptions }: {
+export default function CheckoutItemsPanel({ items, assetTypes, modelOptions }: {
   items: Item[];
+  // Asset types are an open vocabulary: starters + types in use anywhere.
+  // A brand-new category lives here (client state) until its first item saves.
+  assetTypes: string[];
   modelOptions: Record<string, string[]>; // distinct catalog models per asset type
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [customTypes, setCustomTypes] = useState<string[]>([]);
+  const [addingCat, setAddingCat] = useState(false);
+  const [newCat, setNewCat] = useState("");
+
+  // System first - instrument-level items run once per system, not per asset.
+  const GROUPS: { type: string; label: string; subtitle?: string }[] = [
+    { type: "system", label: "System", subtitle: "Runs once per instrument, not per asset." },
+    ...[...new Set([...assetTypes, ...items.map((i) => i.assetType), ...customTypes])]
+      .filter((t) => t && t !== "system")
+      .map((k) => ({ type: k, label: k })),
+  ];
+
+  const addCategory = () => {
+    const name = newCat.trim().slice(0, 40);
+    if (!name || GROUPS.some((g) => g.type.toLowerCase() === name.toLowerCase())) { setNewCat(""); setAddingCat(false); return; }
+    setCustomTypes((c) => [...c, name]);
+    setNewCat("");
+    setAddingCat(false);
+    setExpanded(name);
+  };
   const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState("");
@@ -88,7 +104,8 @@ export default function CheckoutItemsPanel({ items, modelOptions }: {
       if (order) list.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
     }
     return by;
-  }, [items, orderOverride]);
+    // GROUPS is derived from these:
+  }, [items, orderOverride, assetTypes, customTypes]);
 
   // Sheet lifecycle: escape closes, focus moves in and stays trapped.
   useEffect(() => {
@@ -283,6 +300,25 @@ export default function CheckoutItemsPanel({ items, modelOptions }: {
           </div>
         );
       })}
+
+      {addingCat ? (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+          <input autoFocus value={newCat} onChange={(e) => setNewCat(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addCategory(); if (e.key === "Escape") { setAddingCat(false); setNewCat(""); } }}
+            placeholder='New category, e.g. "N2 generator"' style={{ flex: "1 1 200px", maxWidth: 280, fontSize: 13 }} />
+          <button className="btn sm accent" onClick={addCategory} disabled={!newCat.trim()}>Add</button>
+          <button className="btn link" onClick={() => { setAddingCat(false); setNewCat(""); }}>cancel</button>
+        </div>
+      ) : (
+        <button className="btn sm" onClick={() => setAddingCat(true)}
+          style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "#1D6396", marginTop: 4 }}>
+          ＋ New category
+        </button>
+      )}
+      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+        A category matches assets of that type by name - give an asset the type &quot;N2 generator&quot; and its
+        items are created when one is added. New categories stick once their first item is saved.
+      </div>
 
       {sheet && (
         <>

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq, and, asc, inArray } from "drizzle-orm";
+import { eq, and, asc, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
@@ -306,7 +306,9 @@ export async function deleteInstrument(instrumentId: number) {
 type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; asFound?: string; location: string; note: string };
 
 const cleanAsset = (d: AssetInput) => ({
-  kind: (MODULE_KINDS as readonly string[]).includes(d.kind) ? d.kind : "Other",
+  // Open vocabulary: MODULE_KINDS is just the starter list, so the shop can
+  // add its own types ("N2 generator") and give them checkout categories.
+  kind: d.kind.trim().slice(0, 40) || "Other",
   model: d.model.trim(),
   serial: d.serial.trim(),
   manufacturer: d.manufacturer.trim(),
@@ -324,26 +326,30 @@ async function logAssetEvent(assetId: number, kind: string, instrumentId: number
 }
 
 /**
- * Auto-create checkout tasks + tests when an asset lands on a system (or,
- * with an assetType of "system", when a system is created). Skips any item
- * whose name is already an open task for the same asset on that system, so
- * re-attach churn is safe.
+ * Auto-create checkout tasks + tests when an asset lands on a system (or, with
+ * an assetType of "system", when a system is created), and on demand for a
+ * standalone asset being checked out for sale. Dedupe follows the asset: any
+ * open task with the same name tagged to it - here or on a system it later
+ * joins - blocks a duplicate, so a bench checkout doesn't repeat on install.
+ * Returns how many items it created.
  */
 async function generateCheckout(
-  instrumentId: number,
+  instrumentId: number | null,
   target: { id: number | null; kind: string; model: string; serial: string },
   actorEmail: string,
-) {
+): Promise<number> {
   const assetType = target.id === null ? "system" : target.kind;
   const items = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, assetType));
   const picked = matchItems(items, assetType, target.model);
-  if (!picked.length) return;
-  const existing = await db.select().from(tasks).where(eq(tasks.instrumentId, instrumentId));
-  const openTitles = new Set(
-    existing.filter((t) => t.state !== "Done" && t.assetId === target.id).map((t) => t.title.toLowerCase())
-  );
+  if (!picked.length) return 0;
+  const existing = target.id !== null
+    ? await db.select().from(tasks).where(eq(tasks.assetId, target.id))
+    : instrumentId !== null
+      ? await db.select().from(tasks).where(and(eq(tasks.instrumentId, instrumentId), isNull(tasks.assetId)))
+      : [];
+  const openTitles = new Set(existing.filter((t) => t.state !== "Done").map((t) => t.title.toLowerCase()));
   const fresh = picked.filter((i) => !openTitles.has(i.name.toLowerCase()));
-  if (!fresh.length) return;
+  if (!fresh.length) return 0;
   for (const i of fresh) {
     await db.insert(tasks).values({
       instrumentId, title: i.name, body: summarizeItem(i), origin: "checkout",
@@ -352,9 +358,24 @@ async function generateCheckout(
   }
   const label = target.id !== null ? assetLabel(target as { kind: string; model: string; serial: string }) : "the system";
   await audit({
-    actor: actorEmail, instrumentId, entityType: "task", entityId: target.id ?? instrumentId,
+    actor: actorEmail, instrumentId, assetId: target.id, entityType: "task", entityId: target.id ?? instrumentId ?? "",
     action: `generated ${fresh.length} checkout item${fresh.length === 1 ? "" : "s"} for ${label}`,
   });
+  return fresh.length;
+}
+
+/**
+ * Run an asset's checkout on demand - a spare being refurbished for resale
+ * gets its tests without ever joining a system.
+ */
+export async function runAssetCheckout(assetId: number): Promise<{ error?: string; created?: number }> {
+  const u = await requireEditor();
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a) return { error: "Not found" };
+  const created = await generateCheckout(a.instrumentId, a, u.email);
+  revWork({ instrumentId: a.instrumentId, assetId });
+  if (!created) return { error: "Nothing new to add - its checkout items are already open (or none are defined for this type)" };
+  return { created };
 }
 
 export async function createAsset(instrumentId: number | null, data: AssetInput): Promise<{ error?: string; id?: number }> {
@@ -910,7 +931,31 @@ type PartInput = {
   kind: string; assetId?: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
+  // "Removed - request new?": also file a Needed twin so the reorder isn't forgotten.
+  requestReplacement?: boolean;
 };
+
+/**
+ * File the Needed twin of a part that was just pulled: same identity (name,
+ * PN, specs, vendor, qty, kind, asset), no serial or order paperwork - those
+ * belong to the new unit's own life.
+ */
+async function fileReplacementRequest(
+  removed: { instrumentId: number | null; assetId: number | null; kind: string; name: string; partNumber: string; qty: string; specs: string; vendor: string },
+  actorEmail: string,
+) {
+  const [twin] = await db.insert(parts).values({
+    instrumentId: removed.instrumentId, assetId: removed.assetId, kind: removed.kind,
+    name: removed.name, partNumber: removed.partNumber, qty: removed.qty,
+    specs: removed.specs, vendor: removed.vendor, status: "Needed",
+    note: "replacement for removed unit",
+  }).returning();
+  await audit({
+    actor: actorEmail, instrumentId: removed.instrumentId, assetId: removed.assetId,
+    entityType: "part", entityId: twin.id,
+    action: `requested replacement for '${removed.name}'${removed.partNumber ? ` (PN ${removed.partNumber})` : ""} - filed as Needed`,
+  });
+}
 
 /** Normalize client-supplied kind/specs so only well-formed values are stored. */
 function cleanPartInput(data: PartInput): PartInput {
@@ -987,6 +1032,12 @@ export async function updatePart(partId: number, raw: PartInput) {
       actor: u.email, instrumentId: before.instrumentId, assetId: before.assetId, entityType: "part", entityId: partId,
       action: taggedAsset ? `tagged part '${data.name.trim()}' to ${assetLabel(taggedAsset)}` : `untagged part '${data.name.trim()}' (whole system)`,
     });
+  }
+  if (data.requestReplacement && data.status === "Removed") {
+    await fileReplacementRequest({
+      instrumentId: before.instrumentId, assetId, kind: data.kind, name: data.name.trim(),
+      partNumber: data.partNumber, qty: data.qty, specs: data.specs, vendor: data.vendor,
+    }, u.email);
   }
   revWork(before);
 }
@@ -1334,7 +1385,8 @@ export async function deleteDiscussionPost(postId: number) {
 // "system" items fire when a system is created). Per kind, model-scoped
 // items replace the type's all-model items for matching models.
 
-const CHECKOUT_ASSET_TYPES: readonly string[] = [...MODULE_KINDS, "system"];
+/** "system" plus any nonempty type name - asset kinds are an open vocabulary. */
+const validCheckoutType = (t: string) => t === "system" || (!!t.trim() && t.trim().length <= 40);
 
 type CheckoutItemInput = {
   assetType: string; kind: string; name: string;
@@ -1349,7 +1401,7 @@ function cleanCheckoutItem(data: CheckoutItemInput): { error: string } | {
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean; modelScope: string[];
 } {
-  if (!CHECKOUT_ASSET_TYPES.includes(data.assetType)) return { error: "Pick an asset type" };
+  if (!validCheckoutType(data.assetType)) return { error: "Pick an asset type" };
   if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
   const name = data.name.trim();
   if (!name || name.length > 120) return { error: "Name must be 1-120 characters" };
@@ -1432,7 +1484,7 @@ export async function deleteCheckoutItem(itemId: number) {
 /** Persist a drag-reorder within one asset type's list. */
 export async function reorderCheckoutItems(assetType: string, orderedIds: number[]) {
   const u = await requireStaff();
-  if (!CHECKOUT_ASSET_TYPES.includes(assetType)) return;
+  if (!validCheckoutType(assetType)) return;
   const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, assetType));
   const known = new Map(siblings.map((i) => [i.id, i]));
   let position = 1;

@@ -9,7 +9,7 @@ import {
 import { requireUser } from "@/lib/authz";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
-import { partOpen, GASES } from "@/lib/stages";
+import { partOpen, GASES, MODULE_KINDS } from "@/lib/stages";
 import { composeSystemLabel } from "@/lib/systemLabel";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
@@ -32,7 +32,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, discussion, peopleRows, assetRows, unassignedRows, readRows] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, discussion, peopleRows, assetRows, unassignedRows, kindRows, readRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -46,6 +46,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     db.select().from(assets).where(isNull(assets.instrumentId)).orderBy(asc(assets.kind), asc(assets.model)),
+    db.selectDistinct({ kind: assets.kind }).from(assets),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
   ]);
   if (!inst) notFound();
@@ -130,6 +131,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           id: a.id,
           label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
         }))}
+        kinds={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
         canEdit={canEdit}
       />
 

@@ -46,7 +46,7 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
   );
 }
 
-const empty = { kind: "part", assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "" };
+const empty = { kind: "part", assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", requestReplacement: false };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
@@ -61,7 +61,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
 
   const openNew = () => { setDraft(empty); setSpecPairs([]); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
-    setDraft({ kind: p.kind, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note });
+    setDraft({ kind: p.kind, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, requestReplacement: false });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -148,6 +148,13 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               <select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
                 {PART_STATES.map((s) => <option key={s}>{s}</option>)}
               </select>
+              {draft.status === "Removed" && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "6px 0 0", textTransform: "none", letterSpacing: 0, color: "var(--ink)", fontWeight: 400 }}>
+                  <input type="checkbox" checked={draft.requestReplacement} style={{ width: 15, height: 15 }}
+                    onChange={(e) => setDraft({ ...draft, requestReplacement: e.target.checked })} />
+                  Request new? Files a copy as <b>Needed</b> so the reorder isn&apos;t forgotten.
+                </label>
+              )}
             </div>
           </div>
           {showOrderFields && (

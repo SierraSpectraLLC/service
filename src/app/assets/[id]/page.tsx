@@ -9,7 +9,7 @@ import {
 import { requireUser } from "@/lib/authz";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
-import { GASES } from "@/lib/stages";
+import { GASES, MODULE_KINDS } from "@/lib/stages";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
@@ -18,6 +18,7 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
+import RunCheckoutButton from "@/components/RunCheckoutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const assetId = parseInt(id);
   if (isNaN(assetId)) notFound();
 
-  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows,
+  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows, kindRows,
          gasRows, gasNames, attachRows, activity, peopleRows] = await Promise.all([
     db.select().from(assets).where(eq(assets.id, assetId)),
     db.select().from(assetEvents).where(eq(assetEvents.assetId, assetId)),
@@ -40,6 +41,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, client: instruments.client, archived: instruments.archived })
       .from(instruments).orderBy(asc(instruments.externalId)),
     db.selectDistinct({ owner: assets.owner }).from(assets),
+    db.selectDistinct({ kind: assets.kind }).from(assets),
     db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(desc(attachments.createdAt)),
@@ -85,9 +87,18 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="container" style={{ maxWidth: 720 }}>
-      <Link href="/assets" className="mut" style={{ fontSize: 13, textDecoration: "none", display: "inline-block", marginBottom: 10 }}>
-        ← Assets
-      </Link>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <Link href="/assets" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
+          ← Assets
+        </Link>
+        <span style={{ marginLeft: "auto" }} />
+        {canEdit && <RunCheckoutButton assetId={asset.id} />}
+        {isStaff && (
+          <Link href={`/assets/${asset.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
+            Sign-off packet
+          </Link>
+        )}
+      </div>
 
       <div className="card">
         <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
@@ -120,6 +131,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
           systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
           owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
+          kinds={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
           canEdit={canEdit} isStaff={isStaff}
         />
         <GasPanel target={target} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}

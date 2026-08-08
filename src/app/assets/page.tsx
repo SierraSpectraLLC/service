@@ -22,6 +22,8 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   const home = new Map(insts.map((i) => [i.id, i]));
   // Owner picker options: whoever already owns stock, plus the clients we work for.
   const owners = [...new Set([...rows.map((a) => a.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort();
+  // Types are an open vocabulary: the starter list plus whatever is in use.
+  const kinds = [...new Set([...MODULE_KINDS, ...rows.map((a) => a.kind)].filter(Boolean))];
 
   const needle = q.trim().toLowerCase();
   const filtered = rows.filter((a) => {
@@ -43,9 +45,9 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
           Every unit we track - in a system, on the shelf, or retired. Tap one for its full service
           history.{unattached > 0 ? ` ${unattached} not in a system right now.` : ""}
         </div>
-        {user.role !== "client_viewer" && <NewAssetForm owners={owners} />}
+        {user.role !== "client_viewer" && <NewAssetForm owners={owners} kinds={kinds} />}
         <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner}
-          kinds={[...MODULE_KINDS]} statuses={[...ASSET_STATES]} owners={owners} />
+          kinds={kinds} statuses={[...ASSET_STATES]} owners={owners} />
 
         {filtered.map((a) => {
           const c = ASSET_COLOR[a.status] ?? ASSET_COLOR.Spare;

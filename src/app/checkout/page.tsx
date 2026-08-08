@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { checkoutItems, assets } from "@/db/schema";
+import { MODULE_KINDS } from "@/lib/stages";
 import { requireUser } from "@/lib/authz";
 import CheckoutItemsPanel from "@/components/CheckoutItemsPanel";
 
@@ -30,6 +31,7 @@ export default async function CheckoutPage() {
   return (
     <div className="container" style={{ maxWidth: 720 }}>
       <CheckoutItemsPanel
+        assetTypes={[...new Set([...MODULE_KINDS, ...assetModels.map((a) => a.kind)].filter(Boolean))]}
         items={itemRows.map((i) => ({
           id: i.id, assetType: i.assetType, kind: i.kind, name: i.name, position: i.position,
           resultType: i.resultType, target: i.target, tolerancePct: i.tolerancePct,

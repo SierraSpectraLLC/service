@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MODULE_KINDS } from "@/lib/stages";
 import { createAsset } from "@/app/actions";
 import PickOrAdd from "./PickOrAdd";
 
@@ -13,7 +12,7 @@ const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: ""
  * the shelf, with no system to attach it to yet. It lands as a Spare and can be
  * installed into a system later (from here or from the system's Assets section).
  */
-export default function NewAssetForm({ owners }: { owners: string[] }) {
+export default function NewAssetForm({ owners, kinds }: { owners: string[]; kinds: string[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<typeof empty>(empty);
@@ -50,9 +49,8 @@ export default function NewAssetForm({ owners }: { owners: string[] }) {
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
-              <select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-                {MODULE_KINDS.map((k) => <option key={k}>{k}</option>)}
-              </select>
+              <PickOrAdd value={draft.kind} options={kinds} newLabel="+ New type..." placeholder="e.g. N2 generator"
+                onChange={(kind) => setDraft({ ...draft, kind })} />
             </div>
             <div><label>Model</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="LC-40D XR" /></div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>
