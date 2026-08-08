@@ -8,7 +8,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
-  checkoutItems,
+  checkoutItems, engagementRecords, accessRequests,
 } from "@/db/schema";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
@@ -23,6 +23,7 @@ import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { composeSystemLabel } from "@/lib/systemLabel";
+import { composeSystemDossier } from "@/lib/dossier";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess,
   canEditSystem, isHouse, visibleSystemIds,
@@ -1915,11 +1916,31 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
     // (that's the house's call) and not another client's.
     if (org.kind !== "provider") return { error: "You can only remove a service provider" };
   }
-  await db.delete(systemShares)
+  const [share] = await db.select().from(systemShares)
     .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, orgId)));
+  if (!share) return {};
+  // A service provider keeps its own service reports: freeze the full dossier
+  // as of this moment before the share goes. Nothing recorded after today can
+  // ever reach it. Clients don't get one - unsharing a client is cleanup, not
+  // the end of an engagement.
+  if (org.kind === "provider") {
+    const dossier = await composeSystemDossier(instrumentId);
+    if (dossier) {
+      await db.insert(engagementRecords).values({
+        instrumentId, orgId, externalId: inst.externalId, label: dossier.label,
+        revokedBy: u.email, data: dossier,
+      });
+    }
+  }
+  await db.delete(systemShares).where(eq(systemShares.id, share.id));
+  // Losing the share also vacates the approver's seat: an owner with no access
+  // shouldn't keep deciding who gets on.
+  if (inst.ownerOrgId === orgId) {
+    await db.update(instruments).set({ ownerOrgId: null }).where(eq(instruments.id, instrumentId));
+  }
   await audit({
     actor: u.email, instrumentId, entityType: "share", entityId: inst.externalId,
-    action: `removed ${org.name}'s access to ${inst.externalId}`,
+    action: `removed ${org.name}'s access to ${inst.externalId}${org.kind === "provider" ? " - they keep a frozen record of the engagement" : ""}`,
   });
   rev(instrumentId);
   return {};

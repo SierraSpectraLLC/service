@@ -41,7 +41,11 @@ export default function SharePanel({ instrumentId, shares, orgOptions, canManage
   };
 
   const remove = (s: ShareEntry) => {
-    const reason = promptReason(`Remove ${s.name}'s access to this system? They lose sight of it immediately.`);
+    const reason = promptReason(
+      s.kind === "provider"
+        ? `End ${s.name}'s engagement on this system? They lose live access immediately but keep a frozen, read-only record of the work up to today.`
+        : `Remove ${s.name}'s access to this system? They lose sight of it immediately.`
+    );
     if (!reason) return; // the confirm doubles as the "are you sure"
     setError("");
     startTransition(async () => {

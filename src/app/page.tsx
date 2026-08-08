@@ -1,6 +1,8 @@
 import { and, asc, eq, desc, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms } from "@/db/schema";
+import Link from "next/link";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords } from "@/db/schema";
+import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
 import { composeSystemLabel } from "@/lib/systemLabel";
@@ -38,6 +40,13 @@ export default async function Home() {
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
   ]);
+
+  // A service provider's shelf of past engagements: frozen records kept from
+  // systems whose access was later revoked. Only their own org's records.
+  const pastEngagements = user.orgId === null ? [] : await db
+    .select({ id: engagementRecords.id, externalId: engagementRecords.externalId, label: engagementRecords.label, revokedAt: engagementRecords.revokedAt })
+    .from(engagementRecords).where(eq(engagementRecords.orgId, user.orgId))
+    .orderBy(desc(engagementRecords.revokedAt));
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
   // Internal parity detail, so staff eyes only.
@@ -84,14 +93,35 @@ export default async function Home() {
   });
 
   return (
-    <Dashboard
-      data={data}
-      stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
-      people={peopleRows.map((p) => p.name)}
-      clients={allSystems.map((c) => c.client).filter(Boolean)}
-      categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
-      canEdit={user.role !== "client_viewer"}
-      isStaff={isStaff}
-    />
+    <>
+      <Dashboard
+        data={data}
+        stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
+        people={peopleRows.map((p) => p.name)}
+        clients={allSystems.map((c) => c.client).filter(Boolean)}
+        categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
+        canEdit={user.role !== "client_viewer"}
+        isStaff={isStaff}
+      />
+      {pastEngagements.length > 0 && (
+        <div className="container" style={{ paddingTop: 0 }}>
+          <div className="card">
+            <div className="card-title">Past engagements</div>
+            <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
+              Systems you no longer have access to. Each keeps a frozen, read-only copy of the record as it stood the day the engagement ended.
+            </div>
+            {pastEngagements.map((r) => (
+              <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+                <Link href={`/records/${r.id}`} className="mono" style={{ fontWeight: 700, fontSize: 13, textDecoration: "none", color: "var(--navy)" }}>
+                  {r.externalId}
+                </Link>
+                <span style={{ fontSize: 13 }}>{r.label || <span className="mut">No assets were listed</span>}</span>
+                <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>ended {shopTime(r.revokedAt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
