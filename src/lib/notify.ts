@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { users, people } from "@/db/schema";
 import { parseList } from "@/lib/allowMatch";
 import { sendEmail } from "@/lib/email";
+import { getBrand } from "@/lib/brand";
 
 export type Person = { name: string; email: string };
 
@@ -51,9 +52,11 @@ export function parseMentions(body: string, names: string[]): string[] {
   });
 }
 
-const wrap = (body: string) => `
+// System notifications are sent by the platform, so they carry its name rather
+// than any one service company's - see lib/brand.ts.
+const wrap = async (body: string) => `
   <div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#172A4A;">
-    <div style="font-weight:bold;letter-spacing:0.3px;margin-bottom:10px;">SIERRA SPECTRA</div>
+    <div style="font-weight:bold;letter-spacing:0.3px;margin-bottom:10px;">${esc((await getBrand()).name).toUpperCase()}</div>
     ${body}
   </div>`;
 
@@ -75,7 +78,7 @@ export async function notifyTaskAssigned(opts: {
     await sendEmail(
       [to],
       `${opts.externalId}: assigned "${opts.taskTitle}"`,
-      wrap(`${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
+      await wrap(`${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
         ${url && (opts.instrumentId || opts.assetId)
           ? `<div style="margin-top:10px;"><a href="${url}${opts.instrumentId ? `/instruments/${opts.instrumentId}` : `/assets/${opts.assetId}`}">Open ${esc(opts.externalId)}</a></div>`
           : ""}`),
@@ -102,7 +105,7 @@ export async function notifySystemAssigned(opts: {
     await sendEmail(
       [to],
       `${opts.externalId}: you're the lead`,
-      wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
+      await wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
     );
   } catch (e) {
@@ -142,7 +145,7 @@ export async function notifyDiscussion(opts: {
     await sendEmail(
       [...to],
       `${opts.label}: ${opts.actorName} posted in discussion`,
-      wrap(`<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
+      await wrap(`<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
         <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.body)}</div>
         ${url ? `<a href="${link}">Reply in the portal</a>` : ""}`),
     );
@@ -169,7 +172,7 @@ export async function notifyAccessRequest(opts: {
       claim
         ? `${opts.externalId}: ownership claim from ${opts.orgName || opts.actorName}`
         : `${opts.externalId}: access request from ${opts.orgName || opts.actorName}`,
-      wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
+      await wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
         ${opts.message ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.message)}</div>` : ""}
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Approve or deny on ${esc(opts.externalId)}</a></div>` : ""}`),
     );
@@ -186,7 +189,7 @@ export async function notifyGasEmpty(opts: { actorEmail: string; actorName: stri
     await sendEmail(
       to,
       `${opts.externalId}: ${opts.gas} is EMPTY`,
-      wrap(`${esc(opts.actorName)} marked <b>${esc(opts.gas)}</b> empty on <b>${esc(opts.externalId)}</b>.
+      await wrap(`${esc(opts.actorName)} marked <b>${esc(opts.gas)}</b> empty on <b>${esc(opts.externalId)}</b>.
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
     );
   } catch (e) {

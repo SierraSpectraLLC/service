@@ -92,7 +92,7 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
           );
         })}
         {shares.length === 0 && (
-          <span className="mut" style={{ fontSize: 12 }}>Only Sierra Spectra can see this system.</span>
+          <span className="mut" style={{ fontSize: 12 }}>Nobody outside the platform staff can see this system.</span>
         )}
         {(canManageAll || canAddProvider) && options.length > 0 && !adding && (
           <button className="btn link" onClick={() => setAdding(true)}>
@@ -126,7 +126,7 @@ export default function SharePanel({ instrumentId, shares, orgOptions, ownerOrgI
               if (res?.error) setError(res.error);
             })}
             style={{ width: "auto", fontSize: 12 }}>
-            <option value="">Sierra Spectra (house)</option>
+            <option value="">Unassigned - platform-stewarded</option>
             {orgOptions.filter((o) => o.kind === "client").map((o) => (
               <option key={o.id} value={o.id}>{o.name}</option>
             ))}

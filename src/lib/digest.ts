@@ -4,6 +4,7 @@ import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
 import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { parseList } from "@/auth";
 import { sendEmail } from "@/lib/email";
+import { getBrand } from "@/lib/brand";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -16,6 +17,9 @@ const pill = (text: string, bg: string, fg: string) =>
  * statuses, and open parts; anything needing gas gets called out on top.
  */
 export async function composeDigest(): Promise<{ subject: string; html: string }> {
+  // The digest is the operator's own status report, so it carries the service
+  // organization's name rather than the platform's.
+  const brand = await getBrand();
   const rows = await db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId));
   const gases = await db.select().from(instrumentGases);
   const allParts = await db.select().from(parts);
@@ -62,7 +66,7 @@ export async function composeDigest(): Promise<{ subject: string; html: string }
   <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:680px;margin:auto;background:#fff;border-radius:12px;border:1px solid #E2E8F0;">
     <tr><td style="height:4px;border-radius:12px 12px 0 0;background:#172A4A;"></td></tr>
     <tr><td style="padding:18px 20px 6px;">
-      <div style="font-family:Helvetica,Arial,sans-serif;font-weight:bold;font-size:16px;color:#172A4A;letter-spacing:0.3px;">SIERRA SPECTRA</div>
+      <div style="font-family:Helvetica,Arial,sans-serif;font-weight:bold;font-size:16px;color:#172A4A;letter-spacing:0.3px;">${esc(brand.operatorName).toUpperCase()}</div>
       <div style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#64748B;margin-bottom:14px;">Daily system status &middot; ${today}</div>
       ${attentionBlock}
       <table width="100%" border="0" cellspacing="0" cellpadding="0">

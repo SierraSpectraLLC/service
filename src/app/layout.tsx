@@ -6,18 +6,22 @@ import { sheetDiffs } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { signOut } from "@/auth";
 import NavMore from "@/components/NavMore";
+import { getBrand } from "@/lib/brand";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: "Sierra Spectra - Instrument management",
-  description: "Instrument refurbishment tracking",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const brand = await getBrand();
+  return {
+    title: `${brand.name} - Instrument management`,
+    description: "Instrument refurbishment tracking",
+  };
+}
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const user = await currentUser();
+  const [user, brand] = await Promise.all([currentUser(), getBrand()]);
   const isStaff = user && (user.role === "owner" || user.role === "staff");
-  // Parity is an internal Sierra concern, so don't even ask the database for it
-  // on a client's request.
+  // Parity is an operator concern, so don't even ask the database for it on a
+  // client's request.
   const diffRows = isStaff
     ? await db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false))
         .catch(() => []) // table may not exist before first push
@@ -31,10 +35,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="spectrum" />
           <div className="container" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingTop: 14, paddingBottom: 14 }}>
             <Link href="/" style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.3, color: "#fff", textDecoration: "none" }}>
-              SIERRA SPECTRA
+              {brand.name.toUpperCase()}
             </Link>
             <span style={{ fontSize: 12, opacity: 0.75 }}>
-              {user?.orgName ? `Sierra Spectra × ${user.orgName} · instrument portal` : "Sierra Spectra · instrument portal"}
+              {user?.orgName ? `${brand.name} × ${user.orgName} · ${brand.tagline}` : `${brand.name} · ${brand.tagline}`}
             </span>
             {user && (
               <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

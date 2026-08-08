@@ -337,6 +337,16 @@ export async function createInstrument(
     if (owner !== null) {
       await db.update(instruments).set({ ownerOrgId: owner }).where(eq(instruments.id, row.id));
     }
+  } else {
+    // Created by the operator: share it with the service organization running
+    // this instance, so its engineers - who sign in as that org, not as
+    // platform staff - can work the system.
+    const [s] = await db.select({ operatorOrgId: appSettings.operatorOrgId }).from(appSettings).where(eq(appSettings.id, 1));
+    if (s?.operatorOrgId != null) {
+      await db.insert(systemShares)
+        .values({ instrumentId: row.id, orgId: s.operatorOrgId, access: "edit", addedBy: u.email })
+        .onConflictDoNothing();
+    }
   }
   if (lead) {
     await notifySystemAssigned({
@@ -2219,6 +2229,45 @@ export async function removeOrg(orgId: number, reason: string): Promise<{ error?
   });
   revalidatePath("/settings");
   rev();
+  return {};
+}
+
+/**
+ * What this instance calls itself. The portal is a product, so its name is data
+ * rather than a string in the source - see lib/brand.ts.
+ */
+export async function setBranding(data: { name: string; tagline: string }): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const name = data.name.trim().slice(0, 60);
+  const tagline = data.tagline.trim().slice(0, 80);
+  if (!name) return { error: "Give the platform a name" };
+  await db.insert(appSettings).values({ id: 1, platformName: name, platformTagline: tagline })
+    .onConflictDoUpdate({ target: appSettings.id, set: { platformName: name, platformTagline: tagline } });
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "branding",
+    action: `renamed the platform to "${name}"${tagline ? ` (${tagline})` : ""}`,
+    field: "platform_name", newValue: name,
+  });
+  revalidatePath("/", "layout");
+  return {};
+}
+
+/**
+ * Which organization is the service business running this instance. It is an
+ * ordinary provider org - this only says whose name goes on the documents the
+ * platform generates, and which org inherits systems the operator creates.
+ */
+export async function setOperatorOrg(orgId: number | null): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [org] = orgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (orgId !== null && !org) return { error: "Not found" };
+  await db.update(appSettings).set({ operatorOrgId: orgId }).where(eq(appSettings.id, 1));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "operator_org",
+    action: org ? `${org.name} now operates this instance` : "cleared the operating organization",
+  });
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
   return {};
 }
 

@@ -95,7 +95,7 @@ export function CreateSystemForm({ serial, kinds }: { serial: string; kinds: str
   return (
     <div className="dash-form" style={{ marginTop: 10, marginBottom: 0 }}>
       <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-        Start its service record here. It goes into your workspace; if the owner joins the platform later, Sierra Spectra can hand the system over to them.
+        Start its service record here. It goes into your workspace; if the owner joins the platform later, the system can be handed over to them.
       </div>
       <div className="pf3" style={{ marginBottom: 8 }}>
         <div>

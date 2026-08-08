@@ -39,6 +39,9 @@ export default async function SettingsPage() {
           logins: allowRows.filter((r) => r.orgId === o.id).length,
         }))}
         sheetOrgId={s?.sheetOrgId ?? null}
+        platformName={s?.platformName ?? ""}
+        platformTagline={s?.platformTagline ?? ""}
+        operatorOrgId={s?.operatorOrgId ?? null}
         vocab={vocabRows.map((v) => ({ id: v.id, kind: v.kind, assetType: v.assetType, name: v.name }))}
         assetTypes={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
       />

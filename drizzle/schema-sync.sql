@@ -742,16 +742,23 @@ END $$;
 -- service engagements are ordinary shares. The platform-operator role
 -- (STAFF_EMAILS) is untouched and still sees everything.
 --
+-- Both steps are one-time and apply only to THIS instance, recognized by it
+-- already holding data. A fresh database is a fresh product install: it gets no
+-- Sierra org and no seeded name, and reads as DEFAULT_BRAND until Settings says
+-- otherwise. Guarded on a marker so a rename in Settings is never undone.
+--
 -- ORDER MATTERS: this must stay below the organizations migration above, which
 -- is guarded on "orgs" being empty. Creating an org before it would silently
 -- skip the whole LabZen backfill.
 DO $$
 DECLARE v_org integer;
 BEGIN
-  UPDATE "app_settings" SET "platform_name" = 'Sierra Spectra'
-    WHERE "id" = 1 AND btrim("platform_name") = '';
   IF NOT EXISTS (SELECT 1 FROM "audit_log"
-                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'org' AND "entity_id" = 'operator-org') THEN
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'org' AND "entity_id" = 'operator-org')
+     AND (EXISTS (SELECT 1 FROM "instruments") OR EXISTS (SELECT 1 FROM "client_allowlist")) THEN
+    -- Keep the header reading as it does today; renaming is a Settings action.
+    UPDATE "app_settings" SET "platform_name" = 'Sierra Spectra'
+      WHERE "id" = 1 AND btrim("platform_name") = '';
     SELECT "id" INTO v_org FROM "orgs" WHERE lower("name") = 'sierra spectra';
     IF v_org IS NULL THEN
       INSERT INTO "orgs" ("name","kind") VALUES ('Sierra Spectra','provider') RETURNING "id" INTO v_org;

@@ -6,7 +6,7 @@ import {
   addStage, setStageColor, renameStage, deleteStage,
   addPerson, removePerson, updateEodRecipients,
   addVocabTerm, deleteVocabTerm,
-  addOrg, removeOrg, setSheetOrg, setClientAccessOrg,
+  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setBranding, setOperatorOrg,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 
@@ -30,6 +30,7 @@ export default function SettingsForm(props: {
   stageDefs: StageRow[]; people: PersonRow[]; eodRecipients: string;
   vocab: VocabRow[]; assetTypes: string[];
   orgs: OrgRow[]; sheetOrgId: number | null;
+  platformName: string; platformTagline: string; operatorOrgId: number | null;
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [edit, setEdit] = useState(props.clientCanEdit);
@@ -52,6 +53,19 @@ export default function SettingsForm(props: {
       const res = await addClientAccess(v, parseInt(newEntryOrg));
       if (res?.error) setError(res.error);
       else setNewEntry("");
+    });
+  };
+
+  // What the platform calls itself, and which service org runs it.
+  const [brandDraft, setBrandDraft] = useState({ name: props.platformName, tagline: props.platformTagline });
+  const [brandError, setBrandError] = useState("");
+  const [brandSaved, setBrandSaved] = useState(false);
+  const saveBrand = () => {
+    setBrandError(""); setBrandSaved(false);
+    startTransition(async () => {
+      const res = await setBranding(brandDraft);
+      if (res?.error) setBrandError(res.error);
+      else setBrandSaved(true);
     });
   };
 
@@ -160,7 +174,7 @@ export default function SettingsForm(props: {
     <div className="card">
       <div style={{ fontWeight: 700, fontSize: 15, color: "var(--navy)", marginBottom: 4 }}>Client access</div>
       <div className="mut" style={{ fontSize: 13, marginBottom: 14 }}>
-        Sierra Spectra staff always have full access. These toggles control what client accounts (the sign-in list below) can do.
+        Platform staff always have full access. These toggles control what client accounts (the sign-in list below) can do.
       </div>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
         <Toggle on={view} label="Client can view" onClick={() => apply(!view, edit)} />
@@ -313,11 +327,64 @@ export default function SettingsForm(props: {
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Platform identity</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          What this portal calls itself, everywhere it names itself: the header, the browser tab, the sign-in
+          page and the notification emails. Changing it takes effect immediately - the web address is set
+          separately, with your host.
+        </div>
+        <div className="pf2" style={{ marginBottom: 8 }}>
+          <div>
+            <label>Name</label>
+            <input value={brandDraft.name} onChange={(e) => { setBrandSaved(false); setBrandDraft({ ...brandDraft, name: e.target.value }); }}
+              placeholder="e.g. Instrapath" />
+          </div>
+          <div>
+            <label>Tagline</label>
+            <input value={brandDraft.tagline} onChange={(e) => { setBrandSaved(false); setBrandDraft({ ...brandDraft, tagline: e.target.value }); }}
+              placeholder="instrument portal" />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button className="btn sm accent" onClick={saveBrand} disabled={pending || !brandDraft.name.trim()}>
+            {pending ? "Saving..." : "Save name"}
+          </button>
+          {brandSaved && <span className="mut" style={{ fontSize: 12 }}>Saved.</span>}
+        </div>
+        {brandError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{brandError}</div>}
+
+        <div style={{ display: "flex", gap: 6, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="mut" style={{ fontSize: 12 }}>Operated by:</span>
+          <select value={props.operatorOrgId ?? ""} disabled={pending}
+            onChange={(e) => {
+              const next = e.target.value ? parseInt(e.target.value) : null;
+              setBrandError("");
+              startTransition(async () => {
+                const res = await setOperatorOrg(next);
+                if (res?.error) setBrandError(res.error);
+              });
+            }}
+            style={{ width: "auto", fontSize: 12 }}>
+            <option value="">Nobody - use the platform name</option>
+            {props.orgs.filter((o) => o.kind === "provider").map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+          The service organization running this instance. Its name goes on sign-off packets and the daily
+          reports - documents a service company signs, not the platform - and systems you create as staff
+          are shared with it so its engineers can work them. It is an ordinary provider organization
+          otherwise, with no special sight of anything.
+        </div>
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Organizations</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           Who the portal is shared with. A <b>client</b> owns or operates systems; a <b>provider</b> is an
           outside service outfit brought onto specific systems. Each organization sees only the systems
-          shared with it - set that on a system&apos;s own page. Sierra Spectra always sees everything.
+          shared with it - set that on a system&apos;s own page. Platform staff always see everything.
         </div>
         {props.orgs.map((o) => (
           <div key={o.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>

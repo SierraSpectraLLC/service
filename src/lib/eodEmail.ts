@@ -6,6 +6,7 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, eodUpdates, people, appSettings, systemShares } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
+import { getBrand } from "@/lib/brand";
 
 const SEP = "-".repeat(50);
 const esc = (s: string) =>
@@ -56,5 +57,5 @@ export async function composeEodEmail(date: string, dateMDY: string): Promise<{
     <pre style="font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;color:#172A4A;margin:0;">${body}</pre>
     ${url ? `<div style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#64748B;margin-top:16px;">Questions on a system? Tap its heading and reply in the portal - it keeps everyone on the same page. General topics: <a href="${url}/discussions">${url.replace(/^https?:\/\//, "")}/discussions</a></div>` : ""}`;
 
-  return { subject: `Sierra Spectra - Daily Updates ${dateMDY}`, html, filled, total: included.length };
+  return { subject: `${(await getBrand()).operatorName} - Daily Updates ${dateMDY}`, html, filled, total: included.length };
 }

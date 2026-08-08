@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/authz";
 import { composeSystemLabel } from "@/lib/systemLabel";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
+import { getBrand } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const instId = parseInt(id);
   if (isNaN(instId)) notFound();
 
+  const brand = await getBrand();
   const [[inst], taskRows, partRows, attachRows, moduleRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -60,7 +62,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
 
       <div className="card">
         <div style={{ borderBottom: "3px solid var(--navy)", paddingBottom: 10, marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: 0.4, color: "var(--navy)" }}>SIERRA SPECTRA</div>
+          <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: 0.4, color: "var(--navy)" }}>{brand.operatorName.toUpperCase()}</div>
           <div className="mut" style={{ fontSize: 13 }}>Instrument delivery &amp; sign-off</div>
         </div>
 
@@ -127,7 +129,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
         {attachRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>None.</div>}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 36, breakInside: "avoid" }}>
-          {["Sierra Spectra", inst.client || "Client"].map((party) => (
+          {[brand.operatorName, inst.client || "Client"].map((party) => (
             <div key={party}>
               <div style={{ borderBottom: "1px solid var(--ink)", height: 36 }} />
               <div style={{ fontSize: 12, marginTop: 4 }}>{party} - signature</div>
