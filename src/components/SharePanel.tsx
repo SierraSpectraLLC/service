@@ -143,8 +143,10 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
             })}
             style={{ width: "auto", fontSize: 12 }}>
             <option value="">Unassigned - platform-stewarded</option>
-            {orgOptions.filter((o) => o.kind === "client").map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
+            {/* Any organization can own equipment, providers included - a
+                service company owns its own warehouse stock. */}
+            {orgOptions.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}{o.kind === "provider" ? " (provider)" : ""}</option>
             ))}
           </select>
         </div>

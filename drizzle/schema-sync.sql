@@ -799,15 +799,13 @@ BEGIN
   END IF;
 END $$;
 
--- ── Invariant: only client organizations own things ─────────────────────────
--- A service provider records a client's instrument; it never becomes theirs.
--- An ownership stamp on a provider org would outlive a revoked share and hand
--- back the access the unshare removed, so heal any that exist. Naturally
--- idempotent: by this rule a provider is never a legitimate owner.
-UPDATE "assets" SET "owner_org_id" = NULL
-  WHERE "owner_org_id" IN (SELECT "id" FROM "orgs" WHERE "kind" = 'provider');
-UPDATE "instruments" SET "owner_org_id" = NULL
-  WHERE "owner_org_id" IN (SELECT "id" FROM "orgs" WHERE "kind" = 'provider');
+-- NOTE: an earlier revision cleared owner_org_id on provider organizations,
+-- on the rule that only a client could own equipment. That rule is gone - a
+-- service company owns its own warehouse stock - so nothing heals ownership
+-- here any more. The property that mattered lives in code instead: a provider
+-- never *acquires* ownership by recording someone else's instrument
+-- (creatorOwns in app/actions.ts); it only ever holds ownership that staff
+-- assigned deliberately.
 
 -- ── Migration: formal system ownership ──────────────────────────────────────
 -- owner_org_id says whose system it is (null = stewarded by the house). Seed it

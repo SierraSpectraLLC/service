@@ -112,10 +112,11 @@ export const instruments = pgTable("instruments", {
   manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
   serial: text("serial").notNull().default(""),             // the instrument's own serial
   location: text("location").notNull().default(""),         // room / bench on the client's floor
-  // Which client organization owns this system. Null = stewarded by the house:
-  // Sierra-managed work and systems a provider logged before the real owner
-  // joined the platform ("unclaimed"). The owner's editors approve access
-  // requests; visibility itself still comes only from system_shares.
+  // Which organization owns this system - a client, or a service company that
+  // owns its own stock. Null = stewarded by the house: work the operator runs
+  // directly, and systems a provider logged before the real owner joined the
+  // platform ("unclaimed"). The owner's editors approve access requests;
+  // visibility itself still comes only from system_shares.
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   // Resale state, set by the owning org (or staff). While for_sale is true the
   // listing_token URL serves a public, heavily redacted view of the system:

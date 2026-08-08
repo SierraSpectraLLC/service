@@ -2,6 +2,7 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { eq, and, asc, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
@@ -19,7 +20,7 @@ import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
 import { audit } from "@/lib/audit";
-import { requireUser, requireEditor, requireStaff, requireOwner, type SessionUser } from "@/lib/authz";
+import { requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner, VIEW_AS_COOKIE, type SessionUser } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
@@ -385,6 +386,10 @@ export async function deleteInstrument(instrumentId: number, reason: string): Pr
  * and their systems stay theirs. Service providers don't: a provider typing in
  * a client's pump is recording it, not acquiring it, and stamping ownership
  * would survive revocation and hand them back what the unshare took away.
+ *
+ * A provider CAN own equipment - a service company's own warehouse stock is
+ * exactly that - but only where staff assigned it deliberately
+ * (setSystemOwner / setAssetOwnerOrg). Never as a side effect of data entry.
  */
 async function creatorOwns(orgId: number | null): Promise<number | null> {
   if (orgId === null) return null;
@@ -2015,7 +2020,6 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
   if (orgId !== null) {
     [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
     if (!org) return { error: "Not found" };
-    if (org.kind !== "client") return { error: "Only a client organization can own a system" };
   }
   if (inst.ownerOrgId === orgId) return {};
   await db.update(instruments).set({ ownerOrgId: orgId }).where(eq(instruments.id, instrumentId));
@@ -2030,6 +2034,38 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
     field: "owner", newValue: org?.name ?? "",
   });
   rev(instrumentId);
+  return {};
+}
+
+// ---------------- View as ----------------
+
+/**
+ * Walk the portal with an organization's permissions. Gated on the REAL
+ * session being the owner's - a persona can't grant itself another one, and it
+ * can always be exited even though the persona itself may not reach Settings.
+ * Nothing is impersonated but authorization: writes stay audited under the
+ * owner's own email.
+ */
+export async function setViewAs(orgId: number | null, mode: "editor" | "viewer" = "editor"): Promise<{ error?: string }> {
+  const real = await requireRealOwner();
+  const jar = await cookies();
+  if (orgId === null) {
+    jar.delete(VIEW_AS_COOKIE);
+  } else {
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!org) return { error: "Not found" };
+    jar.set(VIEW_AS_COOKIE, `${orgId}:${mode}`, {
+      httpOnly: true, sameSite: "lax", path: "/",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 8, // a working day, then back to yourself
+    });
+    // Audited: a record of when the operator was looking through other eyes.
+    await audit({
+      actor: real.email, entityType: "settings", entityId: "view_as",
+      action: `started viewing the portal as ${org.name} (${mode})`,
+    });
+  }
+  revalidatePath("/", "layout");
   return {};
 }
 
@@ -2101,7 +2137,6 @@ export async function setAssetOwnerOrg(assetId: number, orgId: number | null): P
   if (orgId !== null) {
     [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
     if (!org) return { error: "Not found" };
-    if (org.kind !== "client") return { error: "Only a client organization can own an asset" };
   }
   if (asset.ownerOrgId === orgId) return {};
   await db.update(assets).set({ ownerOrgId: orgId }).where(eq(assets.id, assetId));
@@ -2226,11 +2261,9 @@ async function ownerAudience(ownerOrgId: number | null): Promise<string[]> {
 export async function requestAccess(serial: string, message: string, kind = "access"): Promise<{ error?: string; ok?: boolean }> {
   const u = await requireUser();
   if (u.orgId === null) return { error: "Staff already see every system" };
-  // Only a client organization can own a system, so only a client may claim one.
+  // Any organization may own equipment - a service company owns its warehouse
+  // stock - so any organization may claim it. The operator still rules on it.
   const want = kind === "claim" ? "claim" : "access";
-  if (want === "claim" && u.orgKind !== "client") {
-    return { error: "Only a client organization can claim ownership" };
-  }
   const norm = normalizeSerial(serial);
   if (norm.length < MIN_SERIAL_LOOKUP) return { error: "Serial number too short" };
   // Re-resolve the serial here: a request must come from a real match typed
@@ -2324,7 +2357,6 @@ export async function approveClaim(requestId: number): Promise<{ error?: string 
     db.select().from(instruments).where(eq(instruments.id, req.instrumentId)),
   ]);
   if (!org || !inst) return { error: "Not found" };
-  if (org.kind !== "client") return { error: "Only a client organization can own a system" };
   const previous = inst.ownerOrgId;
   const [prevOrg] = previous === null ? [] : await db.select().from(orgs).where(eq(orgs.id, previous));
   // An owner must be able to work the system it owns, so the share is edit.

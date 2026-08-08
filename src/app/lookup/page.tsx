@@ -121,7 +121,7 @@ export default async function LookupPage({ searchParams }: { searchParams: Promi
                     </div>
                   )}
                   <RequestAccessCard serial={sn} assetDesc={desc} requested={pendingIds.includes(instId)}
-                    canClaim={user.orgKind === "client"} />
+                    canClaim={user.orgKind !== ""} />
                 </div>
               );
             })}

@@ -3,10 +3,12 @@ import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, sheetDiffs } from "@/db/schema";
-import { currentUser } from "@/lib/authz";
+import { asc } from "drizzle-orm";
+import { currentUser, viewContext } from "@/lib/authz";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import { signOut } from "@/auth";
 import NavMore from "@/components/NavMore";
+import ViewAsBar from "@/components/ViewAsBar";
 import { getBrand } from "@/lib/brand";
 import "./globals.css";
 
@@ -19,8 +21,13 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [user, brand] = await Promise.all([currentUser(), getBrand()]);
+  const [user, brand, view] = await Promise.all([currentUser(), getBrand(), viewContext()]);
   const isStaff = user && (user.role === "owner" || user.role === "staff");
+  // Only the real owner is offered the switch, and only once signed in.
+  const mayViewAs = view.real?.role === "owner";
+  const orgOptions = mayViewAs
+    ? await db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)).catch(() => [])
+    : [];
   // Parity is an operator concern, so don't even ask the database for it on a
   // client's request.
   const diffRows = isStaff
@@ -43,6 +50,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <body style={themed ? ({ ["--bg" as string]: tint(themed, 0.93) } as React.CSSProperties) : undefined}>
+        {/* Topmost so a persona is never mistaken for a broken page. */}
+        {view.persona && (
+          <ViewAsBar orgs={[]} active={{ orgName: view.persona.orgName, role: view.persona.role }} />
+        )}
         <div className="app-header" style={{ background: headerBg, color: headerFg }}>
           <div className="spectrum" />
           <div className="container" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingTop: 14, paddingBottom: 14 }}>
@@ -77,6 +88,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       : []),
                   ]} />
                 )}
+                {mayViewAs && !view.persona && <ViewAsBar orgs={orgOptions} active={null} />}
                 <form action={async () => { "use server"; await signOut({ redirectTo: "/login" }); }}>
                   <button className="btn sm" type="submit">Sign out</button>
                 </form>
