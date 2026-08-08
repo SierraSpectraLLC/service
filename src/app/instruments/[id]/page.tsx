@@ -9,6 +9,7 @@ import {
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
+import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES, MODULE_KINDS } from "@/lib/stages";
@@ -92,6 +93,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // A view-level share is read-only even for an org whose role can edit.
   const canEdit = await canEditSystem(user, instId);
   const isStaff = user.role === "owner" || user.role === "staff";
+  const modules = await getModules();
 
   // Pending serial-lookup access requests, for the people who decide them:
   // staff, or the owning organization's editors.
@@ -123,7 +125,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         {isStaff && (
           <>
             <span style={{ marginLeft: "auto" }} />
-            <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />
+            {modules.sheetSync && <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />}
             <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
               Sign-off packet
             </Link>

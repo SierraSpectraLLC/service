@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people, systemShares } from "@/db/schema";
+import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people, systemShares, orgs } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { requireUser } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
 import EodPanel from "@/components/EodPanel";
@@ -20,6 +21,12 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
+  if (!(await getModules()).eod) redirect("/");
+  // Who the report goes to, for the send button's copy.
+  const [reportCfg] = await db.select({ sheetOrgId: appSettings.sheetOrgId }).from(appSettings).where(eq(appSettings.id, 1));
+  const reportClient = reportCfg?.sheetOrgId
+    ? (await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, reportCfg.sheetOrgId)))[0]?.name ?? ""
+    : "";
 
   const { date: dateParam } = await searchParams;
   const today = shopToday();
@@ -33,14 +40,17 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   let sentInfo = "";
   let canSend = false;
   if (isToday) {
-    // Today: every active Sierra-led system, editable, with autofill suggestions.
-    // LabZen-led systems stay out of Sierra's report (their own work).
+    // Today: every active operator-led system, editable, with autofill
+    // suggestions. Systems led by the client's own people stay out.
     const [rows, roster, [cfg]] = await Promise.all([
       db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
       db.select().from(people),
       db.select().from(appSettings).where(eq(appSettings.id, 1)),
     ]);
-    const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
+    const sheetOrgName = cfg?.sheetOrgId
+      ? (await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, cfg.sheetOrgId)))[0]?.name ?? ""
+      : "";
+    const clientLed = new Set(roster.filter((p) => sheetOrgName && p.org === sheetOrgName).map((p) => p.name));
     // The report belongs to one organization, so only their systems appear -
     // matching what composeEodEmail will actually send.
     const sharedIds = cfg?.sheetOrgId
@@ -48,7 +58,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
           .where(eq(systemShares.orgId, cfg.sheetOrgId))).map((r) => r.instrumentId))
       : null;
     const active = rows.filter((i) =>
-      !i.stages.includes("Shipped") && !labzenLed.has(i.lead) && (sharedIds === null || sharedIds.has(i.id)));
+      !i.stages.includes("Shipped") && !clientLed.has(i.lead) && (sharedIds === null || sharedIds.has(i.id)));
     const ids = active.map((i) => i.id);
 
     const [saved, taskRows, partRows, gasRows, recentAudit, [settings]] = await Promise.all([
@@ -134,7 +144,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     <div className="container">
       <EodDateNav date={date} today={today} dates={dates} />
       <EodPanel systems={systems} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
-        canSend={canSend} sentInfo={sentInfo} />
+        canSend={canSend} sentInfo={sentInfo} clientName={reportClient || undefined} />
     </div>
   );
 }

@@ -4,7 +4,7 @@
 // so replies migrate into discussions instead of reply-all email.
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, people, appSettings, systemShares } from "@/db/schema";
+import { instruments, eodUpdates, people, appSettings, systemShares, orgs } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { getBrand } from "@/lib/brand";
 
@@ -32,10 +32,12 @@ export async function composeEodEmail(date: string, dateMDY: string): Promise<{
     (await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
       .where(eq(systemShares.orgId, sheetOrgId))).map((r) => r.instrumentId)
   );
-  // Sierra's report covers Sierra-led work; LabZen-led systems are theirs.
-  const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
+  // The operator's report covers operator-led work; systems led by one of the
+  // client's own people are theirs to report on.
+  const sheetOrgName = sheetOrgId === null ? "" : (await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, sheetOrgId)))[0]?.name ?? "";
+  const clientLed = new Set(roster.filter((p) => sheetOrgName && p.org === sheetOrgName).map((p) => p.name));
   const active = rows.filter((i) =>
-    !i.stages.includes("Shipped") && !labzenLed.has(i.lead) && (shared === null || shared.has(i.id)));
+    !i.stages.includes("Shipped") && !clientLed.has(i.lead) && (shared === null || shared.has(i.id)));
   const included = active.filter((i) => !saved.find((s) => s.instrumentId === i.id)?.skipped);
   const labels = await getSystemLabels(included);
   const url = appUrl();

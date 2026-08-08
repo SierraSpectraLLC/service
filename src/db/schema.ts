@@ -537,4 +537,11 @@ export const appSettings = pgTable("app_settings", {
   // other, so its engagements are shares and its people are org members.
   // Systems the operator creates are shared with it automatically.
   operatorOrgId: integer("operator_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // Optional modules. The sheet tracker, EOD report and daily digest grew out
+  // of one operator's workflow; a fresh instance ships with all three off and
+  // their crons, nav entries and pages go quiet. This instance keeps them on
+  // via a one-time migration.
+  sheetSyncEnabled: boolean("sheet_sync_enabled").notNull().default(false),
+  eodEnabled: boolean("eod_enabled").notNull().default(false),
+  digestEnabled: boolean("digest_enabled").notNull().default(false),
 });

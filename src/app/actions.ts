@@ -1821,13 +1821,16 @@ export async function addPerson(name: string, email: string, org: string): Promi
   const e = email.trim().toLowerCase();
   if (!n || n.length > 40) return { error: "Name must be 1-40 characters" };
   if (e && !ALLOW_EMAIL.test(e)) return { error: "Enter a valid email, or leave it blank" };
-  const o = org === "labzen" ? "labzen" : "sierra";
+  // Free-text org name (or blank) - the roster predates real organizations
+  // and stays lightweight; the name is only used for labels and the EOD
+  // "client-led" rule.
+  const o = org.trim().slice(0, 60);
   const existing = await db.select().from(people);
   if (existing.some((p) => p.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" is already on the roster` };
   await db.insert(people).values({ name: n, email: e, org: o }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: n,
-    action: `added ${o === "labzen" ? "LabZen" : "Sierra"} person to roster: ${n}${e ? ` <${e}>` : ""}`,
+    action: `added person to roster: ${n}${e ? ` <${e}>` : ""}${o ? ` (${o})` : ""}`,
   });
   revalidatePath("/settings");
   return {};
@@ -2566,6 +2569,23 @@ export async function setOperatorOrg(orgId: number | null): Promise<{ error?: st
   await audit({
     actor: u.email, entityType: "settings", entityId: "operator_org",
     action: org ? `${org.name} now operates this instance` : "cleared the operating organization",
+  });
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+  return {};
+}
+
+/** Optional modules, per instance: the sheet tracker, EOD report and digest. */
+export async function setModule(
+  moduleKey: "sheetSync" | "eod" | "digest", on: boolean,
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const col = moduleKey === "sheetSync" ? { sheetSyncEnabled: on } : moduleKey === "eod" ? { eodEnabled: on } : { digestEnabled: on };
+  await db.update(appSettings).set(col).where(eq(appSettings.id, 1));
+  const label = moduleKey === "sheetSync" ? "sheet tracker sync" : moduleKey === "eod" ? "EOD client report" : "daily digest";
+  await audit({
+    actor: u.email, entityType: "settings", entityId: `module_${moduleKey}`,
+    action: `turned the ${label} ${on ? "on" : "off"}`,
   });
   revalidatePath("/", "layout");
   revalidatePath("/settings");

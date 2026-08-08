@@ -14,8 +14,10 @@ type SaveState = "dirty" | "saving" | "saved";
 const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
 
-export default function EodPanel({ systems, dateMDY, readOnly = false, canSend = false, sentInfo = "" }: {
+export default function EodPanel({ systems, dateMDY, readOnly = false, canSend = false, sentInfo = "", clientName = "the client" }: {
   systems: Sys[]; dateMDY: string; readOnly?: boolean; canSend?: boolean; sentInfo?: string;
+  /** The client organization the report goes to, for button/confirm copy. */
+  clientName?: string;
 }) {
   const [drafts, setDrafts] = useState<Record<number, Draft>>(
     Object.fromEntries(systems.map((s) => [s.id, { systemUpdate: s.systemUpdate, actionItem: s.actionItem }]))
@@ -87,7 +89,7 @@ export default function EodPanel({ systems, dateMDY, readOnly = false, canSend =
 
   const [sendMsg, setSendMsg] = useState("");
   const send = () => {
-    if (!window.confirm(`Email today's update to the LabZen recipients configured in Settings?${sentInfo ? `\n\n(Already ${sentInfo.toLowerCase()} - this sends it again.)` : ""}`)) return;
+    if (!window.confirm(`Email today's update to the ${clientName} recipients configured in Settings?${sentInfo ? `\n\n(Already ${sentInfo.toLowerCase()} - this sends it again.)` : ""}`)) return;
     setSendMsg("");
     startTransition(async () => {
       const res = await sendEodEmail();
@@ -199,7 +201,7 @@ export default function EodPanel({ systems, dateMDY, readOnly = false, canSend =
             {!readOnly && (
               <button className="btn sm accent" onClick={send} disabled={pending || anyUnsaved || !canSend}
                 title={canSend ? "Emails the recipients configured in Settings, with portal links per system" : "Add EOD recipients in Settings first"}>
-                {pending ? "..." : "Send to LabZen"}
+                {pending ? "..." : `Send to ${clientName}`}
               </button>
             )}
             <button className="btn sm primary" onClick={copy}>

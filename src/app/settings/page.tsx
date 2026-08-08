@@ -39,9 +39,11 @@ export default async function SettingsPage() {
           logins: allowRows.filter((r) => r.orgId === o.id).length,
         }))}
         sheetOrgId={s?.sheetOrgId ?? null}
+        orgNames={[...orgRows.filter((o) => o.id === s?.operatorOrgId), ...orgRows.filter((o) => o.id !== s?.operatorOrgId)].map((o) => o.name)}
         platformName={s?.platformName ?? ""}
         platformTagline={s?.platformTagline ?? ""}
         operatorOrgId={s?.operatorOrgId ?? null}
+        modules={{ sheetSync: s?.sheetSyncEnabled ?? false, eod: s?.eodEnabled ?? false, digest: s?.digestEnabled ?? false }}
         vocab={vocabRows.map((v) => ({ id: v.id, kind: v.kind, assetType: v.assetType, name: v.name }))}
         assetTypes={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
       />

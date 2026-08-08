@@ -3,12 +3,14 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { sheetDiffs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import ParityList from "@/components/ParityList";
 
 export const dynamic = "force-dynamic";
 
 export default async function ParityPage() {
   try { await requireStaff(); } catch { redirect("/"); }
+  if (!(await getModules()).sheetSync) redirect("/");
   // Open diffs first, newest first within each group.
   const diffs = await db.select().from(sheetDiffs).orderBy(asc(sheetDiffs.resolved), desc(sheetDiffs.runAt)).limit(100);
   const openCount = diffs.filter((d) => !d.resolved).length;

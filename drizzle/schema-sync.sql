@@ -407,6 +407,9 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEF
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFAULT '';
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "show_on_listing" boolean NOT NULL DEFAULT false;
 ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_edit" boolean NOT NULL DEFAULT false;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "sheet_sync_enabled" boolean NOT NULL DEFAULT false;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_enabled" boolean NOT NULL DEFAULT false;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_enabled" boolean NOT NULL DEFAULT false;
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "for_sale" boolean NOT NULL DEFAULT false;
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEFAULT '';
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFAULT '';
@@ -807,6 +810,28 @@ END $$;
 -- never *acquires* ownership by recording someone else's instrument
 -- (creatorOwns in app/actions.ts); it only ever holds ownership that staff
 -- assigned deliberately.
+
+-- ── Migration: LabZen-era modules become optional, people carry org names ───
+-- The sheet tracker, EOD report and digest stay on for this instance (it uses
+-- them daily) and default off everywhere else. People rows drop the hardcoded
+-- sierra/labzen labels for real organization names. Both one-time; the module
+-- flags get a marker so switching one off in Settings survives redeploys, and
+-- the people rewrite only ever matches the legacy literals.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'settings' AND "entity_id" = 'module-flags')
+     AND (EXISTS (SELECT 1 FROM "instruments") OR EXISTS (SELECT 1 FROM "client_allowlist")) THEN
+    UPDATE "app_settings" SET "sheet_sync_enabled" = true, "eod_enabled" = true, "digest_enabled" = true WHERE "id" = 1;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','settings','module-flags',
+            'kept the sheet tracker, EOD report and daily digest on for this existing instance - fresh installs start with them off');
+  END IF;
+  UPDATE "people" SET "org" = COALESCE((SELECT o."name" FROM "orgs" o JOIN "app_settings" s ON o."id" = s."operator_org_id" WHERE s."id" = 1), '')
+    WHERE "org" = 'sierra';
+  UPDATE "people" SET "org" = COALESCE((SELECT o."name" FROM "orgs" o JOIN "app_settings" s ON o."id" = s."sheet_org_id" WHERE s."id" = 1), 'Client')
+    WHERE "org" = 'labzen';
+END $$;
 
 -- ── Migration: per-person roles replace the instance-wide edit toggle ───────
 -- Every sign-in entry now carries its own editor/viewer role. Seed it once

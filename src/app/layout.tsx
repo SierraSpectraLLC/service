@@ -10,6 +10,7 @@ import { signOut } from "@/auth";
 import NavMore from "@/components/NavMore";
 import ViewAsBar from "@/components/ViewAsBar";
 import { getBrand } from "@/lib/brand";
+import { getModules } from "@/lib/flags";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -21,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const [user, brand, view] = await Promise.all([currentUser(), getBrand(), viewContext()]);
+  const [user, brand, view, modules] = await Promise.all([currentUser(), getBrand(), viewContext(), getModules()]);
   const isStaff = user && (user.role === "owner" || user.role === "staff");
   // Only the real owner is offered the switch, and only once signed in.
   const mayViewAs = view.real?.role === "owner";
@@ -30,7 +31,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     : [];
   // Parity is an operator concern, so don't even ask the database for it on a
   // client's request.
-  const diffRows = isStaff
+  const diffRows = isStaff && modules.sheetSync
     ? await db.select({ id: sheetDiffs.id }).from(sheetDiffs).where(eq(sheetDiffs.resolved, false))
         .catch(() => []) // table may not exist before first push
     : [];
@@ -76,13 +77,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
                 <Link className="btn sm" href="/lookup" style={{ textDecoration: "none" }}>Lookup</Link>
-                {isStaff && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
+                {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {isStaff && (
                   <NavMore items={[
                     { href: "/checkout", label: "Checkout" },
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
-                    { href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` },
+                    ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
                     ...(user.role === "owner"
                       ? [{ href: "/admin/access", label: "Access & ownership" }, { href: "/settings", label: "Settings" }]
                       : []),

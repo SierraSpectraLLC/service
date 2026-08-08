@@ -6,7 +6,7 @@ import {
   addStage, setStageColor, renameStage, deleteStage,
   addPerson, removePerson, updateEodRecipients,
   addVocabTerm, deleteVocabTerm,
-  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setClientAccessRole, setBranding, setOperatorOrg, setOrgAppearance,
+  addOrg, removeOrg, setSheetOrg, setClientAccessOrg, setClientAccessRole, setBranding, setOperatorOrg, setOrgAppearance, setModule,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 
@@ -29,12 +29,14 @@ export default function SettingsForm(props: {
   clientAccessEnabled: boolean; clientCanEdit: boolean; allowlist: AllowRow[]; envClients: string[];
   stageDefs: StageRow[]; people: PersonRow[]; eodRecipients: string;
   vocab: VocabRow[]; assetTypes: string[];
-  orgs: OrgRow[]; sheetOrgId: number | null;
+  orgs: OrgRow[]; sheetOrgId: number | null; orgNames: string[];
+  modules: { sheetSync: boolean; eod: boolean; digest: boolean };
   platformName: string; platformTagline: string; operatorOrgId: number | null;
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [edit, setEdit] = useState(props.clientCanEdit);
   const [newEntry, setNewEntry] = useState("");
+  const [moduleState, setModuleState] = useState<Record<string, boolean>>({});
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -113,7 +115,7 @@ export default function SettingsForm(props: {
   const models = props.vocab.filter((v) => v.kind === "model");
 
   // People roster + EOD recipients.
-  const [personDraft, setPersonDraft] = useState({ name: "", email: "", org: "sierra" });
+  const [personDraft, setPersonDraft] = useState({ name: "", email: "", org: props.orgNames[0] ?? "" });
   const [personError, setPersonError] = useState("");
   const [recipients, setRecipients] = useState(props.eodRecipients);
   const [recipientsMsg, setRecipientsMsg] = useState("");
@@ -187,17 +189,13 @@ export default function SettingsForm(props: {
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>People</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Task assignees and @mention targets - Sierra and LabZen. An email makes assignments and
-          mentions reach them; without one they can still be assigned, just not notified.
+          Task assignees and @mention targets. An email makes assignments and mentions reach
+          them; without one they can still be assigned, just not notified.
         </div>
         {props.people.map((p) => (
           <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
-            <span className="pill" style={p.org === "labzen"
-              ? { background: "#E7F2FA", color: "#1D6396" }
-              : { background: "#EEF1F5", color: "#475569" }}>
-              {p.org === "labzen" ? "LabZen" : "Sierra"}
-            </span>
+            {p.org && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{p.org}</span>}
             {p.email && <span className="mut mono" style={{ fontSize: 11 }}>{p.email}</span>}
             <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
               onClick={() => {
@@ -212,8 +210,8 @@ export default function SettingsForm(props: {
           <input className="mono" value={personDraft.email} onChange={(e) => setPersonDraft({ ...personDraft, email: e.target.value })}
             placeholder="email (optional)" style={{ flex: "2 1 160px", fontSize: 13 }} />
           <select value={personDraft.org} onChange={(e) => setPersonDraft({ ...personDraft, org: e.target.value })} style={{ width: "auto", fontSize: 13 }}>
-            <option value="sierra">Sierra</option>
-            <option value="labzen">LabZen</option>
+            <option value="">no organization</option>
+            {props.orgNames.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
           <button className="btn sm accent" onClick={submitPerson} disabled={pending || !personDraft.name.trim()}>Add</button>
         </div>
@@ -223,11 +221,11 @@ export default function SettingsForm(props: {
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>EOD email recipients</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Who the EOD page&apos;s &quot;Send to LabZen&quot; button emails. Comma-separated.
+          Who the EOD page&apos;s send button emails. Comma-separated.
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           <input className="mono" value={recipients} onChange={(e) => { setRecipients(e.target.value); setRecipientsMsg(""); }}
-            placeholder="michael@labzenllc.com, adam@labzenllc.com" style={{ flex: 1, fontSize: 13 }} />
+            placeholder="michael@client.com, adam@client.com" style={{ flex: 1, fontSize: 13 }} />
           <button className="btn sm accent" onClick={saveRecipients} disabled={pending || recipients === props.eodRecipients}>Save</button>
         </div>
         {recipientsMsg && (
@@ -318,6 +316,28 @@ export default function SettingsForm(props: {
           <button className="btn sm accent" onClick={submitStage} disabled={pending || !stageDraft.name.trim()}>Add</button>
         </div>
         {stageError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{stageError}</div>}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Modules</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Optional workflows. Off hides their pages and silences their scheduled runs.
+        </div>
+        {([
+          ["sheetSync", "Google Sheet tracker sync", props.modules.sheetSync],
+          ["eod", "EOD client report", props.modules.eod],
+          ["digest", "Daily staff digest", props.modules.digest],
+        ] as const).map(([key, label, on]) => (
+          <div key={key} style={{ display: "flex", gap: 12, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+            <Toggle on={moduleState[key] ?? on} label={label}
+              onClick={() => {
+                const next = !(moduleState[key] ?? on);
+                setModuleState((m) => ({ ...m, [key]: next }));
+                startTransition(async () => { await setModule(key, next); });
+              }} />
+            <div style={{ fontSize: 13, fontWeight: 700 }}>{label}</div>
+          </div>
+        ))}
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2 }}>
@@ -476,7 +496,7 @@ export default function SettingsForm(props: {
         <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
           <input className="mono" value={newEntry} onChange={(e) => setNewEntry(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") add(); }}
-            placeholder="jane@labzenllc.com or @labzenllc.com" style={{ flex: "1 1 180px", fontSize: 13 }} />
+            placeholder="jane@company.com or @company.com" style={{ flex: "1 1 180px", fontSize: 13 }} />
           <select value={newEntryOrg} onChange={(e) => setNewEntryOrg(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
             <option value="">signs in as...</option>
             {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
