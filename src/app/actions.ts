@@ -249,13 +249,14 @@ export async function deleteInstrument(instrumentId: number) {
 // First-class units systems are built from. Work is recorded on the system
 // and tagged with the asset; lifecycle rows here give the dossier its spine.
 
-type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; location: string; note: string };
+type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; location: string; note: string };
 
 const cleanAsset = (d: AssetInput) => ({
   kind: (MODULE_KINDS as readonly string[]).includes(d.kind) ? d.kind : "Other",
   model: d.model.trim(),
   serial: d.serial.trim(),
   manufacturer: d.manufacturer.trim(),
+  owner: d.owner.trim(),
   location: d.location.trim(),
   note: d.note.trim(),
 });
@@ -326,8 +327,12 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
     await generateCheckout(instrumentId, row, u.email);
     rev(instrumentId);
   } else {
-    await logAssetEvent(row.id, "note", null, "created as spare", u.name);
-    await audit({ actor: u.email, entityType: "asset", entityId: row.id, action: `added spare ${assetLabel(row)}` });
+    // Stock: bought, on the shelf, not part of a system yet.
+    await logAssetEvent(row.id, "note", null, `added to stock${a.location ? ` at ${a.location}` : ""}`, u.name);
+    await audit({
+      actor: u.email, entityType: "asset", entityId: row.id,
+      action: `added ${assetLabel(row)} to stock${a.owner ? ` for ${a.owner}` : ""}${a.location ? ` (${a.location})` : ""}`,
+    });
   }
   revalidatePath("/assets");
   revalidatePath(`/assets/${row.id}`);

@@ -20,14 +20,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const assetId = parseInt(id);
   if (isNaN(assetId)) notFound();
 
-  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts] = await Promise.all([
+  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows] = await Promise.all([
     db.select().from(assets).where(eq(assets.id, assetId)),
     db.select().from(assetEvents).where(eq(assetEvents.assetId, assetId)),
     db.select().from(tasks).where(eq(tasks.assetId, assetId)),
     db.select().from(parts).where(eq(parts.assetId, assetId)),
     db.select().from(timeEntries).where(eq(timeEntries.assetId, assetId)),
-    db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, archived: instruments.archived })
+    db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, client: instruments.client, archived: instruments.archived })
       .from(instruments).orderBy(asc(instruments.externalId)),
+    db.selectDistinct({ owner: assets.owner }).from(assets),
   ]);
   if (!asset) notFound();
 
@@ -56,8 +57,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           {asset.kind} — {asset.model || "(no model)"}
         </div>
         <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
-          {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.location && `@ ${asset.location}`]
-            .filter(Boolean).join(" · ") || "No identifiers yet."}
+          {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
+            asset.location && `@ ${asset.location}`].filter(Boolean).join(" · ") || "No identifiers yet."}
         </div>
         <div style={{ fontSize: 13, margin: "8px 0 10px" }}>
           {home ? (
@@ -73,8 +74,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         </div>
         {asset.note && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{asset.note}</div>}
         <AssetControls
-          asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
+          asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
           systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
+          owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
           canEdit={canEdit} isStaff={isStaff}
         />
       </div>

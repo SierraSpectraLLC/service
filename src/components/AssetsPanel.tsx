@@ -9,7 +9,7 @@ export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
 };
 
-const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", location: "", note: "" };
+const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", location: "", note: "" };
 
 export default function AssetsPanel({ instrumentId, assets, unassigned, canEdit }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).

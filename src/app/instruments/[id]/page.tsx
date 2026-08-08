@@ -112,7 +112,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         }))}
         unassigned={unassignedRows.map((a) => ({
           id: a.id,
-          label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
+          label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
         }))}
         canEdit={canEdit}
       />

@@ -243,6 +243,9 @@ export const assets = pgTable("assets", {
   model: text("model").notNull().default(""),
   serial: text("serial").notNull().default(""),
   manufacturer: text("manufacturer").notNull().default(""),
+  // Whose unit it is - a client name, or blank for our own stock. Independent
+  // of whatever system it currently sits in.
+  owner: text("owner").notNull().default(""),
   // In service | Spare | Needs attention | Down | Decommissioned (lib/stages.ts)
   status: text("status").notNull().default("In service"),
   location: text("location").notNull().default(""), // where a spare lives: "shelf B"
