@@ -4,8 +4,9 @@
 // An item can carry a model scope (a list of exact model names; empty = all
 // models). Per kind INDEPENDENTLY - a scoped test never suppresses tasks, and
 // vice versa - scoped items REPLACE the type's all-model items when any match
-// the asset's model. System items scope by system type (instruments.model)
-// with the same rule.
+// the asset's model. System items are never model-scoped: a system has no
+// model of its own (it is the sum of its assets) and its items are created
+// before any asset is attached.
 
 export const CHECKOUT_KINDS = ["task", "test"] as const;
 export const RESULT_TYPES = ["pass_fail", "measured", "reading", "note"] as const;
@@ -89,8 +90,9 @@ export function impactLine(
   groupItems: Pick<CheckoutItem, "kind" | "modelScope">[],
 ): { text: string; warning: boolean } {
   const noun = kind === "task" ? "task" : "test";
-  const thing = assetType === "system" ? "system" : assetType.toLowerCase();
   const scopeLabel = scope.join(", ");
+  if (assetType === "system") return { text: "Created with every new system.", warning: false };
+  const thing = assetType.toLowerCase();
   if (scope.length === 0) {
     return { text: `Created on every ${thing} without a model-specific ${noun}.`, warning: false };
   }

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people } from "@/db/schema";
+import { getSystemLabels } from "@/lib/systemLabel";
 import { requireUser } from "@/lib/authz";
 import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
@@ -51,6 +52,12 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
       db.select().from(appSettings).where(eq(appSettings.id, 1)),
     ]);
 
+    const labels = await getSystemLabels(active);
+    const labelFor = (i: { id: number; externalId: string }) => {
+      const named = labels.get(i.id) ?? "";
+      return named ? `${i.externalId} - ${named}` : i.externalId;
+    };
+
     const lastSend = recentAudit.find((a) => a.entityType === "eod" && a.entityId === today);
     sentInfo = lastSend ? `Sent ${shopTime(lastSend.createdAt)} by ${lastSend.actor.split("@")[0]}` : "";
     canSend = !!(settings?.eodRecipients ?? "").trim();
@@ -79,7 +86,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
       const suggestedAction = [...dueSoon, ...blocked, ...waiting, ...gas].slice(0, 3).join("; ");
       return {
         id: i.id,
-        label: `${i.externalId} - ${i.model}`,
+        label: labelFor(i),
         client: i.client,
         systemUpdate: u?.systemUpdate ?? "",
         actionItem: u?.actionItem ?? "",
@@ -95,11 +102,16 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     const insts = ids.length
       ? await db.select().from(instruments).where(inArray(instruments.id, ids)).orderBy(asc(instruments.priority), asc(instruments.externalId))
       : [];
+    const labels = await getSystemLabels(insts);
+    const labelFor = (i: { id: number; externalId: string }) => {
+      const named = labels.get(i.id) ?? "";
+      return named ? `${i.externalId} - ${named}` : i.externalId;
+    };
     systems = insts.map((i) => {
       const u = saved.find((s) => s.instrumentId === i.id)!;
       return {
         id: i.id,
-        label: `${i.externalId} - ${i.model}`,
+        label: labelFor(i),
         client: i.client,
         systemUpdate: u.systemUpdate,
         actionItem: u.actionItem,

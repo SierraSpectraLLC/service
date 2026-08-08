@@ -4,6 +4,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, tasks, checklistItems, parts, attachments, assets } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { composeSystemLabel } from "@/lib/systemLabel";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
 import PrintButton from "@/components/PrintButton";
@@ -64,10 +65,9 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
         </div>
 
         <Row label="System ID" value={inst.externalId} />
-        <Row label="Model" value={inst.model} />
+        {/* Composed from the assets listed below, which carry the serials. */}
+        <Row label="System" value={composeSystemLabel(moduleRows, inst.model)} />
         <Row label="Client" value={inst.client} />
-        <Row label="Manufacturer" value={inst.manufacturer} />
-        <Row label="Instrument SN" value={inst.serial} />
         <Row label="Location" value={inst.location} />
         <Row label="Intake" value={shopMonthDay(inst.createdAt)} />
         <Row label="Stages" value={inst.stages.join(", ")} />

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { taskTemplates, templateTasks, templateItems, checkoutItems, assets, instruments } from "@/db/schema";
+import { taskTemplates, templateTasks, templateItems, checkoutItems, assets } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import TemplatesPanel from "@/components/TemplatesPanel";
 import CheckoutItemsPanel from "@/components/CheckoutItemsPanel";
@@ -13,12 +13,11 @@ export default async function TemplatesPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
 
-  const [tpls, itemRows, assetModels, systemModels] = await Promise.all([
+  const [tpls, itemRows, assetModels] = await Promise.all([
     db.select().from(taskTemplates).orderBy(asc(taskTemplates.name)),
     db.select().from(checkoutItems)
       .orderBy(asc(checkoutItems.assetType), asc(checkoutItems.position), asc(checkoutItems.id)),
     db.selectDistinct({ kind: assets.kind, model: assets.model }).from(assets),
-    db.selectDistinct({ model: instruments.model }).from(instruments),
   ]);
   const tplIds = tpls.map((t) => t.id);
   const tTasks = tplIds.length
@@ -40,11 +39,10 @@ export default async function TemplatesPage() {
     })),
   }));
 
-  // Scope options come from the catalog only: distinct asset models per type,
-  // distinct instrument models for the System group.
-  const modelOptions: Record<string, string[]> = {
-    system: [...new Set(systemModels.map((m) => m.model).filter(Boolean))].sort(),
-  };
+  // Scope options come from the catalog only: the distinct models recorded for
+  // each asset type. System items aren't model-scoped - a system has no model
+  // of its own, it's the sum of its assets.
+  const modelOptions: Record<string, string[]> = {};
   for (const { kind, model } of assetModels) {
     if (!model) continue;
     (modelOptions[kind] ??= []).push(model);

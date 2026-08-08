@@ -64,8 +64,7 @@ function ScopeField({ scope, options, onChange }: {
 
 export default function CheckoutItemsPanel({ items, modelOptions }: {
   items: Item[];
-  // distinct catalog models per asset type; key "system" holds system types
-  modelOptions: Record<string, string[]>;
+  modelOptions: Record<string, string[]>; // distinct catalog models per asset type
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
@@ -127,7 +126,8 @@ export default function CheckoutItemsPanel({ items, modelOptions }: {
   const save = () => {
     if (!sheet || !draft.name.trim()) return;
     setError("");
-    const payload = { ...draft, assetType: sheet.assetType };
+    const payload = { ...draft, assetType: sheet.assetType,
+      modelScope: sheet.assetType === "system" ? [] : draft.modelScope };
     startTransition(async () => {
       const res = sheet.id ? await updateCheckoutItem(sheet.id, payload) : await addCheckoutItem(payload);
       if (res?.error) { setError(res.error); return; }
@@ -173,7 +173,7 @@ export default function CheckoutItemsPanel({ items, modelOptions }: {
   };
 
   const impact = sheet
-    ? impactLine(draft.kind, sheet.assetType, draft.modelScope,
+    ? impactLine(draft.kind, sheet.assetType, sheet.assetType === "system" ? [] : draft.modelScope,
         (grouped.get(sheet.assetType) ?? []).filter((i) => i.id !== sheet.id))
     : null;
 
@@ -233,7 +233,7 @@ export default function CheckoutItemsPanel({ items, modelOptions }: {
       <details style={{ marginBottom: 12 }}>
         <summary style={{ fontSize: 12, fontWeight: 700, color: "#1D6396", cursor: "pointer" }}>How these get applied</summary>
         <ul className="mut" style={{ fontSize: 12, margin: "6px 0 0", paddingLeft: 18 }}>
-          <li>Adding or installing an asset creates its type&apos;s items; creating a system creates the System items.</li>
+          <li>Adding or installing an asset creates its type&apos;s items; creating a system creates the System items once.</li>
           <li>A task is just done / not done; a test records a result (pass/fail, a measured value, a reading, or a note).</li>
           <li>When any model-specific item matches, it replaces the all-model items of the same kind - tasks and tests never replace each other.</li>
         </ul>
@@ -356,9 +356,18 @@ export default function CheckoutItemsPanel({ items, modelOptions }: {
               </div>
             )}
 
-            <label>{sheet.assetType === "system" ? "System types" : "Models"}</label>
-            <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}
-              onChange={(next) => setDraft({ ...draft, modelScope: next })} />
+            {sheet.assetType === "system" ? (
+              <div className="mut" style={{ fontSize: 12 }}>
+                System items are created with every new system. Model-specific work belongs on the
+                asset types below, where the models live.
+              </div>
+            ) : (
+              <>
+                <label>Models</label>
+                <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}
+                  onChange={(next) => setDraft({ ...draft, modelScope: next })} />
+              </>
+            )}
 
             {impact && (
               <div style={{

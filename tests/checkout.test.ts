@@ -53,13 +53,15 @@ describe("matchItems", () => {
     expect(matchItems(ITEMS, "Pump", "LC-40D XR").map((i) => i.name)).not.toContain("LC-40 Tight Spec");
   });
 
-  it("scopes system items by system type with the same rule", () => {
+  it("takes every system item, since systems have no model to scope by", () => {
     const items = [
       item({ assetType: "system", name: "Caffeine Checkout", position: 1 }),
-      item({ assetType: "system", name: "GC checkout", position: 1, modelScope: ["GC-2030"] }),
+      item({ assetType: "system", name: "Paperwork", kind: "task", position: 2 }),
+      // Legacy rows may still carry a scope; generation passes no model for a
+      // system, so they simply never match.
+      item({ assetType: "system", name: "Stale scoped item", position: 3, modelScope: ["GC-2030"] }),
     ];
-    expect(matchItems(items, "system", "LC-2050").map((i) => i.name)).toEqual(["Caffeine Checkout"]);
-    expect(matchItems(items, "system", "gc-2030").map((i) => i.name)).toEqual(["GC checkout"]);
+    expect(matchItems(items, "system", "").map((i) => i.name)).toEqual(["Caffeine Checkout", "Paperwork"]);
   });
 
   it("only considers items of the requested asset type", () => {
@@ -118,6 +120,11 @@ describe("impactLine", () => {
     const r = impactLine("task", "Pump", ["LC-2050"], group);
     expect(r.warning).toBe(true);
     expect(r.text).toBe("On LC-2050, this replaces the 1 all-model task. Everything else stays.");
+  });
+
+  it("says system items just run on every new system", () => {
+    expect(impactLine("test", "system", [], group))
+      .toEqual({ text: "Created with every new system.", warning: false });
   });
 
   it("plain when nothing would be replaced", () => {

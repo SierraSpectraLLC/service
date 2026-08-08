@@ -21,7 +21,14 @@ import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
+import { composeSystemLabel } from "@/lib/systemLabel";
 import { sendEmail } from "@/lib/email";
+
+/** A system is named by its assets; the stored description is the fallback. */
+async function systemLabelFor(inst: { id: number; model: string }) {
+  const rows = await db.select().from(assets).where(eq(assets.instrumentId, inst.id));
+  return composeSystemLabel(rows, inst.model);
+}
 
 const rev = (id?: number) => {
   revalidatePath("/");
@@ -63,15 +70,12 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; model: string; priority: number;
-          manufacturer?: string; serial?: string; location?: string },
+  data: { externalId?: string; client: string; priority: number; location?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
   const client = data.client.trim();
-  const model = data.model.trim();
-  if (!model) return { error: "Model required" };
   const externalId = (data.externalId ?? inst.externalId).trim();
   if (!externalId) return { error: "System ID required" };
   if (externalId.length > 40) return { error: "System ID must be 40 characters or fewer" };
@@ -81,19 +85,14 @@ export async function updateInstrument(
     if (clash.length) return { error: `${externalId} is already used by another system` };
   }
   const priority = data.priority || inst.priority;
-  const manufacturer = (data.manufacturer ?? inst.manufacturer).trim();
-  const serial = (data.serial ?? inst.serial).trim();
   const location = (data.location ?? inst.location).trim();
   const changed: [string, string, string][] = [];
   if (externalId !== inst.externalId) changed.push(["externalId", inst.externalId, externalId]);
-  if (manufacturer !== inst.manufacturer) changed.push(["manufacturer", inst.manufacturer, manufacturer]);
-  if (serial !== inst.serial) changed.push(["serial", inst.serial, serial]);
   if (location !== inst.location) changed.push(["location", inst.location, location]);
   if (client !== inst.client) changed.push(["client", inst.client, client]);
-  if (model !== inst.model) changed.push(["model", inst.model, model]);
   if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, model, priority, manufacturer, serial, location, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments).set({ externalId, client, priority, location, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.
@@ -148,7 +147,7 @@ export async function pushInstrumentToSheet(instrumentId: number): Promise<{ err
   if (!inst) return { error: "Not found" };
   try {
     await appendInstrumentToSheet({
-      externalId: inst.externalId, client: inst.client, model: inst.model,
+      externalId: inst.externalId, client: inst.client, model: await systemLabelFor(inst),
       priority: inst.priority, stages: inst.stages, notes: inst.notes,
     });
   } catch (e) {
@@ -189,14 +188,14 @@ export async function setInstrumentLead(instrumentId: number, lead: string) {
   if (name) {
     await notifySystemAssigned({
       actorEmail: u.email, actorName: u.name, lead: name,
-      instrumentId, externalId: inst.externalId, model: inst.model,
+      instrumentId, externalId: inst.externalId, label: await systemLabelFor(inst),
     });
   }
   rev(instrumentId);
 }
 
 export async function createInstrument(
-  data: { externalId: string; client: string; model: string; priority: number; lead?: string },
+  data: { externalId: string; client: string; priority: number; lead?: string },
   templateId?: number,
 ) {
   // Editors, not just staff: LabZen adds their internal systems themselves.
@@ -207,22 +206,25 @@ export async function createInstrument(
     if (!roster.some((p) => p.name === lead)) lead = "";
   }
   const [row] = await db.insert(instruments).values({
-    externalId: data.externalId.trim(), client: data.client.trim(), model: data.model.trim(),
+    // model stays blank: the system is named by the assets added to it
+    // (lib/systemLabel). The column lives on only as the pre-asset fallback
+    // for older records and sheet imports.
+    externalId: data.externalId.trim(), client: data.client.trim(), model: "",
     priority: data.priority || 99, lead, stages: ["Intake"],
   }).returning();
   await db.insert(stageEvents).values({ instrumentId: row.id, stage: "Intake", kind: "added" });
   await audit({
     actor: u.email, instrumentId: row.id, entityType: "instrument", entityId: row.externalId,
-    action: `created instrument ${row.externalId}: ${row.model}${lead ? ` (lead ${lead})` : ""}`,
+    action: `created instrument ${row.externalId} (${row.client || "no client"})${lead ? ` - lead ${lead}` : ""}`,
   });
   if (lead) {
     await notifySystemAssigned({
       actorEmail: u.email, actorName: u.name, lead,
-      instrumentId: row.id, externalId: row.externalId, model: row.model,
+      instrumentId: row.id, externalId: row.externalId, label: "",
     });
   }
   if (templateId) await copyTemplateOnto(row.id, row.externalId, templateId, u.email);
-  await generateCheckout(row.id, { id: null, kind: "system", model: row.model, serial: "" }, u.email);
+  await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email);
   rev(row.id);
   return row.id;
 }
@@ -236,7 +238,7 @@ export async function deleteInstrument(instrumentId: number) {
   await deleteBlobs(files.map((f) => f.url)); // cascade covers rows; blobs need explicit removal
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
-    action: `deleted instrument ${inst.externalId}: ${inst.model} (${inst.client})`,
+    action: `deleted instrument ${inst.externalId} (${inst.client})`,
   });
   rev(instrumentId);
   redirect("/");
@@ -1385,7 +1387,10 @@ function cleanCheckoutItem(data: CheckoutItemInput): { error: string } | {
     if (Number.isNaN(n) || n < 0) return { error: "Tolerance must be a number, e.g. 10" };
     tolerancePct = String(n);
   }
-  const modelScope = [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
+  // System items fire when a system is created, before it has any assets to
+  // scope by, so they always apply to every new system.
+  const modelScope = data.assetType === "system"
+    ? [] : [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
   return {
     assetType: data.assetType, kind: data.kind, name, resultType, target, tolerancePct,
     requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart, modelScope,

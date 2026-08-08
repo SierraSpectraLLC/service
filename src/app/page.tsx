@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, taskTemplates, people, tasks, assets } from "@/db/schema";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
-import { getStageSince, ageDays } from "@/lib/stageAges";
+import { composeSystemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { requireUser } from "@/lib/authz";
 import { redirect } from "next/navigation";
@@ -15,7 +15,7 @@ export default async function Home() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
-  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows, taskRows, assetRows] = await Promise.all([
+  const [rows, allParts, allGases, recent, openRowDiffs, stageDefList, templateList, peopleRows, taskRows, assetRows, clientRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(parts),
     db.select().from(instrumentGases),
@@ -25,7 +25,10 @@ export default async function Home() {
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks),
-    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, status: assets.status }).from(assets),
+    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets),
+    // Archived systems included, so retiring the last system for a client
+    // doesn't drop them out of the picker.
+    db.selectDistinct({ client: instruments.client }).from(instruments),
   ]);
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
@@ -35,7 +38,6 @@ export default async function Home() {
     isStaff ? openRowDiffs.filter((d) => d.sheetValue === "(missing from sheet)").map((d) => d.externalId) : []
   );
 
-  const stageSince = await getStageSince(rows.map((r) => r.id));
   const today = shopToday();
   const overdueBy = new Map<number, number>();
   for (const t of taskRows) {
@@ -44,16 +46,6 @@ export default async function Home() {
   }
 
   const data = rows.map((i) => {
-    // Flag systems parked in a stage for a week+ (shipped systems are done, not stuck).
-    let aging = "";
-    if (!i.stages.includes("Shipped")) {
-      let worst = 0, worstStage = "";
-      for (const s of i.stages) {
-        const d = ageDays(stageSince.get(i.id)?.get(s) ?? i.createdAt);
-        if (d > worst) { worst = d; worstStage = s; }
-      }
-      if (worst >= 7) aging = `${worst}d in ${worstStage}`;
-    }
     const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
     const gasIssues = allGases
       .filter((g) => g.instrumentId === i.id && gasAttention(g.status))
@@ -63,14 +55,15 @@ export default async function Home() {
       id: i.id,
       externalId: i.externalId,
       client: i.client,
-      model: i.model,
+      // A system is what it's built from; the stored description is only a
+      // fallback for systems whose assets haven't been entered yet.
+      label: composeSystemLabel(assetRows.filter((a) => a.instrumentId === i.id), i.model),
       priority: i.priority,
       lead: i.lead,
       stages: i.stages,
       notes: i.notes,
       openParts,
       gasIssues,
-      aging,
       overdue: overdueBy.get(i.id) ?? 0,
       assetIssues: assetRows
         .filter((a) => a.instrumentId === i.id && assetAttention(a.status))
@@ -86,6 +79,7 @@ export default async function Home() {
       stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
       templates={templateList}
       people={peopleRows.map((p) => p.name)}
+      clients={clientRows.map((c) => c.client).filter(Boolean)}
       canEdit={user.role !== "client_viewer"}
       isStaff={isStaff}
     />

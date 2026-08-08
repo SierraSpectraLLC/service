@@ -5,6 +5,7 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, eodUpdates, people } from "@/db/schema";
+import { getSystemLabels } from "@/lib/systemLabel";
 
 const SEP = "-".repeat(50);
 const esc = (s: string) =>
@@ -26,13 +27,15 @@ export async function composeEodEmail(date: string, dateMDY: string): Promise<{
   const labzenLed = new Set(roster.filter((p) => p.org === "labzen").map((p) => p.name));
   const active = rows.filter((i) => !i.stages.includes("Shipped") && !labzenLed.has(i.lead));
   const included = active.filter((i) => !saved.find((s) => s.instrumentId === i.id)?.skipped);
+  const labels = await getSystemLabels(included);
   const url = appUrl();
 
   let filled = 0;
   const blocks = included.map((i, idx) => {
     const u = saved.find((s) => s.instrumentId === i.id);
     if (u?.systemUpdate || u?.actionItem) filled++;
-    const label = esc(`${i.externalId} - ${i.model}`);
+    const named = labels.get(i.id) ?? "";
+    const label = esc(named ? `${i.externalId} - ${named}` : i.externalId);
     const heading = url
       ? `<a href="${url}/instruments/${i.id}" style="color:#1D6396;">System ${idx + 1}: ${label}</a>`
       : `System ${idx + 1}: ${label}`;

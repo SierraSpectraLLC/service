@@ -5,8 +5,8 @@ import { toggleStage } from "@/app/actions";
 
 export type StageDefLite = { name: string; bg: string; fg: string };
 
-export default function StagePanel({ instrumentId, stages, stageDefs, ages, canEdit }: {
-  instrumentId: number; stages: string[]; stageDefs: StageDefLite[]; ages: Record<string, string>; canEdit: boolean;
+export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }: {
+  instrumentId: number; stages: string[]; stageDefs: StageDefLite[]; canEdit: boolean;
 }) {
   const [, startTransition] = useTransition();
   // Flip the pill immediately; the server action + revalidation reconcile behind it.
@@ -33,7 +33,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, ages, canE
               background: color(s).bg, color: color(s).fg,
               cursor: canEdit ? "pointer" : "default", userSelect: "none",
             }}
-          >{s}{ages[s] ? <span style={{ opacity: 0.75, fontWeight: 400 }}> · {ages[s]}</span> : null}{canEdit && optimisticStages.length > 1 ? " ×" : ""}</span>
+          >{s}{canEdit && optimisticStages.length > 1 ? " ×" : ""}</span>
         ))}
         {canEdit && inactive.length > 0 && (
           <select

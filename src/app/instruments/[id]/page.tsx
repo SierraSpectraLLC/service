@@ -10,7 +10,7 @@ import { requireUser } from "@/lib/authz";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen } from "@/lib/stages";
-import { getStageSince, ageDays } from "@/lib/stageAges";
+import { composeSystemLabel } from "@/lib/systemLabel";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
@@ -32,7 +32,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, stageSince, discussion, peopleRows, assetRows, spareRows, readRows] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, templateList, clientRows, discussion, peopleRows, assetRows, spareRows, readRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -41,7 +41,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
     getStageDefs(),
     db.select({ id: taskTemplates.id, name: taskTemplates.name }).from(taskTemplates).orderBy(asc(taskTemplates.name)),
-    getStageSince([instId]),
+    db.selectDistinct({ client: instruments.client }).from(instruments),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
@@ -90,30 +90,28 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       </div>
 
       <SystemPanel
-        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, model: inst.model, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy,
-          manufacturer: inst.manufacturer, serial: inst.serial, location: inst.location }}
+        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy,
+          location: inst.location }}
+        label={composeSystemLabel(assetRows, inst.model)}
+        clients={clientRows.map((c) => c.client)}
         stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
-        stageAges={Object.fromEntries(inst.stages.flatMap((s) => {
-          const since = stageSince.get(instId)?.get(s) ?? inst.createdAt;
-          const d = ageDays(since);
-          return d >= 1 ? [[s, `${d}d`]] : [];
-        }))}
         gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
         people={peopleRows.map((p) => p.name)}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
-      />
-
-      <AssetsPanel
-        instrumentId={inst.id}
-        assets={assetRows.map((a) => ({
-          id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
-          openItems:
-            taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
-            partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
-        }))}
-        spares={spareRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}` }))}
-        canEdit={canEdit}
-      />
+      >
+        <AssetsPanel
+          embedded
+          instrumentId={inst.id}
+          assets={assetRows.map((a) => ({
+            id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
+            openItems:
+              taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
+              partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
+          }))}
+          spares={spareRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}` }))}
+          canEdit={canEdit}
+        />
+      </SystemPanel>
 
       <PartsPanel instrumentId={inst.id} parts={partRows.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} canEdit={canEdit} isStaff={isStaff} />
 

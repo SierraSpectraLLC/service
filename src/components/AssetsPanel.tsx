@@ -11,8 +11,11 @@ export type AssetRow = {
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, spares, canEdit }: {
+export default function AssetsPanel({ instrumentId, assets, spares, canEdit, embedded }: {
   instrumentId: number; assets: AssetRow[]; spares: { id: number; label: string }[]; canEdit: boolean;
+  // Embedded: rendered inside the system card (the system *is* its assets), so
+  // no card chrome of its own.
+  embedded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<typeof empty>(empty);
@@ -28,12 +31,12 @@ export default function AssetsPanel({ instrumentId, assets, spares, canEdit }: {
     });
   };
 
-  if (!canEdit && assets.length === 0) return null;
+  if (!canEdit && assets.length === 0 && !embedded) return null;
 
   return (
-    <div className="card">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <div className="card-title">Assets</div>
+    <div className={embedded ? "" : "card"} style={embedded ? { marginTop: 14 } : undefined}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: embedded ? 4 : 10, flexWrap: "wrap" }}>
+        {embedded ? <div className="eyebrow">Assets</div> : <div className="card-title">Assets</div>}
         {canEdit && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             {spares.length > 0 && (

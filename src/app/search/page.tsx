@@ -6,6 +6,7 @@ import {
   instruments, tasks, parts, attachments, discussionPosts, assets, auditLog,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { getSystemLabels } from "@/lib/systemLabel";
 import SearchBox from "@/components/SearchBox";
 
 export const dynamic = "force-dynamic";
@@ -25,9 +26,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   if (q.length >= 2) {
     const [instRows, taskRows, partRows, attachRows, postRows, moduleRows, auditRows] = await Promise.all([
       db.select().from(instruments).where(or(
-        ilike(instruments.externalId, like), ilike(instruments.model, like), ilike(instruments.client, like),
-        ilike(instruments.notes, like), ilike(instruments.serial, like), ilike(instruments.manufacturer, like),
-        ilike(instruments.location, like), ilike(instruments.lead, like),
+        // Asset models/serials are searched through the assets table below;
+        // the system itself is found by ID, client, notes, location or lead.
+        ilike(instruments.externalId, like), ilike(instruments.client, like),
+        ilike(instruments.notes, like), ilike(instruments.location, like), ilike(instruments.lead, like),
       )).limit(25),
       db.select().from(tasks).where(or(ilike(tasks.title, like), ilike(tasks.body, like), ilike(tasks.assignee, like))).limit(25),
       db.select().from(parts).where(or(
@@ -53,11 +55,15 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model })
           .from(instruments).where(inArray(instruments.id, [...ids]))
       : [];
-    labels = new Map(named.map((n) => [n.id, `${n.externalId} - ${n.model}`]));
+    const composed = await getSystemLabels(named);
+    labels = new Map(named.map((n) => {
+      const label = composed.get(n.id) ?? "";
+      return [n.id, label ? `${n.externalId} - ${label}` : n.externalId];
+    }));
 
     const join = (parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(" · ");
     hits = [
-      ...instRows.map((i) => ({ id: i.id, instrumentId: i.id, group: "Systems", title: `${i.externalId} - ${i.model}`, sub: join([i.client, i.location, i.serial && `SN ${i.serial}`]) })),
+      ...instRows.map((i) => ({ id: i.id, instrumentId: i.id, group: "Systems", title: labels.get(i.id) ?? i.externalId, sub: join([i.client, i.location, i.lead && `lead ${i.lead}`]) })),
       ...taskRows.map((t) => ({ id: t.id, instrumentId: t.instrumentId, group: "Tasks", title: t.title, sub: join([t.state, t.assignee, t.body]) })),
       ...partRows.map((p) => ({ id: p.id, instrumentId: p.instrumentId, group: p.kind === "consumable" ? "Consumables" : "Parts", title: p.name, sub: join([p.partNumber && `PN ${p.partNumber}`, p.serial && `SN ${p.serial}`, p.vendor, p.status]) })),
       ...moduleRows.map((m) => ({ id: m.id, instrumentId: -m.id, group: "Assets", title: `${m.kind}: ${m.model || "(no model)"}`, sub: join([m.serial && `SN ${m.serial}`, m.status, m.note]) })),

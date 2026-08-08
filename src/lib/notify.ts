@@ -82,7 +82,9 @@ export async function notifyTaskAssigned(opts: {
 }
 
 export async function notifySystemAssigned(opts: {
-  actorEmail: string; actorName: string; lead: string; instrumentId: number; externalId: string; model: string;
+  // `label` is composed from the system's assets and can be empty on a system
+  // that has none yet, so the ID carries the subject on its own.
+  actorEmail: string; actorName: string; lead: string; instrumentId: number; externalId: string; label: string;
 }) {
   try {
     const staff = parseList(process.env.STAFF_EMAILS);
@@ -96,7 +98,7 @@ export async function notifySystemAssigned(opts: {
     await sendEmail(
       [to],
       `${opts.externalId}: you're the lead`,
-      wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)} - ${esc(opts.model)}</b>.
+      wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
     );
   } catch (e) {

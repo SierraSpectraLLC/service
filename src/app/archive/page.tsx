@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getStageDefs } from "@/lib/stageDefs";
+import { getSystemLabels } from "@/lib/systemLabel";
 import { shopMonthDay } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +18,7 @@ export default async function ArchivePage() {
       .orderBy(desc(instruments.archivedAt), asc(instruments.externalId)),
     getStageDefs(),
   ]);
+  const labels = await getSystemLabels(rows);
   const color = (name: string) => defs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
 
   return (
@@ -30,7 +32,7 @@ export default async function ArchivePage() {
           <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
-            <span style={{ fontSize: 13, flex: "1 1 140px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.model}</span>
+            <span style={{ fontSize: 13, flex: "1 1 140px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{labels.get(i.id) || <span className="mut">No assets listed</span>}</span>
             <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {i.stages.map((s) => (
                 <span key={s} className="pill" style={{ background: color(s).bg, color: color(s).fg }}>{s}</span>

@@ -3,23 +3,24 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ClientSelect from "./ClientSelect";
 import { createInstrument } from "@/app/actions";
 
 type StageDefLite = { name: string; bg: string; fg: string };
 
 type Row = {
-  id: number; externalId: string; client: string; model: string; priority: number; lead: string;
+  id: number; externalId: string; client: string; label: string; priority: number; lead: string;
   stages: string[]; notes: string; openParts: number; gasIssues: string[];
-  aging: string; overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
+  overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
 };
 
 const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, templates, people, canEdit, isStaff }: {
+export default function Dashboard({ data, stageDefs, templates, people, clients, canEdit, isStaff }: {
   data: Row[]; stageDefs: StageDefLite[]; templates: { id: number; name: string }[]; people: string[];
-  canEdit: boolean; isStaff: boolean;
+  clients: string[]; canEdit: boolean; isStaff: boolean;
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
@@ -28,7 +29,7 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", model: "", priority: "", lead: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", priority: "", lead: "" });
   const [tpl, setTpl] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -58,8 +59,8 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
-        [i.externalId, i.client, i.model, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "),
-          i.aging, i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
+        [i.externalId, i.client, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "),
+          i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
       );
     }
     return list;
@@ -74,14 +75,14 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
   };
 
   const submitNew = () => {
-    if (!draft.externalId.trim() || !draft.model.trim()) return;
+    if (!draft.externalId.trim()) return;
     startTransition(async () => {
       const id = await createInstrument({
-        externalId: draft.externalId, client: draft.client, model: draft.model,
+        externalId: draft.externalId, client: draft.client,
         priority: parseInt(draft.priority) || 99, lead: draft.lead,
       }, parseInt(tpl) || undefined);
       setShowNew(false);
-      setDraft({ externalId: "", client: "", model: "", priority: "", lead: "" });
+      setDraft({ externalId: "", client: "", priority: "", lead: "" });
       setTpl("");
       router.push(`/instruments/${id}`);
     });
@@ -172,13 +173,16 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
 
       {showNew && (
         <div className="dash-form">
-          <div className="pf2" style={{ marginBottom: 8 }}>
+          <div className="pf3" style={{ marginBottom: 8 }}>
             <div><label>System ID *</label><input value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} placeholder="G-012" /></div>
-            <div><label>Client</label><input value={draft.client} onChange={(e) => setDraft({ ...draft, client: e.target.value })} placeholder="GMI" /></div>
-          </div>
-          <div className="pf-ship" style={{ marginBottom: 10 }}>
+            <div>
+              <label>Client</label>
+              <ClientSelect value={draft.client} clients={clients} onChange={(client) => setDraft({ ...draft, client })} />
+            </div>
             <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} placeholder="11" /></div>
-            <div><label>Model *</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="Shimadzu LCMS-8045 + LC-30" /></div>
+          </div>
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            The system is named by the assets you add to it - pump, autosampler, detector - on its page.
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {people.length > 0 && (
@@ -204,7 +208,7 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
         </div>
       )}
 
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ID, model, client, stage..." style={{ marginBottom: 12 }} />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ID, asset, client, stage..." style={{ marginBottom: 12 }} />
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div className="grid-row eyebrow" style={{ padding: "9px 14px", borderBottom: "1px solid var(--line)" }}>
@@ -215,7 +219,7 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
             style={{ padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none", color: "inherit" }}>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
             <span style={{ minWidth: 0 }}>
-              <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.model}</span>
+              <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.label || <span className="mut">No assets listed yet</span>}</span>
               <span className="mut" style={{ fontSize: 11 }}>
                 {i.client} · P{i.priority}
                 {i.lead && <span style={{ color: "var(--navy)", fontWeight: 700 }}> · {i.lead}</span>}
@@ -233,12 +237,11 @@ export default function Dashboard({ data, stageDefs, templates, people, canEdit,
               {i.assetIssues.map((x) => (
                 <Pill key={x} bg={x.endsWith("down") ? "#FBE9E9" : "#FAF0DC"} fg={x.endsWith("down") ? "#A32D2D" : "#8A5410"}>{x}</Pill>
               ))}
-              {i.aging && <Pill bg="#FAF0DC" fg="#8A5410">{i.aging}</Pill>}
               {i.openParts > 0 && <Pill bg="#FAF0DC" fg="#8A5410">{i.openParts} open</Pill>}
               {i.gasIssues.map((g) => (
                 <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
               ))}
-              {!i.missingFromSheet && !i.aging && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
+              {!i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </Link>
         ))}
