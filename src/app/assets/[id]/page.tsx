@@ -4,13 +4,15 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
-  attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs,
+  attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs, eodUpdates,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import SharePanel from "@/components/SharePanel";
 import SalePanel from "@/components/SalePanel";
+import DailyUpdatePanel from "@/components/DailyUpdatePanel";
+import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES, MODULE_KINDS } from "@/lib/stages";
@@ -87,6 +89,13 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];
   const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId);
+  // Today's client-facing update for this unit, picked up by the EOD page.
+  const modules = await getModules();
+  const ownerIsViewer = asset.ownerOrgId !== null && asset.ownerOrgId === user.orgId;
+  const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
+    ? await db.select().from(eodUpdates)
+        .where(and(eq(eodUpdates.assetId, assetId), eq(eodUpdates.date, shopToday())))
+    : [];
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
@@ -172,6 +181,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         {canSell && (
           <SalePanel target="asset" targetId={asset.id} forSale={asset.forSale}
             saleNote={asset.saleNote} listingToken={asset.listingToken} />
+        )}
+        {modules.eod && (isStaff || ownerIsViewer) && (
+          <DailyUpdatePanel target={target}
+            systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+            updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
         )}
       </div>
 

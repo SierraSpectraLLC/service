@@ -3,81 +3,105 @@
 import { useRef, useState, useTransition } from "react";
 import { saveEodUpdate, setEodSkip, sendEodEmail } from "@/app/actions";
 
-type Sys = {
-  id: number; label: string; client: string;
-  systemUpdate: string; actionItem: string; skipped: boolean;
-  suggestedUpdate: string; suggestedAction: string;
+/** One line on a client's report: a system, or a standalone asset. */
+export type EodLine = {
+  kind: "system" | "asset";
+  id: number;
+  externalId: string;
+  label: string;
+  systemUpdate: string;
+  actionItem: string;
+  skipped: boolean;
+  written: boolean;
+  suggestedUpdate: string;
+  suggestedAction: string;
 };
 type Draft = { systemUpdate: string; actionItem: string };
 type SaveState = "dirty" | "saving" | "saved";
 
 const SEP = "-".repeat(50);
 const AUTOSAVE_MS = 900;
+const keyOf = (e: EodLine) => `${e.kind}:${e.id}`;
+const targetOf = (e: EodLine) =>
+  e.kind === "system" ? { instrumentId: e.id, assetId: null } : { instrumentId: null, assetId: e.id };
 
-export default function EodPanel({ systems, dateMDY, readOnly = false, canSend = false, sentInfo = "", clientName = "the client" }: {
-  systems: Sys[]; dateMDY: string; readOnly?: boolean; canSend?: boolean; sentInfo?: string;
-  /** The client organization the report goes to, for button/confirm copy. */
-  clientName?: string;
+/**
+ * One client's daily report: the work they own, the updates written on those
+ * systems and assets today, and a send button aimed at their own recipients.
+ * Lines can be edited here too, but the primary place to write one is the
+ * system's or asset's own page - anything written there shows up here.
+ */
+export default function EodPanel({
+  clientName, orgId, entries, dateMDY, readOnly = false, canSend = false, recipientCount = 0, sentInfo = "",
+}: {
+  clientName: string; orgId: number | null; entries: EodLine[]; dateMDY: string;
+  readOnly?: boolean; canSend?: boolean; recipientCount?: number; sentInfo?: string;
 }) {
-  const [drafts, setDrafts] = useState<Record<number, Draft>>(
-    Object.fromEntries(systems.map((s) => [s.id, { systemUpdate: s.systemUpdate, actionItem: s.actionItem }]))
+  const [drafts, setDrafts] = useState<Record<string, Draft>>(
+    Object.fromEntries(entries.map((e) => [keyOf(e), { systemUpdate: e.systemUpdate, actionItem: e.actionItem }]))
   );
-  const [status, setStatus] = useState<Record<number, SaveState>>({});
+  const [status, setStatus] = useState<Record<string, SaveState>>({});
   const [copied, setCopied] = useState(false);
+  const [sendMsg, setSendMsg] = useState("");
+  const [showBlanks, setShowBlanks] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  // Autosave: debounce while typing, flush immediately on blur. The refs keep
-  // the timer callbacks reading the latest draft, not the one they closed over.
-  const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+  // Autosave: debounce while typing, flush on blur. The ref keeps the timer
+  // callbacks reading the latest draft, not the one they closed over.
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const draftsRef = useRef(drafts);
   draftsRef.current = drafts;
 
-  const flush = (id: number) => {
-    if (timers.current[id]) { clearTimeout(timers.current[id]); delete timers.current[id]; }
-    const d = draftsRef.current[id];
+  const flush = (e: EodLine) => {
+    const k = keyOf(e);
+    if (timers.current[k]) { clearTimeout(timers.current[k]); delete timers.current[k]; }
+    const d = draftsRef.current[k];
     if (!d) return;
-    setStatus((s) => ({ ...s, [id]: "saving" }));
+    setStatus((s) => ({ ...s, [k]: "saving" }));
     startTransition(async () => {
-      await saveEodUpdate(id, d);
-      // If the user typed again while this save was in flight, stay dirty;
-      // the newer edit's own timer will save it.
-      setStatus((s) => (s[id] === "dirty" ? s : { ...s, [id]: "saved" }));
+      await saveEodUpdate(targetOf(e), d);
+      // Typed again mid-flight? Stay dirty; the newer edit's timer saves it.
+      setStatus((s) => (s[k] === "dirty" ? s : { ...s, [k]: "saved" }));
     });
   };
 
-  const setDraft = (id: number, patch: Partial<Draft>) => {
-    setDrafts((d) => ({ ...d, [id]: { ...d[id], ...patch } }));
-    setStatus((s) => ({ ...s, [id]: "dirty" }));
-    if (timers.current[id]) clearTimeout(timers.current[id]);
-    timers.current[id] = setTimeout(() => flush(id), AUTOSAVE_MS);
+  const setDraft = (e: EodLine, patch: Partial<Draft>) => {
+    const k = keyOf(e);
+    setDrafts((d) => ({ ...d, [k]: { ...d[k], ...patch } }));
+    setStatus((s) => ({ ...s, [k]: "dirty" }));
+    if (timers.current[k]) clearTimeout(timers.current[k]);
+    timers.current[k] = setTimeout(() => flush(e), AUTOSAVE_MS);
   };
 
-  const included = systems.filter((s) => !s.skipped);
+  const hasText = (e: EodLine) => {
+    const d = drafts[keyOf(e)];
+    return !!(d?.systemUpdate || d?.actionItem);
+  };
+  const included = entries.filter((e) => !e.skipped);
+  // Written first - that's what the email will actually carry.
+  const filled = included.filter(hasText);
+  const blanks = included.filter((e) => !hasText(e));
+  const skipped = entries.filter((e) => e.skipped);
 
   // Fill only what's empty - a suggestion never overwrites something typed.
-  const autofill = (s: Sys) => {
-    const d = drafts[s.id];
-    setDraft(s.id, {
-      systemUpdate: d.systemUpdate || s.suggestedUpdate,
-      actionItem: d.actionItem || s.suggestedAction,
+  const autofill = (e: EodLine) => {
+    const d = drafts[keyOf(e)];
+    setDraft(e, {
+      systemUpdate: d.systemUpdate || e.suggestedUpdate,
+      actionItem: d.actionItem || e.suggestedAction,
     });
   };
-  const canAutofill = (s: Sys) => {
-    const d = drafts[s.id];
-    return (!d.systemUpdate && !!s.suggestedUpdate) || (!d.actionItem && !!s.suggestedAction);
+  const canAutofill = (e: EodLine) => {
+    const d = drafts[keyOf(e)];
+    return (!d?.systemUpdate && !!e.suggestedUpdate) || (!d?.actionItem && !!e.suggestedAction);
   };
 
   const emailText = [
-    `${dateMDY} - Daily Updates`,
-    "",
-    SEP,
-    ...included.flatMap((s, i) => [
-      `System ${i + 1}: ${s.label}`,
-      "",
-      `System Update: ${drafts[s.id]?.systemUpdate ?? ""}`,
-      `Action Item: ${drafts[s.id]?.actionItem ?? ""}`,
-      "",
-      SEP,
+    `${dateMDY} - Daily Updates`, "", SEP,
+    ...filled.flatMap((e, i) => [
+      `${e.kind === "system" ? "System" : "Unit"} ${i + 1}: ${e.label}`, "",
+      `System Update: ${drafts[keyOf(e)]?.systemUpdate ?? ""}`,
+      `Action Item: ${drafts[keyOf(e)]?.actionItem ?? ""}`, "", SEP,
     ]),
   ].join("\n");
 
@@ -87,12 +111,11 @@ export default function EodPanel({ systems, dateMDY, readOnly = false, canSend =
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const [sendMsg, setSendMsg] = useState("");
   const send = () => {
-    if (!window.confirm(`Email today's update to the ${clientName} recipients configured in Settings?${sentInfo ? `\n\n(Already ${sentInfo.toLowerCase()} - this sends it again.)` : ""}`)) return;
+    if (!window.confirm(`Email today's report to ${clientName}'s ${recipientCount} recipient${recipientCount === 1 ? "" : "s"}?${sentInfo ? `\n\n(Already ${sentInfo.toLowerCase()} - this sends it again.)` : ""}`)) return;
     setSendMsg("");
     startTransition(async () => {
-      const res = await sendEodEmail();
+      const res = await sendEodEmail(orgId);
       setSendMsg(res?.error ? res.error : `Sent to ${res.sent} recipient${res.sent === 1 ? "" : "s"} ✓`);
     });
   };
@@ -101,122 +124,112 @@ export default function EodPanel({ systems, dateMDY, readOnly = false, canSend =
     st === "saving" ? "Saving..." : st === "saved" ? "Saved ✓" : st === "dirty" ? "Unsaved" : "";
   const anyUnsaved = Object.values(status).some((s) => s === "dirty" || s === "saving");
 
-  return (
-    <>
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <div className="card-title">End-of-day client update</div>
-          <span className="mut" style={{ fontSize: 12 }}>{dateMDY}</span>
-          {!readOnly && (
-            <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-              <span className="mut" style={{ fontSize: 12 }}>
-                {anyUnsaved ? "Saving..." : Object.keys(status).length ? "All changes saved" : ""}
-              </span>
-              <button className="btn sm" onClick={() => included.forEach(autofill)} disabled={pending || !included.some(canAutofill)}>
-                Autofill empty
-              </button>
-            </div>
+  const editable = (e: EodLine, num: number) => (
+    <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>
+          {num > 0 ? `${e.kind === "system" ? "System" : "Unit"} ${num}: ` : ""}<span className="mono">{e.label}</span>
+        </span>
+        {e.kind === "asset" && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>unit</span>}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          <span className="mut" style={{ fontSize: 11 }}>{saveLabel(status[keyOf(e)])}</span>
+          {canAutofill(e) && (
+            <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
+          <button className="btn link" style={{ color: "#A32D2D" }} disabled={pending}
+            onClick={() => startTransition(() => setEodSkip(targetOf(e), true))}>skip</button>
         </div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
-          {readOnly
-            ? "Read-only snapshot of a previous day. Only today's update can be edited."
-            : "Every active system (anything not Shipped). Saves automatically as you type. Autofill drafts from today's activity - always review before copying. Skipped systems stay out of the email."}
-        </div>
-
-        {systems.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
-            {readOnly ? "No EOD update was recorded for this day." : "No active systems."}
-          </div>
-        )}
-        {systems.map((s) => {
-          const num = included.findIndex((x) => x.id === s.id);
-          if (s.skipped) {
-            return (
-              <div key={s.id} style={{ border: "1px dashed var(--line)", borderRadius: 10, padding: "8px 12px", marginBottom: 8, display: "flex", alignItems: "center", gap: 8, opacity: 0.65 }}>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{s.label}</span>
-                <span className="pill" style={{ background: "#EEF1F5", color: "#64748B" }}>{readOnly ? "Skipped" : "Skipped today"}</span>
-                {!readOnly && (
-                  <button className="btn link" style={{ marginLeft: "auto" }} disabled={pending}
-                    onClick={() => startTransition(() => setEodSkip(s.id, false))}>Include</button>
-                )}
-              </div>
-            );
-          }
-          if (readOnly) {
-            return (
-              <div key={s.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13, fontWeight: 700 }}>System {num + 1}: <span className="mono">{s.label}</span></span>
-                  <span className="mut" style={{ fontSize: 12 }}>{s.client}</span>
-                </div>
-                <div style={{ fontSize: 13, marginBottom: 4 }}>
-                  <span className="eyebrow" style={{ marginRight: 6 }}>Update</span>
-                  {s.systemUpdate || <span className="mut">(blank)</span>}
-                </div>
-                <div style={{ fontSize: 13 }}>
-                  <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>
-                  {s.actionItem || <span className="mut">(blank)</span>}
-                </div>
-              </div>
-            );
-          }
-          return (
-            <div key={s.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>System {num + 1}: <span className="mono">{s.label}</span></span>
-                <span className="mut" style={{ fontSize: 12 }}>{s.client}</span>
-                <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-                  <span className="mut" style={{ fontSize: 11 }}>{saveLabel(status[s.id])}</span>
-                  {canAutofill(s) && (
-                    <button className="btn link" onClick={() => autofill(s)} disabled={pending} title="Draft from today's activity and open items">
-                      autofill
-                    </button>
-                  )}
-                  <button className="btn link" style={{ color: "#A32D2D" }} disabled={pending}
-                    onClick={() => startTransition(() => setEodSkip(s.id, true))}>skip</button>
-                </div>
-              </div>
-              <label style={{ fontSize: 11 }}>System Update</label>
-              <textarea rows={2} value={drafts[s.id]?.systemUpdate ?? ""}
-                onChange={(e) => setDraft(s.id, { systemUpdate: e.target.value })}
-                onBlur={() => { if (status[s.id] === "dirty") flush(s.id); }}
-                placeholder={s.suggestedUpdate || "What happened on this system today"}
-                style={{ marginBottom: 8, resize: "vertical" }} />
-              <label style={{ fontSize: 11 }}>Action Item</label>
-              <input value={drafts[s.id]?.actionItem ?? ""}
-                onChange={(e) => setDraft(s.id, { actionItem: e.target.value })}
-                onBlur={() => { if (status[s.id] === "dirty") flush(s.id); }}
-                placeholder={s.suggestedAction || "Next step / what we need"} />
-            </div>
-          );
-        })}
       </div>
+      <label style={{ fontSize: 11 }}>System Update</label>
+      <textarea rows={2} value={drafts[keyOf(e)]?.systemUpdate ?? ""}
+        onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
+        onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+        placeholder={e.suggestedUpdate || "What happened today"}
+        style={{ marginBottom: 8, resize: "vertical" }} />
+      <label style={{ fontSize: 11 }}>Action Item</label>
+      <input value={drafts[keyOf(e)]?.actionItem ?? ""}
+        onChange={(ev) => setDraft(e, { actionItem: ev.target.value })}
+        onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+        placeholder={e.suggestedAction || "Next step / what we need"} />
+    </div>
+  );
 
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-          <div className="card-title">Email preview</div>
-          {sentInfo && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{sentInfo} ✓</span>}
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            {!readOnly && (
-              <button className="btn sm accent" onClick={send} disabled={pending || anyUnsaved || !canSend}
-                title={canSend ? "Emails the recipients configured in Settings, with portal links per system" : "Add EOD recipients in Settings first"}>
-                {pending ? "..." : `Send to ${clientName}`}
-              </button>
-            )}
-            <button className="btn sm primary" onClick={copy}>
-              {copied ? "Copied ✓" : "Copy to clipboard"}
+  return (
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+        <div className="card-title">{clientName}</div>
+        <span className="mut" style={{ fontSize: 12 }}>{dateMDY}</span>
+        {sentInfo && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{sentInfo} ✓</span>}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+          {!readOnly && (
+            <button className="btn sm accent" onClick={send} disabled={pending || anyUnsaved || !canSend || !filled.length}
+              title={canSend ? `Emails ${clientName}'s recipients, with portal links per line` : `Add ${clientName}'s recipients in Settings first`}>
+              {pending ? "..." : `Send to ${clientName}`}
             </button>
+          )}
+          <button className="btn sm primary" onClick={copy} disabled={!filled.length}>
+            {copied ? "Copied ✓" : "Copy"}
+          </button>
+        </div>
+      </div>
+      {sendMsg && (
+        <div style={{ fontSize: 12, marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
+      )}
+      {!canSend && !readOnly && (
+        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>No recipients set for {clientName} yet - add them in Settings.</div>
+      )}
+
+      {filled.length === 0 && blanks.length === 0 && (
+        <div className="mut" style={{ fontSize: 13 }}>Nothing to report.</div>
+      )}
+
+      {filled.map((e, i) => (readOnly ? (
+        <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+            {e.kind === "system" ? "System" : "Unit"} {i + 1}: <span className="mono">{e.label}</span>
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 4 }}>
+            <span className="eyebrow" style={{ marginRight: 6 }}>Update</span>{e.systemUpdate || <span className="mut">(blank)</span>}
+          </div>
+          <div style={{ fontSize: 13 }}>
+            <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>{e.actionItem || <span className="mut">(blank)</span>}
           </div>
         </div>
-        {sendMsg && (
-          <div style={{ fontSize: 12, marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
-        )}
-        <pre style={{
-          fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#F5F7FA",
-          border: "1px solid var(--line)", borderRadius: 8, padding: 12, margin: 0,
-        }}>{emailText}</pre>
-      </div>
-    </>
+      ) : editable(e, i + 1)))}
+
+      {!readOnly && blanks.length > 0 && (
+        <>
+          <button className="btn link" style={{ marginTop: 4 }} onClick={() => setShowBlanks((v) => !v)}>
+            {showBlanks ? "Hide" : "Show"} {blanks.length} with nothing written yet
+          </button>
+          {showBlanks && <div style={{ marginTop: 8 }}>{blanks.map((e) => editable(e, 0))}</div>}
+        </>
+      )}
+
+      {skipped.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
+          <span className="mut" style={{ fontSize: 11 }}>Skipped:</span>
+          {skipped.map((e) => (
+            <span key={keyOf(e)} className="pill" style={{ background: "#EEF1F5", color: "#64748B", display: "inline-flex", gap: 5, alignItems: "center" }}>
+              {e.externalId}
+              {!readOnly && (
+                <button className="btn link" style={{ fontSize: 10 }} disabled={pending}
+                  onClick={() => startTransition(() => setEodSkip(targetOf(e), false))}>include</button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {filled.length > 0 && (
+        <details style={{ marginTop: 10 }}>
+          <summary className="mut" style={{ fontSize: 12, cursor: "pointer" }}>Email preview</summary>
+          <pre style={{
+            fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#F5F7FA",
+            border: "1px solid var(--line)", borderRadius: 8, padding: 12, margin: "8px 0 0",
+          }}>{emailText}</pre>
+        </details>
+      )}
+    </div>
   );
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests,
+  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -94,6 +94,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const canEdit = await canEditSystem(user, instId);
   const isStaff = user.role === "owner" || user.role === "staff";
   const modules = await getModules();
+  // Today's client-facing update, written here and picked up by the EOD page.
+  const ownerIsViewer = inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId;
+  const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
+    ? await db.select().from(eodUpdates)
+        .where(and(eq(eodUpdates.instrumentId, instId), eq(eodUpdates.date, shopToday())))
+    : [];
 
   // Pending serial-lookup access requests, for the people who decide them:
   // staff, or the owning organization's editors.
@@ -152,6 +158,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         ownerOrgId={inst.ownerOrgId}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
         canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
+        dailyUpdate={modules.eod && (isStaff || ownerIsViewer) ? {
+          systemUpdate: todayUpdate?.systemUpdate ?? "", actionItem: todayUpdate?.actionItem ?? "",
+          updatedBy: todayUpdate?.updatedBy ?? "", canEdit: isStaff,
+        } : null}
       />
 
       <AssetsPanel

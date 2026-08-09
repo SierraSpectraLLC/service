@@ -62,6 +62,10 @@ export const orgs = pgTable("orgs", {
   // and a logo shown beside the wordmark. Blank = the platform default look.
   themeColor: text("theme_color").notNull().default(""),
   logoUrl: text("logo_url").notNull().default(""),
+  // Who at this organization receives its daily report. Each client gets its
+  // own list and its own send button - one report per client, never a merged
+  // one that would show them each other's systems.
+  eodRecipients: text("eod_recipients").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("org_name_unique").on(t.name)]);
 
@@ -278,11 +282,14 @@ export const attachments = pgTable("attachments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("attachments_instrument_idx").on(t.instrumentId)]);
 
-// One row per (instrument, day): the client-facing end-of-day update draft.
-// Staff fill these in during the day; /eod renders them into the email template.
+// One row per (system or asset, day): the client-facing end-of-day update.
+// Written where the work happens - on the system's or asset's own page - and
+// assembled by /eod into one email per client, which is why the row can hang
+// off either target. Exactly one of instrument_id / asset_id is set.
 export const eodUpdates = pgTable("eod_updates", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
   date: text("date").notNull(), // YYYY-MM-DD in shop time
   systemUpdate: text("system_update").notNull().default(""),
   actionItem: text("action_item").notNull().default(""),
@@ -290,7 +297,11 @@ export const eodUpdates = pgTable("eod_updates", {
 
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (t) => [unique("eod_instrument_date").on(t.instrumentId, t.date), index("eod_date_idx").on(t.date)]);
+}, (t) => [
+  unique("eod_instrument_date").on(t.instrumentId, t.date),
+  unique("eod_asset_date").on(t.assetId, t.date),
+  index("eod_date_idx").on(t.date),
+]);
 
 // Append-only. No update or delete paths exist in the app code, by design.
 export const auditLog = pgTable("audit_log", {

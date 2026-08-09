@@ -25,6 +25,7 @@ import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/l
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
+import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { composeSystemLabel } from "@/lib/systemLabel";
@@ -1436,35 +1437,71 @@ export async function resolveDiff(
 
 // ---------------- End-of-day client update ----------------
 
-/** Upsert today's client-facing update draft for one system. Not audited - it's a draft, not instrument history. */
-export async function saveEodUpdate(instrumentId: number, data: { systemUpdate: string; actionItem: string }) {
+/**
+ * Upsert today's client-facing update for a system or a single asset. Written
+ * where the work happens - the system's or asset's own page - and assembled by
+ * /eod. Not audited: it's a draft of a message, not instrument history.
+ */
+export async function saveEodUpdate(
+  target: { instrumentId: number | null; assetId: number | null },
+  data: { systemUpdate: string; actionItem: string },
+) {
   const u = await requireStaff();
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
   const date = shopToday();
   const systemUpdate = data.systemUpdate.trim();
   const actionItem = data.actionItem.trim();
-  await db.insert(eodUpdates)
-    .values({ instrumentId, date, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [eodUpdates.instrumentId, eodUpdates.date],
-      set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
-    });
+  if (target.instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
+    if (!inst) throw new Error("Not found");
+    await db.insert(eodUpdates)
+      .values({ instrumentId: target.instrumentId, date, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [eodUpdates.instrumentId, eodUpdates.date],
+        set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
+      });
+  } else if (target.assetId !== null) {
+    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
+    if (!a) throw new Error("Not found");
+    await db.insert(eodUpdates)
+      .values({ assetId: target.assetId, date, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [eodUpdates.assetId, eodUpdates.date],
+        set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
+      });
+  } else {
+    throw new Error("Not found");
+  }
   // No revalidatePath here on purpose: autosave fires on every typing pause,
   // and a revalidate would make the client re-fetch the whole page each time
   // (visible jank on mobile). The typist's screen is already current; other
   // viewers get fresh data on page load, which is how the EOD flow works.
 }
 
-/** Email today's EOD report to the recipients configured in Settings. */
-export async function sendEodEmail(): Promise<{ error?: string; sent?: number }> {
+/**
+ * Email today's report to ONE client - the organization that owns those
+ * systems - using its own recipient list. `orgId` null is the operator's own
+ * group (house-stewarded work), which goes to the operator org's list.
+ */
+export async function sendEodEmail(orgId: number | null): Promise<{ error?: string; sent?: number }> {
   const u = await requireStaff();
-  const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
-  const to = (s?.eodRecipients ?? "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-  if (!to.length) return { error: "No recipients configured - add them in Settings first" };
-  const { subject, html, filled, total } = await composeEodEmail(shopToday(), shopTodayMDY());
-  if (!total) return { error: "No active systems to report on" };
-  if (!filled) return { error: "Every system is still blank - fill in at least one update before sending" };
+  let recipients = "";
+  let who = "";
+  if (orgId === null) {
+    const brand = await getBrand();
+    const [op] = brand.operatorOrgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, brand.operatorOrgId));
+    recipients = op?.eodRecipients ?? "";
+    who = op?.name ?? brand.name;
+  } else {
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!org) return { error: "Not found" };
+    recipients = org.eodRecipients;
+    who = org.name;
+  }
+  const to = recipients.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (!to.length) return { error: `No recipients for ${who} - add them in Settings first` };
+  const { subject, html, filled, total } = await composeEodEmail(shopToday(), shopTodayMDY(), orgId);
+  if (!total) return { error: `Nothing to report for ${who}` };
+  if (!filled) return { error: `Every line for ${who} is still blank - write at least one update first` };
   try {
     await sendEmail(to, subject, html);
   } catch (e) {
@@ -1473,24 +1510,38 @@ export async function sendEodEmail(): Promise<{ error?: string; sent?: number }>
     return { error: "Email failed to send - check AUTH_RESEND_KEY / EMAIL_FROM and try again" };
   }
   await audit({
-    actor: u.email, entityType: "eod", entityId: shopToday(),
-    action: `sent EOD update to ${to.length} recipient${to.length === 1 ? "" : "s"}`,
+    actor: u.email, entityType: "eod", entityId: `${shopToday()}:${orgId ?? "own"}`,
+    action: `sent the ${who} daily report to ${to.length} recipient${to.length === 1 ? "" : "s"}`,
   });
   revalidatePath("/eod");
   return { sent: to.length };
 }
 
 /** Leave a system out of (or bring it back into) today's client email. Keeps any saved text. */
-export async function setEodSkip(instrumentId: number, skipped: boolean) {
+export async function setEodSkip(
+  target: { instrumentId: number | null; assetId: number | null }, skipped: boolean,
+) {
   const u = await requireStaff();
-  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
-  await db.insert(eodUpdates)
-    .values({ instrumentId, date: shopToday(), skipped, updatedBy: u.name, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: [eodUpdates.instrumentId, eodUpdates.date],
-      set: { skipped, updatedBy: u.name, updatedAt: new Date() },
-    });
+  const date = shopToday();
+  if (target.instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
+    if (!inst) throw new Error("Not found");
+    await db.insert(eodUpdates)
+      .values({ instrumentId: target.instrumentId, date, skipped, updatedBy: u.name, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [eodUpdates.instrumentId, eodUpdates.date],
+        set: { skipped, updatedBy: u.name, updatedAt: new Date() },
+      });
+  } else if (target.assetId !== null) {
+    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
+    if (!a) throw new Error("Not found");
+    await db.insert(eodUpdates)
+      .values({ assetId: target.assetId, date, skipped, updatedBy: u.name, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [eodUpdates.assetId, eodUpdates.date],
+        set: { skipped, updatedBy: u.name, updatedAt: new Date() },
+      });
+  } else throw new Error("Not found");
   revalidatePath("/eod");
 }
 
@@ -1849,18 +1900,19 @@ export async function removePerson(id: number) {
 }
 
 /** Who the EOD "Send to LabZen" button emails. Comma-separated. */
-export async function updateEodRecipients(value: string): Promise<{ error?: string }> {
+/** Who receives one organization's daily report. Each client has its own list. */
+export async function updateEodRecipients(orgId: number, value: string): Promise<{ error?: string }> {
   const u = await requireOwner();
   const entries = value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   const bad = entries.find((e) => !ALLOW_EMAIL.test(e));
   if (bad) return { error: `"${bad}" doesn't look like an email` };
   const eodRecipients = entries.join(", ");
-  await db.insert(appSettings)
-    .values({ id: 1, eodRecipients })
-    .onConflictDoUpdate({ target: appSettings.id, set: { eodRecipients } });
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ eodRecipients }).where(eq(orgs.id, orgId));
   await audit({
-    actor: u.email, entityType: "settings", entityId: 1,
-    action: `EOD recipients: ${eodRecipients || "(none)"}`,
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `${org.name} daily report recipients: ${eodRecipients || "(none)"}`,
   });
   revalidatePath("/settings");
   revalidatePath("/eod");

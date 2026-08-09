@@ -401,6 +401,8 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NU
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
 ALTER TABLE "access_requests" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'access';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "theme_color" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "eod_recipients" text NOT NULL DEFAULT '';
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "asset_id" integer;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "logo_url" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "for_sale" boolean NOT NULL DEFAULT false;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "sale_note" text NOT NULL DEFAULT '';
@@ -451,7 +453,7 @@ CREATE INDEX IF NOT EXISTS "access_requests_instrument_idx" ON "access_requests"
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['tasks','parts','attachments','instrument_gases'] LOOP
+  FOREACH t IN ARRAY ARRAY['tasks','parts','attachments','instrument_gases','eod_updates'] LOOP
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = 'public' AND table_name = t
                  AND column_name = 'instrument_id' AND is_nullable = 'NO') THEN
@@ -467,6 +469,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_instrument_date') THEN
     ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_instrument_date" UNIQUE ("instrument_id","date");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_asset_date') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_asset_date" UNIQUE ("asset_id","date");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'allowlist_entry_unique') THEN
     ALTER TABLE "client_allowlist" ADD CONSTRAINT "allowlist_entry_unique" UNIQUE ("entry");
@@ -613,6 +618,10 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_owner_org_id_orgs_id_fk') THEN
     ALTER TABLE "instruments" ADD CONSTRAINT "instruments_owner_org_id_orgs_id_fk"
       FOREIGN KEY ("owner_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_asset_id_assets_id_fk') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'asset_shares_asset_id_assets_id_fk') THEN
     ALTER TABLE "asset_shares" ADD CONSTRAINT "asset_shares_asset_id_assets_id_fk"
@@ -831,6 +840,24 @@ BEGIN
     WHERE "org" = 'sierra';
   UPDATE "people" SET "org" = COALESCE((SELECT o."name" FROM "orgs" o JOIN "app_settings" s ON o."id" = s."sheet_org_id" WHERE s."id" = 1), 'Client')
     WHERE "org" = 'labzen';
+END $$;
+
+-- ── Migration: the daily report becomes one report per client ───────────────
+-- Recipients used to be a single instance-wide list aimed at one client. Each
+-- organization now carries its own, so /eod can group by client and send each
+-- their own. Move the old list onto the organization it was aimed at. One-time:
+-- editing a list afterwards must survive redeploys.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'settings' AND "entity_id" = 'per-org-eod') THEN
+    UPDATE "orgs" o SET "eod_recipients" = s."eod_recipients"
+      FROM "app_settings" s
+      WHERE s."id" = 1 AND o."id" = s."sheet_org_id" AND btrim(s."eod_recipients") <> '';
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','settings','per-org-eod',
+            'moved the daily report recipients onto the organization they were aimed at - each client now has its own list and its own send button');
+  END IF;
 END $$;
 
 -- ── Migration: per-person roles replace the instance-wide edit toggle ───────

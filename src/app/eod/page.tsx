@@ -1,12 +1,12 @@
 import { redirect } from "next/navigation";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, tasks, parts, instrumentGases, auditLog, appSettings, people, systemShares, orgs } from "@/db/schema";
-import { getSystemLabels } from "@/lib/systemLabel";
+import { eodUpdates, tasks, parts, instrumentGases, auditLog } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
+import { collectEodEntries, eodGroups } from "@/lib/eodEmail";
 import EodPanel from "@/components/EodPanel";
 import EodDateNav from "@/components/EodDateNav";
 
@@ -17,134 +17,89 @@ const mdy = (iso: string) => {
   return `${m}/${d}/${y.slice(2)}`;
 };
 
+/**
+ * One report per client. Each group is the work a client owns, with its own
+ * recipients and its own send button, so nothing can carry one client's systems
+ * into another's email. Updates themselves are written on each system's or
+ * asset's own page and picked up here.
+ */
 export default async function EodPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
   if (!(await getModules()).eod) redirect("/");
-  // Who the report goes to, for the send button's copy.
-  const [reportCfg] = await db.select({ sheetOrgId: appSettings.sheetOrgId }).from(appSettings).where(eq(appSettings.id, 1));
-  const reportClient = reportCfg?.sheetOrgId
-    ? (await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, reportCfg.sheetOrgId)))[0]?.name ?? ""
-    : "";
 
   const { date: dateParam } = await searchParams;
   const today = shopToday();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? dateParam! : today;
   const isToday = date === today;
 
-  const recorded = await db.selectDistinct({ date: eodUpdates.date }).from(eodUpdates).orderBy(desc(eodUpdates.date)).limit(60);
+  const [recorded, groups, recentAudit] = await Promise.all([
+    db.selectDistinct({ date: eodUpdates.date }).from(eodUpdates).orderBy(desc(eodUpdates.date)).limit(60),
+    eodGroups(),
+    db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(400),
+  ]);
   const dates = recorded.map((r) => r.date);
 
-  let systems;
-  let sentInfo = "";
-  let canSend = false;
-  if (isToday) {
-    // Today: every active operator-led system, editable, with autofill
-    // suggestions. Systems led by the client's own people stay out.
-    const [rows, roster, [cfg]] = await Promise.all([
-      db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
-      db.select().from(people),
-      db.select().from(appSettings).where(eq(appSettings.id, 1)),
-    ]);
-    const sheetOrgName = cfg?.sheetOrgId
-      ? (await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, cfg.sheetOrgId)))[0]?.name ?? ""
-      : "";
-    const clientLed = new Set(roster.filter((p) => sheetOrgName && p.org === sheetOrgName).map((p) => p.name));
-    // The report belongs to one organization, so only their systems appear -
-    // matching what composeEodEmail will actually send.
-    const sharedIds = cfg?.sheetOrgId
-      ? new Set((await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
-          .where(eq(systemShares.orgId, cfg.sheetOrgId))).map((r) => r.instrumentId))
-      : null;
-    const active = rows.filter((i) =>
-      !i.stages.includes("Shipped") && !clientLed.has(i.lead) && (sharedIds === null || sharedIds.has(i.id)));
-    const ids = active.map((i) => i.id);
+  // Autofill suggestions come from what actually happened today, so a blank
+  // line is one keystroke from a real update.
+  const tz = process.env.SHOP_TZ || "America/Los_Angeles";
+  const todayAudit = isToday
+    ? recentAudit.filter((a) => a.actor !== "sheet-sync" && a.createdAt.toLocaleDateString("en-CA", { timeZone: tz }) === today)
+    : [];
 
-    const [saved, taskRows, partRows, gasRows, recentAudit, [settings]] = await Promise.all([
-      db.select().from(eodUpdates).where(eq(eodUpdates.date, today)),
-      ids.length ? db.select().from(tasks).where(inArray(tasks.instrumentId, ids)) : Promise.resolve([]),
-      ids.length ? db.select().from(parts).where(inArray(parts.instrumentId, ids)) : Promise.resolve([]),
-      ids.length ? db.select().from(instrumentGases).where(inArray(instrumentGases.instrumentId, ids)) : Promise.resolve([]),
-      db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(400),
-      db.select().from(appSettings).where(eq(appSettings.id, 1)),
-    ]);
+  const built = await Promise.all(groups.map(async (g) => {
+    const entries = await collectEodEntries(date, g.orgId);
+    const sysIds = entries.filter((e) => e.kind === "system").map((e) => e.id);
+    const [taskRows, partRows, gasRows] = isToday && sysIds.length
+      ? await Promise.all([
+          db.select().from(tasks).where(inArray(tasks.instrumentId, sysIds)),
+          db.select().from(parts).where(inArray(parts.instrumentId, sysIds)),
+          db.select().from(instrumentGases).where(inArray(instrumentGases.instrumentId, sysIds)),
+        ])
+      : [[], [], []];
 
-    const labels = await getSystemLabels(active);
-    const labelFor = (i: { id: number; externalId: string }) => {
-      const named = labels.get(i.id) ?? "";
-      return named ? `${i.externalId} - ${named}` : i.externalId;
+    const last = recentAudit.find((a) => a.entityType === "eod" && a.entityId === `${date}:${g.orgId ?? "own"}`);
+    return {
+      orgId: g.orgId,
+      name: g.name,
+      canSend: isToday && !!g.recipients.trim(),
+      recipientCount: g.recipients.split(",").filter((x) => x.trim()).length,
+      sentInfo: last ? `Sent ${shopTime(last.createdAt)} by ${last.actor.split("@")[0]}` : "",
+      entries: entries.map((e) => {
+        if (!isToday || e.kind !== "system") {
+          return { ...e, suggestedUpdate: "", suggestedAction: "" };
+        }
+        const happenings = todayAudit
+          .filter((a) => a.instrumentId === e.id)
+          .reverse()
+          .map((a) => (a.field === "note" && a.newValue ? a.newValue : a.action));
+        const suggestedUpdate = [...new Set(happenings)].slice(0, 6).join("; ");
+        const blocked = taskRows.filter((t) => t.instrumentId === e.id && t.state === "Blocked").map((t) => `Blocked: ${t.title}`);
+        const dueSoon = taskRows
+          .filter((t) => t.instrumentId === e.id && t.state !== "Done" && t.dueDate && t.dueDate <= today)
+          .map((t) => `${t.dueDate < today ? "Overdue" : "Due today"}: ${t.title}`);
+        const waiting = partRows.filter((p) => p.instrumentId === e.id && partOpen(p.status)).map((p) => `${p.name} (${p.status.toLowerCase()})`);
+        const gas = gasRows.filter((gr) => gr.instrumentId === e.id && gasAttention(gr.status)).map((gr) => `${gr.gas} ${gr.status.toLowerCase()}`);
+        return { ...e, suggestedUpdate, suggestedAction: [...dueSoon, ...blocked, ...waiting, ...gas].slice(0, 3).join("; ") };
+      }),
     };
+  }));
 
-    const lastSend = recentAudit.find((a) => a.entityType === "eod" && a.entityId === today);
-    sentInfo = lastSend ? `Sent ${shopTime(lastSend.createdAt)} by ${lastSend.actor.split("@")[0]}` : "";
-    canSend = !!(settings?.eodRecipients ?? "").trim();
-
-    // Today's human activity, in shop time (audit timestamps are UTC).
-    const tz = process.env.SHOP_TZ || "America/Los_Angeles";
-    const todayAudit = recentAudit.filter(
-      (a) => a.actor !== "sheet-sync" && a.createdAt.toLocaleDateString("en-CA", { timeZone: tz }) === today
-    );
-
-    systems = active.map((i) => {
-      const u = saved.find((s) => s.instrumentId === i.id);
-      // Suggested update: what actually happened on this system today, oldest first.
-      const happenings = todayAudit
-        .filter((a) => a.instrumentId === i.id)
-        .reverse()
-        .map((a) => (a.field === "note" && a.newValue ? a.newValue : a.action));
-      const suggestedUpdate = [...new Set(happenings)].slice(0, 6).join("; ");
-      // Suggested action item: blocked work first, then parts in flight, then gas needs.
-      const blocked = taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked").map((t) => `Blocked: ${t.title}`);
-      const dueSoon = taskRows
-        .filter((t) => t.instrumentId === i.id && t.state !== "Done" && t.dueDate && t.dueDate <= today)
-        .map((t) => `${t.dueDate < today ? "Overdue" : "Due today"}: ${t.title}`);
-      const waiting = partRows.filter((p) => p.instrumentId === i.id && partOpen(p.status)).map((p) => `${p.name} (${p.status.toLowerCase()})`);
-      const gas = gasRows.filter((g) => g.instrumentId === i.id && gasAttention(g.status)).map((g) => `${g.gas} ${g.status.toLowerCase()}`);
-      const suggestedAction = [...dueSoon, ...blocked, ...waiting, ...gas].slice(0, 3).join("; ");
-      return {
-        id: i.id,
-        label: labelFor(i),
-        client: i.client,
-        systemUpdate: u?.systemUpdate ?? "",
-        actionItem: u?.actionItem ?? "",
-        skipped: u?.skipped ?? false,
-        suggestedUpdate,
-        suggestedAction,
-      };
-    });
-  } else {
-    // Past day: read-only snapshot of what was recorded.
-    const saved = await db.select().from(eodUpdates).where(eq(eodUpdates.date, date));
-    const ids = saved.map((s) => s.instrumentId);
-    const insts = ids.length
-      ? await db.select().from(instruments).where(inArray(instruments.id, ids)).orderBy(asc(instruments.priority), asc(instruments.externalId))
-      : [];
-    const labels = await getSystemLabels(insts);
-    const labelFor = (i: { id: number; externalId: string }) => {
-      const named = labels.get(i.id) ?? "";
-      return named ? `${i.externalId} - ${named}` : i.externalId;
-    };
-    systems = insts.map((i) => {
-      const u = saved.find((s) => s.instrumentId === i.id)!;
-      return {
-        id: i.id,
-        label: labelFor(i),
-        client: i.client,
-        systemUpdate: u.systemUpdate,
-        actionItem: u.actionItem,
-        skipped: u.skipped,
-        suggestedUpdate: "",
-        suggestedAction: "",
-      };
-    });
-  }
+  // A past day only shows groups that recorded something.
+  const shown = isToday ? built : built.filter((g) => g.entries.some((e) => e.written));
 
   return (
     <div className="container">
       <EodDateNav date={date} today={today} dates={dates} />
-      <EodPanel systems={systems} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
-        canSend={canSend} sentInfo={sentInfo} clientName={reportClient || undefined} />
+      {shown.map((g) => (
+        <EodPanel key={g.orgId ?? "own"} clientName={g.name} orgId={g.orgId}
+          entries={g.entries} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
+          canSend={g.canSend} recipientCount={g.recipientCount} sentInfo={g.sentInfo} />
+      ))}
+      {shown.length === 0 && (
+        <div className="card"><div className="mut" style={{ fontSize: 13 }}>Nothing recorded for this day.</div></div>
+      )}
     </div>
   );
 }

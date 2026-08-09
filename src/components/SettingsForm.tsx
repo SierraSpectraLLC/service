@@ -20,7 +20,7 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 }
 
 type AllowRow = { id: number; entry: string; addedBy: string; orgId: number | null; canEdit: boolean };
-type OrgRow = { id: number; name: string; kind: string; themeColor: string; logoUrl: string; systems: number; logins: number };
+type OrgRow = { id: number; name: string; kind: string; themeColor: string; logoUrl: string; eodRecipients: string; systems: number; logins: number };
 type VocabRow = { id: number; kind: string; assetType: string; name: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
 type PersonRow = { id: number; name: string; email: string; org: string };
@@ -117,7 +117,11 @@ export default function SettingsForm(props: {
   // People roster + EOD recipients.
   const [personDraft, setPersonDraft] = useState({ name: "", email: "", org: props.orgNames[0] ?? "" });
   const [personError, setPersonError] = useState("");
-  const [recipients, setRecipients] = useState(props.eodRecipients);
+  // Each organization has its own daily-report recipients (see the
+  // Organizations rows) - the report is per client, so the list is too.
+  const [recipients, setRecipients] = useState<Record<number, string>>(
+    Object.fromEntries(props.orgs.map((o) => [o.id, o.eodRecipients]))
+  );
   const [recipientsMsg, setRecipientsMsg] = useState("");
   const submitPerson = () => {
     if (!personDraft.name.trim()) return;
@@ -128,10 +132,10 @@ export default function SettingsForm(props: {
       else setPersonDraft({ name: "", email: "", org: personDraft.org });
     });
   };
-  const saveRecipients = () => {
+  const saveRecipients = (orgId: number) => {
     setRecipientsMsg("");
     startTransition(async () => {
-      const res = await updateEodRecipients(recipients);
+      const res = await updateEodRecipients(orgId, recipients[orgId] ?? "");
       setRecipientsMsg(res?.error ?? "Saved ✓");
     });
   };
@@ -216,21 +220,6 @@ export default function SettingsForm(props: {
           <button className="btn sm accent" onClick={submitPerson} disabled={pending || !personDraft.name.trim()}>Add</button>
         </div>
         {personError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{personError}</div>}
-      </div>
-
-      <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>EOD email recipients</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Who the EOD page&apos;s send button emails. Comma-separated.
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input className="mono" value={recipients} onChange={(e) => { setRecipients(e.target.value); setRecipientsMsg(""); }}
-            placeholder="michael@client.com, adam@client.com" style={{ flex: 1, fontSize: 13 }} />
-          <button className="btn sm accent" onClick={saveRecipients} disabled={pending || recipients === props.eodRecipients}>Save</button>
-        </div>
-        {recipientsMsg && (
-          <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
-        )}
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 2, marginBottom: 12 }}>
@@ -426,8 +415,19 @@ export default function SettingsForm(props: {
               <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }} disabled={pending}
                 onClick={() => dropOrg(o)}>remove</button>
             </span>
+            <div style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center" }}>
+              <span className="mut" style={{ fontSize: 11, whiteSpace: "nowrap" }}>Daily report to</span>
+              <input className="mono" value={recipients[o.id] ?? ""}
+                onChange={(e) => { setRecipients((r) => ({ ...r, [o.id]: e.target.value })); setRecipientsMsg(""); }}
+                placeholder="nobody - no report is sent" style={{ flex: 1, fontSize: 12 }} />
+              <button className="btn link" style={{ fontSize: 11 }} disabled={pending || (recipients[o.id] ?? "") === o.eodRecipients}
+                onClick={() => saveRecipients(o.id)}>save</button>
+            </div>
           </div>
         ))}
+        {recipientsMsg && (
+          <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
+        )}
         {props.orgs.length === 0 && (
           <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
             None yet - add one, then share systems with it from each system&apos;s page.
