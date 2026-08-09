@@ -2800,15 +2800,20 @@ export async function deleteVocabTerm(termId: number) {
 
 // ---------------- Settings ----------------
 
-export async function updateSettings(data: { clientAccessEnabled: boolean; clientCanEdit: boolean }) {
+/**
+ * The one master switch: whether clients can sign in at all. What each person
+ * may DO once inside is per-membership now (`client_allowlist.can_edit`), so
+ * the old global `clientCanEdit` column is retired - still in the schema for
+ * compat, read by nothing.
+ */
+export async function updateSettings(data: { clientAccessEnabled: boolean }) {
   const u = await requireOwner();
-  const clientCanEdit = data.clientAccessEnabled ? data.clientCanEdit : false;
   await db.insert(appSettings)
-    .values({ id: 1, clientAccessEnabled: data.clientAccessEnabled, clientCanEdit })
-    .onConflictDoUpdate({ target: appSettings.id, set: { clientAccessEnabled: data.clientAccessEnabled, clientCanEdit } });
+    .values({ id: 1, clientAccessEnabled: data.clientAccessEnabled })
+    .onConflictDoUpdate({ target: appSettings.id, set: { clientAccessEnabled: data.clientAccessEnabled } });
   await audit({
     actor: u.email, entityType: "settings", entityId: 1,
-    action: `client access: view ${data.clientAccessEnabled ? "on" : "off"}, edit ${clientCanEdit ? "on" : "off"}`,
+    action: `client sign-in ${data.clientAccessEnabled ? "on" : "off"}`,
   });
   revalidatePath("/settings");
 }

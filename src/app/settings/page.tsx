@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { appSettings, clientAllowlist, people, vocabTerms, assets, orgs, systemShares } from "@/db/schema";
 import { MODULE_KINDS } from "@/lib/stages";
 import { requireOwner } from "@/lib/authz";
-import { parseList } from "@/auth";
 import { getStageDefs } from "@/lib/stageDefs";
 import SettingsForm from "@/components/SettingsForm";
 
@@ -27,12 +26,9 @@ export default async function SettingsPage() {
     <div className="container" style={{ maxWidth: 620 }}>
       <SettingsForm
         clientAccessEnabled={s?.clientAccessEnabled ?? false}
-        clientCanEdit={s?.clientCanEdit ?? false}
         allowlist={allowRows.map((r) => ({ id: r.id, entry: r.entry, addedBy: r.addedBy, orgId: r.orgId, canEdit: r.canEdit }))}
-        envClients={parseList(process.env.CLIENT_EMAILS)}
         stageDefs={stageDefList}
         people={peopleRows.map((p) => ({ id: p.id, name: p.name, email: p.email, org: p.org }))}
-        eodRecipients={s?.eodRecipients ?? ""}
         orgs={orgRows.map((o) => ({
           id: o.id, name: o.name, kind: o.kind, themeColor: o.themeColor, logoUrl: o.logoUrl, eodRecipients: o.eodRecipients,
           systems: shareCounts.filter((c) => c.orgId === o.id).length,
