@@ -36,7 +36,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
 
   const [recorded, groups, recentAudit] = await Promise.all([
     db.selectDistinct({ date: eodUpdates.date }).from(eodUpdates).orderBy(desc(eodUpdates.date)).limit(60),
-    eodGroups(),
+    eodGroups(date, !isToday),
     db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(400),
   ]);
   const dates = recorded.map((r) => r.date);
@@ -49,7 +49,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     : [];
 
   const built = await Promise.all(groups.map(async (g) => {
-    const entries = await collectEodEntries(date, g.orgId);
+    const entries = await collectEodEntries(date, g.orgId, !isToday);
     const sysIds = entries.filter((e) => e.kind === "system").map((e) => e.id);
     const [taskRows, partRows, gasRows] = isToday && sysIds.length
       ? await Promise.all([
@@ -87,7 +87,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   }));
 
   // A past day only shows groups that recorded something.
-  const shown = isToday ? built : built.filter((g) => g.entries.some((e) => e.written));
+  const shown = isToday ? built : built.filter((g) => g.entries.length > 0);
 
   return (
     <div className="container">

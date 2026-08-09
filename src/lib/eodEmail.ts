@@ -33,24 +33,52 @@ export type EodEntry = {
 };
 
 /**
- * Everything that belongs on one client's report for a date, in report order:
- * their active systems, then updates written on their assets. `orgId` null
- * means the operator's own group - systems nobody else owns.
+ * Does this system belong on `orgId`'s report for the date? The whole
+ * live-versus-history distinction lives here, because getting it wrong loses
+ * records silently: a system that has since shipped, been archived, or been
+ * handed to a client lead has left the ACTIVE set, but its recorded update is
+ * still history and must keep showing. Pure, so it is unit-tested.
  */
-export async function collectEodEntries(date: string, orgId: number | null): Promise<EodEntry[]> {
+export function includesSystem(
+  i: { id: number; ownerOrgId: number | null; archived: boolean; stages: string[]; lead: string },
+  orgId: number | null,
+  historical: boolean,
+  recordedIds: Set<number>,
+  clientLed: Set<string>,
+): boolean {
+  if ((i.ownerOrgId ?? null) !== orgId) return false;
+  // History is driven by what was written, never by today's activity filters.
+  if (historical) return recordedIds.has(i.id);
+  return !i.archived && !i.stages.includes("Shipped") && !clientLed.has(i.lead);
+}
+
+/**
+ * Everything that belongs on one client's report for a date, in report order:
+ * their systems, then updates written on their assets. `orgId` null means the
+ * operator's own group - work nobody else owns.
+ *
+ * `historical` flips where the list comes from, and that distinction matters:
+ * TODAY the page must offer every system still being worked, whether or not
+ * anything is written yet. A PAST DAY must show what was actually recorded,
+ * driven off the saved rows - a system since shipped, archived, reassigned or
+ * handed to a client lead has left the active set, and reading history through
+ * today's filters would silently erase its entry.
+ */
+export async function collectEodEntries(date: string, orgId: number | null, historical = false): Promise<EodEntry[]> {
   const [rows, saved, roster, orgRow] = await Promise.all([
-    db.select().from(instruments).where(eq(instruments.archived, false))
-      .orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    // All systems: includesSystem decides, so an archived-but-recorded one is
+    // still reachable in history.
+    db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
     db.select().from(people),
     orgId === null ? Promise.resolve(undefined) : db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0]),
   ]);
 
   // Systems led by one of the client's own people are theirs to report on, not
-  // the operator's.
+  // the operator's - a live-report rule only, never applied to history.
   const clientLed = new Set(roster.filter((p) => orgRow?.name && p.org === orgRow.name).map((p) => p.name));
-  const mine = rows.filter((i) =>
-    (i.ownerOrgId ?? null) === orgId && !i.stages.includes("Shipped") && !clientLed.has(i.lead));
+  const recorded = new Set(saved.filter((s) => s.instrumentId !== null).map((s) => s.instrumentId as number));
+  const mine = rows.filter((i) => includesSystem(i, orgId, historical, recorded, clientLed));
 
   const labels = await getSystemLabels(mine);
   const entries: EodEntry[] = mine.map((i) => {
@@ -65,13 +93,15 @@ export async function collectEodEntries(date: string, orgId: number | null): Pro
     };
   });
 
-  // Asset-level updates: a standalone unit this org owns, written on its own
-  // page. Assets sitting on a system are covered by that system's line.
+  // Asset-level updates: a unit this org owns, written on its own page. Live,
+  // only shelf units get their own line (one on a system is covered by that
+  // system's); in history every recorded line stands, wherever the unit sits
+  // now.
   const assetUpdates = saved.filter((s) => s.assetId !== null);
   if (assetUpdates.length) {
     const ids = assetUpdates.map((s) => s.assetId!) as number[];
     const owned = (await db.select().from(assets).where(inArray(assets.id, ids)))
-      .filter((a) => (a.ownerOrgId ?? null) === orgId && a.instrumentId === null);
+      .filter((a) => (a.ownerOrgId ?? null) === orgId && (historical || a.instrumentId === null));
     for (const a of owned) {
       const u = assetUpdates.find((s) => s.assetId === a.id)!;
       entries.push({
@@ -86,18 +116,30 @@ export async function collectEodEntries(date: string, orgId: number | null): Pro
   return entries;
 }
 
-/** Which client groups exist for a date: every org that owns active work, plus the operator's own. */
-export async function eodGroups(): Promise<{ orgId: number | null; name: string; recipients: string }[]> {
-  const [rows, orgRows, brand, standalone] = await Promise.all([
-    db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.archived, false)),
+/**
+ * Which client groups a date has. Today: every org that owns active work, so
+ * nothing waiting to be written is missed. A past day: every org that owns
+ * something which recorded an update, so a client with no active systems left
+ * still shows the history they have.
+ */
+export async function eodGroups(date: string, historical = false): Promise<{ orgId: number | null; name: string; recipients: string }[]> {
+  const [rows, orgRows, brand, standalone, saved] = await Promise.all([
+    db.select({ id: instruments.id, ownerOrgId: instruments.ownerOrgId, archived: instruments.archived }).from(instruments),
     db.select().from(orgs).orderBy(asc(orgs.name)),
     getBrand(),
-    db.select({ ownerOrgId: assets.ownerOrgId }).from(assets).where(isNull(assets.instrumentId)),
+    db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId }).from(assets)
+      .where(historical ? undefined : isNull(assets.instrumentId)),
+    historical ? db.select().from(eodUpdates).where(eq(eodUpdates.date, date)) : Promise.resolve([]),
   ]);
-  const owners = new Set<number | null>([
-    ...rows.map((r) => r.ownerOrgId ?? null),
-    ...standalone.map((r) => r.ownerOrgId ?? null),
-  ]);
+  const owners = historical
+    ? new Set<number | null>([
+        ...rows.filter((r) => saved.some((s) => s.instrumentId === r.id)).map((r) => r.ownerOrgId ?? null),
+        ...standalone.filter((a) => saved.some((s) => s.assetId === a.id)).map((a) => a.ownerOrgId ?? null),
+      ])
+    : new Set<number | null>([
+        ...rows.filter((r) => !r.archived).map((r) => r.ownerOrgId ?? null),
+        ...standalone.map((r) => r.ownerOrgId ?? null),
+      ]);
   const groups: { orgId: number | null; name: string; recipients: string }[] = [];
   // The operator's own group first: house-stewarded work, reported internally.
   if (owners.has(null)) {
@@ -114,7 +156,7 @@ export async function composeEodEmail(date: string, dateMDY: string, orgId: numb
   subject: string; html: string; filled: number; total: number;
 }> {
   const brand = await getBrand();
-  const entries = await collectEodEntries(date, orgId);
+  const entries = await collectEodEntries(date, orgId, false);
   const included = entries.filter((e) => !e.skipped);
   const url = appUrl();
 
