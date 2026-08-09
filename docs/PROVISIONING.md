@@ -49,20 +49,26 @@ safe to leave scheduled on every instance.
 
 ## 4. First sign-in checklist (as the owner)
 
+Settings has two halves: **Configuration** (`/settings`) is the instance
+itself, **Personnel** (`/settings/personnel`) is who is on it. Each
+organization then has its own page at `/settings/organizations/<id>`, which is
+also the page that organization's own editors get.
+
 1. Sign in with the first `STAFF_EMAILS` address (magic link).
-2. **Settings → Platform identity**: name the instance; set the tagline.
-3. **Settings → Organizations**: create the operator's own org (kind
-   `provider`) and set it as **Operated by** — its name and logo go on
-   sign-off packets and reports. Create the first client org(s).
-4. **Settings → Client sign-in**: switch on; invite the first people (each
-   entry picks an organization and an editor/viewer role — invitations email
-   automatically).
-5. **Settings → Modules**: switch on EOD / digest / sheet sync only if this
-   operator wants them. Fresh instances have all three off.
+2. **Configuration → This instance**: name the instance; set the tagline.
+3. **Personnel → Organizations**: create the operator's own org (kind
+   `provider`), then set it as **Operated by** back in Configuration — its
+   name and logo go on sign-off packets and reports. Create the first client
+   org(s).
+4. **Personnel → Client sign-in**: switch the master toggle on. Then open each
+   organization and invite its people from its own page (each entry gets an
+   editor/viewer role; invitations email automatically).
+5. **Configuration → Modules**: switch on EOD / digest / sheet sync only if
+   this operator wants them. Fresh instances have all three off.
 6. **/import**: bring the fleet in from their spreadsheet (template on the
    page). Assets and systems land with ownership and shares handled.
-7. Upload the operator org's logo (dashboard → Workspace appearance while
-   viewing as that org, or Settings → Organizations color/logo controls).
+7. Upload the operator org's logo on its own settings page (Workspace
+   appearance).
 
 ## 5. Smoke checks before handing over
 
@@ -76,6 +82,11 @@ safe to leave scheduled on every instance.
   reports create actions and no errors.
 - Trigger `api/cron/daily-digest` with the `CRON_SECRET` header → `skipped`
   unless the module is on.
+- Discussion privacy, worth checking once per instance because it is the thing
+  customers ask about: post on a shared system as staff with **Internal** on,
+  then view the system as the client org (view-as) → the post is absent, and
+  the activity feed says a note was posted without quoting it. On
+  `/discussions`, confirm a client sees only their own room.
 
 ## Notes
 
@@ -85,5 +96,8 @@ safe to leave scheduled on every instance.
 - **Blob URLs** are public-but-unguessable underneath the `/api/files` proxy;
   the app never renders a raw URL. Treat the proxy as the only supported way
   to reach files.
+- **Internal posts are private from the operator too.** That is deliberate: it
+  is what makes the feature worth anything to a customer. The operator can see
+  that an internal note exists (in the audit log) but never its text.
 - Deleting an instance: snapshot the Neon database first — the audit log is
   the customer's record.

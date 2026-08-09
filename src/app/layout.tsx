@@ -77,6 +77,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
+                {/* An organization's editors configure their own workspace and
+                    people on the same page the owner uses. */}
+                {!isStaff && user.role === "client_editor" && user.orgId !== null && (
+                  <Link className="btn sm" href={`/settings/organizations/${user.orgId}`} style={{ textDecoration: "none" }}>
+                    Settings
+                  </Link>
+                )}
                 {isStaff && (
                   <NavMore items={[
                     { href: "/checkout", label: "Checkout" },
