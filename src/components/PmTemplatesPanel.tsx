@@ -69,12 +69,7 @@ export default function PmTemplatesPanel({ templates, assetTypes, modelOptions }
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 4 }}>Maintenance templates</div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-        What a model needs, written once. Every unit of the type gets the schedule - existing ones now, new
-        ones as they&apos;re added. Narrow the scope to give specific models their own version of a job (same
-        task, different part number). Editing or removing a template never touches schedules already on units.
-      </div>
+      <div className="card-title" style={{ marginBottom: 10 }}>Maintenance templates</div>
 
       {types.map((type) => {
         const ofType = templates.filter((t) => t.assetType === type);

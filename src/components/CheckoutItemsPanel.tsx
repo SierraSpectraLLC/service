@@ -290,14 +290,6 @@ export default function CheckoutItemsPanel({ items, assetTypes, modelOptions }: 
         );
       })}
 
-      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
-        Missing a module type? Define it in Settings → Catalog and it appears here.
-      </div>
-      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
-        A category matches assets of that type by name - give an asset the type &quot;N2 generator&quot; and its
-        items are created when one is added. New categories stick once their first item is saved.
-      </div>
-
       {sheet && (
         <>
           <div className="scrim" onClick={() => setSheet(null)} />

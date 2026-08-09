@@ -91,7 +91,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     { href: "/archive", label: "Archived" },
                     ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
                     ...(user.role === "owner"
-                      ? [{ href: "/admin/access", label: "Access & ownership" }, { href: "/settings", label: "Settings" }]
+                      ? [{ href: "/settings", label: "Settings" }]
                       // Staff curate the catalog and procedures; the rest of
                       // Settings is the owner's.
                       : [{ href: "/settings/catalog", label: "Catalog & procedures" }]),

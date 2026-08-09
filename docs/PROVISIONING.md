@@ -56,7 +56,9 @@ Settings has four parts, split by how often each changes: **Configuration**
 (`/settings/personnel`) is who is on it, changing weekly; **Catalog**
 (`/settings/catalog`) is the equipment reference and **Procedures**
 (`/settings/procedures`) is what gets done to equipment (checkout tests and
-maintenance templates) - both curated forever, by the owner AND staff. The
+maintenance templates) - both curated forever, by the owner AND staff;
+**Admin** (`/settings/admin`) is the operator's override on every system's
+ownership and visibility, owner only. The
 catalog is the only place types, models and categories are defined: every
 picker references it and none accepts free text. Each
 organization then has its own page at `/settings/organizations/<id>`, which is
