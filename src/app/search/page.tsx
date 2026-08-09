@@ -8,7 +8,11 @@ import {
 import { requireUser } from "@/lib/authz";
 import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { getSystemLabels } from "@/lib/systemLabel";
+import { findOutsideMatches } from "@/lib/serialLookup";
+import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
+import { MODULE_KINDS } from "@/lib/stages";
 import SearchBox from "@/components/SearchBox";
+import { RequestAccessCard, CreateSystemForm } from "@/components/LookupPanels";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +20,12 @@ export const dynamic = "force-dynamic";
 // own link and a "where it lives" line rather than an id we reinterpret.
 type Hit = { id: number; group: string; title: string; sub: string; href: string; where: string };
 
-/** One box over everything: serials, POs, parts, tasks, modules, files, posts, history. */
+/**
+ * One box over everything: serials, POs, parts, tasks, modules, files, posts,
+ * history. An exact serial that belongs to a unit outside the viewer's
+ * workspace also surfaces here, as a request-access / claim / listing card -
+ * there is one place to type a serial, not two.
+ */
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
@@ -108,6 +117,15 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   }
 
   const groups = [...new Set(hits.map((h) => h.group))];
+  // The cross-workspace half: an exact serial elsewhere on the platform.
+  const outside = q.length >= MIN_SERIAL_LOOKUP ? await findOutsideMatches(user, q) : [];
+  // Nobody on the platform has this serial: offer to start its record, the way
+  // a provider picks up an instrument whose owner isn't here yet.
+  const serialUnknown = q.length >= MIN_SERIAL_LOOKUP && hits.length === 0 && outside.length === 0;
+  const mayCreate = serialUnknown && user.role !== "client_viewer";
+  const kinds = mayCreate
+    ? [...new Set([...MODULE_KINDS, ...(await db.selectDistinct({ kind: assets.kind }).from(assets)).map((k) => k.kind)].filter(Boolean))]
+    : [];
 
   return (
     <div className="container" style={{ maxWidth: 720 }}>
@@ -136,8 +154,38 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         </div>
       ))}
 
-      {q.length >= 2 && hits.length === 0 && (
-        <div className="card"><div className="mut" style={{ fontSize: 13 }}>Nothing found.</div></div>
+      {outside.length > 0 && (
+        <div className="card">
+          <div className="eyebrow" style={{ marginBottom: 2 }}>That serial, in another workspace</div>
+          {outside.map((m, i) => (
+            <div key={i}>
+              {m.listing && (
+                <div style={{ border: "1px solid #BFDDBF", background: "#F3FAF3", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <b style={{ fontSize: 14, color: "var(--navy)" }}>{m.desc}</b>
+                    <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+                  </div>
+                  {m.listing.note && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{m.listing.note}</div>}
+                  <a href={`/listing/${m.listing.token}`} target="_blank" rel="noreferrer" className="btn sm accent"
+                    style={{ display: "inline-block", marginTop: 8, textDecoration: "none" }}>View listing</a>
+                </div>
+              )}
+              {m.instrumentId !== null && (
+                <RequestAccessCard serial={q} assetDesc={m.desc} requested={m.requested}
+                  canClaim={user.orgKind !== ""} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {q.length >= 2 && hits.length === 0 && outside.length === 0 && (
+        <div className="card">
+          <div className="mut" style={{ fontSize: 13 }}>
+            Nothing found.{q.length < MIN_SERIAL_LOOKUP ? " Serial numbers need at least 4 characters." : ""}
+          </div>
+          {mayCreate && <CreateSystemForm serial={q} kinds={kinds} />}
+        </div>
       )}
     </div>
   );

@@ -76,7 +76,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <Link className="btn sm" href="/discussions" style={{ textDecoration: "none" }}>Discussion</Link>
                 <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
-                <Link className="btn sm" href="/lookup" style={{ textDecoration: "none" }}>Lookup</Link>
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {isStaff && (
                   <NavMore items={[
