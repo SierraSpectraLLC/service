@@ -86,6 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 )}
                 {isStaff && (
                   <NavMore items={[
+                    { href: "/maintenance", label: "Maintenance" },
                     { href: "/checkout", label: "Checkout" },
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },

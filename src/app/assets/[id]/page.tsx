@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs, eodUpdates,
+  pmSchedules,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
@@ -22,6 +23,7 @@ import GasPanel from "@/components/GasPanel";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
+import MaintenancePanel from "@/components/MaintenancePanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import RunCheckoutButton from "@/components/RunCheckoutButton";
@@ -100,6 +102,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
   const target = { instrumentId: null, assetId: asset.id };
+  // The unit's own recurring upkeep, wherever it currently sits.
+  const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId)).orderBy(asc(pmSchedules.nextDue));
 
   const fullTasks = taggedTasks.map((t) => ({
     ...t,
@@ -129,9 +133,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         <span style={{ marginLeft: "auto" }} />
         {canEdit && <RunCheckoutButton assetId={asset.id} />}
         {isStaff && (
-          <Link href={`/assets/${asset.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
-            Sign-off packet
-          </Link>
+          <>
+            <Link href={`/assets/${asset.id}/label`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
+              Label
+            </Link>
+            <Link href={`/assets/${asset.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
+              Sign-off packet
+            </Link>
+          </>
         )}
       </div>
 
@@ -197,6 +206,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
       <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
         systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+
+      <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
+        people={peopleRows.map((p) => p.name)}
+        schedules={pmRows.map((s) => ({
+          id: s.id, title: s.title, body: s.body, assignee: s.assignee,
+          everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+          openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
+        }))} />
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Service history</div>

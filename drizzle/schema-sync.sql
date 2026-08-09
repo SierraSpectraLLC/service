@@ -235,6 +235,20 @@ CREATE TABLE IF NOT EXISTS "discussion_reads" (
   "thread_id" integer NOT NULL,
   "last_seen_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "pm_schedules" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer,
+  "asset_id" integer,
+  "title" text NOT NULL,
+  "body" text NOT NULL DEFAULT '',
+  "assignee" text NOT NULL DEFAULT '',
+  "every_days" integer NOT NULL,
+  "next_due" text NOT NULL,
+  "last_done" text NOT NULL DEFAULT '',
+  "paused" boolean NOT NULL DEFAULT false,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "people" (
   "id" serial PRIMARY KEY NOT NULL,
   "name" text NOT NULL,
@@ -421,6 +435,7 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "operator_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "author_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "audience" text NOT NULL DEFAULT 'all';
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "room_org_id" integer;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -436,6 +451,8 @@ CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
 CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "pm_instrument_idx" ON "pm_schedules" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "pm_asset_idx" ON "pm_schedules" ("asset_id");
 CREATE INDEX IF NOT EXISTS "time_instrument_idx" ON "time_entries" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "assets_instrument_idx" ON "assets" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "asset_events_asset_idx" ON "asset_events" ("asset_id");
@@ -577,6 +594,18 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_asset_id_assets_id_fk') THEN
+    ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_pm_schedule_id_pm_schedules_id_fk') THEN
+    ALTER TABLE "tasks" ADD CONSTRAINT "tasks_pm_schedule_id_pm_schedules_id_fk"
+      FOREIGN KEY ("pm_schedule_id") REFERENCES "pm_schedules"("id") ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_author_org_id_orgs_id_fk') THEN
     ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_author_org_id_orgs_id_fk"

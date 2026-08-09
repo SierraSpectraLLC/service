@@ -10,8 +10,10 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
-  checkoutItems, engagementRecords, accessRequests, assetShares,
+  checkoutItems, engagementRecords, accessRequests, assetShares, pmSchedules,
 } from "@/db/schema";
+import { advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
+import { generateDuePmTasks } from "@/lib/pmGenerate";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -882,9 +884,10 @@ export async function updateTask(taskId: number, data: { title: string; body: st
 export async function deleteTask(taskId: number, reason: string): Promise<{ error?: string }> {
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t) { await requireStaff(); return {}; }
-  // Checkout tests are auto-generated, so any editor may clear ones that
-  // don't apply; hand-written tasks stay staff-only to delete.
-  const u = t.origin === "checkout" ? await requireEditor() : await requireStaff();
+  // Checkout tests and PM tasks are auto-generated, so any editor may clear
+  // ones that don't apply (a still-due PM schedule just regenerates on the
+  // next run); hand-written tasks stay staff-only to delete.
+  const u = t.origin === "checkout" || t.origin === "pm" ? await requireEditor() : await requireStaff();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
   await assertWorkEditable(u, t);
@@ -914,7 +917,117 @@ export async function setTaskState(taskId: number, state: string) {
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
     action: `set task '${t.title}' to ${state}${suffix}`, field: "state", oldValue: t.state, newValue: state,
   });
+  // Completing scheduled maintenance advances its schedule - from the day the
+  // work was DONE, so doing it late doesn't owe the next one early. Reopening
+  // the task deliberately does not roll the schedule back: the work happened,
+  // and the reopen is bookkeeping about that occurrence, not a new cycle.
+  if (state === "Done" && t.pmScheduleId !== null) {
+    const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, t.pmScheduleId));
+    if (s) {
+      const today = shopToday();
+      const nextDue = advancePm(today, s.everyDays);
+      await db.update(pmSchedules).set({ lastDone: today, nextDue }).where(eq(pmSchedules.id, s.id));
+      await audit({
+        actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: s.id,
+        action: `maintenance '${s.title}' done - next due ${nextDue} (${cadenceLabel(s.everyDays)})`,
+        field: "nextDue", oldValue: s.nextDue, newValue: nextDue,
+      });
+    }
+  }
   revWork(t);
+}
+
+// ---------------- Maintenance schedules ----------------
+// The calendar half of PM: schedules live on a system or standalone asset and
+// the daily cron (plus every mutation below) turns due ones into ordinary
+// tasks via lib/pmGenerate. Same visibility rules as the tasks they produce.
+
+export async function addPmSchedule(
+  target: WorkTarget,
+  data: { title: string; body: string; assignee: string; everyDays: number | string; firstDue: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!data.title.trim()) return { error: "Title required" };
+  const cadence = parseCadence(data.everyDays);
+  if ("error" in cadence) return cadence;
+  const firstDue = data.firstDue.trim();
+  if (!isIsoDay(firstDue)) return { error: "Pick a first due date" };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const [s] = await db.insert(pmSchedules).values({
+    instrumentId: t0.instrumentId, assetId: t0.assetId,
+    title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
+    everyDays: cadence.days, nextDue: firstDue, createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "pm", entityId: s.id,
+    action: `scheduled maintenance '${s.title}' ${cadenceLabel(s.everyDays)}${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}, first due ${firstDue}${s.assignee ? `, assigned ${s.assignee}` : ""}`,
+  });
+  // Due today (or created already overdue): the task exists before the page
+  // reloads, not after tomorrow's cron.
+  await generateDuePmTasks(shopToday(), u.email);
+  revWork(s);
+  return {};
+}
+
+export async function updatePmSchedule(
+  id: number,
+  data: { assignee: string; everyDays: number | string; nextDue: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, id));
+  if (!s) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  const cadence = parseCadence(data.everyDays);
+  if ("error" in cadence) return cadence;
+  const nextDue = data.nextDue.trim();
+  if (!isIsoDay(nextDue)) return { error: "Pick a next due date" };
+  const assignee = data.assignee.trim();
+  if (s.everyDays === cadence.days && s.nextDue === nextDue && s.assignee === assignee) return {};
+  await db.update(pmSchedules).set({ everyDays: cadence.days, nextDue, assignee }).where(eq(pmSchedules.id, id));
+  await audit({
+    actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: id,
+    action: `rescheduled maintenance '${s.title}': ${cadenceLabel(cadence.days)}, next due ${nextDue}${assignee !== s.assignee ? `, assigned ${assignee || "nobody"}` : ""}`,
+    field: "nextDue", oldValue: `${s.nextDue} (${cadenceLabel(s.everyDays)})`, newValue: `${nextDue} (${cadenceLabel(cadence.days)})`,
+  });
+  await generateDuePmTasks(shopToday(), u.email);
+  revWork(s);
+  return {};
+}
+
+export async function setPmPaused(id: number, paused: boolean): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, id));
+  if (!s || s.paused === paused) return {};
+  await assertWorkEditable(u, s);
+  await db.update(pmSchedules).set({ paused }).where(eq(pmSchedules.id, id));
+  await audit({
+    actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: id,
+    action: `${paused ? "paused" : "resumed"} maintenance '${s.title}'${paused ? "" : ` - next due ${s.nextDue}`}`,
+    field: "paused", oldValue: String(s.paused), newValue: String(paused),
+  });
+  if (!paused) await generateDuePmTasks(shopToday(), u.email);
+  revWork(s);
+  return {};
+}
+
+export async function removePmSchedule(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, id));
+  if (!s) return {};
+  await assertWorkEditable(u, s);
+  // Tasks already generated survive (FK sets their schedule null): work that
+  // was asked for doesn't vanish because the recurrence ended.
+  await db.delete(pmSchedules).where(eq(pmSchedules.id, id));
+  await audit({
+    actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: id,
+    action: `removed maintenance schedule '${s.title}' (${cadenceLabel(s.everyDays)}) - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revWork(s);
+  return {};
 }
 
 export async function assignTask(taskId: number, assignee: string) {

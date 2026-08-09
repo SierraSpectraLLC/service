@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
+  pmSchedules,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -22,6 +23,7 @@ import ActivityFeed from "@/components/ActivityFeed";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
+import MaintenancePanel from "@/components/MaintenancePanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
@@ -68,6 +70,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       .where(eq(systemShares.instrumentId, instId)).orderBy(asc(orgs.name)),
     db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
   ]);
+  const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.instrumentId, instId)).orderBy(asc(pmSchedules.nextDue));
   if (!inst) notFound();
 
   // An asset can carry work of its own (recorded on its page, with no system).
@@ -146,6 +149,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           <>
             <span style={{ marginLeft: "auto" }} />
             {modules.sheetSync && <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />}
+            <Link href={`/instruments/${inst.id}/label`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
+              Label
+            </Link>
             <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
               Sign-off packet
             </Link>
@@ -205,6 +211,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))} />
 
       <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+
+      <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
+        people={peopleRows.map((p) => p.name)}
+        schedules={pmRows.map((s) => ({
+          id: s.id, title: s.title, body: s.body, assignee: s.assignee,
+          everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+          openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
+        }))} />
 
       <DiscussionPanel
         instrumentId={inst.id}
