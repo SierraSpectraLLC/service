@@ -1,15 +1,16 @@
-// The two write paths of preventive maintenance:
+// The recurring half of the procedure catalog, plus the daily task generator.
 //
 // generateDuePmTasks - turns due schedules into ordinary tasks. Called by the
 // daily cron and again right after a schedule is created or rescheduled, so
 // "due today" never waits for tomorrow's run.
 //
-// applyPmTemplates - stamps a model's template schedules onto one asset.
+// applyProcedures - stamps every matching recurring procedure onto one asset.
 // Called when an asset is created (including CSV import, which goes through
-// the same action) and, across all matching assets, when a template is
-// created. A template names the MODEL's upkeep; the schedule it stamps out is
-// the UNIT's, and from then on it belongs to the unit - retuning or deleting
-// the template deliberately leaves existing schedules alone.
+// the same action) and, across the fleet, when a recurring procedure is
+// created. A procedure names the MODEL's upkeep; the schedule it stamps out
+// is the UNIT's, and from then on it belongs to the unit - editing or
+// deleting the procedure leaves existing schedules alone unless the editor
+// explicitly opts in (see updateProcedure).
 //
 // One open task per schedule, ever: if the last generated task is still open,
 // a due schedule generates nothing. That's the difference between a reminder
@@ -17,11 +18,12 @@
 // not three copies of it.
 import { and, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, instruments, pmSchedules, pmTemplates, tasks } from "@/db/schema";
+import { assets, instruments, pmSchedules, procedures, tasks } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { notifyTaskAssigned } from "@/lib/notify";
 import { addDays } from "@/lib/pm";
-import { scopeMatches } from "@/lib/checkout";
+import { scopeMatches, summarizeItem } from "@/lib/checkout";
+import { parseProcParts, partLabel, schedulePartsOf, serializeProcParts } from "@/lib/procedures";
 
 export async function generateDuePmTasks(today: string, actor: string): Promise<{ created: number }> {
   const due = await db.select().from(pmSchedules)
@@ -56,9 +58,10 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
   for (const s of due) {
     if (alreadyOpen.has(s.id)) continue;
     const onSystem = s.instrumentId ?? assetRows.find((r) => r.id === s.assetId)?.instrumentId ?? null;
-    // The part travels on the task, so whoever picks it up has the number in
+    // The parts travel on the task, so whoever picks it up has the numbers in
     // front of them instead of in a binder.
-    const partLine = s.partNumber ? `Part: ${s.partName ? `${s.partName} ` : ""}PN ${s.partNumber}` : "";
+    const parts = schedulePartsOf(s);
+    const partLine = parts.length ? `Part${parts.length === 1 ? "" : "s"}: ${parts.map(partLabel).join(", ")}` : "";
     const [t] = await db.insert(tasks).values({
       instrumentId: onSystem, assetId: s.assetId,
       title: s.title, body: [s.body, partLine].filter(Boolean).join("\n"),
@@ -84,40 +87,55 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
 }
 
 /**
- * Stamp every matching template onto one asset. Dedupe is per unit, by
- * template AND by title, so a hand-written "Replace plunger seals" blocks the
- * template's copy instead of doubling it - same rule checkout generation uses.
- * The first cycle lands one cadence out: a unit entering the shop was just
- * looked at, it doesn't need day-one maintenance.
+ * Stamp every matching recurring procedure onto one asset. Dedupe is per
+ * unit, by procedure AND by title, so a hand-written "Replace plunger seals"
+ * blocks the catalog's copy instead of doubling it. The first cycle lands one
+ * cadence out: a unit entering the shop was just looked at, it doesn't need
+ * day-one maintenance. (Recurring matching is simple scope-match - the
+ * replace-semantics of intake generation stay with intake, where changing
+ * them would change what fires on real units.)
  */
-export async function applyPmTemplates(assetId: number, today: string, actor: string): Promise<{ created: number }> {
+export async function applyProcedures(assetId: number, today: string, actor: string): Promise<{ created: number }> {
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return { created: 0 };
-  const tpls = await db.select().from(pmTemplates).where(eq(pmTemplates.assetType, a.kind));
-  const matching = tpls.filter((t) => t.modelScope.length === 0 || scopeMatches(t.modelScope, a.model));
+  const rows = await db.select().from(procedures)
+    .where(and(eq(procedures.assetType, a.kind), isNotNull(procedures.intervalDays)));
+  const matching = rows.filter((p) => p.modelScope.length === 0 || scopeMatches(p.modelScope, a.model));
   if (!matching.length) return { created: 0 };
 
   const existing = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId));
   const titles = new Set(existing.map((s) => s.title.toLowerCase()));
-  const fromTemplate = new Set(existing.flatMap((s) => (s.templateId !== null ? [s.templateId] : [])));
-  const fresh = matching.filter((t) => !fromTemplate.has(t.id) && !titles.has(t.title.toLowerCase()));
+  const stamped = new Set(existing.flatMap((s) => (s.procedureId !== null ? [s.procedureId] : [])));
+  const fresh = matching.filter((p) => !stamped.has(p.id) && !titles.has(p.name.toLowerCase()));
 
   let created = 0;
-  for (const t of fresh) {
+  for (const p of fresh) {
+    // A recurring TEST becomes a schedule whose tasks carry the criteria in
+    // the body - the schedule engine only makes tasks, so the pass/target
+    // line rides along as text.
+    const body = [p.kind === "test" ? summarizeItem(p) : "", p.notes].filter(Boolean).join("\n");
     await db.insert(pmSchedules).values({
       instrumentId: null, assetId,
-      title: t.title, body: t.body, everyDays: t.everyDays,
-      nextDue: addDays(today, t.everyDays),
-      partName: t.partName, partNumber: t.partNumber,
-      templateId: t.id, createdBy: actor,
+      title: p.name, body, everyDays: p.intervalDays!,
+      nextDue: addDays(today, p.intervalDays!),
+      parts: serializeProcParts(parseProcParts(p.parts)),
+      procedureId: p.id, createdBy: actor,
     });
     created++;
   }
   if (created) {
     await audit({
       actor, instrumentId: a.instrumentId, assetId, entityType: "pm", entityId: assetId,
-      action: `applied ${created} maintenance template${created === 1 ? "" : "s"} to ${a.kind}${a.model ? ` ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
+      action: `applied ${created} recurring procedure${created === 1 ? "" : "s"} to ${a.kind}${a.model ? ` ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
     });
   }
   return { created };
+}
+
+/** Backfill one recurring procedure across every unit of its type. */
+export async function backfillProcedure(assetType: string, today: string, actor: string): Promise<number> {
+  const fleet = await db.select({ id: assets.id }).from(assets).where(eq(assets.kind, assetType));
+  let applied = 0;
+  for (const a of fleet) applied += (await applyProcedures(a.id, today, actor)).created;
+  return applied;
 }

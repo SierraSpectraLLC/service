@@ -1,32 +1,30 @@
-import { asc, eq } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { checkoutItems, pmTemplates, vocabTerms } from "@/db/schema";
+import { procedures, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { parseProcParts } from "@/lib/procedures";
 import SettingsTabs from "@/components/SettingsTabs";
-import CheckoutItemsPanel from "@/components/CheckoutItemsPanel";
-import PmTemplatesPanel from "@/components/PmTemplatesPanel";
+import ProceduresPanel from "@/components/ProceduresPanel";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Settings > Procedures: what happens to equipment, per type and model - the
- * one-time checkout tests a unit passes before it ships, and the recurring
- * maintenance it needs forever after. Both key on the Catalog tab's types and
- * models; neither accepts a type or model the catalog doesn't know.
+ * Settings > Procedures: one catalog of what gets done to equipment, per
+ * module type and model. WHEN a procedure fires - once at intake, on a
+ * cadence, or both - is a property of the row, not a separate page. Types and
+ * models come from the Catalog tab; nothing here accepts free text.
  */
 export default async function ProceduresPage() {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
 
-  const [itemRows, templates, terms] = await Promise.all([
-    db.select().from(checkoutItems)
-      .orderBy(asc(checkoutItems.assetType), asc(checkoutItems.position), asc(checkoutItems.id)),
-    db.select().from(pmTemplates).orderBy(asc(pmTemplates.assetType), asc(pmTemplates.title)),
+  const [rows, terms] = await Promise.all([
+    db.select().from(procedures)
+      .orderBy(asc(procedures.assetType), asc(procedures.position), asc(procedures.id)),
     db.select().from(vocabTerms).orderBy(asc(vocabTerms.name)),
   ]);
 
-  // Types and models come from the catalog alone - the point of having one.
   const assetTypes = terms.filter((t) => t.kind === "asset_type").map((t) => t.name);
   const modelOptions: Record<string, string[]> = {};
   for (const t of terms) {
@@ -37,16 +35,17 @@ export default async function ProceduresPage() {
   return (
     <div className="container" style={{ maxWidth: 720 }}>
       <SettingsTabs active="procedures" isOwner={user.role === "owner"} />
-      <CheckoutItemsPanel
+      <ProceduresPanel
         assetTypes={assetTypes}
-        items={itemRows.map((i) => ({
-          id: i.id, assetType: i.assetType, kind: i.kind, name: i.name, position: i.position,
-          resultType: i.resultType, target: i.target, tolerancePct: i.tolerancePct,
-          requiresNote: i.requiresNote, consumesPart: i.consumesPart, modelScope: i.modelScope,
-        }))}
         modelOptions={modelOptions}
+        items={rows.map((r) => ({
+          id: r.id, assetType: r.assetType, kind: r.kind, name: r.name, notes: r.notes, position: r.position,
+          resultType: r.resultType, target: r.target, tolerancePct: r.tolerancePct,
+          requiresNote: r.requiresNote, consumesPart: r.consumesPart,
+          runsAtIntake: r.runsAtIntake, intervalDays: r.intervalDays,
+          parts: parseProcParts(r.parts), modelScope: r.modelScope,
+        }))}
       />
-      <PmTemplatesPanel templates={templates} assetTypes={assetTypes} modelOptions={modelOptions} />
     </div>
   );
 }

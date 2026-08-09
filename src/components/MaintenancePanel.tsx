@@ -9,7 +9,8 @@ import { cadenceLabel } from "@/lib/pm";
 export type PmRow = {
   id: number; title: string; body: string; assignee: string;
   everyDays: number; nextDue: string; lastDone: string; paused: boolean;
-  partName: string; partNumber: string;
+  /** All parts the job takes (procedure-stamped or the hand-made single pair). */
+  parts: { name: string; number: string }[];
   /** Set when a schedule shown on a system page actually lives on one of its assets. */
   onAsset?: string;
   /** An open generated task is the schedule "in flight". */
@@ -37,7 +38,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "90", firstDue: today, partName: "", partNumber: "" });
-  const [requested, setRequested] = useState<Record<number, string>>({});
+  const [requested, setRequested] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string }>>({});
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -168,23 +169,26 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               )}
             </div>
             {s.body && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
-            {s.partNumber && (
-              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
-                <span className="mono mut" style={{ fontSize: 11 }}>
-                  {s.partName ? `${s.partName} · ` : ""}PN {s.partNumber}
-                </span>
-                {canEdit && (requested[s.id]
-                  ? <span style={{ fontSize: 11, color: requested[s.id] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
-                      {requested[s.id] === "ok" ? "Requested - see Parts" : requested[s.id]}
-                    </span>
-                  : <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                      onClick={() => startTransition(async () => {
-                        const res = await requestPmPart(s.id);
-                        setRequested((m) => ({ ...m, [s.id]: res?.error ?? "ok" }));
-                      })}>request part</button>
-                )}
-              </div>
-            )}
+            {s.parts.filter((pt) => pt.number).map((pt) => {
+              const key = `${s.id}:${pt.number}`;
+              return (
+                <div key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
+                  <span className="mono mut" style={{ fontSize: 11 }}>
+                    {pt.name ? `${pt.name} · ` : ""}PN {pt.number}
+                  </span>
+                  {canEdit && (requested[key]
+                    ? <span style={{ fontSize: 11, color: requested[key] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
+                        {requested[key] === "ok" ? "Requested - see Parts" : requested[key]}
+                      </span>
+                    : <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                        onClick={() => startTransition(async () => {
+                          const res = await requestPmPart(s.id, pt.number);
+                          setRequested((m) => ({ ...m, [key]: res?.error ?? "ok" }));
+                        })}>request part</button>
+                  )}
+                </div>
+              );
+            })}
             {e && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
                 <span className="mut" style={{ fontSize: 11 }}>every</span>

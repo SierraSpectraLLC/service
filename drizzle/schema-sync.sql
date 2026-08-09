@@ -246,6 +246,24 @@ CREATE TABLE IF NOT EXISTS "pm_templates" (
   "model_scope" text[] NOT NULL DEFAULT '{}',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "procedures" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "asset_type" text NOT NULL,
+  "kind" text NOT NULL DEFAULT 'task',
+  "name" text NOT NULL,
+  "notes" text NOT NULL DEFAULT '',
+  "position" integer NOT NULL DEFAULT 0,
+  "result_type" text NOT NULL DEFAULT 'pass_fail',
+  "target" text,
+  "tolerance_pct" numeric,
+  "requires_note" boolean NOT NULL DEFAULT false,
+  "consumes_part" boolean NOT NULL DEFAULT false,
+  "runs_at_intake" boolean NOT NULL DEFAULT false,
+  "interval_days" integer,
+  "parts" text NOT NULL DEFAULT '',
+  "model_scope" text[] NOT NULL DEFAULT '{}',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "pm_schedules" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -454,6 +472,8 @@ ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_name" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "template_id" integer;
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "parts" text NOT NULL DEFAULT '';
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "procedure_id" integer;
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
@@ -621,6 +641,10 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_asset_id_assets_id_fk') THEN
     ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_asset_id_assets_id_fk"
       FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_procedure_id_procedures_id_fk') THEN
+    ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_procedure_id_procedures_id_fk"
+      FOREIGN KEY ("procedure_id") REFERENCES "procedures"("id") ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_template_id_pm_templates_id_fk') THEN
     ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_template_id_pm_templates_id_fk"
@@ -1053,5 +1077,48 @@ BEGIN
     VALUES ('schema-sync','vocab','catalog-seed',
             'seeded the equipment catalog from the fleet: ' || v_types || ' asset type(s), ' ||
             v_models || ' model(s), ' || v_cats || ' system categor(ies) - curate in Settings > Catalog');
+  END IF;
+END $$;
+
+-- ── Migration: one procedure catalog ────────────────────────────────────────
+-- checkout_items and pm_templates were secretly the same thing - a procedure
+-- defined against a module type, optionally narrowed to models, applied to
+-- every unit - differing only in WHEN they fire. Copy both into `procedures`:
+-- checkout items become runs_at_intake, templates become interval_days, and
+-- nothing merges automatically - same-named rows on both sides stay separate
+-- for hand reconciliation. Schedules stamped by a template are re-pointed at
+-- the procedure that replaced it (procedure_id), so dedupe and completion keep
+-- working; the schedules themselves are not touched. Old tables stay, retired.
+DO $$
+DECLARE r RECORD; v_id integer; v_items integer := 0; v_tpls integer := 0; v_pos integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'procedure' AND "entity_id" = 'procedures-merge') THEN
+    FOR r IN SELECT * FROM "checkout_items" ORDER BY "asset_type", "position", "id" LOOP
+      INSERT INTO "procedures" ("asset_type","kind","name","position","result_type","target","tolerance_pct",
+                                "requires_note","consumes_part","runs_at_intake","interval_days","model_scope","created_at")
+      VALUES (r."asset_type", r."kind", r."name", r."position", r."result_type", r."target", r."tolerance_pct",
+              r."requires_note", r."consumes_part", true, NULL, r."model_scope", r."created_at");
+      v_items := v_items + 1;
+    END LOOP;
+    FOR r IN SELECT * FROM "pm_templates" ORDER BY "asset_type", "id" LOOP
+      -- Templates had no ordering; they land after the intake items of their type.
+      SELECT COALESCE(max("position"), 0) + 1 INTO v_pos FROM "procedures" WHERE "asset_type" = r."asset_type";
+      INSERT INTO "procedures" ("asset_type","kind","name","notes","position","runs_at_intake","interval_days",
+                                "parts","model_scope","created_at")
+      VALUES (r."asset_type", 'task', r."title", r."body", v_pos, false, r."every_days",
+              CASE WHEN btrim(r."part_number") <> '' OR btrim(r."part_name") <> ''
+                   THEN json_build_array(json_build_object('name', r."part_name", 'number', r."part_number"))::text
+                   ELSE '' END,
+              r."model_scope", r."created_at")
+      RETURNING "id" INTO v_id;
+      UPDATE "pm_schedules" SET "procedure_id" = v_id WHERE "template_id" = r."id";
+      v_tpls := v_tpls + 1;
+    END LOOP;
+    -- Marker written unconditionally: a rerun must never re-copy rows the shop
+    -- has since edited or deleted in the merged catalog.
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','procedure','procedures-merge',
+            'merged ' || v_items || ' checkout item(s) and ' || v_tpls || ' maintenance template(s) into the procedure catalog - same-named pairs were kept separate for hand reconciliation');
   END IF;
 END $$;

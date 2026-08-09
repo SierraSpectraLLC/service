@@ -185,13 +185,40 @@ export const accessRequests = pgTable("access_requests", {
 // on PM work with no special cases. Completing the task advances next_due from
 // the day it was done (floating cadence), which is how shops actually run:
 // changing a filter late doesn't owe you an extra change next week.
-// PM templates: the maintenance a MODEL needs, written once. "An LC-20AD gets
-// its plunger seals replaced quarterly, PN 228-35145-91; an LC-20ADXR the same
-// job, different part." A template applies when its model scope is empty (all
-// models of the type) or names the asset's model; overlap is settled per
-// asset by title - a unit never carries two schedules with the same name.
-// Applied automatically to every new asset of the type and backfilled across
-// existing ones when the template is created. Managed on /maintenance.
+// One procedure catalog: everything defined against a module type (or
+// "system") that turns into work on units automatically. WHEN it fires is a
+// property, not a table: runs_at_intake covers the old checkout items,
+// interval_days the old maintenance templates, and one row can carry both -
+// "Leak check" at intake AND quarterly is one definition, not two that drift.
+// interval_days null is the single statement of "does not repeat".
+//
+// parts is a JSON list [{name, number}] in a text column - same convention as
+// parts.specs - because the parts table is per-work-order tracking rows, not
+// an inventory entity a catalog could join.
+export const procedures = pgTable("procedures", {
+  id: serial("id").primaryKey(),
+  assetType: text("asset_type").notNull(),          // catalog module type or "system"
+  kind: text("kind").notNull().default("task"),     // 'task' | 'test'
+  name: text("name").notNull(),
+  notes: text("notes").notNull().default(""),
+  position: integer("position").notNull().default(0), // ordering within its type; generated tasks keep it
+  // Test-only
+  resultType: text("result_type").notNull().default("pass_fail"),
+  target: text("target"),
+  tolerancePct: numeric("tolerance_pct"),
+  // Task-only
+  requiresNote: boolean("requires_note").notNull().default(false),
+  consumesPart: boolean("consumes_part").notNull().default(false),
+  // Timing. Both may be true; both false is rejected by the actions.
+  runsAtIntake: boolean("runs_at_intake").notNull().default(false),
+  intervalDays: integer("interval_days"),
+  parts: text("parts").notNull().default(""),       // JSON [{name, number}], "" = none
+  modelScope: text("model_scope").array().notNull().default([]), // [] = all models
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// RETIRED: merged into `procedures` (see the procedures-merge migration).
+// The table stays because the sync pipeline is additive-only; nothing reads it.
 export const pmTemplates = pgTable("pm_templates", {
   id: serial("id").primaryKey(),
   assetType: text("asset_type").notNull(), // MODULE_KINDS entry, e.g. "Pump"
@@ -217,12 +244,18 @@ export const pmSchedules = pgTable("pm_schedules", {
   nextDue: text("next_due").notNull(), // YYYY-MM-DD in shop time
   lastDone: text("last_done").notNull().default(""), // blank = never yet done
   paused: boolean("paused").notNull().default(false),
-  // The part the job takes, carried onto every generated task.
+  // The part(s) the job takes, carried onto every generated task. `parts` is
+  // JSON [{name, number}]; the single name/number pair predates it and is
+  // still written by hand-made schedules - readers go through
+  // schedulePartsOf(), which falls back to the pair.
   partName: text("part_name").notNull().default(""),
   partNumber: text("part_number").notNull().default(""),
-  // Which template stamped this schedule out; null = written by hand. Kept on
-  // template deletion - the schedule is shop data now, not template state.
+  parts: text("parts").notNull().default(""),
+  // Which definition stamped this schedule out; null = written by hand. Kept
+  // on deletion - the schedule is shop data now, not catalog state.
+  // template_id predates the procedures merge and is no longer written.
   templateId: integer("template_id").references(() => pmTemplates.id, { onDelete: "set null" }),
+  procedureId: integer("procedure_id").references(() => procedures.id, { onDelete: "set null" }),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("pm_instrument_idx").on(t.instrumentId), index("pm_asset_idx").on(t.assetId)]);
@@ -529,13 +562,9 @@ export const vocabTerms = pgTable("vocab_terms", {
   // to apply to several system types, not a row per type.
 }, (t) => [unique("vocab_term_unique").on(t.kind, t.assetType, t.name)]);
 
-// Checkout items: tasks and tests auto-created when a system or asset is
-// added. Each asset type (or "system" for instrument-level items) carries an
-// ordered list; a non-empty model scope narrows an item to those models and,
-// per kind, scoped items REPLACE the type's all-model items when any match.
-// Superseded checkout_rules stays in the DB (additive pipeline) but is only
-// read by the schema-sync migration that seeds this table. Managed on
-// /checkout.
+// RETIRED: merged into `procedures` (see the procedures-merge migration).
+// The table stays because the sync pipeline is additive-only; nothing reads it
+// except the older checkout_rules seed migration that fills it.
 export const checkoutItems = pgTable("checkout_items", {
   id: serial("id").primaryKey(),
   assetType: text("asset_type").notNull(),          // MODULE_KINDS entry or "system"

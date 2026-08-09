@@ -10,10 +10,11 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
-  checkoutItems, engagementRecords, accessRequests, assetShares, pmSchedules, pmTemplates,
+  engagementRecords, accessRequests, assetShares, pmSchedules, procedures,
 } from "@/db/schema";
-import { advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
-import { applyPmTemplates, generateDuePmTasks } from "@/lib/pmGenerate";
+import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
+import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
+import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -441,7 +442,8 @@ async function generateCheckout(
   actorEmail: string,
 ): Promise<number> {
   const assetType = target.id === null ? "system" : target.kind;
-  const items = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, assetType));
+  const items = await db.select().from(procedures)
+    .where(and(eq(procedures.assetType, assetType), eq(procedures.runsAtIntake, true)));
   const picked = matchItems(items, assetType, target.model);
   if (!picked.length) return 0;
   const existing = target.id !== null
@@ -454,7 +456,7 @@ async function generateCheckout(
   if (!fresh.length) return 0;
   for (const i of fresh) {
     await db.insert(tasks).values({
-      instrumentId, title: i.name, body: summarizeItem(i), origin: "checkout",
+      instrumentId, title: i.name, body: procedureTaskBody(i, parseProcParts(i.parts)), origin: "checkout",
       assetId: target.id, sortOrder: i.position,
     });
   }
@@ -522,9 +524,9 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       action: `added ${assetLabel(row)} to stock${a.owner ? ` for ${a.owner}` : ""}${a.location ? ` (${a.location})` : ""}`,
     });
   }
-  // The model's standing maintenance arrives with the unit - CSV imports come
+  // The model's recurring procedures arrive with the unit - CSV imports come
   // through here too, so a migrated fleet lands already scheduled.
-  await applyPmTemplates(row.id, shopToday(), u.email);
+  await applyProcedures(row.id, shopToday(), u.email);
   revalidatePath("/assets");
   revalidatePath(`/assets/${row.id}`);
   return { id: row.id };
@@ -1025,10 +1027,18 @@ export async function setPmPaused(id: number, paused: boolean): Promise<{ error?
  * instead of a sticky note. Dedupes against an open request for the same
  * number on the same equipment.
  */
-export async function requestPmPart(scheduleId: number): Promise<{ error?: string }> {
+export async function requestPmPart(scheduleId: number, partNumber?: string): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
-  if (!s || !s.partNumber) return { error: "Not found" };
+  if (!s) return { error: "Not found" };
+  // Which of the schedule's parts - a schedule can carry several. The number
+  // must be one the schedule actually names, so this can't file arbitrary
+  // parts under a maintenance job's flag.
+  const options = schedulePartsOf(s);
+  const want = partNumber
+    ? options.find((o) => o.number.toLowerCase() === partNumber.toLowerCase())
+    : options[0];
+  if (!want || !want.number) return { error: "Not found" };
   await assertWorkEditable(u, s);
   // An asset-bound schedule files the part on the unit AND its current system,
   // so both pages show it coming.
@@ -1037,97 +1047,19 @@ export async function requestPmPart(scheduleId: number): Promise<{ error?: strin
   const open = await db.select().from(parts).where(
     s.assetId !== null ? eq(parts.assetId, s.assetId) : eq(parts.instrumentId, instrumentId!)
   );
-  if (open.some((p) => partOpen(p.status) && p.partNumber.toLowerCase() === s.partNumber.toLowerCase())) {
-    return { error: `PN ${s.partNumber} is already requested and not yet installed` };
+  if (open.some((p) => partOpen(p.status) && p.partNumber.toLowerCase() === want.number.toLowerCase())) {
+    return { error: `PN ${want.number} is already requested and not yet installed` };
   }
-  const name = s.partName || s.title;
+  const name = want.name || s.title;
   const [p] = await db.insert(parts).values({
-    instrumentId, assetId: s.assetId, name, partNumber: s.partNumber,
+    instrumentId, assetId: s.assetId, name, partNumber: want.number,
     qty: "1", status: "Needed", note: `for maintenance '${s.title}'`,
   }).returning();
   await audit({
     actor: u.email, instrumentId, assetId: s.assetId, entityType: "part", entityId: p.id,
-    action: `requested part '${name}' (PN ${s.partNumber}) for maintenance '${s.title}'`,
+    action: `requested part '${name}' (PN ${want.number}) for maintenance '${s.title}'`,
   });
   revWork(p);
-  return {};
-}
-
-// PM templates: model-level upkeep definitions, staff-managed like checkout
-// items. Creating one backfills schedules across every matching asset;
-// changing or removing one leaves stamped-out schedules alone - they belong
-// to their units now, and rewriting a shop's live calendar from a template
-// edit would be a surprise, not a convenience.
-
-type PmTemplateInput = {
-  assetType: string; title: string; body: string;
-  everyDays: number | string; partName: string; partNumber: string; modelScope: string[];
-};
-
-function cleanPmTemplate(data: PmTemplateInput): { error: string } | (Omit<PmTemplateInput, "everyDays" | "modelScope"> & { everyDays: number; modelScope: string[] }) {
-  if (!data.title.trim()) return { error: "Title required" };
-  if (!data.assetType.trim()) return { error: "Pick an asset type" };
-  const cadence = parseCadence(data.everyDays);
-  if ("error" in cadence) return cadence;
-  return {
-    assetType: data.assetType.trim(), title: data.title.trim(), body: data.body.trim(),
-    everyDays: cadence.days, partName: data.partName.trim(), partNumber: data.partNumber.trim(),
-    modelScope: data.modelScope.map((m) => m.trim()).filter(Boolean),
-  };
-}
-
-export async function addPmTemplate(data: PmTemplateInput): Promise<{ error?: string; applied?: number }> {
-  const u = await requireStaff();
-  const clean = cleanPmTemplate(data);
-  if ("error" in clean) return clean;
-  const siblings = await db.select().from(pmTemplates).where(eq(pmTemplates.assetType, clean.assetType));
-  if (siblings.some((t) => t.title.toLowerCase() === clean.title.toLowerCase()
-      && t.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase())) {
-    return { error: `"${clean.title}" already exists for this type` };
-  }
-  const [tpl] = await db.insert(pmTemplates).values(clean).returning();
-  await audit({
-    actor: u.email, entityType: "pm-template", entityId: tpl.id,
-    action: `defined maintenance template '${tpl.title}' for ${tpl.assetType}${tpl.modelScope.length ? ` (${tpl.modelScope.join(", ")})` : ""} ${cadenceLabel(tpl.everyDays)}${tpl.partNumber ? ` - ${tpl.partName || "part"} PN ${tpl.partNumber}` : ""}`,
-  });
-  // Backfill: the fleet already on the floor gets the schedule too, each unit
-  // deduped by title so hand-written schedules block the template's copy.
-  const fleet = await db.select({ id: assets.id }).from(assets).where(eq(assets.kind, clean.assetType));
-  const today = shopToday();
-  let applied = 0;
-  for (const a of fleet) {
-    applied += (await applyPmTemplates(a.id, today, u.email)).created;
-  }
-  revalidatePath("/maintenance");
-  revalidatePath("/assets");
-  return { applied };
-}
-
-export async function updatePmTemplate(id: number, data: PmTemplateInput): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const [tpl] = await db.select().from(pmTemplates).where(eq(pmTemplates.id, id));
-  if (!tpl) return { error: "Not found" };
-  const clean = cleanPmTemplate(data);
-  if ("error" in clean) return clean;
-  await db.update(pmTemplates).set(clean).where(eq(pmTemplates.id, id));
-  await audit({
-    actor: u.email, entityType: "pm-template", entityId: id,
-    action: `updated maintenance template '${clean.title}' (${tpl.assetType}) - applies to units it lands on from now on, existing schedules unchanged`,
-  });
-  revalidatePath("/maintenance");
-  return {};
-}
-
-export async function removePmTemplate(id: number): Promise<{ error?: string }> {
-  const u = await requireStaff();
-  const [tpl] = await db.select().from(pmTemplates).where(eq(pmTemplates.id, id));
-  if (!tpl) return {};
-  await db.delete(pmTemplates).where(eq(pmTemplates.id, id)); // schedules keep living, FK goes null
-  await audit({
-    actor: u.email, entityType: "pm-template", entityId: id,
-    action: `removed maintenance template '${tpl.title}' (${tpl.assetType}) - schedules already on units stay`,
-  });
-  revalidatePath("/maintenance");
   return {};
 }
 
@@ -1935,28 +1867,32 @@ export async function deleteDiscussionPost(postId: number, reason: string): Prom
   return {};
 }
 
-// ---------------- Checkout items ----------------
-// Tasks and tests auto-created when an asset lands on a system (assetType
-// "system" items fire when a system is created). Per kind, model-scoped
-// items replace the type's all-model items for matching models.
+// ---------------- Procedures ----------------
+// The one catalog of work definitions: everything here fires automatically on
+// units - at intake (the old checkout items), on a cadence (the old
+// maintenance templates), or both from a single row. Staff-managed like the
+// equipment catalog it keys on.
 
 /** "system" plus any nonempty type name - asset kinds are an open vocabulary. */
-const validCheckoutType = (t: string) => t === "system" || (!!t.trim() && t.trim().length <= 40);
+const validProcedureType = (t: string) => t === "system" || (!!t.trim() && t.trim().length <= 40);
 
-type CheckoutItemInput = {
-  assetType: string; kind: string; name: string;
+type ProcedureInput = {
+  assetType: string; kind: string; name: string; notes: string;
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
-  modelScope: string[];
+  runsAtIntake: boolean; intervalDays: number | string | null;
+  parts: ProcPart[]; modelScope: string[];
 };
 
-/** Validate + normalize a checkout item; returns {error} or clean values. */
-function cleanCheckoutItem(data: CheckoutItemInput): { error: string } | {
-  assetType: string; kind: string; name: string;
+/** Validate + normalize; returns {error} or clean column values. */
+function cleanProcedure(data: ProcedureInput): { error: string } | {
+  assetType: string; kind: string; name: string; notes: string;
   resultType: string; target: string | null; tolerancePct: string | null;
-  requiresNote: boolean; consumesPart: boolean; modelScope: string[];
+  requiresNote: boolean; consumesPart: boolean;
+  runsAtIntake: boolean; intervalDays: number | null;
+  parts: string; modelScope: string[];
 } {
-  if (!validCheckoutType(data.assetType)) return { error: "Pick an asset type" };
+  if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
   if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
   const name = data.name.trim();
   if (!name || name.length > 120) return { error: "Name must be 1-120 characters" };
@@ -1969,93 +1905,170 @@ function cleanCheckoutItem(data: CheckoutItemInput): { error: string } | {
     if (Number.isNaN(n) || n < 0) return { error: "Tolerance must be a number, e.g. 10" };
     tolerancePct = String(n);
   }
+  let intervalDays: number | null = null;
+  if (data.intervalDays !== null && String(data.intervalDays).trim() !== "") {
+    const cadence = parseCadence(data.intervalDays);
+    if ("error" in cadence) return cadence;
+    intervalDays = cadence.days;
+  }
+  // A procedure that never fires is an orphan - refuse it at the source.
+  if (!data.runsAtIntake && intervalDays === null) {
+    return { error: "Pick when it runs: at intake, on a cadence, or both" };
+  }
+  // Recurring work is scheduled per asset; a system has no asset to schedule.
+  if (data.assetType === "system" && intervalDays !== null) {
+    return { error: "System procedures run at intake only - recurring work lives on the modules" };
+  }
   // System items fire when a system is created, before it has any assets to
   // scope by, so they always apply to every new system.
   const modelScope = data.assetType === "system"
     ? [] : [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
   return {
-    assetType: data.assetType, kind: data.kind, name, resultType, target, tolerancePct,
-    requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart, modelScope,
+    assetType: data.assetType, kind: data.kind, name, notes: data.notes.trim(),
+    resultType, target, tolerancePct,
+    requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart,
+    runsAtIntake: data.runsAtIntake, intervalDays,
+    parts: serializeProcParts(data.parts), modelScope,
   };
 }
 
-const checkoutScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", ")} only)` : "");
+const procScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", ")} only)` : "");
+const procTimingLabel = (p: { runsAtIntake: boolean; intervalDays: number | null }) =>
+  p.runsAtIntake && p.intervalDays !== null ? `at intake + ${cadenceLabel(p.intervalDays)}`
+    : p.runsAtIntake ? "at intake" : cadenceLabel(p.intervalDays!);
 
-export async function addCheckoutItem(data: CheckoutItemInput): Promise<{ error?: string }> {
+export async function addProcedure(data: ProcedureInput): Promise<{ error?: string; applied?: number }> {
   const u = await requireStaff();
-  const clean = cleanCheckoutItem(data);
+  const clean = cleanProcedure(data);
   if ("error" in clean) return clean;
-  const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, clean.assetType));
+  const siblings = await db.select().from(procedures).where(eq(procedures.assetType, clean.assetType));
   if (siblings.some((i) => i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
       && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
     return { error: `"${clean.name}" already exists for this type` };
   const position = Math.max(0, ...siblings.map((i) => i.position)) + 1;
-  const [row] = await db.insert(checkoutItems).values({ ...clean, position }).returning();
+  const [row] = await db.insert(procedures).values({ ...clean, position }).returning();
   await audit({
-    actor: u.email, entityType: "checkout", entityId: row.id,
-    action: `added checkout ${clean.kind} "${clean.name}" for ${clean.assetType}${checkoutScopeLabel(clean.modelScope)}`,
+    actor: u.email, entityType: "procedure", entityId: row.id,
+    action: `added ${clean.kind} procedure "${clean.name}" for ${clean.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
   });
-  revalidatePath("/checkout");
-  return {};
+  // A new recurring procedure covers the fleet already on the floor, per unit
+  // deduped by title so hand-written schedules block the catalog's copy.
+  let applied = 0;
+  if (clean.intervalDays !== null) applied = await backfillProcedure(clean.assetType, shopToday(), u.email);
+  revalidatePath("/settings/procedures");
+  revalidatePath("/maintenance");
+  return { applied };
 }
 
-export async function updateCheckoutItem(itemId: number, data: CheckoutItemInput): Promise<{ error?: string }> {
+export async function updateProcedure(
+  procedureId: number,
+  data: ProcedureInput,
+  // "Also apply to existing units now" - the sheet's opt-in when the TIMING
+  // changed. Without it, edits touch new units only; schedules already on
+  // units keep running as they were.
+  applyNow = false,
+): Promise<{ error?: string; applied?: number; retimed?: number; unscheduled?: number }> {
   const u = await requireStaff();
-  const [before] = await db.select().from(checkoutItems).where(eq(checkoutItems.id, itemId));
+  const [before] = await db.select().from(procedures).where(eq(procedures.id, procedureId));
   if (!before) return { error: "Not found" };
-  const clean = cleanCheckoutItem({ ...data, assetType: before.assetType }); // type is fixed at creation
+  const clean = cleanProcedure({ ...data, assetType: before.assetType }); // type is fixed at creation
   if ("error" in clean) return clean;
-  const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, before.assetType));
-  if (siblings.some((i) => i.id !== itemId && i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
+  const siblings = await db.select().from(procedures).where(eq(procedures.assetType, before.assetType));
+  if (siblings.some((i) => i.id !== procedureId && i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
       && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
     return { error: `"${clean.name}" already exists for this type` };
-  await db.update(checkoutItems).set({
-    kind: clean.kind, name: clean.name, resultType: clean.resultType, target: clean.target,
-    tolerancePct: clean.tolerancePct, requiresNote: clean.requiresNote, consumesPart: clean.consumesPart,
-    modelScope: clean.modelScope,
-  }).where(eq(checkoutItems.id, itemId));
+  await db.update(procedures).set(clean).where(eq(procedures.id, procedureId));
   await audit({
-    actor: u.email, entityType: "checkout", entityId: itemId,
-    action: `edited checkout ${clean.kind} "${clean.name}" for ${before.assetType}${checkoutScopeLabel(clean.modelScope)}`,
-    field: "item", oldValue: `${before.kind} | ${before.name} | ${before.modelScope.join(", ")}`,
-    newValue: `${clean.kind} | ${clean.name} | ${clean.modelScope.join(", ")}`,
+    actor: u.email, entityType: "procedure", entityId: procedureId,
+    action: `edited ${clean.kind} procedure "${clean.name}" for ${before.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
+    field: "procedure",
+    oldValue: `${before.kind} | ${before.name} | ${procTimingLabel(before)} | ${before.modelScope.join(", ")}`,
+    newValue: `${clean.kind} | ${clean.name} | ${procTimingLabel(clean)} | ${clean.modelScope.join(", ")}`,
   });
-  revalidatePath("/checkout");
-  return {};
+
+  const addedRepeat = before.intervalDays === null && clean.intervalDays !== null;
+  const removedRepeat = before.intervalDays !== null && clean.intervalDays === null;
+  const changedInterval = before.intervalDays !== null && clean.intervalDays !== null && before.intervalDays !== clean.intervalDays;
+  let applied = 0, retimed = 0, unscheduled = 0;
+  if (applyNow && addedRepeat) {
+    applied = await backfillProcedure(before.assetType, shopToday(), u.email);
+  }
+  if (applyNow && changedInterval) {
+    // Re-time the schedules this procedure stamped out: keep their history,
+    // move the next occurrence to one new cadence after the last completion
+    // (or after today, for ones never yet done).
+    const children = await db.select().from(pmSchedules).where(eq(pmSchedules.procedureId, procedureId));
+    const today = shopToday();
+    for (const c of children) {
+      const nextDue = addDays(c.lastDone || today, clean.intervalDays!);
+      await db.update(pmSchedules).set({ everyDays: clean.intervalDays!, nextDue }).where(eq(pmSchedules.id, c.id));
+      retimed++;
+    }
+    if (retimed) {
+      await audit({
+        actor: u.email, entityType: "procedure", entityId: procedureId,
+        action: `re-timed ${retimed} existing schedule(s) of "${clean.name}" to ${cadenceLabel(clean.intervalDays!)}`,
+      });
+    }
+  }
+  if (applyNow && removedRepeat) {
+    // Opt-in removal of the schedules this procedure stamped out. Their
+    // generated tasks survive (the task FK goes null), and hand-written
+    // schedules are untouched - they were never the catalog's to remove.
+    const children = await db.select().from(pmSchedules).where(eq(pmSchedules.procedureId, procedureId));
+    for (const c of children) {
+      await db.delete(pmSchedules).where(eq(pmSchedules.id, c.id));
+      unscheduled++;
+    }
+    if (unscheduled) {
+      await audit({
+        actor: u.email, entityType: "procedure", entityId: procedureId,
+        action: `unscheduled "${clean.name}" from ${unscheduled} unit(s) - tasks already created stay`,
+      });
+    }
+  }
+  revalidatePath("/settings/procedures");
+  revalidatePath("/maintenance");
+  rev();
+  return { applied, retimed, unscheduled };
 }
 
-export async function deleteCheckoutItem(itemId: number) {
+export async function deleteProcedure(procedureId: number): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const [i] = await db.select().from(checkoutItems).where(eq(checkoutItems.id, itemId));
-  if (!i) return;
-  await db.delete(checkoutItems).where(eq(checkoutItems.id, itemId));
+  const [i] = await db.select().from(procedures).where(eq(procedures.id, procedureId));
+  if (!i) return {};
+  // Schedules and tasks already on units survive - the FK goes null and they
+  // belong to their units now.
+  await db.delete(procedures).where(eq(procedures.id, procedureId));
   await audit({
-    actor: u.email, entityType: "checkout", entityId: itemId,
-    action: `removed checkout ${i.kind} "${i.name}" for ${i.assetType}${checkoutScopeLabel(i.modelScope)}`,
+    actor: u.email, entityType: "procedure", entityId: procedureId,
+    action: `removed ${i.kind} procedure "${i.name}" for ${i.assetType} (${procTimingLabel(i)})${procScopeLabel(i.modelScope)} - work already on units stays`,
   });
-  revalidatePath("/checkout");
+  revalidatePath("/settings/procedures");
+  revalidatePath("/maintenance");
+  return {};
 }
 
 /** Persist a drag-reorder within one asset type's list. */
-export async function reorderCheckoutItems(assetType: string, orderedIds: number[]) {
+export async function reorderProcedures(assetType: string, orderedIds: number[]) {
   const u = await requireStaff();
-  if (!validCheckoutType(assetType)) return;
-  const siblings = await db.select().from(checkoutItems).where(eq(checkoutItems.assetType, assetType));
+  if (!validProcedureType(assetType)) return;
+  const siblings = await db.select().from(procedures).where(eq(procedures.assetType, assetType));
   const known = new Map(siblings.map((i) => [i.id, i]));
   let position = 1;
   for (const id of orderedIds) {
     const item = known.get(id);
     if (!item) continue; // ignore ids from other types or stale UIs
     if (item.position !== position) {
-      await db.update(checkoutItems).set({ position }).where(eq(checkoutItems.id, id));
+      await db.update(procedures).set({ position }).where(eq(procedures.id, id));
     }
     position++;
   }
   await audit({
-    actor: u.email, entityType: "checkout", entityId: assetType,
-    action: `reordered the ${assetType} checkout list`,
+    actor: u.email, entityType: "procedure", entityId: assetType,
+    action: `reordered the ${assetType} procedure list`,
   });
-  revalidatePath("/checkout");
+  revalidatePath("/settings/procedures");
 }
 
 // ---------------- Stage vocabulary ----------------

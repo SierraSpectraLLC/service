@@ -11,6 +11,7 @@ import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
+import { schedulePartsOf } from "@/lib/procedures";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
@@ -235,7 +236,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           return {
             id: s.id, title: s.title, body: s.body, assignee: s.assignee,
             everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
-            partName: s.partName, partNumber: s.partNumber,
+            parts: schedulePartsOf(s),
             onAsset: onAsset ? `${onAsset.kind} — ${onAsset.model || onAsset.serial || "?"}` : undefined,
             openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
           };

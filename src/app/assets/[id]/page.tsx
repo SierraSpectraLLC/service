@@ -17,6 +17,7 @@ import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
+import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
@@ -216,7 +217,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         schedules={pmRows.map((s) => ({
           id: s.id, title: s.title, body: s.body, assignee: s.assignee,
           everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
-          partName: s.partName, partNumber: s.partNumber,
+          parts: schedulePartsOf(s),
           openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
         }))} />
 
