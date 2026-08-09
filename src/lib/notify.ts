@@ -6,15 +6,13 @@ import { users, people } from "@/db/schema";
 import { parseList } from "@/lib/allowMatch";
 import { sendEmail } from "@/lib/email";
 import { getBrand } from "@/lib/brand";
+import { appUrl } from "@/lib/appUrl";
 
 export type Person = { name: string; email: string };
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const appUrl = () =>
-  process.env.APP_URL ||
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "");
 
 /**
  * Assignees/mentions are freeform names ("Joe", "Thomas", "Chris Ma").

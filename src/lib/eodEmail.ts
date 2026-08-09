@@ -10,14 +10,12 @@ import { db } from "@/db";
 import { instruments, eodUpdates, people, assets, orgs } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { getBrand } from "@/lib/brand";
+import { appUrl } from "@/lib/appUrl";
 
 const SEP = "-".repeat(50);
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const appUrl = () =>
-  process.env.APP_URL ||
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "");
 
 /** One line on the report: a system or a single asset, with the day's update. */
 export type EodEntry = {

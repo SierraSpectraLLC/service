@@ -43,9 +43,11 @@ Settings.
 
 ## 3. Crons
 
-`vercel.json` schedules `api/cron/daily-digest` and `api/cron/sheet-sync`.
-They no-op unless the matching module is switched on in Settings, so they are
-safe to leave scheduled on every instance.
+`vercel.json` schedules `api/cron/daily-digest`, `api/cron/sheet-sync` and
+`api/cron/pm-generate`. The first two no-op unless the matching module is
+switched on in Settings. PM generation is core product, not a module: with no
+maintenance schedules defined it does nothing, so it too is safe to leave
+scheduled on every instance.
 
 ## 4. First sign-in checklist (as the owner)
 
@@ -82,6 +84,10 @@ also the page that organization's own editors get.
   reports create actions and no errors.
 - Trigger `api/cron/daily-digest` with the `CRON_SECRET` header → `skipped`
   unless the module is on.
+- Add a maintenance schedule due today on a test system → the task appears
+  under Tasks immediately; mark it Done → the schedule's next due date moves
+  out by one cadence. Open a system's **Label** and scan the QR with a phone →
+  it lands on that system's page (after sign-in).
 - Discussion privacy, worth checking once per instance because it is the thing
   customers ask about: post on a shared system as staff with **Internal** on,
   then view the system as the client org (view-as) → the post is absent, and
