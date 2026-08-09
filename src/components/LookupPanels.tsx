@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestAccess, createSystemFromSerial } from "@/app/actions";
-import PickOrAdd from "./PickOrAdd";
+import CatalogSelect from "./CatalogSelect";
 
 /**
  * The knock on the door: the serial matched a system in someone else's
@@ -69,7 +69,10 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
  * starts the system's record themselves. Created by a service provider it
  * stays unclaimed until the real owner joins and the house hands it over.
  */
-export function CreateSystemForm({ serial, kinds }: { serial: string; kinds: string[] }) {
+export function CreateSystemForm({ serial, kinds, models, categories }: {
+  serial: string; kinds: string[];
+  models: Record<string, string[]>; categories: string[];
+}) {
   const router = useRouter();
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", kind: "", model: "", manufacturer: "" });
   const [error, setError] = useState("");
@@ -100,18 +103,22 @@ export function CreateSystemForm({ serial, kinds }: { serial: string; kinds: str
         </div>
         <div>
           <label>Category</label>
-          <input value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="e.g. LC-MS" />
+          <CatalogSelect value={draft.category} options={categories} ariaLabel="System category"
+            onChange={(category) => setDraft({ ...draft, category })} />
         </div>
       </div>
       <div className="pf3" style={{ marginBottom: 8 }}>
         <div>
           <label>Unit type *</label>
-          <PickOrAdd value={draft.kind} options={kinds} newLabel="+ Other..." placeholder="e.g. Mass spec"
-            onChange={(kind) => setDraft({ ...draft, kind })} />
+          <CatalogSelect value={draft.kind} options={kinds} ariaLabel="Unit type"
+            onChange={(kind) => setDraft({ ...draft, kind, model: "" })}
+            hint="Define module types in Settings → Catalog" />
         </div>
         <div>
           <label>Model</label>
-          <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="LCMS-8050" />
+          <CatalogSelect value={draft.model} options={models[draft.kind] ?? []} ariaLabel="Model"
+            onChange={(model) => setDraft({ ...draft, model })}
+            hint={`No ${draft.kind || "?"} models defined yet - add them in Settings → Catalog`} />
         </div>
         <div>
           <label>Manufacturer</label>

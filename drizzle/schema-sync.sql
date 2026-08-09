@@ -1008,3 +1008,50 @@ BEGIN
             'attributed ' || v_authors || ' post(s) to the organization their author signs in as and moved ' || v_rooms || ' General post(s) into that organization''s room - every post stays shared, none was marked internal');
   END IF;
 END $$;
+
+-- ── Migration: seed the equipment catalog ───────────────────────────────────
+-- The catalog becomes the only place asset types, models and system categories
+-- are defined - pickers stop accepting free text. Seed it once so nothing the
+-- shop already uses becomes unpickable: the starter asset types every install
+-- gets, plus every type, model and category the fleet actually carries.
+-- Models seed with no category tags (universal) - filing them under LC-MS /
+-- GC-MS is curation, done in Settings > Catalog afterwards.
+DO $$
+DECLARE v_types integer; v_models integer; v_cats integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'vocab' AND "entity_id" = 'catalog-seed') THEN
+    INSERT INTO "vocab_terms" ("kind","asset_type","name")
+    SELECT 'asset_type', '', t.name FROM (
+      SELECT unnest(ARRAY['Pump','Autosampler','Column oven','Detector','Mass spec','Degasser',
+                          'Controller','Headspace','GC','Injector','Vacuum pump','Computer','Other']) AS name
+      UNION
+      SELECT DISTINCT "kind" FROM "assets" WHERE btrim("kind") <> ''
+    ) t
+    WHERE NOT EXISTS (SELECT 1 FROM "vocab_terms" v
+                      WHERE v."kind" = 'asset_type' AND lower(v."name") = lower(t.name));
+    GET DIAGNOSTICS v_types = ROW_COUNT;
+
+    INSERT INTO "vocab_terms" ("kind","asset_type","name")
+    SELECT DISTINCT 'model', a."kind", a."model" FROM "assets" a
+    WHERE btrim(a."model") <> '' AND btrim(a."kind") <> ''
+      AND NOT EXISTS (SELECT 1 FROM "vocab_terms" v
+                      WHERE v."kind" = 'model' AND lower(v."asset_type") = lower(a."kind")
+                        AND lower(v."name") = lower(a."model"));
+    GET DIAGNOSTICS v_models = ROW_COUNT;
+
+    INSERT INTO "vocab_terms" ("kind","asset_type","name")
+    SELECT DISTINCT 'category', '', i."category" FROM "instruments" i
+    WHERE btrim(i."category") <> ''
+      AND NOT EXISTS (SELECT 1 FROM "vocab_terms" v
+                      WHERE v."kind" = 'category' AND lower(v."name") = lower(i."category"));
+    GET DIAGNOSTICS v_cats = ROW_COUNT;
+
+    -- Marker written unconditionally: a rerun must never resurrect a type or
+    -- model the shop has deliberately removed from the catalog since.
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','vocab','catalog-seed',
+            'seeded the equipment catalog from the fleet: ' || v_types || ' asset type(s), ' ||
+            v_models || ' model(s), ' || v_cats || ' system categor(ies) - curate in Settings > Catalog');
+  END IF;
+END $$;

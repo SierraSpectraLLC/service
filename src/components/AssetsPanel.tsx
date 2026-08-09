@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { ASSET_COLOR } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
-import PickOrAdd from "./PickOrAdd";
+import CatalogSelect from "./CatalogSelect";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
@@ -98,20 +98,15 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
-              <PickOrAdd value={draft.kind} options={kinds} newLabel="+ New type..." placeholder="e.g. N2 generator"
-                onChange={(kind) => setDraft({ ...draft, kind })} />
+              <CatalogSelect value={draft.kind} options={kinds} ariaLabel="Asset type"
+                onChange={(kind) => setDraft({ ...draft, kind, model: "" })}
+                hint="Define module types in Settings → Catalog" />
             </div>
             <div>
               <label>Model</label>
-              {/* Catalog first, free text always: a model nobody has defined yet
-                  must never be a reason you can't record the unit in front of you. */}
-              {(catalogModels[draft.kind] ?? []).length > 0 ? (
-                <PickOrAdd value={draft.model} options={catalogModels[draft.kind] ?? []}
-                  newLabel="+ Not listed..." placeholder="LC-40D XR"
-                  onChange={(model) => setDraft({ ...draft, model })} />
-              ) : (
-                <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="LC-40D XR" />
-              )}
+              <CatalogSelect value={draft.model} options={catalogModels[draft.kind] ?? []} ariaLabel="Model"
+                onChange={(model) => setDraft({ ...draft, model })}
+                hint={`No ${draft.kind || "?"} models for this system type yet - add them in Settings → Catalog`} />
             </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>
           </div>

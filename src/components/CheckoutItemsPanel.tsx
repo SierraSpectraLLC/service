@@ -57,32 +57,21 @@ export function ScopeField({ scope, options, onChange }: {
 
 export default function CheckoutItemsPanel({ items, assetTypes, modelOptions }: {
   items: Item[];
-  // Asset types are an open vocabulary: starters + types in use anywhere.
-  // A brand-new category lives here (client state) until its first item saves.
+  // Asset types come from Settings > Catalog - the one place they're defined.
   assetTypes: string[];
   modelOptions: Record<string, string[]>; // distinct catalog models per asset type
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [customTypes, setCustomTypes] = useState<string[]>([]);
-  const [addingCat, setAddingCat] = useState(false);
-  const [newCat, setNewCat] = useState("");
 
   // System first - instrument-level items run once per system, not per asset.
+  // Types with items but no catalog entry still render, so nothing defined
+  // before the catalog took over goes invisible.
   const GROUPS: { type: string; label: string; subtitle?: string }[] = [
     { type: "system", label: "System", subtitle: "Runs once per instrument, not per asset." },
-    ...[...new Set([...assetTypes, ...items.map((i) => i.assetType), ...customTypes])]
+    ...[...new Set([...assetTypes, ...items.map((i) => i.assetType)])]
       .filter((t) => t && t !== "system")
       .map((k) => ({ type: k, label: k })),
   ];
-
-  const addCategory = () => {
-    const name = newCat.trim().slice(0, 40);
-    if (!name || GROUPS.some((g) => g.type.toLowerCase() === name.toLowerCase())) { setNewCat(""); setAddingCat(false); return; }
-    setCustomTypes((c) => [...c, name]);
-    setNewCat("");
-    setAddingCat(false);
-    setExpanded(name);
-  };
   const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState("");
@@ -105,7 +94,7 @@ export default function CheckoutItemsPanel({ items, assetTypes, modelOptions }: 
     }
     return by;
     // GROUPS is derived from these:
-  }, [items, orderOverride, assetTypes, customTypes]);
+  }, [items, orderOverride, assetTypes]);
 
   // Sheet lifecycle: escape closes, focus moves in and stays trapped.
   useEffect(() => {
@@ -301,20 +290,9 @@ export default function CheckoutItemsPanel({ items, assetTypes, modelOptions }: 
         );
       })}
 
-      {addingCat ? (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-          <input autoFocus value={newCat} onChange={(e) => setNewCat(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") addCategory(); if (e.key === "Escape") { setAddingCat(false); setNewCat(""); } }}
-            placeholder='New category, e.g. "N2 generator"' style={{ flex: "1 1 200px", maxWidth: 280, fontSize: 13 }} />
-          <button className="btn sm accent" onClick={addCategory} disabled={!newCat.trim()}>Add</button>
-          <button className="btn link" onClick={() => { setAddingCat(false); setNewCat(""); }}>cancel</button>
-        </div>
-      ) : (
-        <button className="btn sm" onClick={() => setAddingCat(true)}
-          style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "#1D6396", marginTop: 4 }}>
-          ＋ New category
-        </button>
-      )}
+      <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+        Missing a module type? Define it in Settings → Catalog and it appears here.
+      </div>
       <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
         A category matches assets of that type by name - give an asset the type &quot;N2 generator&quot; and its
         items are created when one is added. New categories stick once their first item is saved.

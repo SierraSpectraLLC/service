@@ -502,8 +502,12 @@ export const stageEvents = pgTable("stage_events", {
 // asset models per type ("Autosampler" / "ASI-L"). Pickers everywhere combine
 // these terms with values already in use, so a checkout test can be scoped to
 // a model the shop hasn't stocked yet. Managed in Settings.
-// The equipment catalog: system categories ("LC-MS") and asset models
-// ("LC-20AD"), curated by the operator and shared by everyone on the instance.
+// The equipment catalog: system categories ("LC-MS"), asset types ("Pump"),
+// and asset models ("LC-20AD") - curated by the house, shared by everyone on
+// the instance, and the ONLY place equipment vocabulary is defined. Every
+// picker that names a type, model or category reads from here; there is no
+// free-text fallback, so "LC-20" spelled four ways can't happen. Seeded once
+// from the fleet in use (see the catalog-seed migration), then curated.
 //
 // A model hangs off an asset TYPE (which is what a checkout item or PM template
 // keys on) and is tagged with the system categories it belongs to, because
@@ -513,7 +517,7 @@ export const stageEvents = pgTable("stage_events", {
 // right answer for genuinely universal kit like a control PC.
 export const vocabTerms = pgTable("vocab_terms", {
   id: serial("id").primaryKey(),
-  kind: text("kind").notNull(),                        // 'category' | 'model'
+  kind: text("kind").notNull(),                        // 'category' | 'asset_type' | 'model'
   assetType: text("asset_type").notNull().default(""), // models only: which asset type
   name: text("name").notNull(),
   // Models only: system categories this model appears under. [] = all of them.

@@ -1,14 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, eq, inArray, isNotNull, ne, and } from "drizzle-orm";
+import { asc, inArray, isNotNull, ne, and } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, instruments, pmSchedules, pmTemplates, tasks, vocabTerms } from "@/db/schema";
+import { assets, instruments, pmSchedules, tasks } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { cadenceLabel } from "@/lib/pm";
 import { shopToday } from "@/lib/shopday";
-import { MODULE_KINDS } from "@/lib/stages";
-import PmTemplatesPanel from "@/components/PmTemplatesPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -22,20 +20,11 @@ export default async function MaintenancePage() {
   try { await requireStaff(); } catch { redirect("/"); }
   const today = shopToday();
 
-  const [schedules, openPm, templates, assetModels, vocabModels] = await Promise.all([
+  const [schedules, openPm] = await Promise.all([
     db.select().from(pmSchedules).orderBy(asc(pmSchedules.paused), asc(pmSchedules.nextDue), asc(pmSchedules.id)),
     db.select({ pmScheduleId: tasks.pmScheduleId }).from(tasks)
       .where(and(isNotNull(tasks.pmScheduleId), ne(tasks.state, "Done"))),
-    db.select().from(pmTemplates).orderBy(asc(pmTemplates.assetType), asc(pmTemplates.title)),
-    db.selectDistinct({ kind: assets.kind, model: assets.model }).from(assets),
-    db.select({ assetType: vocabTerms.assetType, name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "model")),
   ]);
-  // Model choices for template scoping: what's in the fleet plus the vocabulary,
-  // same recipe as the checkout backend.
-  const modelOptions: Record<string, string[]> = {};
-  for (const { kind, model } of assetModels) if (model) (modelOptions[kind] ??= []).push(model);
-  for (const v of vocabModels) (modelOptions[v.assetType] ??= []).push(v.name);
-  for (const k of Object.keys(modelOptions)) modelOptions[k] = [...new Set(modelOptions[k])].sort();
   const inFlight = new Set(openPm.map((t) => t.pmScheduleId));
 
   const instIds = [...new Set(schedules.flatMap((s) => (s.instrumentId !== null ? [s.instrumentId] : [])))];
@@ -102,11 +91,10 @@ export default async function MaintenancePage() {
         )}
       </div>
 
-      <PmTemplatesPanel
-        templates={templates}
-        assetTypes={[...new Set([...MODULE_KINDS, ...assetModels.map((a) => a.kind)].filter(Boolean))]}
-        modelOptions={modelOptions}
-      />
+      <div className="mut no-print" style={{ fontSize: 12, padding: "0 4px" }}>
+        Define what each model needs - jobs, cadences, part numbers - in{" "}
+        <Link href="/settings/procedures" style={{ color: "var(--navy)" }}>Settings → Procedures</Link>.
+      </div>
     </div>
   );
 }

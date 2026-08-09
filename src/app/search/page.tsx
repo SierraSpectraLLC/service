@@ -3,7 +3,7 @@ import Link from "next/link";
 import { and, desc, ilike, or, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  instruments, tasks, parts, attachments, discussionPosts, assets, auditLog,
+  instruments, tasks, parts, attachments, discussionPosts, assets, auditLog, vocabTerms,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
@@ -11,7 +11,6 @@ import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { findOutsideMatches } from "@/lib/serialLookup";
 import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
-import { MODULE_KINDS } from "@/lib/stages";
 import SearchBox from "@/components/SearchBox";
 import { RequestAccessCard, CreateSystemForm } from "@/components/LookupPanels";
 
@@ -131,9 +130,16 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   // a provider picks up an instrument whose owner isn't here yet.
   const serialUnknown = q.length >= MIN_SERIAL_LOOKUP && hits.length === 0 && outside.length === 0;
   const mayCreate = serialUnknown && user.role !== "client_viewer";
-  const kinds = mayCreate
-    ? [...new Set([...MODULE_KINDS, ...(await db.selectDistinct({ kind: assets.kind }).from(assets)).map((k) => k.kind)].filter(Boolean))]
-    : [];
+  // Everything strict from the catalog - starting an unknown unit's record is
+  // still equipment entry, not a place to invent vocabulary.
+  const catalogTerms = mayCreate ? await db.select().from(vocabTerms) : [];
+  const kinds = catalogTerms.filter((v) => v.kind === "asset_type").map((v) => v.name);
+  const createModels: Record<string, string[]> = {};
+  for (const v of catalogTerms) {
+    if (v.kind !== "model" || !v.assetType) continue;
+    (createModels[v.assetType] ??= []).push(v.name);
+  }
+  const createCategories = catalogTerms.filter((v) => v.kind === "category").map((v) => v.name);
 
   return (
     <div className="container" style={{ maxWidth: 720 }}>
@@ -192,7 +198,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           <div className="mut" style={{ fontSize: 13 }}>
             Nothing found.{q.length < MIN_SERIAL_LOOKUP ? " Serial numbers need at least 4 characters." : ""}
           </div>
-          {mayCreate && <CreateSystemForm serial={q} kinds={kinds} />}
+          {mayCreate && <CreateSystemForm serial={q} kinds={kinds} models={createModels} categories={createCategories} />}
         </div>
       )}
     </div>

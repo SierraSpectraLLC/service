@@ -51,10 +51,14 @@ scheduled on every instance.
 
 ## 4. First sign-in checklist (as the owner)
 
-Settings has three parts, split by how often each changes: **Configuration**
+Settings has four parts, split by how often each changes: **Configuration**
 (`/settings`) is the instance itself, set up once; **Personnel**
 (`/settings/personnel`) is who is on it, changing weekly; **Catalog**
-(`/settings/catalog`) is the equipment reference, curated forever. Each
+(`/settings/catalog`) is the equipment reference and **Procedures**
+(`/settings/procedures`) is what gets done to equipment (checkout tests and
+maintenance templates) - both curated forever, by the owner AND staff. The
+catalog is the only place types, models and categories are defined: every
+picker references it and none accepts free text. Each
 organization then has its own page at `/settings/organizations/<id>`, which is
 also the page that organization's own editors get.
 
@@ -69,9 +73,11 @@ also the page that organization's own editors get.
    editor/viewer role; invitations email automatically).
 5. **Configuration → Modules**: switch on EOD / digest / sheet sync only if
    this operator wants them. Fresh instances have all three off.
-6. **Catalog**: add the system types this operator services (LC-MS, GC-MS)
-   and the models under each. Models tagged to no system type are offered
-   everywhere, which is right for control PCs and gas generators.
+6. **Catalog**: add the system types this operator services (LC-MS, GC-MS),
+   the module types (a fresh install ships the 13 starters), and the models
+   under each. Models tagged to no system type are offered everywhere, which
+   is right for control PCs and gas generators. Asset and system forms only
+   offer what's defined here; a CSV import auto-registers what it brings in.
 7. **/import**: bring the fleet in from their spreadsheet (template on the
    page). Assets and systems land with ownership and shares handled.
 8. Upload the operator org's logo on its own settings page (Workspace

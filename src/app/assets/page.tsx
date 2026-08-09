@@ -2,10 +2,10 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, instruments } from "@/db/schema";
+import { assets, instruments, vocabTerms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
-import { ASSET_COLOR, ASSET_STATES, MODULE_KINDS } from "@/lib/stages";
+import { ASSET_COLOR, ASSET_STATES } from "@/lib/stages";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
 
@@ -18,18 +18,27 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
 
   // Units on systems shared with the viewer, plus any their own org owns.
   const [seeAssets, seeSystems] = await Promise.all([visibleAssetIds(user), visibleSystemIds(user)]);
-  const [rows, insts] = await Promise.all([
+  const [rows, insts, vocab] = await Promise.all([
     db.select().from(assets)
       .where(seeAssets === null ? undefined : seeAssets.length ? inArray(assets.id, seeAssets) : sql`false`)
       .orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
     db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client }).from(instruments)
       .where(seeSystems === null ? undefined : seeSystems.length ? inArray(instruments.id, seeSystems) : sql`false`),
+    db.select().from(vocabTerms),
   ]);
   const home = new Map(insts.map((i) => [i.id, i]));
   // Owner picker options: whoever already owns stock, plus the clients we work for.
   const owners = [...new Set([...rows.map((a) => a.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort();
-  // Types are an open vocabulary: the starter list plus whatever is in use.
-  const kinds = [...new Set([...MODULE_KINDS, ...rows.map((a) => a.kind)].filter(Boolean))];
+  // The catalog names the types; the FILTER also offers kinds only found on
+  // old units, because filtering must reach everything that exists.
+  const catalogKinds = vocab.filter((v) => v.kind === "asset_type").map((v) => v.name);
+  const filterKinds = [...new Set([...catalogKinds, ...rows.map((a) => a.kind)].filter(Boolean))];
+  // Standalone stock has no system context, so every model of the type is fair game.
+  const catalogModels: Record<string, string[]> = {};
+  for (const v of vocab) {
+    if (v.kind !== "model" || !v.assetType) continue;
+    (catalogModels[v.assetType] ??= []).push(v.name);
+  }
 
   const needle = q.trim().toLowerCase();
   const filtered = rows.filter((a) => {
@@ -58,9 +67,9 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
           Every unit we track - in a system, on the shelf, or retired. Tap one for its full service
           history.{unattached > 0 ? ` ${unattached} not in a system right now.` : ""}
         </div>
-        {user.role !== "client_viewer" && <NewAssetForm owners={owners} kinds={kinds} />}
+        {user.role !== "client_viewer" && <NewAssetForm owners={owners} kinds={catalogKinds} models={catalogModels} />}
         <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner}
-          kinds={kinds} statuses={[...ASSET_STATES]} owners={owners} />
+          kinds={filterKinds} statuses={[...ASSET_STATES]} owners={owners} />
 
         {filtered.map((a) => {
           const c = ASSET_COLOR[a.status] ?? ASSET_COLOR.Spare;

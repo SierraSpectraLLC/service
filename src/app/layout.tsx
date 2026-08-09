@@ -87,13 +87,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {isStaff && (
                   <NavMore items={[
                     { href: "/maintenance", label: "Maintenance" },
-                    { href: "/checkout", label: "Checkout" },
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
                     ...(user.role === "owner"
                       ? [{ href: "/admin/access", label: "Access & ownership" }, { href: "/settings", label: "Settings" }]
-                      : []),
+                      // Staff curate the catalog and procedures; the rest of
+                      // Settings is the owner's.
+                      : [{ href: "/settings/catalog", label: "Catalog & procedures" }]),
                   ]} />
                 )}
                 {mayViewAs && !view.persona && <ViewAsBar orgs={orgOptions} active={null} />}

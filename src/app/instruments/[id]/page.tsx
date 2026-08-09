@@ -15,7 +15,7 @@ import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
-import { partOpen, GASES, MODULE_KINDS } from "@/lib/stages";
+import { partOpen, GASES } from "@/lib/stages";
 import { composeSystemLabel } from "@/lib/systemLabel";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
@@ -44,7 +44,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, vocabRows, discussion, peopleRows, assetRows, unassignedRows, kindRows, readRows, shareRows, orgRows] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, vocabRows, discussion, peopleRows, assetRows, unassignedRows, readRows, shareRows, orgRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -62,7 +62,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     // only units it owns, never another client's spares.
     db.select().from(assets).where(and(isNull(assets.instrumentId),
       user.orgId === null ? undefined : eq(assets.ownerOrgId, user.orgId))).orderBy(asc(assets.kind), asc(assets.model)),
-    db.selectDistinct({ kind: assets.kind }).from(assets),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
     // Who this system is shared with, and who it could be shared with.
     db.select({ orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
@@ -214,7 +213,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           id: a.id,
           label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
         }))}
-        kinds={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
+        kinds={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
         canEdit={canEdit}
         catalogModels={catalogModels}
       />

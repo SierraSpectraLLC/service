@@ -5,6 +5,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
 import PickOrAdd from "./PickOrAdd";
+import CatalogSelect from "./CatalogSelect";
 import SharePanel, { type ShareEntry } from "./SharePanel";
 import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
 import SalePanel from "./SalePanel";
@@ -141,7 +142,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>
                   <label>Category</label>
-                  <PickOrAdd value={draft.category} options={categories} newLabel="+ New category..." placeholder="e.g. LC-MS"
+                  <CatalogSelect value={draft.category} options={categories} ariaLabel="System category"
                     onChange={(category) => setDraft({ ...draft, category })} />
                 </div>
                 <div>

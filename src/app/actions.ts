@@ -2491,6 +2491,30 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
   }
 
   if (!dryRun && (systemsMade || assetsMade)) {
+    // The catalog is the only source of truth for types, models and
+    // categories, so a migration registers what it brings in - otherwise the
+    // imported fleet would be full of equipment no picker can name again.
+    const vocab = await db.select().from(vocabTerms);
+    const has = (kind: string, at: string, name: string) => vocab.some((v) =>
+      v.kind === kind && v.assetType.toLowerCase() === at.toLowerCase() && v.name.toLowerCase() === name.toLowerCase());
+    const newTerms: { kind: string; assetType: string; name: string }[] = [];
+    for (const r of rows) {
+      const kind = r.kind.trim(), model = r.model.trim(), cat = r.category.trim();
+      if (kind && !has("asset_type", "", kind) && !newTerms.some((t) => t.kind === "asset_type" && t.name.toLowerCase() === kind.toLowerCase()))
+        newTerms.push({ kind: "asset_type", assetType: "", name: kind });
+      if (kind && model && !has("model", kind, model) && !newTerms.some((t) => t.kind === "model" && t.assetType.toLowerCase() === kind.toLowerCase() && t.name.toLowerCase() === model.toLowerCase()))
+        newTerms.push({ kind: "model", assetType: kind, name: model });
+      if (cat && !has("category", "", cat) && !newTerms.some((t) => t.kind === "category" && t.name.toLowerCase() === cat.toLowerCase()))
+        newTerms.push({ kind: "category", assetType: "", name: cat });
+    }
+    if (newTerms.length) {
+      await db.insert(vocabTerms).values(newTerms).onConflictDoNothing();
+      await audit({
+        actor: u.email, entityType: "vocab", entityId: "csv-import",
+        action: `import added ${newTerms.length} catalog term(s) - review in Settings > Catalog`,
+      });
+      revalidatePath("/settings/catalog");
+    }
     await audit({
       actor: u.email, entityType: "settings", entityId: "csv-import",
       action: `imported ${systemsMade} system(s) and ${assetsMade} asset(s) from CSV`,
@@ -3042,8 +3066,9 @@ export async function setSheetOrg(orgId: number | null) {
 export async function addVocabTerm(
   kind: string, assetType: string, name: string, categories: string[] = [],
 ): Promise<{ error?: string }> {
-  const u = await requireOwner();
-  if (kind !== "category" && kind !== "model") return { error: "Unknown vocabulary kind" };
+  // The catalog is house-curated: the owner and their staff, never clients.
+  const u = await requireStaff();
+  if (kind !== "category" && kind !== "model" && kind !== "asset_type") return { error: "Unknown vocabulary kind" };
   const at = kind === "model" ? assetType.trim() : "";
   if (kind === "model" && !at) return { error: "Pick which asset type the model belongs to" };
   const n = name.trim();
@@ -3073,8 +3098,8 @@ export async function addVocabTerm(
   const [row] = await db.insert(vocabTerms).values({ kind, assetType: at, name: n, categories: cats }).returning();
   await audit({
     actor: u.email, entityType: "vocab", entityId: row.id,
-    action: kind === "category"
-      ? `defined system category "${n}"`
+    action: kind === "category" ? `defined system category "${n}"`
+      : kind === "asset_type" ? `defined asset type "${n}"`
       : `defined model "${n}" for ${at}${cats.length ? ` under ${cats.join(", ")}` : " (all system types)"}`,
   });
   revalidatePath("/settings/catalog");
@@ -3089,7 +3114,7 @@ export async function addVocabTerm(
  * type, so clearing the tags widens a model rather than hiding it.
  */
 export async function setVocabCategories(termId: number, categories: string[]): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requireStaff();
   const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
   if (!t || t.kind !== "model") return { error: "Not found" };
   const cats = [...new Set(categories.map((c) => c.trim()).filter(Boolean))];
@@ -3105,21 +3130,30 @@ export async function setVocabCategories(termId: number, categories: string[]): 
   return {};
 }
 
-export async function deleteVocabTerm(termId: number) {
-  const u = await requireOwner();
+export async function deleteVocabTerm(termId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
   const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
-  if (!t) return;
+  if (!t) return {};
+  // Removing a type that still has models would strand them behind no picker.
+  if (t.kind === "asset_type") {
+    const models = await db.select({ id: vocabTerms.id }).from(vocabTerms)
+      .where(and(eq(vocabTerms.kind, "model"), eq(vocabTerms.assetType, t.name)));
+    if (models.length) return { error: `Remove or move its ${models.length} model${models.length === 1 ? "" : "s"} first` };
+  }
   await db.delete(vocabTerms).where(eq(vocabTerms.id, termId));
   await audit({
     actor: u.email, entityType: "vocab", entityId: termId,
     action: t.kind === "category"
-      ? `removed system category "${t.name}" from the vocabulary (systems using it keep it)`
-      : `removed model "${t.name}" (${t.assetType}) from the vocabulary`,
+      ? `removed system category "${t.name}" from the catalog (systems using it keep it)`
+      : t.kind === "asset_type"
+        ? `removed asset type "${t.name}" from the catalog (units recorded as it keep it)`
+        : `removed model "${t.name}" (${t.assetType}) from the catalog`,
   });
   revalidatePath("/settings/catalog");
-  revalidatePath("/checkout");
+  revalidatePath("/settings/procedures");
   revalidatePath("/maintenance");
   rev();
+  return {};
 }
 
 // ---------------- Settings ----------------

@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs, eodUpdates,
-  pmSchedules,
+  pmSchedules, vocabTerms,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
@@ -16,7 +16,7 @@ import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
-import { GASES, MODULE_KINDS } from "@/lib/stages";
+import { GASES } from "@/lib/stages";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
@@ -44,7 +44,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // viewer is allowed to know about.
   const visibleSystems = await visibleSystemIds(user);
 
-  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows, kindRows,
+  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows, vocab,
          gasRows, gasNames, attachRows, activity, peopleRows] = await Promise.all([
     db.select().from(assets).where(eq(assets.id, assetId)),
     db.select().from(assetEvents).where(eq(assetEvents.assetId, assetId)),
@@ -56,7 +56,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       .where(visibleSystems === null ? undefined : visibleSystems.length ? inArray(instruments.id, visibleSystems) : sql`false`)
       .orderBy(asc(instruments.externalId)),
     db.selectDistinct({ owner: assets.owner }).from(assets),
-    db.selectDistinct({ kind: assets.kind }).from(assets),
+    db.select().from(vocabTerms),
     db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(desc(attachments.createdAt)),
@@ -178,7 +178,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
           systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
           owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
-          kinds={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
+          kinds={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
+          models={vocab.reduce<Record<string, string[]>>((acc, v) => {
+            if (v.kind === "model" && v.assetType) (acc[v.assetType] ??= []).push(v.name);
+            return acc;
+          }, {})}
           canEdit={canEdit} isStaff={isStaff}
         />
         <GasPanel target={target} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}

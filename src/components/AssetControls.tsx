@@ -4,6 +4,7 @@ import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_COLOR } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, updateAsset } from "@/app/actions";
+import CatalogSelect from "./CatalogSelect";
 import PickOrAdd from "./PickOrAdd";
 
 type Asset = {
@@ -11,8 +12,11 @@ type Asset = {
   owner: string; asFound: string; location: string; note: string; status: string; instrumentId: number | null;
 };
 
-export default function AssetControls({ asset, systems, owners, kinds, canEdit, isStaff }: {
+export default function AssetControls({ asset, systems, owners, kinds, models, canEdit, isStaff }: {
   asset: Asset; systems: { id: number; externalId: string }[]; owners: string[]; kinds: string[];
+  // Catalog models per type; the unit's current values stay selectable even
+  // if they've since left the catalog (CatalogSelect handles that).
+  models: Record<string, string[]>;
   canEdit: boolean; isStaff: boolean;
 }) {
   const [error, setError] = useState("");
@@ -80,10 +84,16 @@ export default function AssetControls({ asset, systems, owners, kinds, canEdit, 
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
-              <PickOrAdd value={draft.kind} options={kinds} newLabel="+ New type..." placeholder="e.g. N2 generator"
-                onChange={(kind) => setDraft({ ...draft, kind })} />
+              <CatalogSelect value={draft.kind} options={kinds} ariaLabel="Asset type"
+                onChange={(kind) => setDraft({ ...draft, kind })}
+                hint="Define module types in Settings → Catalog" />
             </div>
-            <div><label>Model</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} /></div>
+            <div>
+              <label>Model</label>
+              <CatalogSelect value={draft.model} options={models[draft.kind] ?? []} ariaLabel="Model"
+                onChange={(model) => setDraft({ ...draft, model })}
+                hint={`No ${draft.kind || "?"} models defined yet - add them in Settings → Catalog`} />
+            </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} /></div>
           </div>
           <div className="pf3" style={{ marginBottom: 8 }}>

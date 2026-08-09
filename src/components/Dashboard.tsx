@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PickOrAdd from "./PickOrAdd";
+import CatalogSelect from "./CatalogSelect";
 import { createInstrument } from "@/app/actions";
 
 type StageDefLite = { name: string; bg: string; fg: string };
@@ -187,8 +188,9 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>Category</label>
-              <PickOrAdd value={draft.category} options={categories} newLabel="+ New category..." placeholder="e.g. LC-MS"
-                onChange={(category) => setDraft({ ...draft, category })} />
+              <CatalogSelect value={draft.category} options={categories} ariaLabel="System category"
+                onChange={(category) => setDraft({ ...draft, category })}
+                hint="Define system types in Settings → Catalog" />
             </div>
           </div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
