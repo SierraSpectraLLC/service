@@ -290,6 +290,7 @@ CREATE TABLE IF NOT EXISTS "vocab_terms" (
   "kind" text NOT NULL,
   "asset_type" text NOT NULL DEFAULT '',
   "name" text NOT NULL,
+  "categories" text[] NOT NULL DEFAULT '{}',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS "checkout_items" (
@@ -453,6 +454,7 @@ ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_name" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "template_id" integer;
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");

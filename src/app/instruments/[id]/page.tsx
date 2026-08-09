@@ -44,7 +44,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // neon-http makes each query its own round-trip, so batch the independent
   // ones: wave 1 needs only the id, wave 2 needs taskIds, wave 3 itemIds.
-  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, vocabCats, discussion, peopleRows, assetRows, unassignedRows, kindRows, readRows, shareRows, orgRows] = await Promise.all([
+  const [[inst], gasRows, taskRows, partRows, attachRows, activity, stageDefList, gasNames, systemRows, vocabRows, discussion, peopleRows, assetRows, unassignedRows, kindRows, readRows, shareRows, orgRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(instrumentGases).where(eq(instrumentGases.instrumentId, instId)).orderBy(asc(instrumentGases.id)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -54,7 +54,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     getStageDefs(),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
-    db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
+    db.select().from(vocabTerms),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
@@ -70,6 +70,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       .where(eq(systemShares.instrumentId, instId)).orderBy(asc(orgs.name)),
     db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
   ]);
+  // Catalog models for THIS system's type, by asset type: adding a detector to
+  // a GC-MS should offer FID and TCD, not every detector the shop knows. A model
+  // tagged to no category is universal kit, so it's always offered.
+  const catalogModels: Record<string, string[]> = {};
+  for (const v of vocabRows) {
+    if (v.kind !== "model" || !v.assetType) continue;
+    if (v.categories.length && !v.categories.some((c) => c.toLowerCase() === inst.category.trim().toLowerCase())) continue;
+    (catalogModels[v.assetType] ??= []).push(v.name);
+  }
+
   // The system's own schedules plus those living on its installed assets - a
   // pump's seal job shows up wherever the pump currently works.
   const pmRows = await db.select().from(pmSchedules).where(
@@ -170,7 +180,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken }}
         label={composeSystemLabel(assetRows, inst.model)}
         clients={systemRows.map((c) => c.client)}
-        categories={[...systemRows.map((c) => c.category), ...vocabCats.map((v) => v.name)]}
+        categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
         stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
         gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
         knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]}
@@ -206,6 +216,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         }))}
         kinds={[...new Set([...MODULE_KINDS, ...kindRows.map((k) => k.kind)].filter(Boolean))]}
         canEdit={canEdit}
+        catalogModels={catalogModels}
       />
 
       <PartsPanel target={{ instrumentId: inst.id, assetId: null }}

@@ -502,12 +502,27 @@ export const stageEvents = pgTable("stage_events", {
 // asset models per type ("Autosampler" / "ASI-L"). Pickers everywhere combine
 // these terms with values already in use, so a checkout test can be scoped to
 // a model the shop hasn't stocked yet. Managed in Settings.
+// The equipment catalog: system categories ("LC-MS") and asset models
+// ("LC-20AD"), curated by the operator and shared by everyone on the instance.
+//
+// A model hangs off an asset TYPE (which is what a checkout item or PM template
+// keys on) and is tagged with the system categories it belongs to, because
+// those are different axes: a Detector means FID or TCD on a GC-MS and SPD-20A
+// on an LC-MS. Empty categories = every system type, which is both the
+// backward-compatible default for models defined before tagging existed and the
+// right answer for genuinely universal kit like a control PC.
 export const vocabTerms = pgTable("vocab_terms", {
   id: serial("id").primaryKey(),
   kind: text("kind").notNull(),                        // 'category' | 'model'
   assetType: text("asset_type").notNull().default(""), // models only: which asset type
   name: text("name").notNull(),
+  // Models only: system categories this model appears under. [] = all of them.
+  // An array rather than one value because a pump can serve LC-MS and HPLC
+  // alike - same reasoning as checkout_items.model_scope.
+  categories: text("categories").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Unique on identity only, not on categories: FID is one model that happens
+  // to apply to several system types, not a row per type.
 }, (t) => [unique("vocab_term_unique").on(t.kind, t.assetType, t.name)]);
 
 // Checkout items: tasks and tests auto-created when a system or asset is

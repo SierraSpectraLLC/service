@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import {
   addStage, setStageColor, renameStage, deleteStage,
-  addVocabTerm, deleteVocabTerm, setBranding, setOperatorOrg, setModule,
+  setBranding, setOperatorOrg, setModule,
 } from "@/app/actions";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
@@ -29,18 +29,17 @@ function SubHead({ children }: { children: React.ReactNode }) {
   return <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>{children}</div>;
 }
 
-type VocabRow = { id: number; kind: string; assetType: string; name: string };
 type StageRow = { id: number; name: string; bg: string; fg: string; builtin: boolean };
 type OrgRow = { id: number; name: string; kind: string };
 
 /**
  * The instance itself: what it's called, who operates it, which optional
- * workflows run, and the vocabulary the shop works in. Nothing here is about a
- * particular person or company - that's Personnel.
+ * workflows run, and the stages work moves through. Nothing here is about a
+ * particular person or company (that's Personnel) or a piece of equipment
+ * (that's Catalog).
  */
 export default function ConfigurationForm(props: {
   stageDefs: StageRow[];
-  vocab: VocabRow[]; assetTypes: string[];
   orgs: OrgRow[];
   modules: { sheetSync: boolean; eod: boolean; digest: boolean };
   platformName: string; platformTagline: string; operatorOrgId: number | null;
@@ -59,23 +58,6 @@ export default function ConfigurationForm(props: {
       else setBrandSaved(true);
     });
   };
-
-  // Vocabulary: categories, models and stages - all "the words this shop uses".
-  const [catDraft, setCatDraft] = useState("");
-  const [modelDraft, setModelDraft] = useState({ assetType: props.assetTypes[0] ?? "Pump", name: "" });
-  const [vocabError, setVocabError] = useState("");
-  const submitVocab = (kind: "category" | "model") => {
-    const name = kind === "category" ? catDraft : modelDraft.name;
-    if (!name.trim()) return;
-    setVocabError("");
-    startTransition(async () => {
-      const res = await addVocabTerm(kind, kind === "model" ? modelDraft.assetType : "", name);
-      if (res?.error) setVocabError(res.error);
-      else kind === "category" ? setCatDraft("") : setModelDraft((d) => ({ ...d, name: "" }));
-    });
-  };
-  const categories = props.vocab.filter((v) => v.kind === "category");
-  const models = props.vocab.filter((v) => v.kind === "model");
 
   const [stageDraft, setStageDraft] = useState({ name: "", bg: "#C9DAF8" });
   const [stageError, setStageError] = useState("");
@@ -179,56 +161,11 @@ export default function ConfigurationForm(props: {
         ))}
       </Section>
 
-      <Section title="Vocabulary"
-        hint="Categories, models and stages, defined ahead of use. Define a model you don't stock yet and it shows up wherever models are picked - like scoping a checkout test to both an ASI-V and an ASI-L. Removing a term never touches records already using it.">
-        <SubHead>System categories</SubHead>
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-          {categories.map((c) => (
-            <span key={c.id} className="pill" style={{ background: "#E7F2FA", color: "#1D6396", display: "inline-flex", alignItems: "center", gap: 4 }}>
-              {c.name}
-              <button className="btn link" aria-label={`Remove ${c.name}`} style={{ color: "inherit", padding: 0, fontSize: 12 }}
-                disabled={pending} onClick={() => startTransition(() => deleteVocabTerm(c.id))}>×</button>
-            </span>
-          ))}
-          {categories.length === 0 && <span className="mut" style={{ fontSize: 12 }}>None defined - the pickers offer categories already in use.</span>}
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input value={catDraft} onChange={(e) => setCatDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submitVocab("category"); }}
-            placeholder='New category, e.g. "LC-MS"' style={{ flex: 1, fontSize: 13, maxWidth: 260 }} />
-          <button className="btn sm" onClick={() => submitVocab("category")} disabled={pending || !catDraft.trim()}>Add</button>
-        </div>
+      {/* Equipment vocabulary - system types and models - lives in Settings >
+          Catalog; stages are workflow, so they stay with the instance. */}
+      <Section title="Stages"
+        hint="The steps work moves through. Pick a background color - the text color adjusts itself. Built-in names are locked (sync and reports key on them); stages you add can be renamed or deleted.">
 
-        <SubHead>Asset models</SubHead>
-        {[...new Set(models.map((m) => m.assetType))].map((at) => (
-          <div key={at} style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginBottom: 4 }}>
-            <span className="mut" style={{ fontSize: 12, width: 110, flexShrink: 0 }}>{at}</span>
-            {models.filter((m) => m.assetType === at).map((m) => (
-              <span key={m.id} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3", display: "inline-flex", alignItems: "center", gap: 4 }}>
-                {m.name}
-                <button className="btn link" aria-label={`Remove ${m.name}`} style={{ color: "inherit", padding: 0, fontSize: 12 }}
-                  disabled={pending} onClick={() => startTransition(() => deleteVocabTerm(m.id))}>×</button>
-              </span>
-            ))}
-          </div>
-        ))}
-        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-          <select value={modelDraft.assetType} onChange={(e) => setModelDraft({ ...modelDraft, assetType: e.target.value })}
-            style={{ width: "auto", fontSize: 12 }}>
-            {props.assetTypes.map((t) => <option key={t}>{t}</option>)}
-          </select>
-          <input value={modelDraft.name} onChange={(e) => setModelDraft({ ...modelDraft, name: e.target.value })}
-            onKeyDown={(e) => { if (e.key === "Enter") submitVocab("model"); }}
-            placeholder='New model, e.g. "ASI-L"' style={{ flex: "1 1 160px", fontSize: 13, maxWidth: 220 }} />
-          <button className="btn sm" onClick={() => submitVocab("model")} disabled={pending || !modelDraft.name.trim()}>Add</button>
-        </div>
-        {vocabError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{vocabError}</div>}
-
-        <SubHead>Stages</SubHead>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
-          Pick a background color - the text color adjusts itself. Built-in names are locked (sync and
-          reports key on them); stages you add can be renamed or deleted.
-        </div>
         {props.stageDefs.map((s) => (
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)" }}>
             <span className="pill" style={{ background: colors[s.id] ?? s.bg, color: s.fg }}>{s.name}</span>

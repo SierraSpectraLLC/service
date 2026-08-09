@@ -51,8 +51,10 @@ scheduled on every instance.
 
 ## 4. First sign-in checklist (as the owner)
 
-Settings has two halves: **Configuration** (`/settings`) is the instance
-itself, **Personnel** (`/settings/personnel`) is who is on it. Each
+Settings has three parts, split by how often each changes: **Configuration**
+(`/settings`) is the instance itself, set up once; **Personnel**
+(`/settings/personnel`) is who is on it, changing weekly; **Catalog**
+(`/settings/catalog`) is the equipment reference, curated forever. Each
 organization then has its own page at `/settings/organizations/<id>`, which is
 also the page that organization's own editors get.
 
@@ -67,9 +69,12 @@ also the page that organization's own editors get.
    editor/viewer role; invitations email automatically).
 5. **Configuration → Modules**: switch on EOD / digest / sheet sync only if
    this operator wants them. Fresh instances have all three off.
-6. **/import**: bring the fleet in from their spreadsheet (template on the
+6. **Catalog**: add the system types this operator services (LC-MS, GC-MS)
+   and the models under each. Models tagged to no system type are offered
+   everywhere, which is right for control PCs and gas generators.
+7. **/import**: bring the fleet in from their spreadsheet (template on the
    page). Assets and systems land with ownership and shares handled.
-7. Upload the operator org's logo on its own settings page (Workspace
+8. Upload the operator org's logo on its own settings page (Workspace
    appearance).
 
 ## 5. Smoke checks before handing over

@@ -1,14 +1,15 @@
 import Link from "next/link";
 
 /**
- * Two halves of Settings. Configuration is the instance itself - what it's
- * called, what it runs, the words it uses. Personnel is who's on it. They change
- * on completely different schedules, which is why they aren't one page.
+ * Three parts of Settings, split by how often each one changes. Configuration
+ * is the instance itself - set up once. Personnel is who's on it - changes
+ * weekly. Catalog is the equipment reference - curated forever.
  */
-export default function SettingsTabs({ active }: { active: "configuration" | "personnel" }) {
+export default function SettingsTabs({ active }: { active: "configuration" | "personnel" | "catalog" }) {
   const tabs = [
     { key: "configuration", href: "/settings", label: "Configuration" },
     { key: "personnel", href: "/settings/personnel", label: "Personnel" },
+    { key: "catalog", href: "/settings/catalog", label: "Catalog" },
   ] as const;
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>

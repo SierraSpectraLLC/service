@@ -12,10 +12,13 @@ export type AssetRow = {
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit }: {
+export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).
   instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[];
   kinds: string[]; canEdit: boolean;
+  // Catalog models already narrowed to this system's type, keyed by asset type,
+  // so the Model field suggests the right kit instead of every model in the shop.
+  catalogModels: Record<string, string[]>;
 }) {
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -98,7 +101,18 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
               <PickOrAdd value={draft.kind} options={kinds} newLabel="+ New type..." placeholder="e.g. N2 generator"
                 onChange={(kind) => setDraft({ ...draft, kind })} />
             </div>
-            <div><label>Model</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="LC-40D XR" /></div>
+            <div>
+              <label>Model</label>
+              {/* Catalog first, free text always: a model nobody has defined yet
+                  must never be a reason you can't record the unit in front of you. */}
+              {(catalogModels[draft.kind] ?? []).length > 0 ? (
+                <PickOrAdd value={draft.model} options={catalogModels[draft.kind] ?? []}
+                  newLabel="+ Not listed..." placeholder="LC-40D XR"
+                  onChange={(model) => setDraft({ ...draft, model })} />
+              ) : (
+                <input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} placeholder="LC-40D XR" />
+              )}
+            </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>
           </div>
           <div className="pf2" style={{ marginBottom: 10 }}>

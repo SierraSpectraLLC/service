@@ -3039,23 +3039,68 @@ export async function setSheetOrg(orgId: number | null) {
 // scoped to a model the shop hasn't stocked yet. Pickers merge these with
 // values already in use.
 
-export async function addVocabTerm(kind: string, assetType: string, name: string): Promise<{ error?: string }> {
+export async function addVocabTerm(
+  kind: string, assetType: string, name: string, categories: string[] = [],
+): Promise<{ error?: string }> {
   const u = await requireOwner();
   if (kind !== "category" && kind !== "model") return { error: "Unknown vocabulary kind" };
   const at = kind === "model" ? assetType.trim() : "";
   if (kind === "model" && !at) return { error: "Pick which asset type the model belongs to" };
   const n = name.trim();
   if (!n || n.length > 60) return { error: "Name must be 1-60 characters" };
+  const cats = kind === "model" ? [...new Set(categories.map((c) => c.trim()).filter(Boolean))] : [];
   const existing = await db.select().from(vocabTerms).where(eq(vocabTerms.kind, kind));
-  if (existing.some((t) => t.assetType.toLowerCase() === at.toLowerCase() && t.name.toLowerCase() === n.toLowerCase()))
+  const clash = existing.find((t) => t.assetType.toLowerCase() === at.toLowerCase() && t.name.toLowerCase() === n.toLowerCase());
+  if (clash) {
+    // One row per model: the same name under a second system type widens the
+    // existing row rather than colliding with it.
+    if (kind === "model" && cats.length && clash.categories.length) {
+      const merged = [...new Set([...clash.categories, ...cats])];
+      if (merged.length > clash.categories.length) {
+        await db.update(vocabTerms).set({ categories: merged }).where(eq(vocabTerms.id, clash.id));
+        await audit({
+          actor: u.email, entityType: "vocab", entityId: clash.id,
+          action: `model "${n}" (${at}) now also applies to ${cats.join(", ")}`,
+          field: "categories", oldValue: clash.categories.join(", "), newValue: merged.join(", "),
+        });
+        revalidatePath("/settings/catalog");
+        rev();
+        return {};
+      }
+    }
     return { error: `${n} is already defined` };
-  const [row] = await db.insert(vocabTerms).values({ kind, assetType: at, name: n }).returning();
+  }
+  const [row] = await db.insert(vocabTerms).values({ kind, assetType: at, name: n, categories: cats }).returning();
   await audit({
     actor: u.email, entityType: "vocab", entityId: row.id,
-    action: kind === "category" ? `defined system category "${n}"` : `defined model "${n}" for ${at}`,
+    action: kind === "category"
+      ? `defined system category "${n}"`
+      : `defined model "${n}" for ${at}${cats.length ? ` under ${cats.join(", ")}` : " (all system types)"}`,
   });
-  revalidatePath("/settings");
+  revalidatePath("/settings/catalog");
   revalidatePath("/checkout");
+  revalidatePath("/maintenance");
+  rev();
+  return {};
+}
+
+/**
+ * Retag which system categories a model belongs to. Empty means every system
+ * type, so clearing the tags widens a model rather than hiding it.
+ */
+export async function setVocabCategories(termId: number, categories: string[]): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t || t.kind !== "model") return { error: "Not found" };
+  const cats = [...new Set(categories.map((c) => c.trim()).filter(Boolean))];
+  if (cats.join("|") === t.categories.join("|")) return {};
+  await db.update(vocabTerms).set({ categories: cats }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId,
+    action: `model "${t.name}" (${t.assetType}) now applies to ${cats.length ? cats.join(", ") : "all system types"}`,
+    field: "categories", oldValue: t.categories.join(", "), newValue: cats.join(", "),
+  });
+  revalidatePath("/settings/catalog");
   rev();
   return {};
 }
@@ -3071,8 +3116,9 @@ export async function deleteVocabTerm(termId: number) {
       ? `removed system category "${t.name}" from the vocabulary (systems using it keep it)`
       : `removed model "${t.name}" (${t.assetType}) from the vocabulary`,
   });
-  revalidatePath("/settings");
+  revalidatePath("/settings/catalog");
   revalidatePath("/checkout");
+  revalidatePath("/maintenance");
   rev();
 }
 
