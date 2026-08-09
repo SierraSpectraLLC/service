@@ -84,6 +84,9 @@ also the page that organization's own editors get.
   reports create actions and no errors.
 - Trigger `api/cron/daily-digest` with the `CRON_SECRET` header → `skipped`
   unless the module is on.
+- Define a maintenance template on /maintenance for an asset type in the
+  fleet → it reports how many existing units it scheduled; add a new asset of
+  that type → the schedule is on it from birth.
 - Add a maintenance schedule due today on a test system → the task appears
   under Tasks immediately; mark it Done → the schedule's next due date moves
   out by one cadence. Open a system's **Label** and scan the QR with a phone →

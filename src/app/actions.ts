@@ -10,10 +10,10 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
-  checkoutItems, engagementRecords, accessRequests, assetShares, pmSchedules,
+  checkoutItems, engagementRecords, accessRequests, assetShares, pmSchedules, pmTemplates,
 } from "@/db/schema";
 import { advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
-import { generateDuePmTasks } from "@/lib/pmGenerate";
+import { applyPmTemplates, generateDuePmTasks } from "@/lib/pmGenerate";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -24,7 +24,7 @@ import { canSeeCosts } from "@/lib/redact";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner, VIEW_AS_COOKIE, type SessionUser } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg } from "@/lib/stages";
+import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
@@ -522,6 +522,9 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       action: `added ${assetLabel(row)} to stock${a.owner ? ` for ${a.owner}` : ""}${a.location ? ` (${a.location})` : ""}`,
     });
   }
+  // The model's standing maintenance arrives with the unit - CSV imports come
+  // through here too, so a migrated fleet lands already scheduled.
+  await applyPmTemplates(row.id, shopToday(), u.email);
   revalidatePath("/assets");
   revalidatePath(`/assets/${row.id}`);
   return { id: row.id };
@@ -944,7 +947,10 @@ export async function setTaskState(taskId: number, state: string) {
 
 export async function addPmSchedule(
   target: WorkTarget,
-  data: { title: string; body: string; assignee: string; everyDays: number | string; firstDue: string },
+  data: {
+    title: string; body: string; assignee: string; everyDays: number | string; firstDue: string;
+    partName?: string; partNumber?: string;
+  },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   if (!data.title.trim()) return { error: "Title required" };
@@ -958,6 +964,7 @@ export async function addPmSchedule(
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
     everyDays: cadence.days, nextDue: firstDue, createdBy: u.email,
+    partName: (data.partName ?? "").trim(), partNumber: (data.partNumber ?? "").trim(),
   }).returning();
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "pm", entityId: s.id,
@@ -1008,6 +1015,119 @@ export async function setPmPaused(id: number, paused: boolean): Promise<{ error?
   });
   if (!paused) await generateDuePmTasks(shopToday(), u.email);
   revWork(s);
+  return {};
+}
+
+/**
+ * One tap from "this maintenance takes PN 228-35145-91" to a Needed line in
+ * the Parts panel - the same lifecycle every other part follows (ordered, in
+ * transit, received, installed), so purchasing runs through the platform
+ * instead of a sticky note. Dedupes against an open request for the same
+ * number on the same equipment.
+ */
+export async function requestPmPart(scheduleId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s || !s.partNumber) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  // An asset-bound schedule files the part on the unit AND its current system,
+  // so both pages show it coming.
+  const [a] = s.assetId !== null ? await db.select().from(assets).where(eq(assets.id, s.assetId)) : [];
+  const instrumentId = s.instrumentId ?? a?.instrumentId ?? null;
+  const open = await db.select().from(parts).where(
+    s.assetId !== null ? eq(parts.assetId, s.assetId) : eq(parts.instrumentId, instrumentId!)
+  );
+  if (open.some((p) => partOpen(p.status) && p.partNumber.toLowerCase() === s.partNumber.toLowerCase())) {
+    return { error: `PN ${s.partNumber} is already requested and not yet installed` };
+  }
+  const name = s.partName || s.title;
+  const [p] = await db.insert(parts).values({
+    instrumentId, assetId: s.assetId, name, partNumber: s.partNumber,
+    qty: "1", status: "Needed", note: `for maintenance '${s.title}'`,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId, assetId: s.assetId, entityType: "part", entityId: p.id,
+    action: `requested part '${name}' (PN ${s.partNumber}) for maintenance '${s.title}'`,
+  });
+  revWork(p);
+  return {};
+}
+
+// PM templates: model-level upkeep definitions, staff-managed like checkout
+// items. Creating one backfills schedules across every matching asset;
+// changing or removing one leaves stamped-out schedules alone - they belong
+// to their units now, and rewriting a shop's live calendar from a template
+// edit would be a surprise, not a convenience.
+
+type PmTemplateInput = {
+  assetType: string; title: string; body: string;
+  everyDays: number | string; partName: string; partNumber: string; modelScope: string[];
+};
+
+function cleanPmTemplate(data: PmTemplateInput): { error: string } | (Omit<PmTemplateInput, "everyDays" | "modelScope"> & { everyDays: number; modelScope: string[] }) {
+  if (!data.title.trim()) return { error: "Title required" };
+  if (!data.assetType.trim()) return { error: "Pick an asset type" };
+  const cadence = parseCadence(data.everyDays);
+  if ("error" in cadence) return cadence;
+  return {
+    assetType: data.assetType.trim(), title: data.title.trim(), body: data.body.trim(),
+    everyDays: cadence.days, partName: data.partName.trim(), partNumber: data.partNumber.trim(),
+    modelScope: data.modelScope.map((m) => m.trim()).filter(Boolean),
+  };
+}
+
+export async function addPmTemplate(data: PmTemplateInput): Promise<{ error?: string; applied?: number }> {
+  const u = await requireStaff();
+  const clean = cleanPmTemplate(data);
+  if ("error" in clean) return clean;
+  const siblings = await db.select().from(pmTemplates).where(eq(pmTemplates.assetType, clean.assetType));
+  if (siblings.some((t) => t.title.toLowerCase() === clean.title.toLowerCase()
+      && t.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase())) {
+    return { error: `"${clean.title}" already exists for this type` };
+  }
+  const [tpl] = await db.insert(pmTemplates).values(clean).returning();
+  await audit({
+    actor: u.email, entityType: "pm-template", entityId: tpl.id,
+    action: `defined maintenance template '${tpl.title}' for ${tpl.assetType}${tpl.modelScope.length ? ` (${tpl.modelScope.join(", ")})` : ""} ${cadenceLabel(tpl.everyDays)}${tpl.partNumber ? ` - ${tpl.partName || "part"} PN ${tpl.partNumber}` : ""}`,
+  });
+  // Backfill: the fleet already on the floor gets the schedule too, each unit
+  // deduped by title so hand-written schedules block the template's copy.
+  const fleet = await db.select({ id: assets.id }).from(assets).where(eq(assets.kind, clean.assetType));
+  const today = shopToday();
+  let applied = 0;
+  for (const a of fleet) {
+    applied += (await applyPmTemplates(a.id, today, u.email)).created;
+  }
+  revalidatePath("/maintenance");
+  revalidatePath("/assets");
+  return { applied };
+}
+
+export async function updatePmTemplate(id: number, data: PmTemplateInput): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [tpl] = await db.select().from(pmTemplates).where(eq(pmTemplates.id, id));
+  if (!tpl) return { error: "Not found" };
+  const clean = cleanPmTemplate(data);
+  if ("error" in clean) return clean;
+  await db.update(pmTemplates).set(clean).where(eq(pmTemplates.id, id));
+  await audit({
+    actor: u.email, entityType: "pm-template", entityId: id,
+    action: `updated maintenance template '${clean.title}' (${tpl.assetType}) - applies to units it lands on from now on, existing schedules unchanged`,
+  });
+  revalidatePath("/maintenance");
+  return {};
+}
+
+export async function removePmTemplate(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [tpl] = await db.select().from(pmTemplates).where(eq(pmTemplates.id, id));
+  if (!tpl) return {};
+  await db.delete(pmTemplates).where(eq(pmTemplates.id, id)); // schedules keep living, FK goes null
+  await audit({
+    actor: u.email, entityType: "pm-template", entityId: id,
+    action: `removed maintenance template '${tpl.title}' (${tpl.assetType}) - schedules already on units stay`,
+  });
+  revalidatePath("/maintenance");
   return {};
 }
 

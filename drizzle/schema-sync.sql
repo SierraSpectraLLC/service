@@ -235,6 +235,17 @@ CREATE TABLE IF NOT EXISTS "discussion_reads" (
   "thread_id" integer NOT NULL,
   "last_seen_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "pm_templates" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "asset_type" text NOT NULL,
+  "title" text NOT NULL,
+  "body" text NOT NULL DEFAULT '',
+  "every_days" integer NOT NULL,
+  "part_name" text NOT NULL DEFAULT '',
+  "part_number" text NOT NULL DEFAULT '',
+  "model_scope" text[] NOT NULL DEFAULT '{}',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "pm_schedules" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -246,6 +257,9 @@ CREATE TABLE IF NOT EXISTS "pm_schedules" (
   "next_due" text NOT NULL,
   "last_done" text NOT NULL DEFAULT '',
   "paused" boolean NOT NULL DEFAULT false,
+  "part_name" text NOT NULL DEFAULT '',
+  "part_number" text NOT NULL DEFAULT '',
+  "template_id" integer,
   "created_by" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
@@ -436,6 +450,9 @@ ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "author_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "audience" text NOT NULL DEFAULT 'all';
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "room_org_id" integer;
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_name" text NOT NULL DEFAULT '';
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "template_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -602,6 +619,10 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_asset_id_assets_id_fk') THEN
     ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_asset_id_assets_id_fk"
       FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_template_id_pm_templates_id_fk') THEN
+    ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_template_id_pm_templates_id_fk"
+      FOREIGN KEY ("template_id") REFERENCES "pm_templates"("id") ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_pm_schedule_id_pm_schedules_id_fk') THEN
     ALTER TABLE "tasks" ADD CONSTRAINT "tasks_pm_schedule_id_pm_schedules_id_fk"

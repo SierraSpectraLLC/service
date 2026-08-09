@@ -3,12 +3,15 @@
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import type { WorkTarget } from "@/app/actions";
-import { addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule } from "@/app/actions";
+import { addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart } from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
 
 export type PmRow = {
   id: number; title: string; body: string; assignee: string;
   everyDays: number; nextDue: string; lastDone: string; paused: boolean;
+  partName: string; partNumber: string;
+  /** Set when a schedule shown on a system page actually lives on one of its assets. */
+  onAsset?: string;
   /** An open generated task is the schedule "in flight". */
   openTaskId: number | null;
 };
@@ -33,7 +36,8 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   target: WorkTarget; schedules: PmRow[]; people: string[]; today: string; canEdit: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "90", firstDue: today });
+  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "90", firstDue: today, partName: "", partNumber: "" });
+  const [requested, setRequested] = useState<Record<number, string>>({});
   const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string }>>({});
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -46,7 +50,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
     startTransition(async () => {
       const res = await addPmSchedule(target, draft);
       if (res?.error) setError(res.error);
-      else { setDraft({ title: "", body: "", assignee: "", everyDays: draft.everyDays, firstDue: today }); setOpen(false); }
+      else { setDraft({ title: "", body: "", assignee: "", everyDays: draft.everyDays, firstDue: today, partName: "", partNumber: "" }); setOpen(false); }
     });
   };
 
@@ -102,6 +106,12 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               <option value="">unassigned</option>
               {people.map((p) => <option key={p}>{p}</option>)}
             </select>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+            <input value={draft.partName} onChange={(e) => setDraft({ ...draft, partName: e.target.value })}
+              placeholder="Part it takes (optional)" style={{ flex: "1 1 140px", fontSize: 12 }} />
+            <input className="mono" value={draft.partNumber} onChange={(e) => setDraft({ ...draft, partNumber: e.target.value })}
+              placeholder="Part number" style={{ flex: "1 1 120px", fontSize: 12 }} />
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submit}
               disabled={pending || !draft.title.trim()}>
               {pending ? "Saving..." : "Schedule"}
@@ -131,6 +141,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
                 </span>
               )}
+              {s.onAsset && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
               {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
               {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
               {canEdit && (
@@ -157,6 +168,23 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               )}
             </div>
             {s.body && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
+            {s.partNumber && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
+                <span className="mono mut" style={{ fontSize: 11 }}>
+                  {s.partName ? `${s.partName} · ` : ""}PN {s.partNumber}
+                </span>
+                {canEdit && (requested[s.id]
+                  ? <span style={{ fontSize: 11, color: requested[s.id] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
+                      {requested[s.id] === "ok" ? "Requested - see Parts" : requested[s.id]}
+                    </span>
+                  : <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                      onClick={() => startTransition(async () => {
+                        const res = await requestPmPart(s.id);
+                        setRequested((m) => ({ ...m, [s.id]: res?.error ?? "ok" }));
+                      })}>request part</button>
+                )}
+              </div>
+            )}
             {e && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
                 <span className="mut" style={{ fontSize: 11 }}>every</span>

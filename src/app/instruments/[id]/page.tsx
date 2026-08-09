@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import {
@@ -70,7 +70,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       .where(eq(systemShares.instrumentId, instId)).orderBy(asc(orgs.name)),
     db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
   ]);
-  const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.instrumentId, instId)).orderBy(asc(pmSchedules.nextDue));
+  // The system's own schedules plus those living on its installed assets - a
+  // pump's seal job shows up wherever the pump currently works.
+  const pmRows = await db.select().from(pmSchedules).where(
+    assetRows.length
+      ? or(eq(pmSchedules.instrumentId, instId), inArray(pmSchedules.assetId, assetRows.map((a) => a.id)))
+      : eq(pmSchedules.instrumentId, instId)
+  ).orderBy(asc(pmSchedules.nextDue));
   if (!inst) notFound();
 
   // An asset can carry work of its own (recorded on its page, with no system).
@@ -214,11 +220,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
         people={peopleRows.map((p) => p.name)}
-        schedules={pmRows.map((s) => ({
-          id: s.id, title: s.title, body: s.body, assignee: s.assignee,
-          everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
-          openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
-        }))} />
+        schedules={pmRows.map((s) => {
+          const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;
+          return {
+            id: s.id, title: s.title, body: s.body, assignee: s.assignee,
+            everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+            partName: s.partName, partNumber: s.partNumber,
+            onAsset: onAsset ? `${onAsset.kind} — ${onAsset.model || onAsset.serial || "?"}` : undefined,
+            openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
+          };
+        })} />
 
       <DiscussionPanel
         instrumentId={inst.id}

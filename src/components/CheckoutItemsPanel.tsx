@@ -17,7 +17,7 @@ const emptyDraft = {
 };
 
 /** Multiselect over catalog models: chips in the field, type-to-filter list below. */
-function ScopeField({ scope, options, onChange }: {
+export function ScopeField({ scope, options, onChange }: {
   scope: string[]; options: string[]; onChange: (next: string[]) => void;
 }) {
   const [filter, setFilter] = useState("");

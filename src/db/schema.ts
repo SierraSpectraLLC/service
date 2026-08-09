@@ -185,6 +185,27 @@ export const accessRequests = pgTable("access_requests", {
 // on PM work with no special cases. Completing the task advances next_due from
 // the day it was done (floating cadence), which is how shops actually run:
 // changing a filter late doesn't owe you an extra change next week.
+// PM templates: the maintenance a MODEL needs, written once. "An LC-20AD gets
+// its plunger seals replaced quarterly, PN 228-35145-91; an LC-20ADXR the same
+// job, different part." A template applies when its model scope is empty (all
+// models of the type) or names the asset's model; overlap is settled per
+// asset by title - a unit never carries two schedules with the same name.
+// Applied automatically to every new asset of the type and backfilled across
+// existing ones when the template is created. Managed on /maintenance.
+export const pmTemplates = pgTable("pm_templates", {
+  id: serial("id").primaryKey(),
+  assetType: text("asset_type").notNull(), // MODULE_KINDS entry, e.g. "Pump"
+  title: text("title").notNull(),
+  body: text("body").notNull().default(""),
+  everyDays: integer("every_days").notNull(),
+  // The consumable the job takes, structured so a generated task can turn
+  // into a part request without retyping the number.
+  partName: text("part_name").notNull().default(""),
+  partNumber: text("part_number").notNull().default(""),
+  modelScope: text("model_scope").array().notNull().default([]), // [] = all models
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const pmSchedules = pgTable("pm_schedules", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
@@ -196,6 +217,12 @@ export const pmSchedules = pgTable("pm_schedules", {
   nextDue: text("next_due").notNull(), // YYYY-MM-DD in shop time
   lastDone: text("last_done").notNull().default(""), // blank = never yet done
   paused: boolean("paused").notNull().default(false),
+  // The part the job takes, carried onto every generated task.
+  partName: text("part_name").notNull().default(""),
+  partNumber: text("part_number").notNull().default(""),
+  // Which template stamped this schedule out; null = written by hand. Kept on
+  // template deletion - the schedule is shop data now, not template state.
+  templateId: integer("template_id").references(() => pmTemplates.id, { onDelete: "set null" }),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("pm_instrument_idx").on(t.instrumentId), index("pm_asset_idx").on(t.assetId)]);

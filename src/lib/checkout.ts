@@ -32,7 +32,8 @@ export type CheckoutItem = {
   modelScope: string[]; // [] = all models
 };
 
-const scopeMatches = (scope: string[], model: string) => {
+/** Case-insensitive model-scope match; PM templates share the semantics. */
+export const scopeMatches = (scope: string[], model: string) => {
   const m = model.trim().toLowerCase();
   return scope.some((s) => s.trim().toLowerCase() === m);
 };
