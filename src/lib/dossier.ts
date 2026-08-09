@@ -9,6 +9,7 @@ import {
   parts, attachments, auditLog, discussionPosts, assets,
 } from "@/db/schema";
 import { composeSystemLabel } from "@/lib/systemLabel";
+import { canSeePost, type Audience } from "@/lib/discussionScope";
 
 export type SystemDossier = {
   version: 1;
@@ -43,7 +44,13 @@ export type SystemDossier = {
 // Enough for years of a busy system's feed; a hard cap keeps the JSON bounded.
 const ACTIVITY_CAP = 1000;
 
-export async function composeSystemDossier(instrumentId: number): Promise<SystemDossier | null> {
+/**
+ * `forOrgId` is the organization the record is being frozen FOR. It decides
+ * which discussion posts the record captures: a frozen record outlives the share
+ * it came from, so anything it captures is theirs forever - an internal note
+ * belonging to someone else must never be baked into it.
+ */
+export async function composeSystemDossier(instrumentId: number, forOrgId: number): Promise<SystemDossier | null> {
   const [[inst], assetRows, gasRows, taskRows, partRows, attachRows, discussion, activity] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instrumentId)),
     db.select().from(assets).where(eq(assets.instrumentId, instrumentId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
@@ -97,7 +104,9 @@ export async function composeSystemDossier(instrumentId: number): Promise<System
       fileName: a.fileName, kind: a.kind, description: a.description, url: a.url,
       size: a.size, uploadedBy: a.uploadedBy, createdAt: a.createdAt.toISOString(),
     })),
-    discussion: discussion.map((p) => ({ author: p.author, body: p.body, createdAt: p.createdAt.toISOString() })),
+    discussion: discussion
+      .filter((p) => canSeePost({ isHouse: false, orgId: forOrgId }, { ...p, audience: p.audience as Audience }))
+      .map((p) => ({ author: p.author, body: p.body, createdAt: p.createdAt.toISOString() })),
     activity: activity.map((a) => ({
       actor: a.actor, action: a.action, field: a.field, newValue: a.newValue, createdAt: a.createdAt.toISOString(),
     })),

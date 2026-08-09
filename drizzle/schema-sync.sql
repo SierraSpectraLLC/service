@@ -418,6 +418,9 @@ ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "listing_token" text NOT NULL DEFA
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_name" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_tagline" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "operator_org_id" integer;
+ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "author_org_id" integer;
+ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "audience" text NOT NULL DEFAULT 'all';
+ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "room_org_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -574,6 +577,14 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_instrument_id_instruments_id_fk"
       FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_author_org_id_orgs_id_fk') THEN
+    ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_author_org_id_orgs_id_fk"
+      FOREIGN KEY ("author_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_posts_room_org_id_orgs_id_fk') THEN
+    ALTER TABLE "discussion_posts" ADD CONSTRAINT "discussion_posts_room_org_id_orgs_id_fk"
+      FOREIGN KEY ("room_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_events_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "stage_events" ADD CONSTRAINT "stage_events_instrument_id_instruments_id_fk"
@@ -904,5 +915,44 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','org','ownership-backfill',
             'assigned ' || v_count || ' system(s) to the single client organization holding an edit share - review owners in each system''s sharing panel');
+  END IF;
+END $$;
+
+-- ── Migration: discussion authorship and rooms ──────────────────────────────
+-- Posts predate the audience rules, so attribute them once. author_org_id comes
+-- from the exact sign-in entry that matches the author's email (@domain entries
+-- name no one, so they can't attribute a post) - no match means the operator's
+-- own staff wrote it, which is the correct reading for every staff post.
+--
+-- Every existing General post belonged to the one board the old code allowed:
+-- the operator's room with the tracker's organization. Point them at that org
+-- so nobody loses history the day rooms arrive; if no sheet org was ever set,
+-- they stay on the operator's own board, which is who could see them anyway.
+--
+-- Nothing is marked internal: these posts were written under rules where all of
+-- them were shared, and silently narrowing an existing conversation would be a
+-- worse surprise than leaving it as it was read at the time.
+DO $$
+DECLARE v_authors integer; v_rooms integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'discussion' AND "entity_id" = 'authorship-backfill') THEN
+    UPDATE "discussion_posts" p SET "author_org_id" = a."org_id"
+    FROM "client_allowlist" a
+    WHERE a."org_id" IS NOT NULL
+      AND left(btrim(a."entry"), 1) <> '@'
+      AND lower(btrim(a."entry")) = lower(btrim(p."author_email"))
+      AND p."author_org_id" IS NULL;
+    GET DIAGNOSTICS v_authors = ROW_COUNT;
+
+    UPDATE "discussion_posts" SET "room_org_id" = (SELECT "sheet_org_id" FROM "app_settings" WHERE "id" = 1)
+    WHERE "instrument_id" IS NULL AND "room_org_id" IS NULL;
+    GET DIAGNOSTICS v_rooms = ROW_COUNT;
+
+    -- Marker written unconditionally: a rerun must never re-attribute posts
+    -- after someone has moved a person between organizations.
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','discussion','authorship-backfill',
+            'attributed ' || v_authors || ' post(s) to the organization their author signs in as and moved ' || v_rooms || ' General post(s) into that organization''s room - every post stays shared, none was marked internal');
   END IF;
 END $$;

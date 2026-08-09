@@ -34,6 +34,7 @@ import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess,
   canEditSystem, isHouse, visibleSystemIds,
 } from "@/lib/tenancy";
+import { canSeePost, resolveRoom, type Audience, type Viewer } from "@/lib/discussionScope";
 import { sendEmail } from "@/lib/email";
 
 /** A system is named by its assets; the stored description is the fallback. */
@@ -1548,66 +1549,102 @@ export async function setEodSkip(
 // ---------------- Discussions ----------------
 
 /**
- * Who may be emailed about a thread: staff always, plus the sign-in entries of
- * the organizations the system is shared with. The email quotes the post, so a
- * roster @mention must not carry another client's words out of the portal.
- * Null = staff-only (no restriction beyond that), for the General board.
+ * Who may be emailed about a post. An email quotes the post, so the recipient
+ * list is exactly the post's readership and never wider: an internal note
+ * reaches only the author's own organization, a General post only the room it
+ * was written in, and a system post the organizations that system is shared
+ * with. A @domain sign-in entry names nobody in particular, so it can't be a
+ * recipient on its own.
  */
-async function threadAudience(instrumentId: number | null): Promise<string[] | null> {
+async function postAudience(p: {
+  instrumentId: number | null; audience: Audience; authorOrgId: number | null; roomOrgId: number | null;
+}): Promise<string[]> {
   const staff = parseList(process.env.STAFF_EMAILS);
-  if (instrumentId === null) return null;
-  const shares = await db.select({ orgId: systemShares.orgId }).from(systemShares)
-    .where(eq(systemShares.instrumentId, instrumentId));
-  if (!shares.length) return staff;
   const entries = await db.select().from(clientAllowlist);
-  const orgIds = new Set(shares.map((s) => s.orgId));
-  // Exact-email entries are addressable; a @domain entry names no one in
-  // particular, so it can't be a recipient on its own.
-  const orgEmails = entries
-    .filter((e) => e.orgId !== null && orgIds.has(e.orgId) && !e.entry.trim().startsWith("@"))
+  const emailsFor = (orgId: number) => entries
+    .filter((e) => e.orgId === orgId && !e.entry.trim().startsWith("@"))
     .map((e) => e.entry.toLowerCase());
-  return [...new Set([...staff, ...orgEmails])];
+
+  if (p.audience === "internal") return p.authorOrgId === null ? staff : emailsFor(p.authorOrgId);
+  if (p.instrumentId === null) {
+    return p.roomOrgId === null ? staff : [...new Set([...staff, ...emailsFor(p.roomOrgId)])];
+  }
+  const shares = await db.select({ orgId: systemShares.orgId }).from(systemShares)
+    .where(eq(systemShares.instrumentId, p.instrumentId));
+  if (!shares.length) return staff;
+  return [...new Set([...staff, ...shares.flatMap((s) => emailsFor(s.orgId))])];
 }
+
+/** The viewer as the discussion rules see them: the house, or one organization. */
+const partyOf = (u: SessionUser): Viewer => ({ isHouse: isHouse(u.role), orgId: u.orgId });
+
+/** The organization a post is attributed to - null for the operator's own staff. */
+const authorOrgOf = (u: SessionUser): number | null => (isHouse(u.role) ? null : u.orgId);
+
 // Posting only needs a signed-in user: talking is not record-editing, so
 // client viewers may post even while the edit toggle is off.
 
-export async function postDiscussion(instrumentId: number | null, body: string) {
+export async function postDiscussion(
+  instrumentId: number | null,
+  body: string,
+  opts: { audience?: Audience; roomOrgId?: number | null } = {},
+) {
   const u = await requireUser();
   const text = body.trim();
   if (!text) throw new Error("Post text required");
+  const audience: Audience = opts.audience === "internal" ? "internal" : "all";
+  const authorOrgId = authorOrgOf(u);
   let externalId = "";
+  let roomOrgId: number | null = null;
+
   if (instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     if (!inst) throw new Error("Not found");
     // A thread lives with its system: you can only post where you can see.
     await assertSystemVisible(u, instrumentId);
     externalId = inst.externalId;
-  } else if (u.orgId !== null) {
-    // The General board is the house's room with the tracker's organization.
-    const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
-    if (s?.sheetOrgId !== u.orgId) throw new Error("Not found");
+  } else {
+    // The General board is a set of private rooms: an organization has its own,
+    // the operator has one of its own and sits in all the others.
+    const known = await db.select({ id: orgs.id }).from(orgs);
+    const room = resolveRoom(partyOf(u), opts.roomOrgId ?? null, known.map((o) => o.id));
+    if (!room.ok) throw new Error("Not found");
+    roomOrgId = room.roomOrgId;
   }
-  await db.insert(discussionPosts).values({ instrumentId, author: u.name, authorEmail: u.email, body: text });
+
+  await db.insert(discussionPosts).values({
+    instrumentId, author: u.name, authorEmail: u.email, body: text, authorOrgId, audience, roomOrgId,
+  });
+  // The activity feed is read by everyone who can see the system, so an internal
+  // post is recorded as having happened without quoting a word of it.
   await audit({
     actor: u.email, instrumentId: instrumentId ?? undefined, entityType: "discussion", entityId: externalId || "general",
-    action: `posted in ${externalId ? `${externalId} ` : "general "}discussion: "${text.length > 120 ? text.slice(0, 120) + "..." : text}"`,
+    action: audience === "internal"
+      ? `posted an internal note in ${externalId ? `${externalId} ` : "general "}discussion`
+      : `posted in ${externalId ? `${externalId} ` : "general "}discussion: "${text.length > 120 ? text.slice(0, 120) + "..." : text}"`,
   });
   await notifyDiscussion({
     actorEmail: u.email, actorName: u.name,
     actorIsClient: u.role === "client_viewer" || u.role === "client_editor",
     body: text, instrumentId, label: externalId || "General",
-    allowedEmails: await threadAudience(instrumentId),
+    allowedEmails: await postAudience({ instrumentId, audience, authorOrgId, roomOrgId }),
   });
   if (instrumentId !== null) rev(instrumentId);
   revalidatePath("/discussions");
 }
 
-/** Mark a thread read for the current user (0 = the General board). */
+/** Mark a thread read for the current user. See roomThreadId for the numbering. */
 export async function markThreadRead(threadId: number) {
   const u = await requireUser();
-  // 0 is the General board; anything else must be a system the caller can see,
-  // so a read marker can't be used to probe which system ids exist.
-  if (threadId !== 0) await assertSystemVisible(u, threadId);
+  // Positive is a system, and it must be one the caller can see, so a read
+  // marker can't be used to probe which system ids exist. 0 is the caller's own
+  // General room. Negative is the operator's marker for one organization's room.
+  if (threadId > 0) await assertSystemVisible(u, threadId);
+  if (threadId < 0) {
+    if (!isHouse(u.role)) throw new Error("Not found");
+    const [o] = await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.id, -threadId));
+    if (!o) throw new Error("Not found");
+  }
   await db.insert(discussionReads)
     .values({ userEmail: u.email, threadId, lastSeenAt: new Date() })
     .onConflictDoUpdate({
@@ -1622,16 +1659,21 @@ export async function updateDiscussionPost(postId: number, body: string) {
   if (!text) throw new Error("Post text required");
   const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
   if (!p || p.body === text) return;
+  if (p.instrumentId !== null) await assertSystemVisible(u, p.instrumentId);
+  // A post you cannot read is not yours to touch, and that holds for the
+  // operator too - otherwise "internal" leaks through the edit and delete paths.
+  if (!canSeePost(partyOf(u), { ...p, audience: p.audience as Audience })) throw new Error("Not found");
   // Editing someone else's words was possible for any editor - your own posts
   // (or staff) only.
   if (!isHouse(u.role) && p.authorEmail.toLowerCase() !== u.email.toLowerCase()) {
     throw new Error("You can only edit your own posts");
   }
-  if (p.instrumentId !== null) await assertSystemVisible(u, p.instrumentId);
   await db.update(discussionPosts).set({ body: text }).where(eq(discussionPosts.id, postId));
+  const quotable = p.audience !== "internal";
   await audit({
     actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
-    action: `edited a discussion post by ${p.author}`, field: "body", oldValue: p.body, newValue: text,
+    action: `edited ${quotable ? "a" : "an internal"} discussion post by ${p.author}`,
+    ...(quotable ? { field: "body", oldValue: p.body, newValue: text } : {}),
   });
   if (p.instrumentId !== null) rev(p.instrumentId);
   revalidatePath("/discussions");
@@ -1643,14 +1685,17 @@ export async function deleteDiscussionPost(postId: number, reason: string): Prom
   if (typeof why !== "string") return why;
   const [p] = await db.select().from(discussionPosts).where(eq(discussionPosts.id, postId));
   if (!p) return {};
+  if (p.instrumentId !== null) await assertSystemVisible(u, p.instrumentId);
+  if (!canSeePost(partyOf(u), { ...p, audience: p.audience as Audience })) return { error: "Not found" };
   if (!isHouse(u.role) && p.authorEmail.toLowerCase() !== u.email.toLowerCase()) {
     return { error: "You can only delete your own posts" };
   }
-  if (p.instrumentId !== null) await assertSystemVisible(u, p.instrumentId);
   await db.delete(discussionPosts).where(eq(discussionPosts.id, postId));
+  const quotable = p.audience !== "internal";
   await audit({
     actor: u.email, instrumentId: p.instrumentId ?? undefined, entityType: "discussion", entityId: postId,
-    action: `deleted a discussion post by ${p.author} - reason: ${why}`, field: "body", oldValue: p.body, newValue: why,
+    action: `deleted ${quotable ? "a" : "an internal"} discussion post by ${p.author} - reason: ${why}`,
+    ...(quotable ? { field: "body", oldValue: p.body, newValue: why } : {}),
   });
   if (p.instrumentId !== null) rev(p.instrumentId);
   revalidatePath("/discussions");
@@ -2072,7 +2117,7 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
   // ever reach it. Clients don't get one - unsharing a client is cleanup, not
   // the end of an engagement.
   if (org.kind === "provider") {
-    const dossier = await composeSystemDossier(instrumentId);
+    const dossier = await composeSystemDossier(instrumentId, orgId);
     if (dossier) {
       await db.insert(engagementRecords).values({
         instrumentId, orgId, externalId: inst.externalId, label: dossier.label,

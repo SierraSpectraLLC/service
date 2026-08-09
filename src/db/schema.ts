@@ -402,6 +402,18 @@ export const discussionPosts = pgTable("discussion_posts", {
   author: text("author").notNull(),
   authorEmail: text("author_email").notNull().default(""),
   body: text("body").notNull(),
+  // Which organization the author was speaking for; null = the operator's own
+  // staff. Stored on the post rather than looked up from the author, because a
+  // person can change organizations and a post's audience cannot.
+  authorOrgId: integer("author_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // "all" = everyone who can see the thread. "internal" = the author's own
+  // organization only, operator included: this is what keeps one company's
+  // working talk off every other company's screen.
+  audience: text("audience").notNull().default("all"),
+  // General board only: whose room the post sits in. The operator sits in every
+  // room, each organization only in its own, so the General board is a set of
+  // private rooms and never a public square. Null = the operator's own board.
+  roomOrgId: integer("room_org_id").references(() => orgs.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("discussion_instrument_idx").on(t.instrumentId), index("discussion_created_idx").on(t.createdAt)]);
 

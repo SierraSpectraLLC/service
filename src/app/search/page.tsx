@@ -7,6 +7,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { findOutsideMatches } from "@/lib/serialLookup";
 import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
@@ -111,7 +112,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       ...partRows.map((p) => ({ id: p.id, group: p.kind === "consumable" ? "Consumables" : "Parts", title: p.name, sub: join([p.partNumber && `PN ${p.partNumber}`, p.serial && `SN ${p.serial}`, p.vendor, p.status]), ...place(p) })),
       ...moduleRows.map((m) => ({ id: m.id, group: "Assets", title: `${m.kind}: ${m.model || "(no model)"}`, sub: join([m.serial && `SN ${m.serial}`, m.status, m.note]), href: `/assets/${m.id}`, where: m.instrumentId ? labels.get(m.instrumentId) ?? "" : "On the shelf" })),
       ...attachRows.map((a) => ({ id: a.id, group: "Files", title: a.fileName, sub: join([a.kind, a.description]), ...place(a) })),
-      ...postRows.map((p) => ({ id: p.id, group: "Discussion", title: p.body.slice(0, 120), sub: p.author, ...place({ instrumentId: p.instrumentId }) })),
+      // Search must never be a side door onto a post: the same audience rules
+      // that hide an internal note on its own page hide it here.
+      ...postRows
+        .filter((p) => canSeePost(
+          { isHouse: user.role === "owner" || user.role === "staff", orgId: user.orgId },
+          { ...p, audience: p.audience as Audience },
+        ))
+        .map((p) => ({ id: p.id, group: "Discussion", title: p.body.slice(0, 120), sub: p.author, ...place({ instrumentId: p.instrumentId }) })),
       ...auditRows.map((a) => ({ id: a.id, group: "History", title: a.action.slice(0, 120), sub: a.actor.split("@")[0], ...place(a) })),
     ];
   }

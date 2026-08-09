@@ -9,6 +9,8 @@ import {
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
+import { canSeePost, type Audience } from "@/lib/discussionScope";
+import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -100,6 +102,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     ? await db.select().from(eodUpdates)
         .where(and(eq(eodUpdates.instrumentId, instId), eq(eodUpdates.date, shopToday())))
     : [];
+
+  // Discussion. The thread is scoped by the system (checked above), but each
+  // post carries its own audience: an internal note belongs to the party that
+  // wrote it and is invisible to everyone else, this instance's operator
+  // included. Names come from the orgs table so a multi-party thread reads as a
+  // conversation between companies rather than a wall of first names.
+  const brand = await getBrand();
+  const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
+  const partyName = (orgId: number | null) => (orgId === null ? brand.operatorName : orgName.get(orgId) ?? "a former organization");
+  const viewer = { isHouse: isStaff, orgId: user.orgId };
+  const visiblePosts = discussion.filter((p) => canSeePost(viewer, { ...p, audience: p.audience as Audience }));
+  const sharedWith = [brand.operatorName, ...shareRows.map((s) => s.name)].join(", ");
 
   // Pending serial-lookup access requests, for the people who decide them:
   // staff, or the owning organization's editors.
@@ -194,11 +208,17 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
       <DiscussionPanel
         instrumentId={inst.id}
-        posts={discussion.map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        threadId={inst.id}
+        posts={visiblePosts.map((p) => ({
+          ...p, createdAt: p.createdAt.toISOString(),
+          authorParty: partyName(p.authorOrgId), internal: p.audience === "internal",
+        }))}
         canEdit={canEdit}
+        partyName={partyName(viewer.isHouse ? null : user.orgId)}
+        sharedWith={sharedWith}
         newCount={(() => {
           const seen = readRows[0]?.lastSeenAt;
-          return discussion.filter((p) => p.authorEmail !== user.email && (!seen || p.createdAt > seen)).length;
+          return visiblePosts.filter((p) => p.authorEmail !== user.email && (!seen || p.createdAt > seen)).length;
         })()}
       />
 

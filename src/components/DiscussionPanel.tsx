@@ -5,7 +5,12 @@ import { useState, useTransition } from "react";
 import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
 import ThreadSeen from "./ThreadSeen";
 
-export type Post = { id: number; author: string; authorEmail: string; body: string; createdAt: string };
+export type Post = {
+  id: number; author: string; authorEmail: string; body: string; createdAt: string;
+  /** Who the author was speaking for, shown so a multi-party thread stays legible. */
+  authorParty: string;
+  internal: boolean;
+};
 
 const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -17,10 +22,29 @@ const renderBody = (body: string) =>
       : <span key={i}>{part}</span>
   );
 
-export default function DiscussionPanel({ instrumentId, posts, canEdit, newCount = 0, title, subtitle }: {
-  instrumentId: number | null; posts: Post[]; canEdit: boolean; newCount?: number; title?: string; subtitle?: string;
+/**
+ * One thread. Every post is either shared with everyone who can see the thread
+ * or internal to the party that wrote it - and an internal post is invisible to
+ * everyone else, the operator included, so the composer says plainly which of
+ * the two you are about to write.
+ */
+export default function DiscussionPanel({
+  instrumentId, posts, canEdit, newCount = 0, title, subtitle,
+  threadId, roomOrgId = null, partyName, sharedWith,
+}: {
+  instrumentId: number | null; posts: Post[]; canEdit: boolean; newCount?: number;
+  title?: string; subtitle?: string;
+  /** Read-marker id; see lib/discussionScope.roomThreadId. */
+  threadId: number;
+  /** General board only: which room a new post goes into. */
+  roomOrgId?: number | null;
+  /** The viewer's own party - who "internal" keeps a post inside. */
+  partyName: string;
+  /** Who a shared post reaches, for the composer's hint. */
+  sharedWith: string;
 }) {
   const [draft, setDraft] = useState("");
+  const [internal, setInternal] = useState(false);
   const [edits, setEdits] = useState<Record<number, string>>({});
   const [pending, startTransition] = useTransition();
 
@@ -34,14 +58,14 @@ export default function DiscussionPanel({ instrumentId, posts, canEdit, newCount
     const text = draft.trim();
     if (!text) return;
     startTransition(async () => {
-      await postDiscussion(instrumentId, text);
+      await postDiscussion(instrumentId, text, { audience: internal ? "internal" : "all", roomOrgId });
       setDraft("");
     });
   };
 
   return (
     <div className="card">
-      <ThreadSeen threadId={instrumentId ?? 0} hasNew={newCount > 0} />
+      <ThreadSeen threadId={threadId} hasNew={newCount > 0} />
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: subtitle ? 4 : 10 }}>
         <div className="card-title">{title ?? "Discussion"}</div>
         {newCount > 0 && (
@@ -55,10 +79,16 @@ export default function DiscussionPanel({ instrumentId, posts, canEdit, newCount
         {posts.map((p) => {
           const editing = typeof edits[p.id] === "string";
           return (
-            <div key={p.id}>
+            <div key={p.id} style={p.internal ? {
+              borderLeft: "3px solid #EAD9B0", background: "#FDF8EE", borderRadius: 6, padding: "4px 8px", margin: "0 -8px",
+            } : undefined}>
               <div style={{ fontSize: 12 }}>
-                <b style={{ color: "var(--navy)" }}>{p.author}</b>{" "}
+                <b style={{ color: "var(--navy)" }}>{p.author}</b>
+                {p.authorParty && <span className="mut" style={{ fontSize: 11 }}> · {p.authorParty}</span>}{" "}
                 <span className="mut" style={{ fontSize: 11 }}>{when(p.createdAt)}</span>
+                {p.internal && (
+                  <>{" "}<span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>internal</span></>
+                )}
                 {canEdit && !editing && (
                   <>
                     {" "}<button className="btn link" style={{ fontSize: 11 }}
@@ -100,6 +130,18 @@ export default function DiscussionPanel({ instrumentId, posts, canEdit, newCount
           {pending ? "Posting..." : "Post"}
         </button>
       </div>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "8px 0 0", fontSize: 12, fontWeight: 400, color: "var(--ink)" }}>
+        <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)}
+          style={{ width: "auto", marginTop: 2 }} />
+        <span>
+          Internal to {partyName}
+          <span className="mut" style={{ display: "block", fontSize: 11 }}>
+            {internal
+              ? `Only ${partyName} can read this - nobody else on the thread, and no email leaves ${partyName}.`
+              : `Off, this goes to ${sharedWith}.`}
+          </span>
+        </span>
+      </label>
     </div>
   );
 }
