@@ -1,0 +1,28 @@
+// The notification vocabulary and the one preference rule. Pure - the
+// tables live in db/schema, the writes in lib/notify and app/actions.
+
+export const NOTIFY_KINDS = [
+  { kind: "task_assigned", label: "A task is assigned to me" },
+  { kind: "system_assigned", label: "I'm made lead on a system" },
+  { kind: "discussion", label: "Discussion posts and @mentions" },
+  { kind: "access_request", label: "Access requests and ownership claims" },
+  { kind: "gas_empty", label: "A gas is marked empty" },
+] as const;
+
+export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];
+
+export const isNotifyKind = (k: string): k is NotifyKind =>
+  NOTIFY_KINDS.some((n) => n.kind === k);
+
+/**
+ * May this kind email this person? No stored row means yes - prefs only
+ * record opt-outs, so new users and new kinds both default to email on.
+ * The in-app inbox row is written regardless; this gates the email alone.
+ */
+export function emailAllowed(
+  prefs: { kind: string; emailOn: boolean }[],
+  kind: NotifyKind,
+): boolean {
+  const row = prefs.find((p) => p.kind === kind);
+  return row ? row.emailOn : true;
+}

@@ -326,6 +326,22 @@ CREATE TABLE IF NOT EXISTS "vocab_terms" (
   "categories" text[] NOT NULL DEFAULT '{}',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "notifications" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "email" text NOT NULL,
+  "kind" text NOT NULL,
+  "title" text NOT NULL,
+  "href" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "read_at" timestamp
+);
+CREATE TABLE IF NOT EXISTS "notification_prefs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "email" text NOT NULL,
+  "kind" text NOT NULL,
+  "email_on" boolean NOT NULL DEFAULT true,
+  CONSTRAINT "notification_prefs_unique" UNIQUE("email","kind")
+);
 CREATE TABLE IF NOT EXISTS "part_prices" (
   "id" serial PRIMARY KEY NOT NULL,
   "part_number" text NOT NULL,
@@ -534,6 +550,7 @@ CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("i
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
+CREATE INDEX IF NOT EXISTS "notifications_email_idx" ON "notifications" ("email");
 -- One price per (PN, vendor) pair regardless of how either was capitalized.
 -- Lives here alone: drizzle's pgTable can't declare expression indexes, so the
 -- app enforces the same rule with a select-then-write (see addPartPrices) and

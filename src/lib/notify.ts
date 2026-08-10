@@ -1,10 +1,14 @@
-// Event notifications (email via Resend). Deliberately just two events - the
-// daily digest covers routine status. Every send is wrapped so a mail failure
-// can never fail the action that triggered it.
+// Event notifications: an inbox row per recipient, then email via Resend.
+// Every send is wrapped so a mail failure can never fail the action that
+// triggered it. Magic links deliberately don't come through here - sign-in
+// mail is auth infrastructure (src/auth.ts), not a notification anyone may
+// opt out of or needs a record of.
+import { inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { users, people } from "@/db/schema";
+import { users, people, notifications, notificationPrefs } from "@/db/schema";
 import { parseList } from "@/lib/allowMatch";
 import { sendEmail } from "@/lib/email";
+import { emailAllowed, type NotifyKind } from "@/lib/inbox";
 import { getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 
@@ -50,6 +54,29 @@ export function parseMentions(body: string, names: string[]): string[] {
   });
 }
 
+/**
+ * The one door every notification leaves through. Inbox rows are written
+ * FIRST - the in-app record must exist even if the mailer is down or the
+ * recipient opted out of email - then the email goes to whoever hasn't
+ * turned that kind off. Callers stay inside their own try/catch, so a dead
+ * notifications table (pre-sync deploy race) degrades exactly like a dead
+ * mailer always has: logged, action unaffected.
+ */
+async function deliver(opts: {
+  to: string[]; kind: NotifyKind; title: string;
+  href: string;      // in-app path ("/instruments/12"), "" when there's nowhere to go
+  subject: string; html: string;
+}) {
+  const emails = [...new Set(opts.to.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (!emails.length) return;
+  await db.insert(notifications).values(emails.map((email) => ({
+    email, kind: opts.kind, title: opts.title.slice(0, 200), href: opts.href,
+  })));
+  const prefRows = await db.select().from(notificationPrefs).where(inArray(notificationPrefs.email, emails));
+  const wantEmail = emails.filter((e) => emailAllowed(prefRows.filter((p) => p.email === e), opts.kind));
+  if (wantEmail.length) await sendEmail(wantEmail, opts.subject, opts.html);
+}
+
 // System notifications are sent by the platform, so they carry its name rather
 // than any one service company's - see lib/brand.ts.
 const wrap = async (body: string) => `
@@ -73,14 +100,14 @@ export async function notifyTaskAssigned(opts: {
     const to = resolveAssigneeEmail(opts.assignee, staff, userRows, roster);
     if (!to || to === opts.actorEmail.toLowerCase()) return; // unknown assignee or self-assign
     const url = appUrl();
-    await sendEmail(
-      [to],
-      `${opts.externalId}: assigned "${opts.taskTitle}"`,
-      await wrap(`${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
-        ${url && (opts.instrumentId || opts.assetId)
-          ? `<div style="margin-top:10px;"><a href="${url}${opts.instrumentId ? `/instruments/${opts.instrumentId}` : `/assets/${opts.assetId}`}">Open ${esc(opts.externalId)}</a></div>`
-          : ""}`),
-    );
+    const href = opts.instrumentId ? `/instruments/${opts.instrumentId}` : opts.assetId ? `/assets/${opts.assetId}` : "";
+    await deliver({
+      to: [to], kind: "task_assigned", href,
+      title: `${opts.actorName} assigned you "${opts.taskTitle}" on ${opts.externalId}`,
+      subject: `${opts.externalId}: assigned "${opts.taskTitle}"`,
+      html: await wrap(`${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
+        ${url && href ? `<div style="margin-top:10px;"><a href="${url}${href}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+    });
   } catch (e) {
     console.error("[notify] task-assigned email failed:", (e as Error).message);
   }
@@ -100,12 +127,13 @@ export async function notifySystemAssigned(opts: {
     const to = resolveAssigneeEmail(opts.lead, staff, userRows, roster);
     if (!to || to === opts.actorEmail.toLowerCase()) return;
     const url = appUrl();
-    await sendEmail(
-      [to],
-      `${opts.externalId}: you're the lead`,
-      await wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
+    await deliver({
+      to: [to], kind: "system_assigned", href: `/instruments/${opts.instrumentId}`,
+      title: `${opts.actorName} made you the lead on ${opts.externalId}`,
+      subject: `${opts.externalId}: you're the lead`,
+      html: await wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
-    );
+    });
   } catch (e) {
     console.error("[notify] system-assigned email failed:", (e as Error).message);
   }
@@ -139,14 +167,15 @@ export async function notifyDiscussion(opts: {
     }
     if (!to.size) return;
     const url = appUrl();
-    const link = opts.instrumentId != null ? `${url}/instruments/${opts.instrumentId}` : `${url}/discussions`;
-    await sendEmail(
-      [...to],
-      `${opts.label}: ${opts.actorName} posted in discussion`,
-      await wrap(`<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
+    const href = opts.instrumentId != null ? `/instruments/${opts.instrumentId}` : "/discussions";
+    await deliver({
+      to: [...to], kind: "discussion", href,
+      title: `${opts.actorName} posted in discussion on ${opts.label}`,
+      subject: `${opts.label}: ${opts.actorName} posted in discussion`,
+      html: await wrap(`<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
         <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.body)}</div>
-        ${url ? `<a href="${link}">Reply in the portal</a>` : ""}`),
-    );
+        ${url ? `<a href="${url}${href}">Reply in the portal</a>` : ""}`),
+    });
   } catch (e) {
     console.error("[notify] discussion email failed:", (e as Error).message);
   }
@@ -165,20 +194,24 @@ export async function notifyAccessRequest(opts: {
     if (!opts.to.length) return;
     const url = appUrl();
     const claim = opts.kind === "claim";
-    await sendEmail(
-      opts.to,
-      claim
-        ? `${opts.externalId}: ownership claim from ${opts.orgName || opts.actorName}`
-        : `${opts.externalId}: access request from ${opts.orgName || opts.actorName}`,
-      await wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
+    const subject = claim
+      ? `${opts.externalId}: ownership claim from ${opts.orgName || opts.actorName}`
+      : `${opts.externalId}: access request from ${opts.orgName || opts.actorName}`;
+    await deliver({
+      to: opts.to, kind: "access_request", href: `/instruments/${opts.instrumentId}`,
+      title: subject, subject,
+      html: await wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
         ${opts.message ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.message)}</div>` : ""}
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Approve or deny on ${esc(opts.externalId)}</a></div>` : ""}`),
-    );
+    });
   } catch (e) {
     console.error("[notify] access-request email failed:", (e as Error).message);
   }
 }
 
+// Invitations stay plain email, not deliver(): the recipient has never signed
+// in, so an inbox row would greet them with old news and an opt-out would be
+// self-defeating - the email IS the invitation.
 export async function notifyInvite(opts: { to: string; inviterName: string; orgName: string }) {
   try {
     const brand = (await getBrand()).name;
@@ -199,12 +232,13 @@ export async function notifyGasEmpty(opts: { actorEmail: string; actorName: stri
     const to = parseList(process.env.STAFF_EMAILS).filter((e) => e !== opts.actorEmail.toLowerCase());
     if (!to.length) return;
     const url = appUrl();
-    await sendEmail(
-      to,
-      `${opts.externalId}: ${opts.gas} is EMPTY`,
-      await wrap(`${esc(opts.actorName)} marked <b>${esc(opts.gas)}</b> empty on <b>${esc(opts.externalId)}</b>.
+    await deliver({
+      to, kind: "gas_empty", href: `/instruments/${opts.instrumentId}`,
+      title: `${opts.actorName} marked ${opts.gas} empty on ${opts.externalId}`,
+      subject: `${opts.externalId}: ${opts.gas} is EMPTY`,
+      html: await wrap(`${esc(opts.actorName)} marked <b>${esc(opts.gas)}</b> empty on <b>${esc(opts.externalId)}</b>.
         ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
-    );
+    });
   } catch (e) {
     console.error("[notify] gas-empty email failed:", (e as Error).message);
   }

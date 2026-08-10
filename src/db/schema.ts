@@ -615,6 +615,31 @@ export const vocabTerms = pgTable("vocab_terms", {
   // to apply to several system types, not a row per type.
 }, (t) => [unique("vocab_term_unique").on(t.kind, t.assetType, t.name)]);
 
+// One row per event per recipient - the in-app copy of every notification the
+// platform sends. Written BEFORE the email goes out, so "the mail was junked"
+// never means "the event vanished". Keyed by sign-in email rather than user id
+// because recipients (roster mentions, allowlisted clients) can be notified
+// before they've ever signed in and created a users row.
+export const notifications = pgTable("notifications", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),           // recipient, lowercase
+  kind: text("kind").notNull(),             // NOTIFY_KINDS entry (lib/inbox)
+  title: text("title").notNull(),           // one line, same voice as the email subject
+  href: text("href").notNull().default(""), // in-app path, "" when there's nowhere to go
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  readAt: timestamp("read_at"),             // null = unread
+}, (t) => [index("notifications_email_idx").on(t.email)]);
+
+// Per-kind email opt-outs. No row = email on: the table only records
+// departures from the default, so a fresh install (and every existing user)
+// starts with everything enabled and the inbox always gets a row regardless.
+export const notificationPrefs = pgTable("notification_prefs", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  kind: text("kind").notNull(),
+  emailOn: boolean("email_on").notNull().default(true),
+}, (t) => [unique("notification_prefs_unique").on(t.email, t.kind)]);
+
 // The house price book: what a part number costs from each vendor who sells
 // it. One row per (PN, vendor) pair - the OEM's price and every third-party
 // price sit side by side, so "request part" can pick the cheapest and an

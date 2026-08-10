@@ -11,6 +11,7 @@ import {
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
+  notifications, notificationPrefs,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -33,6 +34,7 @@ import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice } from "@/lib/priceBook";
+import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
@@ -1866,6 +1868,48 @@ export async function markThreadRead(threadId: number) {
       target: [discussionReads.userEmail, discussionReads.threadId],
       set: { lastSeenAt: new Date() },
     });
+}
+
+// ── Inbox ───────────────────────────────────────────────────────────────────
+// Read markers follow the markThreadRead precedent: your own inbox, no audit.
+// Rows are only ever touched through the caller's own email, so there's no id
+// to probe - marking someone else's notification read is unexpressible.
+
+export async function markNotificationRead(id: number) {
+  const u = await requireUser();
+  await db.update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.id, id), eq(notifications.email, u.email.toLowerCase()), isNull(notifications.readAt)));
+  revalidatePath("/inbox");
+  revalidatePath("/", "layout"); // the nav badge
+}
+
+export async function markAllNotificationsRead() {
+  const u = await requireUser();
+  await db.update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.email, u.email.toLowerCase()), isNull(notifications.readAt)));
+  revalidatePath("/inbox");
+  revalidatePath("/", "layout");
+}
+
+/** Per-kind email opt-out. The inbox row always lands; this gates the email. */
+export async function setNotificationPref(kind: string, emailOn: boolean): Promise<{ error?: string }> {
+  const u = await requireUser();
+  if (!isNotifyKind(kind)) return { error: "Unknown notification kind" };
+  const email = u.email.toLowerCase();
+  await db.insert(notificationPrefs)
+    .values({ email, kind, emailOn })
+    .onConflictDoUpdate({ target: [notificationPrefs.email, notificationPrefs.kind], set: { emailOn } });
+  // Audited (unlike read markers): "why did nobody get the email" needs an
+  // answer months later, and the answer may be "they turned it off in May".
+  await audit({
+    actor: u.email, entityType: "notification_pref",
+    action: `turned ${emailOn ? "on" : "off"} email for "${NOTIFY_KINDS.find((k) => k.kind === kind)?.label ?? kind}"`,
+    field: kind, newValue: String(emailOn),
+  });
+  revalidatePath("/inbox");
+  return {};
 }
 
 export async function updateDiscussionPost(postId: number, body: string) {

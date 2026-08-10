@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, sheetDiffs } from "@/db/schema";
-import { asc } from "drizzle-orm";
+import { orgs, sheetDiffs, notifications } from "@/db/schema";
+import { and, asc, isNull } from "drizzle-orm";
 import { currentUser, viewContext } from "@/lib/authz";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import { signOut } from "@/auth";
@@ -36,6 +36,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         .catch(() => []) // table may not exist before first push
     : [];
   const openDiffs = diffRows.length;
+  // Unread inbox count for the nav badge. Same .catch posture as the parity
+  // count: a deploy that beats the schema sync must not blank the whole shell.
+  const unreadRows = user
+    ? await db.select({ id: notifications.id }).from(notifications)
+        .where(and(eq(notifications.email, user.email.toLowerCase()), isNull(notifications.readAt)))
+        .catch(() => [])
+    : [];
+  const unread = unreadRows.length;
 
   // The viewer's organization paints its own workspace; staff and org-less
   // sessions keep the platform look. Bad hex stored by any path degrades to
@@ -75,6 +83,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
                 <Link className="btn sm" href="/discussions" style={{ textDecoration: "none" }}>Discussion</Link>
                 <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
+                <Link className="btn sm" href="/inbox" style={{ textDecoration: "none", fontWeight: unread ? 700 : undefined }}>
+                  Inbox{unread ? ` (${unread})` : ""}
+                </Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {/* An organization's editors configure their own workspace and
