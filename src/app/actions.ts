@@ -12,6 +12,7 @@ import {
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
+  purchaseOrders, poLines,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -36,6 +37,7 @@ import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
+import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
@@ -3767,6 +3769,255 @@ export async function receiveStock(itemId: number, qty: number, note?: string): 
     action: `received ${qty} × PN ${item.partNumber} into "${acc.room.name}"${(note ?? "").trim() ? ` - ${note!.trim()}` : ""}`,
   });
   revStock(item.stockroomId);
+  return {};
+}
+
+// ── Purchase orders ─────────────────────────────────────────────────────────
+// A PO is money and inventory, so it follows the destination room's access:
+// whoever may stock a shelf may order for it. Editing stops once the vendor
+// has the order; from then on the only writes are receipts against it.
+
+const revPo = (id?: number) => {
+  revalidatePath("/purchasing");
+  if (id) revalidatePath(`/purchasing/${id}`);
+  revalidatePath("/stock");
+};
+
+async function poAccess(u: SessionUser, poId: number) {
+  const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, poId));
+  if (!po) return { po: null, manage: false, see: false };
+  // A PO with no room left (archived away) stays visible to the house only.
+  if (po.stockroomId === null) return { po, manage: isHouse(u.role), see: isHouse(u.role) };
+  const acc = await roomAccess(u, po.stockroomId);
+  return { po, manage: acc.issue, see: acc.see };
+}
+
+export type PoLineInput = { partNumber: string; name?: string; qty?: string; price?: string; note?: string };
+
+/**
+ * Raise an order. Lines can come from the reorder suggestions (already priced
+ * from the price book) or be typed; either way the number is allocated from the
+ * highest ever used so a cancelled order's number is never handed out twice.
+ */
+export async function createPurchaseOrder(data: {
+  vendor: string; stockroomId: number; reference?: string; note?: string; expectedAt?: string;
+  lines: PoLineInput[];
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireEditor();
+  const acc = await roomAccess(u, data.stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.issue) return { error: acc.see ? "You can't order into someone else's stockroom" : "Not found" };
+  const vendor = data.vendor.trim().slice(0, 80);
+  if (!vendor) return { error: "Vendor required" };
+  const usable = data.lines.filter((l) => l.partNumber.trim());
+  if (!usable.length) return { error: "An order needs at least one line" };
+  if (usable.length > 200) return { error: "200 lines at a time" };
+
+  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
+  const [po] = await db.insert(purchaseOrders).values({
+    number: nextPoNumber(existing.map((r) => r.number)),
+    vendor, stockroomId: data.stockroomId, orgId: acc.room.orgId,
+    reference: (data.reference ?? "").trim().slice(0, 80),
+    note: (data.note ?? "").trim().slice(0, 300),
+    expectedAt: (data.expectedAt ?? "").trim().slice(0, 40),
+    createdBy: u.email,
+  }).returning();
+  for (const l of usable) {
+    const qty = parseInt((l.qty ?? "1").trim(), 10);
+    await db.insert(poLines).values({
+      poId: po.id, partNumber: l.partNumber.trim().slice(0, 80), name: (l.name ?? "").trim().slice(0, 120),
+      qtyOrdered: Number.isFinite(qty) && qty > 0 ? qty : 1,
+      unitCents: parseMoney(l.price ?? ""), note: (l.note ?? "").trim().slice(0, 200),
+    });
+  }
+  await audit({
+    actor: u.email, entityType: "po", entityId: po.id,
+    action: `raised ${po.number} to ${vendor}: ${usable.length} line${usable.length === 1 ? "" : "s"} for "${acc.room.name}"`,
+  });
+  revPo();
+  return { id: po.id };
+}
+
+export async function updatePurchaseOrder(id: number, data: {
+  vendor: string; reference?: string; note?: string; expectedAt?: string;
+}): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const { po, manage, see } = await poAccess(u, id);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't change this order" : "Not found" };
+  if (!poEditable(po.status)) return { error: `${po.number} has already gone to the vendor` };
+  const vendor = data.vendor.trim().slice(0, 80);
+  if (!vendor) return { error: "Vendor required" };
+  await db.update(purchaseOrders).set({
+    vendor, reference: (data.reference ?? "").trim().slice(0, 80),
+    note: (data.note ?? "").trim().slice(0, 300), expectedAt: (data.expectedAt ?? "").trim().slice(0, 40),
+  }).where(eq(purchaseOrders.id, id));
+  if (vendor !== po.vendor) {
+    await audit({
+      actor: u.email, entityType: "po", entityId: id,
+      action: `${po.number} vendor: ${po.vendor} -> ${vendor}`, field: "vendor", oldValue: po.vendor, newValue: vendor,
+    });
+  }
+  revPo(id);
+  return {};
+}
+
+export async function setPoLine(lineId: number, data: { qty: string; price: string; note?: string }): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [line] = await db.select().from(poLines).where(eq(poLines.id, lineId));
+  if (!line) return { error: "Not found" };
+  const { po, manage, see } = await poAccess(u, line.poId);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't change this order" : "Not found" };
+  if (!poEditable(po.status)) return { error: `${po.number} has already gone to the vendor` };
+  const qty = parseInt(data.qty.trim(), 10);
+  if (!Number.isFinite(qty) || qty <= 0) return { error: "Quantity must be a whole number above zero" };
+  await db.update(poLines).set({
+    qtyOrdered: qty, unitCents: parseMoney(data.price), note: (data.note ?? line.note).trim().slice(0, 200),
+  }).where(eq(poLines.id, lineId));
+  revPo(line.poId);
+  return {};
+}
+
+export async function addPoLine(poId: number, line: PoLineInput): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const { po, manage, see } = await poAccess(u, poId);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't change this order" : "Not found" };
+  if (!poEditable(po.status)) return { error: `${po.number} has already gone to the vendor` };
+  const pn = line.partNumber.trim().slice(0, 80);
+  if (!pn) return { error: "Part number required" };
+  const qty = parseInt((line.qty ?? "1").trim(), 10);
+  await db.insert(poLines).values({
+    poId, partNumber: pn, name: (line.name ?? "").trim().slice(0, 120),
+    qtyOrdered: Number.isFinite(qty) && qty > 0 ? qty : 1,
+    unitCents: parseMoney(line.price ?? ""), note: (line.note ?? "").trim().slice(0, 200),
+  });
+  revPo(poId);
+  return {};
+}
+
+export async function deletePoLine(lineId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [line] = await db.select().from(poLines).where(eq(poLines.id, lineId));
+  if (!line) return {};
+  const { po, manage, see } = await poAccess(u, line.poId);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't change this order" : "Not found" };
+  if (!poEditable(po.status)) return { error: `${po.number} has already gone to the vendor` };
+  await db.delete(poLines).where(eq(poLines.id, lineId));
+  revPo(line.poId);
+  return {};
+}
+
+/**
+ * Hand the order to the vendor. This is the point of no return for edits, so
+ * it's a deliberate step rather than something a save button does by accident.
+ */
+export async function sendPurchaseOrder(id: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const { po, manage, see } = await poAccess(u, id);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't send this order" : "Not found" };
+  if (po.status !== "draft") return { error: `${po.number} is already ${PO_LABEL[po.status].toLowerCase()}` };
+  const lines = await db.select().from(poLines).where(eq(poLines.poId, id));
+  if (!lines.length) return { error: "Nothing on this order yet" };
+  const totals = poTotals(lines);
+  await db.update(purchaseOrders).set({ status: "sent", sentAt: new Date() }).where(eq(purchaseOrders.id, id));
+  await audit({
+    actor: u.email, entityType: "po", entityId: id,
+    action: `sent ${po.number} to ${po.vendor} - ${totals.ordered} unit${totals.ordered === 1 ? "" : "s"}`
+      + `${totals.priced ? `, ${formatCents(totals.cents)}` : ""}`
+      + `${totals.unpriced ? ` (${totals.unpriced} line${totals.unpriced === 1 ? "" : "s"} unpriced)` : ""}`,
+    field: "status", oldValue: "draft", newValue: "sent",
+  });
+  revPo(id);
+  return {};
+}
+
+/**
+ * Book a delivery. Receiving is the ONLY thing that puts PO stock on a shelf,
+ * so the count and the paperwork can never drift apart: the line's receipt, the
+ * stock move and the on-hand bump are one action. A unit price on the line also
+ * becomes the shelf's held cost, which is what later issues are valued at.
+ */
+export async function receivePoLine(lineId: number, qty: number, note?: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!Number.isInteger(qty) || qty <= 0) return { error: "How many arrived? Whole numbers above zero." };
+  const [line] = await db.select().from(poLines).where(eq(poLines.id, lineId));
+  if (!line) return { error: "Not found" };
+  const { po, manage, see } = await poAccess(u, line.poId);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't receive against this order" : "Not found" };
+  if (!poReceivable(po.status)) {
+    return { error: po.status === "draft" ? `${po.number} hasn't been sent yet` : `${po.number} is ${PO_LABEL[po.status].toLowerCase()}` };
+  }
+  if (po.stockroomId === null) return { error: "This order's stockroom is gone - receive it into a room instead" };
+  const item = await stockLineFor(po.stockroomId, line.partNumber, { name: line.name });
+  if (!item) return { error: "Not found" };
+
+  await db.update(poLines).set({ qtyReceived: line.qtyReceived + qty }).where(eq(poLines.id, lineId));
+  await moveStock({
+    item, delta: qty, kind: "receive", actor: u.email,
+    reason: [`${po.number} from ${po.vendor}`, (note ?? "").trim()].filter(Boolean).join(" - "),
+  });
+  // What we actually paid becomes the shelf's held cost - later issues are
+  // valued at this rather than at whatever the price book says that week.
+  if (line.unitCents !== null) {
+    await db.update(stockItems).set({ unitCostCents: line.unitCents }).where(eq(stockItems.id, item.id));
+  }
+  // Any open request for this part on any work order is now satisfied - the
+  // sticky-note gap between "ordered" and "it's here" is what this closes.
+  const open = await db.select().from(parts).where(and(
+    sql`lower(${parts.partNumber}) = ${line.partNumber.trim().toLowerCase()}`,
+    inArray(parts.status, ["Needed", "Ordered", "In transit", "Backordered"]),
+  ));
+  for (const p of open) {
+    await db.update(parts).set({ status: "Received", receivedAt: shopMonthDay() }).where(eq(parts.id, p.id));
+    await audit({
+      actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: p.id,
+      action: `'${p.name}' (PN ${p.partNumber}) arrived on ${po.number} - marked Received`,
+      field: "status", oldValue: p.status, newValue: "Received",
+    });
+    revWork(p);
+  }
+
+  const after = await db.select().from(poLines).where(eq(poLines.poId, line.poId));
+  const next = statusAfterReceipt(after);
+  if (next !== po.status) {
+    await db.update(purchaseOrders)
+      .set({ status: next, closedAt: next === "received" ? new Date() : null })
+      .where(eq(purchaseOrders.id, line.poId));
+  }
+  await audit({
+    actor: u.email, entityType: "po", entityId: line.poId,
+    action: `received ${qty} × PN ${line.partNumber} on ${po.number}`
+      + `${next === "received" ? " - order complete" : ""}`,
+  });
+  revPo(line.poId);
+  return {};
+}
+
+export async function cancelPurchaseOrder(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const { po, manage, see } = await poAccess(u, id);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't cancel this order" : "Not found" };
+  if (po.status === "received") return { error: `${po.number} is already fully received` };
+  if (po.status === "cancelled") return {};
+  // Received stock stays received: cancelling stops what's outstanding, it
+  // doesn't un-deliver anything already booked onto the shelf.
+  await db.update(purchaseOrders)
+    .set({ status: "cancelled", cancelReason: why, closedAt: new Date() })
+    .where(eq(purchaseOrders.id, id));
+  await audit({
+    actor: u.email, entityType: "po", entityId: id,
+    action: `cancelled ${po.number} to ${po.vendor} - reason: ${why}`,
+    field: "status", oldValue: po.status, newValue: "cancelled",
+  });
+  revPo(id);
   return {};
 }
 

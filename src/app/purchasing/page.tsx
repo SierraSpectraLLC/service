@@ -1,0 +1,110 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { asc, desc, eq, inArray } from "drizzle-orm";
+import { db } from "@/db";
+import { orgs, poLines, purchaseOrders, stockrooms, stockroomShares } from "@/db/schema";
+import { requireUser } from "@/lib/authz";
+import { shopMonthDay } from "@/lib/shopday";
+import { stockAccess } from "@/lib/stock";
+import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
+import { formatCents } from "@/lib/money";
+import { canSeeCosts } from "@/lib/redact";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * Every order for a stockroom this viewer may stock. Ordering follows the
+ * destination room's access, so a client's own purchasing shows up in their
+ * portal and a provider only sees orders for rooms they can stock.
+ */
+export default async function PurchasingPage() {
+  let user;
+  try { user = await requireUser(); } catch { redirect("/login"); }
+
+  const [rooms, myShares, orgRows] = await Promise.all([
+    db.select().from(stockrooms).orderBy(asc(stockrooms.name)),
+    user.orgId === null ? Promise.resolve([]) : db.select({ stockroomId: stockroomShares.stockroomId, access: stockroomShares.access })
+      .from(stockroomShares).where(eq(stockroomShares.orgId, user.orgId)),
+    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+  ]);
+  const seeRooms = rooms.filter((r) => stockAccess(user, r, myShares.find((s) => s.stockroomId === r.id)).see);
+  const roomIds = seeRooms.map((r) => r.id);
+
+  const pos = roomIds.length
+    ? await db.select().from(purchaseOrders).where(inArray(purchaseOrders.stockroomId, roomIds))
+        .orderBy(desc(purchaseOrders.createdAt)).limit(100)
+    : [];
+  const lines = pos.length
+    ? await db.select().from(poLines).where(inArray(poLines.poId, pos.map((p) => p.id)))
+    : [];
+
+  const roomName = new Map(seeRooms.map((r) => [r.id, r.name]));
+  const roomOrg = new Map(seeRooms.map((r) => [r.id, r.orgId]));
+  const open = pos.filter((p) => p.status === "draft" || p.status === "sent" || p.status === "partial");
+  const closed = pos.filter((p) => !open.includes(p));
+
+  const row = (p: typeof pos[number]) => {
+    const mine = lines.filter((l) => l.poId === p.id);
+    const t = poTotals(mine);
+    // Order value follows the destination room's owner, same rule as part cost.
+    const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null);
+    return (
+      <div key={p.id} style={{ borderTop: "1px solid var(--line)", padding: "9px 0", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <Link href={`/purchasing/${p.id}`} className="mono" style={{ fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
+          {p.number}
+        </Link>
+        <span className="pill" style={{ background: PO_COLOR[p.status]?.bg, color: PO_COLOR[p.status]?.fg, fontWeight: 700 }}>
+          {PO_LABEL[p.status] ?? p.status}
+        </span>
+        <span style={{ fontSize: 13 }}>{p.vendor}</span>
+        <span className="mut" style={{ fontSize: 12 }}>
+          → {p.stockroomId === null ? "(room gone)" : roomName.get(p.stockroomId) ?? "?"}
+        </span>
+        <span className="mut" style={{ fontSize: 12 }}>
+          {t.received} of {t.ordered} received
+        </span>
+        {p.expectedAt && <span className="mut" style={{ fontSize: 12 }}>· expected {p.expectedAt}</span>}
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "baseline" }}>
+          {showCosts && t.priced > 0 && <b style={{ fontSize: 13 }}>{formatCents(t.cents)}</b>}
+          <span className="mut" style={{ fontSize: 11 }}>{shopMonthDay(p.createdAt)}</span>
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="container wide">
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <div className="card-title">Purchasing</div>
+          {open.length > 0 && (
+            <span className="pill" style={{ background: "#E7EFF8", color: "#1D6396", fontWeight: 700 }}>
+              {open.length} open
+            </span>
+          )}
+          <Link href="/stock" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
+            Stock →
+          </Link>
+        </div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Orders are raised from a stockroom&apos;s reorder list, priced from the price book.
+          Receiving here is what puts stock on the shelf, so the count and the paperwork
+          can&apos;t drift apart.
+        </div>
+        {open.length === 0 && closed.length === 0 && (
+          <div className="mut" style={{ fontSize: 13 }}>
+            No orders yet. Open a stockroom and use its <b>Needs ordering</b> list.
+          </div>
+        )}
+        {open.map(row)}
+      </div>
+
+      {closed.length > 0 && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 4 }}>Closed</div>
+          {closed.map(row)}
+        </div>
+      )}
+    </div>
+  );
+}

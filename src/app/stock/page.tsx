@@ -49,7 +49,11 @@ export default async function StockPage() {
               {shortAll} line{shortAll === 1 ? "" : "s"} at or below reorder point
             </span>
           )}
-          <span style={{ marginLeft: "auto" }}>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            {/* Reachable for org editors too, who don't get the staff nav menu. */}
+            {visible.some((v) => v.acc.issue) && (
+              <Link href="/purchasing" className="btn sm" style={{ textDecoration: "none" }}>Purchase orders</Link>
+            )}
             {(isHouse(user.role) || (user.orgId !== null && user.role === "client_editor")) && (
               <NewStockroomForm
                 orgOptions={orgRows}

@@ -10,10 +10,12 @@ import { isHouse, scopeFor, visibleAssetIds } from "@/lib/tenancy";
 import { canSeeCosts } from "@/lib/redact";
 import { shopTime } from "@/lib/shopday";
 import { KIND_LABEL, MOVE_LABEL, reorderLines, stockAccess, stockTotals } from "@/lib/stock";
+import { suggestOrders } from "@/lib/po";
 import StockShelf, { type IssueTarget } from "@/components/StockShelf";
 import StockGrid from "@/components/StockGrid";
 import StockroomAdmin from "@/components/StockroomAdmin";
 import StockAddCard from "@/components/StockAddCard";
+import ReorderCard from "@/components/ReorderCard";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +46,10 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
     db.select({ orgId: stockroomShares.orgId, access: stockroomShares.access, name: orgs.name, kind: orgs.kind })
       .from(stockroomShares).innerJoin(orgs, eq(orgs.id, stockroomShares.orgId))
       .where(eq(stockroomShares.stockroomId, roomId)).orderBy(asc(orgs.name)),
-    db.selectDistinct({ partNumber: partPrices.partNumber }).from(partPrices),
+    db.select({
+      partNumber: partPrices.partNumber, vendor: partPrices.vendor,
+      isOem: partPrices.isOem, priceCents: partPrices.priceCents,
+    }).from(partPrices),
   ]);
 
   // Where stock from this room may go: systems the viewer can work, plus their
@@ -111,6 +116,11 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
     <div className="container wide">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link href="/stock" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← All stock</Link>
+        {acc.issue && (
+          <Link href="/purchasing" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
+            Purchase orders
+          </Link>
+        )}
       </div>
 
       <div className="card">
@@ -141,6 +151,11 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
           canIssue={acc.issue} canManage={acc.manage} showCosts={showCosts}
         />
       </div>
+
+      {/* Ordering follows the same standing as stocking the shelf. */}
+      {acc.issue && short.length > 0 && (
+        <ReorderCard stockroomId={room.id} groups={suggestOrders(short, priceRows)} />
+      )}
 
       {acc.manage && (
         <StockAddCard>

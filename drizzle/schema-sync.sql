@@ -373,6 +373,33 @@ CREATE TABLE IF NOT EXISTS "stock_moves" (
   "actor" text NOT NULL DEFAULT '',
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "purchase_orders" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "number" text NOT NULL,
+  "vendor" text NOT NULL,
+  "stockroom_id" integer,
+  "org_id" integer,
+  "status" text NOT NULL DEFAULT 'draft',
+  "reference" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "expected_at" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "sent_at" timestamp,
+  "closed_at" timestamp,
+  "cancel_reason" text NOT NULL DEFAULT '',
+  CONSTRAINT "po_number_unique" UNIQUE("number")
+);
+CREATE TABLE IF NOT EXISTS "po_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "po_id" integer NOT NULL,
+  "part_number" text NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "qty_ordered" integer NOT NULL DEFAULT 1,
+  "qty_received" integer NOT NULL DEFAULT 0,
+  "unit_cents" integer,
+  "note" text NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS "notifications" (
   "id" serial PRIMARY KEY NOT NULL,
   "email" text NOT NULL,
@@ -598,6 +625,8 @@ CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("crea
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 CREATE INDEX IF NOT EXISTS "notifications_email_idx" ON "notifications" ("email");
+CREATE INDEX IF NOT EXISTS "po_status_idx" ON "purchase_orders" ("status");
+CREATE INDEX IF NOT EXISTS "po_lines_po_idx" ON "po_lines" ("po_id");
 CREATE INDEX IF NOT EXISTS "stockrooms_org_idx" ON "stockrooms" ("org_id");
 CREATE INDEX IF NOT EXISTS "stockroom_shares_org_idx" ON "stockroom_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "stock_items_room_idx" ON "stock_items" ("stockroom_id");

@@ -719,6 +719,43 @@ export const stockMoves = pgTable("stock_moves", {
   at: timestamp("at").notNull().defaultNow(),
 }, (t) => [index("stock_moves_room_idx").on(t.stockroomId), index("stock_moves_at_idx").on(t.at)]);
 
+// A purchase order: one vendor, one destination shelf, the lines you're buying.
+// Raised by hand or from a room's reorder list (which prices itself from the
+// price book), then received - and receiving is what puts stock on the shelf,
+// so the count and the paperwork can't disagree.
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: serial("id").primaryKey(),
+  // Human-facing number, assigned at creation and never reused.
+  number: text("number").notNull(),
+  vendor: text("vendor").notNull(),
+  stockroomId: integer("stockroom_id").references(() => stockrooms.id, { onDelete: "set null" }),
+  // Whose money. Follows the destination room's org, frozen here because a
+  // room can be handed over later and the PO belongs to whoever paid.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // draft | sent | partial | received | cancelled
+  status: text("status").notNull().default("draft"),
+  reference: text("reference").notNull().default(""), // vendor quote or confirmation number
+  note: text("note").notNull().default(""),
+  expectedAt: text("expected_at").notNull().default(""), // free text, like parts.eta
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  sentAt: timestamp("sent_at"),
+  closedAt: timestamp("closed_at"),
+  cancelReason: text("cancel_reason").notNull().default(""),
+}, (t) => [unique("po_number_unique").on(t.number), index("po_status_idx").on(t.status)]);
+
+export const poLines = pgTable("po_lines", {
+  id: serial("id").primaryKey(),
+  poId: integer("po_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  partNumber: text("part_number").notNull(),
+  name: text("name").notNull().default(""),
+  qtyOrdered: integer("qty_ordered").notNull().default(1),
+  // Receiving accumulates here; a line is settled when received >= ordered.
+  qtyReceived: integer("qty_received").notNull().default(0),
+  unitCents: integer("unit_cents"),  // null = price not agreed yet
+  note: text("note").notNull().default(""),
+}, (t) => [index("po_lines_po_idx").on(t.poId)]);
+
 // The house price book: what a part number costs from each vendor who sells
 // it. One row per (PN, vendor) pair - the OEM's price and every third-party
 // price sit side by side, so "request part" can pick the cheapest and an
