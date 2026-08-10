@@ -326,6 +326,53 @@ CREATE TABLE IF NOT EXISTS "vocab_terms" (
   "categories" text[] NOT NULL DEFAULT '{}',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "stockrooms" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "name" text NOT NULL,
+  "kind" text NOT NULL DEFAULT 'shop',
+  "org_id" integer,
+  "keeper" text NOT NULL DEFAULT '',
+  "location" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "archived" boolean NOT NULL DEFAULT false,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "stockroom_shares" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "stockroom_id" integer NOT NULL,
+  "org_id" integer NOT NULL,
+  "access" text NOT NULL DEFAULT 'view',
+  "added_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "stockroom_share_unique" UNIQUE("stockroom_id","org_id")
+);
+CREATE TABLE IF NOT EXISTS "stock_items" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "stockroom_id" integer NOT NULL,
+  "part_number" text NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "qty" integer NOT NULL DEFAULT 0,
+  "min_qty" integer NOT NULL DEFAULT 0,
+  "bin" text NOT NULL DEFAULT '',
+  "unit_cost_cents" integer,
+  "note" text NOT NULL DEFAULT '',
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS "stock_moves" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "stockroom_id" integer NOT NULL,
+  "part_number" text NOT NULL,
+  "delta" integer NOT NULL,
+  "kind" text NOT NULL,
+  "counterparty_id" integer,
+  "instrument_id" integer,
+  "asset_id" integer,
+  "part_id" integer,
+  "reason" text NOT NULL DEFAULT '',
+  "actor" text NOT NULL DEFAULT '',
+  "at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "notifications" (
   "id" serial PRIMARY KEY NOT NULL,
   "email" text NOT NULL,
@@ -551,6 +598,14 @@ CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("crea
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 CREATE INDEX IF NOT EXISTS "notifications_email_idx" ON "notifications" ("email");
+CREATE INDEX IF NOT EXISTS "stockrooms_org_idx" ON "stockrooms" ("org_id");
+CREATE INDEX IF NOT EXISTS "stockroom_shares_org_idx" ON "stockroom_shares" ("org_id");
+CREATE INDEX IF NOT EXISTS "stock_items_room_idx" ON "stock_items" ("stockroom_id");
+CREATE INDEX IF NOT EXISTS "stock_moves_room_idx" ON "stock_moves" ("stockroom_id");
+CREATE INDEX IF NOT EXISTS "stock_moves_at_idx" ON "stock_moves" ("at");
+-- One on-hand line per part number per room, however it was capitalized. Same
+-- reasoning (and same ORM limitation) as part_prices_pn_vendor.
+CREATE UNIQUE INDEX IF NOT EXISTS "stock_items_room_pn" ON "stock_items" ("stockroom_id", lower("part_number"));
 -- One price per (PN, vendor) pair regardless of how either was capitalized.
 -- Lives here alone: drizzle's pgTable can't declare expression indexes, so the
 -- app enforces the same rule with a select-then-write (see addPartPrices) and

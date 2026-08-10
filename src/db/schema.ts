@@ -640,6 +640,85 @@ export const notificationPrefs = pgTable("notification_prefs", {
   emailOn: boolean("email_on").notNull().default(true),
 }, (t) => [unique("notification_prefs_unique").on(t.email, t.kind)]);
 
+// ── Stock ───────────────────────────────────────────────────────────────────
+// Where parts physically live. Three kinds, because "where is it" has three
+// different answers in this business: a shelf in the shop, the client's own
+// spares cage at their site, or a van/field kit that travels with a tech.
+// A room's org is what makes cross-org stock meaningful - a client can let
+// their service provider draw from their cage, and a provider can let the
+// client see the spares held on their behalf (see stockroomShares).
+export const stockrooms = pgTable("stockrooms", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("shop"), // shop | client | mobile
+  // Whose stock this is. Null = the house's own.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  // mobile only: whose van or kit, so a tech's own stock is findable by name.
+  keeper: text("keeper").notNull().default(""),
+  location: text("location").notNull().default(""),
+  note: text("note").notNull().default(""),
+  archived: boolean("archived").notNull().default(false),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("stockrooms_org_idx").on(t.orgId)]);
+
+// Who else may see or draw from a room, one row per (room, org) - the same
+// shape as systemShares. 'issue' is the meaningful grant: it lets another
+// organization's editors decrement someone else's inventory.
+export const stockroomShares = pgTable("stockroom_shares", {
+  id: serial("id").primaryKey(),
+  stockroomId: integer("stockroom_id").notNull().references(() => stockrooms.id, { onDelete: "cascade" }),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  access: text("access").notNull().default("view"), // view | issue
+  addedBy: text("added_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("stockroom_share_unique").on(t.stockroomId, t.orgId),
+  index("stockroom_shares_org_idx").on(t.orgId),
+]);
+
+// On-hand of one part number in one room. Keyed on the part number as text,
+// like the price book, and matched case-insensitively through the same
+// normalizePn - inventory and pricing must agree on what "the same part" is.
+// Case-insensitive uniqueness on (stockroom_id, part_number) is an expression
+// index in drizzle/schema-sync.sql; the ORM can't declare lower().
+export const stockItems = pgTable("stock_items", {
+  id: serial("id").primaryKey(),
+  stockroomId: integer("stockroom_id").notNull().references(() => stockrooms.id, { onDelete: "cascade" }),
+  partNumber: text("part_number").notNull(),
+  name: text("name").notNull().default(""),
+  qty: integer("qty").notNull().default(0),
+  // Reorder point. 0 = never suggest reordering this, which is the honest
+  // default for a part nobody has decided a floor for yet.
+  minQty: integer("min_qty").notNull().default(0),
+  bin: text("bin").notNull().default(""),
+  // What a unit actually cost, when it's known - set by PO receiving. Null
+  // falls back to the price book's best offer when a part is issued.
+  unitCostCents: integer("unit_cost_cents"),
+  note: text("note").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("stock_items_room_idx").on(t.stockroomId)]);
+
+// The ledger. Counts live on stock_items for fast reads, but every change to
+// one appends a move here, so "why does it say four" always has an answer and
+// a miscount is a correcting entry rather than a silent overwrite.
+export const stockMoves = pgTable("stock_moves", {
+  id: serial("id").primaryKey(),
+  stockroomId: integer("stockroom_id").notNull().references(() => stockrooms.id, { onDelete: "cascade" }),
+  partNumber: text("part_number").notNull(),
+  delta: integer("delta").notNull(),  // signed: +in, -out
+  kind: text("kind").notNull(),       // receive | issue | adjust | transfer_in | transfer_out | return
+  // transfer only: the room on the other end.
+  counterpartyId: integer("counterparty_id").references(() => stockrooms.id, { onDelete: "set null" }),
+  // issue only: what it went into, and the parts row it became.
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }),
+  partId: integer("part_id").references(() => parts.id, { onDelete: "set null" }),
+  reason: text("reason").notNull().default(""),
+  actor: text("actor").notNull().default(""),
+  at: timestamp("at").notNull().defaultNow(),
+}, (t) => [index("stock_moves_room_idx").on(t.stockroomId), index("stock_moves_at_idx").on(t.at)]);
+
 // The house price book: what a part number costs from each vendor who sells
 // it. One row per (PN, vendor) pair - the OEM's price and every third-party
 // price sit side by side, so "request part" can pick the cheapest and an

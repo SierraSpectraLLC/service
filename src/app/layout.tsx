@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, sheetDiffs, notifications } from "@/db/schema";
-import { and, asc, isNull } from "drizzle-orm";
+import { orgs, sheetDiffs, notifications, stockrooms, stockroomShares } from "@/db/schema";
+import { and, asc, isNull, or } from "drizzle-orm";
 import { currentUser, viewContext } from "@/lib/authz";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import { signOut } from "@/auth";
@@ -44,6 +44,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         .catch(() => [])
     : [];
   const unread = unreadRows.length;
+  // Staff always get the Stock link; an org only gets it once it has a room of
+  // its own or one shared with it, so a client without inventory sees no
+  // dead end.
+  const hasStock = isStaff || (user?.orgId != null && (
+    await db.select({ id: stockrooms.id }).from(stockrooms)
+      .leftJoin(stockroomShares, eq(stockroomShares.stockroomId, stockrooms.id))
+      .where(and(eq(stockrooms.archived, false),
+        or(eq(stockrooms.orgId, user.orgId), eq(stockroomShares.orgId, user.orgId))))
+      .limit(1).catch(() => [])
+  ).length > 0);
 
   // The viewer's organization paints its own workspace; staff and org-less
   // sessions keep the platform look. Bad hex stored by any path degrades to
@@ -87,6 +97,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   Inbox{unread ? ` (${unread})` : ""}
                 </Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
+                {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Stock</Link>}
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {/* An organization's editors configure their own workspace and
                     people on the same page the owner uses. */}

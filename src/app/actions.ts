@@ -11,7 +11,7 @@ import {
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
-  notifications, notificationPrefs,
+  notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -35,6 +35,7 @@ import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
+import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
@@ -3420,6 +3421,353 @@ export async function addVocabTerms(
     else created++;
   }
   return { created, failures };
+}
+
+// ── Stock ───────────────────────────────────────────────────────────────────
+
+/**
+ * The single gate for one room, mirroring assetAccess: load the room, load the
+ * viewer's share of it if any, and let lib/stock decide. Every stock mutation
+ * goes through here so a new one can't forget the cross-org rules.
+ */
+async function roomAccess(u: SessionUser, stockroomId: number) {
+  const [room] = await db.select().from(stockrooms).where(eq(stockrooms.id, stockroomId));
+  if (!room) return { room: null, see: false, issue: false, manage: false };
+  const [share] = u.orgId === null ? [] : await db.select({ access: stockroomShares.access })
+    .from(stockroomShares).where(and(eq(stockroomShares.stockroomId, stockroomId), eq(stockroomShares.orgId, u.orgId)));
+  return { room, ...stockAccess(u, room, share) };
+}
+
+const revStock = (id?: number) => {
+  revalidatePath("/stock");
+  if (id) revalidatePath(`/stock/${id}`);
+};
+
+export async function createStockroom(data: {
+  name: string; kind: string; orgId: number | null; keeper?: string; location?: string; note?: string;
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireEditor();
+  const name = data.name.trim().slice(0, 80);
+  if (!name) return { error: "Name required" };
+  const kind = (STOCK_KINDS as readonly string[]).includes(data.kind) ? data.kind : "shop";
+  // An org's editors can create their own rooms; only the house can create a
+  // room that belongs to somebody else (or to the house itself).
+  const orgId = isHouse(u.role) ? data.orgId : u.orgId;
+  if (!isHouse(u.role) && orgId === null) return { error: "Not found" };
+  if (orgId !== null) {
+    const [org] = await db.select({ id: orgs.id }).from(orgs).where(eq(orgs.id, orgId));
+    if (!org) return { error: "Unknown organization" };
+  }
+  const [room] = await db.insert(stockrooms).values({
+    name, kind, orgId, keeper: (data.keeper ?? "").trim().slice(0, 60),
+    location: (data.location ?? "").trim().slice(0, 120), note: (data.note ?? "").trim().slice(0, 300),
+    createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "stockroom", entityId: room.id,
+    action: `created ${KIND_LABEL[kind].toLowerCase()} "${name}"`,
+  });
+  revStock();
+  return { id: room.id };
+}
+
+export async function updateStockroom(id: number, data: {
+  name: string; keeper?: string; location?: string; note?: string;
+}): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const acc = await roomAccess(u, id);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.manage) return { error: acc.see ? "You can't change someone else's stockroom" : "Not found" };
+  const name = data.name.trim().slice(0, 80);
+  if (!name) return { error: "Name required" };
+  await db.update(stockrooms).set({
+    name, keeper: (data.keeper ?? "").trim().slice(0, 60),
+    location: (data.location ?? "").trim().slice(0, 120), note: (data.note ?? "").trim().slice(0, 300),
+  }).where(eq(stockrooms.id, id));
+  if (name !== acc.room.name) {
+    await audit({
+      actor: u.email, entityType: "stockroom", entityId: id,
+      action: `renamed stockroom "${acc.room.name}" to "${name}"`, field: "name", oldValue: acc.room.name, newValue: name,
+    });
+  }
+  revStock(id);
+  return {};
+}
+
+/**
+ * Archive rather than delete: the moves ledger is the history of who took what,
+ * and dropping a room would take that with it.
+ */
+export async function archiveStockroom(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const acc = await roomAccess(u, id);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.manage) return { error: acc.see ? "You can't change someone else's stockroom" : "Not found" };
+  await db.update(stockrooms).set({ archived: true }).where(eq(stockrooms.id, id));
+  await audit({
+    actor: u.email, entityType: "stockroom", entityId: id,
+    action: `archived stockroom "${acc.room.name}" - reason: ${why}`, field: "reason", newValue: why,
+  });
+  revStock(id);
+  return {};
+}
+
+/** Let another organization see, or draw from, this room. */
+export async function setStockroomShare(stockroomId: number, orgId: number, access: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const acc = await roomAccess(u, stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.manage) return { error: acc.see ? "Only the stockroom's own organization hands out access" : "Not found" };
+  if (acc.room.orgId === orgId) return { error: "That's the organization the stockroom belongs to" };
+  const level = access === "issue" ? "issue" : "view";
+  const [org] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Unknown organization" };
+  await db.insert(stockroomShares)
+    .values({ stockroomId, orgId, access: level, addedBy: u.email })
+    .onConflictDoUpdate({ target: [stockroomShares.stockroomId, stockroomShares.orgId], set: { access: level } });
+  await audit({
+    actor: u.email, entityType: "stockroom", entityId: stockroomId,
+    action: `gave ${org.name} ${level === "issue" ? "permission to draw parts from" : "read access to"} "${acc.room.name}"`,
+    field: "access", newValue: level,
+  });
+  revStock(stockroomId);
+  return {};
+}
+
+export async function removeStockroomShare(stockroomId: number, orgId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const acc = await roomAccess(u, stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.manage) return { error: acc.see ? "Only the stockroom's own organization hands out access" : "Not found" };
+  const [org] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
+  await db.delete(stockroomShares)
+    .where(and(eq(stockroomShares.stockroomId, stockroomId), eq(stockroomShares.orgId, orgId)));
+  await audit({
+    actor: u.email, entityType: "stockroom", entityId: stockroomId,
+    action: `removed ${org?.name ?? "an organization"}'s access to "${acc.room.name}"`,
+  });
+  revStock(stockroomId);
+  return {};
+}
+
+/** Find (or create) the on-hand line for a part number in a room. */
+async function stockLineFor(stockroomId: number, partNumber: string, seed?: { name?: string }) {
+  const pn = partNumber.trim().slice(0, 80);
+  if (!pn) return null;
+  const [existing] = await db.select().from(stockItems).where(and(
+    eq(stockItems.stockroomId, stockroomId),
+    sql`lower(${stockItems.partNumber}) = ${pn.toLowerCase()}`,
+  ));
+  if (existing) return existing;
+  const [made] = await db.insert(stockItems)
+    .values({ stockroomId, partNumber: pn, name: (seed?.name ?? "").trim().slice(0, 120), qty: 0 })
+    .returning();
+  return made;
+}
+
+/** Append to the ledger and move the count in one place. */
+async function moveStock(opts: {
+  item: typeof stockItems.$inferSelect; delta: number; kind: string; actor: string; reason?: string;
+  counterpartyId?: number | null; instrumentId?: number | null; assetId?: number | null; partId?: number | null;
+}) {
+  await db.insert(stockMoves).values({
+    stockroomId: opts.item.stockroomId, partNumber: opts.item.partNumber, delta: opts.delta, kind: opts.kind,
+    counterpartyId: opts.counterpartyId ?? null, instrumentId: opts.instrumentId ?? null,
+    assetId: opts.assetId ?? null, partId: opts.partId ?? null,
+    reason: (opts.reason ?? "").slice(0, 200), actor: opts.actor,
+  });
+  await db.update(stockItems)
+    .set({ qty: opts.item.qty + opts.delta, updatedAt: new Date() })
+    .where(eq(stockItems.id, opts.item.id));
+}
+
+export type StockItemInput = { partNumber: string; name?: string; qty?: string; minQty?: string; bin?: string; note?: string };
+
+const whole = (s: string | undefined, fallback = 0) => {
+  const n = parseInt((s ?? "").trim(), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+/**
+ * Spreadsheet entry for a room's shelf, same shape as the catalog grids. An
+ * opening quantity counts as a receive so the ledger explains where the first
+ * count came from; a part number already on the shelf has its floor and bin
+ * updated instead of being duplicated.
+ */
+export async function addStockItems(
+  stockroomId: number, rows: StockItemInput[],
+): Promise<{ error?: string; created?: number; updated?: number; failures?: { row: number; name: string; error: string }[] }> {
+  const u = await requireEditor();
+  const acc = await roomAccess(u, stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.manage) return { error: acc.see ? "You can't stock someone else's room" : "Not found" };
+  const usable = rows.filter((r) => r.partNumber.trim());
+  if (!usable.length) return { error: "Nothing to save - every row needs a part number" };
+  if (usable.length > 300) return { error: "Save 300 rows at a time" };
+  const failures: { row: number; name: string; error: string }[] = [];
+  let created = 0, updated = 0;
+  for (let i = 0; i < usable.length; i++) {
+    const r = usable[i];
+    const pn = r.partNumber.trim();
+    const [before] = await db.select().from(stockItems).where(and(
+      eq(stockItems.stockroomId, stockroomId),
+      sql`lower(${stockItems.partNumber}) = ${pn.toLowerCase()}`,
+    ));
+    const line = await stockLineFor(stockroomId, pn, { name: r.name });
+    if (!line) { failures.push({ row: i + 1, name: pn, error: "Part number required" }); continue; }
+    const openingQty = whole(r.qty);
+    await db.update(stockItems).set({
+      name: (r.name ?? line.name).trim().slice(0, 120),
+      minQty: whole(r.minQty, line.minQty),
+      bin: (r.bin ?? line.bin).trim().slice(0, 40),
+      note: (r.note ?? line.note).trim().slice(0, 200),
+    }).where(eq(stockItems.id, line.id));
+    if (before) {
+      updated++;
+    } else {
+      created++;
+      if (openingQty > 0) {
+        await moveStock({ item: line, delta: openingQty, kind: "receive", actor: u.email, reason: "opening count" });
+      }
+    }
+  }
+  await audit({
+    actor: u.email, entityType: "stockroom", entityId: stockroomId,
+    action: `stocked "${acc.room.name}": ${created} new line${created === 1 ? "" : "s"}, ${updated} updated`,
+  });
+  revStock(stockroomId);
+  return { created, updated, failures };
+}
+
+/**
+ * A recount. The count is never edited in place - the difference is posted as a
+ * correcting entry with a reason, so a shelf that keeps drifting shows up as a
+ * pattern in the ledger instead of vanishing into an overwritten number.
+ */
+export async function recountStock(itemId: number, countedQty: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  if (!Number.isInteger(countedQty) || countedQty < 0) return { error: "Count must be a whole number, zero or more" };
+  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, itemId));
+  if (!item) return { error: "Not found" };
+  const acc = await roomAccess(u, item.stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.manage) return { error: acc.see ? "You can't recount someone else's shelf" : "Not found" };
+  const delta = countedQty - item.qty;
+  if (delta === 0) return {};
+  await moveStock({ item, delta, kind: "adjust", actor: u.email, reason: why });
+  await audit({
+    actor: u.email, entityType: "stock", entityId: item.id,
+    action: `recounted PN ${item.partNumber} in "${acc.room.name}": ${item.qty} -> ${countedQty} - reason: ${why}`,
+    field: "qty", oldValue: String(item.qty), newValue: String(countedQty),
+  });
+  revStock(item.stockroomId);
+  return {};
+}
+
+/**
+ * Take parts off a shelf and onto a system or unit. The draw and the parts row
+ * are one action: stock that left the shelf but never appeared on a work order
+ * is how inventory stops being trusted. Unit cost comes from what the room
+ * paid when that's known, else the price book's best offer - server-derived
+ * either way, so the cost-strip rule for editors isn't in play.
+ */
+export async function issueStock(
+  itemId: number, qty: number, target: WorkTarget, opts?: { install?: boolean; note?: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, itemId));
+  if (!item) return { error: "Not found" };
+  const acc = await roomAccess(u, item.stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.issue) return { error: acc.see ? "You can see this stockroom but not draw from it" : "Not found" };
+  const check = canIssue(item.qty, qty);
+  if (!check.ok) return { error: check.error };
+  // The same write-auth gate every other work row goes through.
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+
+  const book = await db.select().from(partPrices);
+  const best = bestPrice(book, item.partNumber);
+  const unitCents = item.unitCostCents ?? best?.priceCents ?? null;
+  const name = item.name || `PN ${item.partNumber}`;
+  const status = opts?.install ? "Installed" : "Received";
+  const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, status);
+  const [p] = await db.insert(parts).values({
+    instrumentId: t0.instrumentId, assetId: t0.assetId, name, partNumber: item.partNumber,
+    qty: String(qty), status, ...stamps,
+    vendor: item.unitCostCents === null && best ? best.vendor : "",
+    note: [`from stock: ${acc.room.name}`, (opts?.note ?? "").trim()].filter(Boolean).join(" - "),
+    ...(unitCents !== null ? { cost: centsToInput(unitCents * qty), costCents: unitCents * qty } : {}),
+  }).returning();
+  await moveStock({
+    item, delta: -qty, kind: "issue", actor: u.email, reason: (opts?.note ?? "").trim(),
+    instrumentId: t0.instrumentId, assetId: t0.assetId, partId: p.id,
+  });
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "part", entityId: p.id,
+    // No price: activity feeds are shared with every org on the system.
+    action: `issued ${qty} × ${name}${item.partNumber ? ` (PN ${item.partNumber})` : ""} from "${acc.room.name}"`
+      + `${status === "Installed" ? " and installed it" : ""}`,
+  });
+  revStock(item.stockroomId);
+  revWork(p);
+  return {};
+}
+
+/** Move stock between rooms - a van restock, or spares going out to a client's cage. */
+export async function transferStock(itemId: number, toStockroomId: number, qty: number, note?: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, itemId));
+  if (!item) return { error: "Not found" };
+  if (toStockroomId === item.stockroomId) return { error: "That's the same stockroom" };
+  const from = await roomAccess(u, item.stockroomId);
+  const to = await roomAccess(u, toStockroomId);
+  if (!from.room || !to.room) return { error: "Not found" };
+  if (!from.issue) return { error: from.see ? "You can see this stockroom but not draw from it" : "Not found" };
+  // Putting stock INTO a room is a write on that room, so it needs the same
+  // standing there - otherwise a share could be used to dump inventory.
+  if (!to.issue) return { error: to.see ? `You can't add stock to "${to.room.name}"` : "Not found" };
+  const check = canIssue(item.qty, qty);
+  if (!check.ok) return { error: check.error };
+  const dest = await stockLineFor(toStockroomId, item.partNumber, { name: item.name });
+  if (!dest) return { error: "Not found" };
+  const why = (note ?? "").trim();
+  await moveStock({ item, delta: -qty, kind: "transfer_out", actor: u.email, reason: why, counterpartyId: toStockroomId });
+  await moveStock({ item: dest, delta: qty, kind: "transfer_in", actor: u.email, reason: why, counterpartyId: item.stockroomId });
+  // Cost travels with the parts: a van restocked from the shop holds stock at
+  // what the shop paid, not at whatever the price book says today.
+  if (dest.unitCostCents === null && item.unitCostCents !== null) {
+    await db.update(stockItems).set({ unitCostCents: item.unitCostCents }).where(eq(stockItems.id, dest.id));
+  }
+  await audit({
+    actor: u.email, entityType: "stock", entityId: item.id,
+    action: `transferred ${qty} × PN ${item.partNumber} from "${from.room.name}" to "${to.room.name}"${why ? ` - ${why}` : ""}`,
+  });
+  revStock(item.stockroomId);
+  revStock(toStockroomId);
+  return {};
+}
+
+/** Stock arriving without a purchase order - a hand-carried spare, a return. */
+export async function receiveStock(itemId: number, qty: number, note?: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!Number.isInteger(qty) || qty <= 0) return { error: "How many? Whole numbers above zero." };
+  const [item] = await db.select().from(stockItems).where(eq(stockItems.id, itemId));
+  if (!item) return { error: "Not found" };
+  const acc = await roomAccess(u, item.stockroomId);
+  if (!acc.room) return { error: "Not found" };
+  if (!acc.issue) return { error: acc.see ? "You can see this stockroom but not stock it" : "Not found" };
+  await moveStock({ item, delta: qty, kind: "receive", actor: u.email, reason: (note ?? "").trim() });
+  await audit({
+    actor: u.email, entityType: "stock", entityId: item.id,
+    action: `received ${qty} × PN ${item.partNumber} into "${acc.room.name}"${(note ?? "").trim() ? ` - ${note!.trim()}` : ""}`,
+  });
+  revStock(item.stockroomId);
+  return {};
 }
 
 // ── Price book ──────────────────────────────────────────────────────────────
