@@ -72,7 +72,10 @@ export default function ImportPanel() {
       const res = await importFleet(toRows(), dryRun);
       if (res.error) { setError(res.error); return; }
       setResults(res.results ?? []);
-      setSummary(`${res.systems} system(s), ${res.assets} asset(s)${dryRun ? " would be created" : " created"}`);
+      setSummary(
+        `${res.systems} system(s), ${res.assets} asset(s)${dryRun ? " would be created" : " created"}`
+        + (res.duplicates ? `, ${res.duplicates} already on file ${dryRun ? "would be" : "were"} skipped` : ""),
+      );
       setPhase(dryRun ? "checked" : "done");
     });
   };

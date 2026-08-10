@@ -39,6 +39,7 @@ import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
 import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
+import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
@@ -563,12 +564,25 @@ export async function createAssets(
   const usable = rows.filter((r) => r.kind.trim() && (r.model.trim() || r.serial.trim()));
   if (!usable.length) return { error: "Nothing to save - each row needs a type and either a model or a serial" };
   if (usable.length > 200) return { error: "Save 200 rows at a time" };
+  // A serial is one physical unit, so a serial already on file is a mistake -
+  // reported per row rather than silently skipped, because this is deliberate
+  // entry and the person needs to know their paste overlapped. Serial-LESS rows
+  // are left alone: three identical seal-less pumps are three real pumps.
+  const taken = new Map((await db.select({ serial: assets.serial, kind: assets.kind, model: assets.model })
+    .from(assets)).filter((a) => a.serial.trim())
+    .map((a) => [normalizeSerial(a.serial), `${a.kind}${a.model ? ` ${a.model}` : ""}`]));
   const failures: { row: number; error: string }[] = [];
   let created = 0;
   for (let i = 0; i < usable.length; i++) {
+    const sn = normalizeSerial(usable[i].serial ?? "");
+    if (sn && taken.has(sn)) {
+      failures.push({ row: i + 1, error: `Serial ${usable[i].serial.trim()} is already on file as ${taken.get(sn)}` });
+      continue;
+    }
     const res = await createAsset(instrumentId, usable[i]);
-    if (res.error) failures.push({ row: i + 1, error: res.error });
-    else created++;
+    if (res.error) { failures.push({ row: i + 1, error: res.error }); continue; }
+    if (sn) taken.set(sn, `${usable[i].kind}${usable[i].model ? ` ${usable[i].model}` : ""}`);
+    created++;
   }
   return { created, failures };
 }
@@ -740,6 +754,53 @@ export async function removeAsset(assetId: number, reason: string): Promise<{ er
   if (a.instrumentId !== null) rev(a.instrumentId);
   revalidatePath("/assets");
   return {};
+}
+
+/**
+ * Delete several asset records at once, under one reason. The cleanup half of
+ * an import that went wrong: hunting down forty accidental rows one confirm
+ * dialog at a time is how people give up and edit the database by hand.
+ *
+ * Each deletion is audited on its own line - a batch is a convenience for the
+ * person, not a single event in the record - and a row that can't be removed
+ * reports back instead of aborting the rest.
+ */
+export async function removeAssets(
+  assetIds: number[], reason: string,
+): Promise<{ error?: string; deleted?: number; failures?: { id: number; error: string }[] }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const ids = [...new Set(assetIds.filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return { error: "Nothing selected" };
+  if (ids.length > 200) return { error: "Delete 200 at a time" };
+  const rows = await db.select().from(assets).where(inArray(assets.id, ids));
+  const failures: { id: number; error: string }[] = [];
+  let deleted = 0;
+  for (const a of rows) {
+    try {
+      await db.delete(assets).where(eq(assets.id, a.id)); // events cascade; tags null out
+      await audit({
+        actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: a.id,
+        action: `deleted asset record ${assetLabel(a)} - reason: ${why}`, field: "reason", newValue: why,
+      });
+      if (a.instrumentId !== null) rev(a.instrumentId);
+      deleted++;
+    } catch (e) {
+      failures.push({ id: a.id, error: (e as Error).message });
+    }
+  }
+  if (deleted > 1) {
+    // One summary line so the audit log reads as the single decision it was.
+    await audit({
+      actor: u.email, entityType: "asset", entityId: "bulk",
+      action: `deleted ${deleted} asset records in one action - reason: ${why}`,
+      field: "reason", newValue: why,
+    });
+  }
+  revalidatePath("/assets");
+  rev();
+  return { deleted, failures };
 }
 
 // ---------------- Gases ----------------
@@ -2897,7 +2958,7 @@ export type ImportRowResult = { row: number; action: string; error?: string };
 const IMPORT_MAX_ROWS = 500;
 
 export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
-  error?: string; results?: ImportRowResult[]; systems?: number; assets?: number;
+  error?: string; results?: ImportRowResult[]; systems?: number; assets?: number; duplicates?: number;
 }> {
   const u = await requireEditor();
   if (!rows.length) return { error: "Nothing to import" };
@@ -2905,9 +2966,32 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
 
   const existing = await db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments);
   const byExt = new Map(existing.map((i) => [i.externalId.toLowerCase(), i.id]));
+  const extOf = new Map(existing.map((i) => [i.id, i.externalId]));
   const createdThisRun = new Map<string, number>(); // externalId -> new instrument id
   const results: ImportRowResult[] = [];
-  let systemsMade = 0, assetsMade = 0;
+  let systemsMade = 0, assetsMade = 0, skippedDupes = 0;
+
+  // Duplicate protection. Re-importing a sheet used to double the fleet; now a
+  // row that already exists is skipped and says what it matched. Keyed on the
+  // system's EXTERNAL id rather than its row id, because rows landing in a
+  // system this run is about to create have no row id yet.
+  const priorAssets = await db.select({
+    id: assets.id, instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model,
+    serial: assets.serial, owner: assets.owner, location: assets.location,
+  }).from(assets);
+  const dupeFields = (a: typeof priorAssets[number]) => ({
+    systemKey: a.instrumentId !== null ? (extOf.get(a.instrumentId) ?? "").toLowerCase() : "",
+    kind: a.kind, model: a.model, serial: a.serial, owner: a.owner, location: a.location,
+  });
+  const describeKey = new Map<string, string>();
+  for (const a of priorAssets) {
+    const k = assetDupeKey(dupeFields(a));
+    if (!describeKey.has(k)) {
+      const where = a.instrumentId !== null ? ` in ${extOf.get(a.instrumentId) ?? "a system"}` : " on the shelf";
+      describeKey.set(k, `${a.kind}${a.model ? ` ${a.model}` : ""}${a.serial ? ` SN ${a.serial}` : ""}${where}`);
+    }
+  }
+  const planRow = importPlanner(priorAssets.map(dupeFields), (k) => describeKey.get(k) ?? "");
 
   for (let n = 0; n < rows.length; n++) {
     const r = rows[n];
@@ -2952,6 +3036,22 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
         }
       } else {
         sysAction = "standalone (shelf)";
+      }
+
+      // Already on file? Skip it and say so. Checked after the system is
+      // resolved, since a serial-less row is only a duplicate within its own
+      // system. The planner spends down existing copies as it goes, so a sheet
+      // legitimately listing three identical units still tops up to three.
+      const verdict = planRow({
+        systemKey: sysId.toLowerCase(), kind, model: r.model.trim(), serial: r.serial.trim(),
+        owner: (r.owner || r.client).trim(), location: r.location.trim(),
+      });
+      if (verdict.skip) {
+        skippedDupes++;
+        // Reported through `action`, not `error`: a skipped duplicate is the
+        // importer working, not a row the person has to go fix.
+        results.push({ row: n + 1, action: `skipped, ${verdict.reason}` });
+        continue;
       }
 
       if (!dryRun) {
@@ -3003,7 +3103,7 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
     rev();
     revalidatePath("/assets");
   }
-  return { results, systems: systemsMade, assets: assetsMade };
+  return { results, systems: systemsMade, assets: assetsMade, duplicates: skippedDupes };
 }
 
 // ---------------- View as ----------------
