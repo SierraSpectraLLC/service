@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, instruments, orgs, partPrices, stockItems, stockMoves, stockrooms, stockroomShares,
@@ -71,6 +71,8 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
     .from(assets)
     .where(and(
       isNull(assets.instrumentId),
+      // Issuing a part to a retired unit is never the intent.
+      ne(assets.status, "Decommissioned"),
       seeAssets === null ? undefined : seeAssets.length ? inArray(assets.id, seeAssets) : sql`false`,
     ))
     .orderBy(asc(assets.kind))

@@ -59,7 +59,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   const isStaff = user.role === "owner" || user.role === "staff";
 
   return (
-    <div className="container page">
+    <div className="container split">
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <div className="card-title" style={{ marginBottom: 4 }}>Assets</div>

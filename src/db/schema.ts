@@ -707,6 +707,22 @@ export const vocabTerms = pgTable("vocab_terms", {
   // to apply to several system types, not a row per type.
 }, (t) => [unique("vocab_term_unique").on(t.kind, t.assetType, t.name)]);
 
+// How one person arranges a record page: which panels sit in which column, in
+// what order, and which they've hidden. Per PERSON, not per browser - two
+// people sharing a workstation get their own view, and one person's arrangement
+// follows them from the bench PC to a laptop.
+//
+// Keyed by sign-in email like the notification tables, and stored as jsonb
+// because the shape belongs to the component: adding a panel or a third column
+// later shouldn't need a migration to a table nobody queries by field.
+export const uiLayouts = pgTable("ui_layouts", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  viewKey: text("view_key").notNull(),   // 'system' | 'asset'
+  data: jsonb("data").notNull(),         // { order: string[], right: string[], hidden: string[] }
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [unique("ui_layout_unique").on(t.email, t.viewKey)]);
+
 // One row per event per recipient - the in-app copy of every notification the
 // platform sends. Written BEFORE the email goes out, so "the mail was junked"
 // never means "the event vanished". Keyed by sign-in email rather than user id

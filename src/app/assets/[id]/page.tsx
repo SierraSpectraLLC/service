@@ -30,6 +30,7 @@ import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import RunCheckoutButton from "@/components/RunCheckoutButton";
 import PanelLayout from "@/components/PanelLayout";
+import { getUiLayout } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -123,6 +124,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const target = { instrumentId: null, assetId: asset.id };
   // The unit's own recurring upkeep, wherever it currently sits.
   const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId)).orderBy(asc(pmSchedules.nextDue));
+  // This reader's own panel arrangement, so the page arrives already arranged.
+  const panelLayout = await getUiLayout("asset");
 
   const fullTasks = taggedTasks.map((t) => ({
     ...t,
@@ -166,7 +169,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       {/* Same two-column shell as the system page - a unit's record runs just
           as long. See PanelLayout. */}
       <PanelLayout
-        storageKey="layout:asset"
+        viewKey="asset"
+        saved={panelLayout}
         defaultRight={["files", "hours", "update", "history", "activity"]}
         panels={[
           { key: "unit", label: "Unit", node: (

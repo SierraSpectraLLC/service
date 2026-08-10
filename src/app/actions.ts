@@ -12,7 +12,7 @@ import {
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
-  purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers,
+  purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -1941,6 +1941,52 @@ export async function markThreadRead(threadId: number) {
       target: [discussionReads.userEmail, discussionReads.threadId],
       set: { lastSeenAt: new Date() },
     });
+}
+
+// ── Page layout ─────────────────────────────────────────────────────────────
+
+/** Views whose arrangement is saveable. Anything else is rejected outright. */
+const PANEL_VIEWS = ["system", "asset"] as const;
+
+export type PanelArrangement = { order: string[]; right: string[]; hidden: string[] };
+
+/**
+ * Remember how this person arranged a record page. Their own row only - the
+ * email comes from the session, never the caller - so there is nothing to probe
+ * and no audit line to write: it's a view preference, like a read marker.
+ *
+ * Keys are stored as given but bounded in count and length, because this is the
+ * one table a client can write to freely.
+ */
+export async function saveUiLayout(viewKey: string, data: PanelArrangement): Promise<{ error?: string }> {
+  const u = await requireUser();
+  if (!(PANEL_VIEWS as readonly string[]).includes(viewKey)) return { error: "Unknown view" };
+  const keys = (list: unknown): string[] =>
+    Array.isArray(list)
+      ? [...new Set(list.filter((k): k is string => typeof k === "string" && k.length > 0 && k.length <= 40))].slice(0, 60)
+      : [];
+  const clean: PanelArrangement = { order: keys(data?.order), right: keys(data?.right), hidden: keys(data?.hidden) };
+  const email = u.email.toLowerCase();
+  await db.insert(uiLayouts)
+    .values({ email, viewKey, data: clean, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [uiLayouts.email, uiLayouts.viewKey],
+      set: { data: clean, updatedAt: new Date() },
+    });
+  return {};
+}
+
+/**
+ * This person's saved arrangement, or null for the page's default. Read on the
+ * server so the page renders already arranged - reading it in the browser would
+ * show one frame of the default layout and then jump.
+ */
+export async function getUiLayout(viewKey: string): Promise<PanelArrangement | null> {
+  const u = await requireUser();
+  const [row] = await db.select({ data: uiLayouts.data }).from(uiLayouts)
+    .where(and(eq(uiLayouts.email, u.email.toLowerCase()), eq(uiLayouts.viewKey, viewKey)))
+    .catch(() => []);
+  return (row?.data as PanelArrangement) ?? null;
 }
 
 // ── Inbox ───────────────────────────────────────────────────────────────────

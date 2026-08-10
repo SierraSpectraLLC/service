@@ -5,7 +5,7 @@
 //
 // One report per client: the systems a client OWNS, plus updates written on
 // their assets. A client never sees another client's work in their report.
-import { asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, eodUpdates, people, assets, orgs } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
@@ -126,7 +126,11 @@ export async function eodGroups(date: string, historical = false): Promise<{ org
     db.select().from(orgs).orderBy(asc(orgs.name)),
     getBrand(),
     db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId }).from(assets)
-      .where(historical ? undefined : isNull(assets.instrumentId)),
+      .where(historical ? undefined : and(
+        isNull(assets.instrumentId),
+        // A retired unit on tonight's client report is noise.
+        ne(assets.status, "Decommissioned"),
+      )),
     historical ? db.select().from(eodUpdates).where(eq(eodUpdates.date, date)) : Promise.resolve([]),
   ]);
   const owners = historical

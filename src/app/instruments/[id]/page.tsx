@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import {
@@ -33,6 +33,7 @@ import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
+import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
@@ -66,8 +67,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     // Shelf stock offered for attaching: the house sees all of it; an org sees
-    // only units it owns, never another client's spares.
+    // only units it owns, never another client's spares. Retired units are
+    // excluded - attachAsset refuses them anyway, so offering one is a picker
+    // that leads to an error message.
     db.select().from(assets).where(and(isNull(assets.instrumentId),
+      ne(assets.status, "Decommissioned"),
       user.orgId === null ? undefined : eq(assets.ownerOrgId, user.orgId))).orderBy(asc(assets.kind), asc(assets.model)),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
     // Who this system is shared with, and who it could be shared with.
@@ -90,14 +94,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   const showCosts = canSeeCosts(user, inst.ownerOrgId);
 
-  // Chain of custody, oldest first - it reads as a story.
-  const [custodyRows, queueRows] = await Promise.all([
+  // Chain of custody, oldest first - it reads as a story. The reader's own
+  // panel arrangement rides along, so the page arrives already arranged.
+  const [custodyRows, queueRows, panelLayout] = await Promise.all([
     db.select().from(custodyEvents)
       .where(eq(custodyEvents.instrumentId, instId))
       .orderBy(asc(custodyEvents.at), asc(custodyEvents.id)),
     db.select().from(queueEvents)
       .where(eq(queueEvents.instrumentId, instId))
       .orderBy(desc(queueEvents.at), desc(queueEvents.id)).limit(20),
+    getUiLayout("system"),
   ]);
 
   // Labor on this system, newest first. Work tagged to an installed asset
@@ -232,7 +238,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           below three screens of scroll. Two columns from 1200px up, arranged
           by whoever is reading - see PanelLayout. */}
       <PanelLayout
-        storageKey="layout:system"
+        viewKey="system"
+        saved={panelLayout}
         defaultRight={["custody", "files", "hours", "update", "discussion", "activity"]}
         panels={[
           { key: "system", label: "System", node: (

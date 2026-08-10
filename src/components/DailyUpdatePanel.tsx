@@ -39,11 +39,14 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
     timer.current = setTimeout(flush, AUTOSAVE_MS);
   };
 
+  // A card like every other panel. It used to be a bare fragment with a top
+  // margin, from when it sat inside the identity block; standing on its own it
+  // read as loose text dropped on the page.
   if (!canEdit) {
     if (!systemUpdate && !actionItem) return null;
     return (
-      <>
-        <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>Today&apos;s update</div>
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 6 }}>Today&apos;s update</div>
         {systemUpdate && <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{systemUpdate}</div>}
         {actionItem && (
           <div style={{ fontSize: 13, marginTop: 4 }}>
@@ -51,17 +54,20 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
           </div>
         )}
         {updatedBy && <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>{updatedBy}</div>}
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, marginBottom: 6 }}>
-        <div className="eyebrow">Today&apos;s update</div>
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+        <div className="card-title">Today&apos;s update</div>
         <span className="mut" style={{ fontSize: 11 }}>
           {state === "saving" ? "Saving..." : state === "saved" ? "Saved ✓" : state === "dirty" ? "Unsaved" : "goes on today's client report"}
         </span>
+      </div>
+      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+        What the client reads tonight. Saves itself as you type.
       </div>
       <textarea rows={2} value={draft.systemUpdate} disabled={pending && state === "saving"}
         onChange={(e) => edit({ systemUpdate: e.target.value })}
@@ -71,6 +77,6 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
         onChange={(e) => edit({ actionItem: e.target.value })}
         onBlur={() => { if (state === "dirty") flush(); }}
         placeholder="Action item - next step or what we need" />
-    </>
+    </div>
   );
 }

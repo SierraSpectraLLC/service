@@ -373,6 +373,14 @@ CREATE TABLE IF NOT EXISTS "stock_moves" (
   "actor" text NOT NULL DEFAULT '',
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "ui_layouts" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "email" text NOT NULL,
+  "view_key" text NOT NULL,
+  "data" jsonb NOT NULL,
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "ui_layout_unique" UNIQUE("email","view_key")
+);
 CREATE TABLE IF NOT EXISTS "house_members" (
   "id" serial PRIMARY KEY NOT NULL,
   "email" text NOT NULL,
