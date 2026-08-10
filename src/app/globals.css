@@ -62,6 +62,39 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .panel-drop-tail { min-height: 44px; border-radius: 10px; border: 1px dashed var(--line); margin-bottom: 12px; }
 .panel-drop-tail.over { border-color: var(--navy); background: #F4F7FB; }
+
+/* The asset registry is a table, not a row of flowing chips: at full width the
+   flex layout pushed status to the far edge and left a canyon down the middle.
+   Columns are declared once as --reg-cols so the header and every row align. */
+.reg { --reg-cols: 12px minmax(150px, 1.6fr) minmax(110px, 1.1fr) minmax(100px, 1fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 112px; }
+.reg.selectable { --reg-cols: 18px 12px minmax(150px, 1.6fr) minmax(110px, 1.1fr) minmax(100px, 1fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 112px; }
+.reg-row {
+  display: grid; grid-template-columns: var(--reg-cols);
+  gap: 12px; align-items: center; padding: 7px 6px;
+  border-top: 1px solid var(--line);
+}
+.reg-head {
+  display: grid; grid-template-columns: var(--reg-cols);
+  gap: 12px; align-items: end; padding: 8px 6px 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--mut);
+  /* A few hundred units scroll a long way past their column names. */
+  position: sticky; top: 0; z-index: 2; background: var(--card);
+}
+.reg-group {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 14px 6px 4px; border-bottom: 1px solid var(--line);
+}
+.reg-group:first-of-type { padding-top: 8px; }
+.reg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Narrow: back to the flowing row, which was never the problem. */
+@media (max-width: 900px) {
+  .reg-head { display: none; }
+  .reg-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .reg-cell { white-space: normal; }
+}
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
 .card-title { font-weight: 700; font-size: 14px; color: var(--navy); }
 .spectrum { height: 4px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }

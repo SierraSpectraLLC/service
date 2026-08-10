@@ -7,7 +7,8 @@ import { removeAssets } from "@/app/actions";
 import { duplicateIds } from "@/lib/assetDupe";
 
 export type RegistryRow = {
-  id: number; kind: string; model: string; serial: string; owner: string; location: string;
+  id: number; kind: string; model: string; serial: string; manufacturer: string;
+  owner: string; location: string;
   status: string; statusBg: string; statusFg: string;
   /** Where it lives, already worded by the page. */
   whereLabel: string;
@@ -15,14 +16,22 @@ export type RegistryRow = {
   systemKey: string;
 };
 
+const COLUMNS = ["Model", "Serial", "Manufacturer", "Owner", "Where", "Status"];
+
 /**
- * The asset registry, with selection. Selecting is staff-only because deleting
- * is: the checkboxes simply aren't rendered for anyone else, and removeAssets
- * re-checks regardless.
+ * The asset registry: a real table, grouped by what each unit IS.
+ *
+ * Grouping by type rather than showing a type column is the point - a registry
+ * is read by going to the pumps, and a "Pump" chip repeated forty times down a
+ * column carries no information. The count in each heading is what tells you
+ * how deep the shelf is.
+ *
+ * Selecting is staff-only because deleting is: the checkboxes aren't rendered
+ * for anyone else, and removeAssets re-checks regardless.
  *
  * "Select duplicates" is the cleanup tool for an import that ran before the
- * importer knew how to skip. It keeps the oldest of each matching group - that's
- * the record with the service history hanging off it - and ticks the rest.
+ * importer knew how to skip. It keeps the oldest of each matching group - the
+ * record with the service history hanging off it - and ticks the rest.
  */
 export default function AssetRegistryList({ rows, canSelect }: {
   rows: RegistryRow[];
@@ -38,10 +47,36 @@ export default function AssetRegistryList({ rows, canSelect }: {
     return dupes.filter((id) => shown.has(id));
   }, [dupes, rows]);
 
+  // One section per type, alphabetical, and within a section by model then
+  // serial so identical units sit next to each other where a duplicate is
+  // obvious to the eye as well as to duplicateIds.
+  const groups = useMemo(() => {
+    const by = new Map<string, RegistryRow[]>();
+    for (const r of rows) {
+      const k = r.kind || "(no type)";
+      const list = by.get(k);
+      if (list) list.push(r); else by.set(k, [r]);
+    }
+    return [...by.entries()]
+      .map(([kind, list]) => ({
+        kind,
+        list: [...list].sort((a, b) => a.model.localeCompare(b.model) || a.serial.localeCompare(b.serial)),
+      }))
+      .sort((a, b) => a.kind.localeCompare(b.kind));
+  }, [rows]);
+
   const toggle = (id: number) =>
     setPicked((cur) => {
       const next = new Set(cur);
       if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+
+  const toggleGroup = (list: RegistryRow[]) =>
+    setPicked((cur) => {
+      const next = new Set(cur);
+      const all = list.every((r) => next.has(r.id));
+      for (const r of list) { if (all) next.delete(r.id); else next.add(r.id); }
       return next;
     });
 
@@ -65,8 +100,10 @@ export default function AssetRegistryList({ rows, canSelect }: {
     });
   };
 
+  const mut = { fontSize: 12, color: "var(--mut)" } as const;
+
   return (
-    <>
+    <div className={`reg${canSelect ? " selectable" : ""}`}>
       {canSelect && (visibleDupes.length > 0 || picked.size > 0) && (
         <div style={{
           display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
@@ -99,41 +136,65 @@ export default function AssetRegistryList({ rows, canSelect }: {
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
 
-      {rows.map((a) => {
-        const on = picked.has(a.id);
-        const isDupe = visibleDupes.includes(a.id);
+      {rows.length > 0 && (
+        <div className="reg-head">
+          {canSelect && <span />}
+          <span />
+          {COLUMNS.map((c) => <span key={c}>{c}</span>)}
+        </div>
+      )}
+
+      {groups.map(({ kind, list }) => {
+        const allPicked = canSelect && list.every((r) => picked.has(r.id));
         return (
-          <div key={a.id} className="row-hover"
-            style={{
-              display: "flex", alignItems: "center", gap: 8, padding: "9px 4px",
-              borderTop: "1px solid var(--line)", flexWrap: "wrap",
-              background: on ? "#FDF4F4" : undefined,
-            }}>
-            {canSelect && (
-              <input type="checkbox" checked={on} onChange={() => toggle(a.id)} disabled={pending}
-                aria-label={`Select ${a.kind} ${a.model}${a.serial ? ` SN ${a.serial}` : ""}`}
-                style={{ width: 15, height: 15, flexShrink: 0 }} />
-            )}
-            <Link href={`/assets/${a.id}`}
-              style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", flex: 1, minWidth: 0, textDecoration: "none", color: "inherit" }}>
-              <span title={a.status} style={{ width: 10, height: 10, borderRadius: "50%", background: a.statusFg, flexShrink: 0 }} />
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
-              <span style={{ fontSize: 13, fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>
-              {a.serial && <span className="mono mut" style={{ fontSize: 12 }}>SN {a.serial}</span>}
-              {a.owner && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{a.owner}</span>}
-              {isDupe && (
-                <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}
-                  title="Matches an earlier row: same serial, or same type/model/owner/location on the same system">
-                  possible duplicate
-                </span>
+          <div key={kind}>
+            <div className="reg-group">
+              {canSelect && (
+                <input type="checkbox" checked={allPicked} onChange={() => toggleGroup(list)} disabled={pending}
+                  aria-label={`Select all ${list.length} ${kind}`}
+                  style={{ width: 15, height: 15, flexShrink: 0 }} />
               )}
-              <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>{a.whereLabel}</span>
-              <span className="pill" style={{ background: a.statusBg, color: a.statusFg }}>{a.status}</span>
-            </Link>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{kind}</span>
+              <span style={mut}>{list.length}</span>
+            </div>
+
+            {list.map((a) => {
+              const on = picked.has(a.id);
+              const isDupe = visibleDupes.includes(a.id);
+              return (
+                <div key={a.id} className="reg-row row-hover" style={on ? { background: "#FDF4F4" } : undefined}>
+                  {canSelect && (
+                    <input type="checkbox" checked={on} onChange={() => toggle(a.id)} disabled={pending}
+                      aria-label={`Select ${a.kind} ${a.model}${a.serial ? ` SN ${a.serial}` : ""}`}
+                      style={{ width: 15, height: 15 }} />
+                  )}
+                  <span title={a.status} aria-hidden
+                    style={{ width: 10, height: 10, borderRadius: "50%", background: a.statusFg }} />
+                  <span className="reg-cell">
+                    <Link href={`/assets/${a.id}`} style={{ fontSize: 13, fontWeight: 700, textDecoration: "none", color: "inherit" }}>
+                      {a.model || <span className="mut">(no model)</span>}
+                    </Link>
+                    {isDupe && (
+                      <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410", marginLeft: 6 }}
+                        title="Matches an earlier row: same serial, or same type/model/owner/location on the same system">
+                        dupe?
+                      </span>
+                    )}
+                  </span>
+                  <span className="reg-cell mono" style={mut}>{a.serial || "—"}</span>
+                  <span className="reg-cell" style={mut}>{a.manufacturer || "—"}</span>
+                  <span className="reg-cell" style={mut}>{a.owner || "—"}</span>
+                  <span className="reg-cell" style={mut}>{a.whereLabel}</span>
+                  <span>
+                    <span className="pill" style={{ background: a.statusBg, color: a.statusFg }}>{a.status}</span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
         );
       })}
       {rows.length === 0 && <div className="mut" style={{ fontSize: 13, marginTop: 8 }}>No assets match.</div>}
-    </>
+    </div>
   );
 }
