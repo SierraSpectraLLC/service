@@ -3288,6 +3288,31 @@ export async function addVocabTerm(
   return {};
 }
 
+/**
+ * Several catalog terms at once - the spreadsheet path, same shape as the asset
+ * grid. Each row goes through the same validation as a single add, and a row
+ * that fails is reported by index rather than aborting the batch: entering
+ * thirty models and losing them all to one duplicate is the thing that makes
+ * people stop using the catalog.
+ */
+export async function addVocabTerms(
+  rows: { kind: string; assetType: string; name: string; categories?: string[]; manufacturer?: string }[],
+): Promise<{ error?: string; created?: number; failures?: { row: number; name: string; error: string }[] }> {
+  await requireStaff();
+  const usable = rows.filter((r) => r.name.trim());
+  if (!usable.length) return { error: "Nothing to save - every row needs a name" };
+  if (usable.length > 300) return { error: "Save 300 rows at a time" };
+  const failures: { row: number; name: string; error: string }[] = [];
+  let created = 0;
+  for (let i = 0; i < usable.length; i++) {
+    const r = usable[i];
+    const res = await addVocabTerm(r.kind, r.assetType, r.name, r.categories ?? [], r.manufacturer ?? "");
+    if (res.error) failures.push({ row: i + 1, name: r.name.trim(), error: res.error });
+    else created++;
+  }
+  return { created, failures };
+}
+
 /** Who makes a model. Blank is honest for kit whose maker nobody recorded. */
 export async function setVocabManufacturer(termId: number, manufacturer: string): Promise<{ error?: string }> {
   const u = await requireStaff();

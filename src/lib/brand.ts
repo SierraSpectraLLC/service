@@ -24,18 +24,27 @@ export type Brand = {
  * cache() so the layout and the page it wraps share one lookup per request.
  * Never throws: an instance with no settings row still renders under the
  * default name.
+ *
+ * One round trip, via a left join to the operator org. This runs on every
+ * render in the app including the sign-in page, so a second sequential query
+ * for the operator's name was a latency tax on literally every request.
  */
 export const getBrand = cache(async (): Promise<Brand> => {
   try {
-    const [s] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+    const [s] = await db
+      .select({
+        platformName: appSettings.platformName,
+        platformTagline: appSettings.platformTagline,
+        operatorOrgId: appSettings.operatorOrgId,
+        operatorName: orgs.name,
+        operatorLogoUrl: orgs.logoUrl,
+      })
+      .from(appSettings)
+      .leftJoin(orgs, eq(orgs.id, appSettings.operatorOrgId))
+      .where(eq(appSettings.id, 1));
     const name = s?.platformName?.trim() || DEFAULT_BRAND;
-    let operatorName = "";
-    let operatorLogoUrl = "";
-    if (s?.operatorOrgId != null) {
-      const [org] = await db.select({ name: orgs.name, logoUrl: orgs.logoUrl }).from(orgs).where(eq(orgs.id, s.operatorOrgId));
-      operatorName = org?.name ?? "";
-      operatorLogoUrl = org?.logoUrl ?? "";
-    }
+    const operatorName = s?.operatorName ?? "";
+    const operatorLogoUrl = s?.operatorLogoUrl ?? "";
     return {
       name,
       tagline: s?.platformTagline?.trim() || "instrument portal",

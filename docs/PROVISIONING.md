@@ -121,6 +121,13 @@ also the page that organization's own editors get.
 
 ## Notes
 
+- **If sign-in feels slow**, the server logs the send: `[auth] magic link sent
+  in NNNms`, or `[auth] resend send failed after NNNms`. Anything left over
+  after that number is the database round trips (adapter lookup + token write),
+  and on a suspended Neon compute the first query of the day pays the wake-up -
+  which the hourly crons normally prevent by keeping it warm. The Resend call
+  is capped at 8s and fails with a readable message rather than hanging.
+
 - **Sign-off signatures are audited approvals, not 21 CFR 11 e-signatures.**
   Identity comes from the authenticated session and intent from a typed name;
   there is no password to re-challenge at signing because sign-in is by magic
