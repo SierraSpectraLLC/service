@@ -1,9 +1,12 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { saveEodUpdate, type WorkTarget } from "@/app/actions";
 
-const AUTOSAVE_MS = 900;
+// Long enough to sit through a mid-sentence pause. It used to be 900ms, which
+// is shorter than thinking about the next word. A blur and a page-hide both
+// flush, so a slow debounce costs nothing.
+const AUTOSAVE_MS = 2500;
 
 /**
  * Today's client-facing update, written where the work happens. Whatever lands
@@ -12,25 +15,47 @@ const AUTOSAVE_MS = 900;
  *
  * Staff write it; the owning client reads it (they'd get the same words by
  * email tonight, so there is nothing to hide, but only one side authors).
+ *
+ * Autosave rules, learned the hard way:
+ *
+ *  - the fields are NEVER disabled. Disabling a focused textarea takes focus
+ *    with it, so a save landing mid-sentence used to eat the next keystrokes
+ *    and lose the caret. A save is background work; it must be invisible to
+ *    the hands.
+ *  - one save at a time. Each save sends the whole text, so two in flight can
+ *    land out of order and persist the older draft over the newer one. A
+ *    second save waits for the first and then re-sends whatever is current.
  */
 export default function DailyUpdatePanel({ target, systemUpdate, actionItem, updatedBy, canEdit }: {
   target: WorkTarget; systemUpdate: string; actionItem: string; updatedBy: string; canEdit: boolean;
 }) {
   const [draft, setDraft] = useState({ systemUpdate, actionItem });
   const [state, setState] = useState<"" | "dirty" | "saving" | "saved">("");
-  const [pending, startTransition] = useTransition();
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
+  // `target` is a fresh object literal on every parent render, so nothing here
+  // may depend on its identity: a hook keyed on it would re-run constantly and
+  // the unmount save below would fire on every render with an edit pending.
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const inFlight = useRef(false);
+  const queued = useRef(false);
 
-  const flush = () => {
+  const flush = useCallback(() => {
     if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    // Serialize: a save already going means this one becomes "go again after".
+    if (inFlight.current) { queued.current = true; return; }
+    inFlight.current = true;
     setState("saving");
-    startTransition(async () => {
-      await saveEodUpdate(target, draftRef.current);
-      setState((s) => (s === "dirty" ? s : "saved"));
-    });
-  };
+    void saveEodUpdate(targetRef.current, draftRef.current)
+      .then(() => { setState((s) => (s === "dirty" ? s : "saved")); })
+      .catch(() => { setState("dirty"); })   // stays "Unsaved"; blur will retry
+      .finally(() => {
+        inFlight.current = false;
+        if (queued.current) { queued.current = false; flush(); }
+      });
+  }, []);
 
   const edit = (patch: Partial<typeof draft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -38,6 +63,26 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(flush, AUTOSAVE_MS);
   };
+
+  /** Anything typed but not yet sent. */
+  const unsaved = () => timer.current !== null || queued.current;
+
+  // Closing the tab or switching away shouldn't cost the last sentence, which
+  // matters more now the debounce is slower. Mounted once - see targetRef.
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === "hidden" && unsaved()) flush(); };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", onHide);
+      // Unmounting with an unsent edit (a navigation) still saves it.
+      if (timer.current) {
+        clearTimeout(timer.current);
+        void saveEodUpdate(targetRef.current, draftRef.current).catch(() => {});
+      }
+    };
+  }, [flush]);
 
   // A card like every other panel. It used to be a bare fragment with a top
   // margin, from when it sat inside the identity block; standing on its own it
@@ -69,13 +114,14 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
       <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
         What the client reads tonight. Saves itself as you type.
       </div>
-      <textarea rows={2} value={draft.systemUpdate} disabled={pending && state === "saving"}
+      {/* Never disabled - see the autosave rules above. */}
+      <textarea rows={3} value={draft.systemUpdate}
         onChange={(e) => edit({ systemUpdate: e.target.value })}
-        onBlur={() => { if (state === "dirty") flush(); }}
+        onBlur={() => { if (unsaved()) flush(); }}
         placeholder="What happened today" style={{ marginBottom: 6, resize: "vertical" }} />
       <input value={draft.actionItem}
         onChange={(e) => edit({ actionItem: e.target.value })}
-        onBlur={() => { if (state === "dirty") flush(); }}
+        onBlur={() => { if (unsaved()) flush(); }}
         placeholder="Action item - next step or what we need" />
     </div>
   );
