@@ -29,6 +29,7 @@ import HoursPanel from "@/components/HoursPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import RunCheckoutButton from "@/components/RunCheckoutButton";
+import PanelLayout from "@/components/PanelLayout";
 
 export const dynamic = "force-dynamic";
 
@@ -143,7 +144,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   );
 
   return (
-    <div className="container page">
+    <div className="container split">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link href="/assets" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← Assets
@@ -162,128 +163,146 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         )}
       </div>
 
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
-            {asset.kind} — {asset.model || "(no model)"}
-          </div>
-          {asset.forSale && <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>}
-        </div>
-        <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
-          {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
-            asset.location && `@ ${asset.location}`].filter(Boolean).join(" · ") || "No identifiers yet."}
-        </div>
-        <div style={{ fontSize: 13, margin: "8px 0 10px" }}>
-          {home ? (
-            <>Currently in{" "}
-              <Link href={`/instruments/${home.id}`} style={{ fontWeight: 700, textDecoration: "none" }}>
-                {home.externalId} — {home.model}
-              </Link>
-            </>
-          ) : (
-            <span className="mut">{asset.status === "Decommissioned" ? "Retired - not attached to any system." : "Not attached to a system."}</span>
-          )}
-          {totalMinutes > 0 && <span className="mut"> · {formatHours(totalMinutes)} logged lifetime</span>}
-        </div>
-        {asset.asFound && (
-          <div style={{ fontSize: 13, background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
-            <span className="eyebrow" style={{ color: "#8A5410" }}>As found</span>
-            <div style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{asset.asFound}</div>
-          </div>
-        )}
-        {asset.note && <div className="mut" style={{ fontSize: 13, marginBottom: 10, whiteSpace: "pre-wrap" }}>{asset.note}</div>}
-        <AssetControls
-          asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
-          systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
-          owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
-          kinds={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
-          models={vocab.reduce<Record<string, string[]>>((acc, v) => {
-            if (v.kind === "model" && v.assetType) (acc[v.assetType] ??= []).push(v.name);
-            return acc;
-          }, {})}
-          canEdit={canEdit} isStaff={isStaff}
-        />
-        <GasPanel target={target} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
-          knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]} canEdit={canEdit} isStaff={isStaff} />
-        <SharePanel target="asset" targetId={asset.id}
-          shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
-          orgOptions={orgRows} ownerOrgId={asset.ownerOrgId}
-          canManageAll={isStaff} canAddProvider={!isStaff && canSell} />
-        {canSell && (
-          <SalePanel target="asset" targetId={asset.id} forSale={asset.forSale}
-            saleNote={asset.saleNote} listingToken={asset.listingToken} />
-        )}
-      </div>
-
-      <PartsPanel target={target}
-        parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId)
-          .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-        systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
-
-      <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
-        evidenceTasks={evidenceTasks}
-        canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell} />
-
-      <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
-        systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
-
-      <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
-        people={peopleRows.map((p) => p.name)}
-        schedules={pmRows.map((s) => ({
-          id: s.id, title: s.title, body: s.body, assignee: s.assignee,
-          everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
-          parts: schedulePartsOf(s),
-          openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
-        }))} />
-
-      <HoursPanel target={target}
-        entries={[...taggedTime].sort((a, b) => (a.date < b.date ? 1 : -1))
-          .map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
-        people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
-        today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
-
-      {modules.eod && (isStaff || ownerIsViewer) && (
-        <DailyUpdatePanel target={target}
-          systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-          updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
-      )}
-
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Service history</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Lifecycle plus every task, part, and hour on this asset - its own work and anything tagged to it
-          on a system, across every system it has lived in.
-        </div>
-        {history.map((h, i) => (
-          <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap", alignItems: "baseline" }}>
-            <span className="mut mono" style={{ fontSize: 11, flexShrink: 0, width: 108 }}>{shopTime(h.at)}</span>
-            {h.instrumentId !== null && (label.get(h.instrumentId) ? (
-              <Link href={`/instruments/${h.instrumentId}`} className="mono" style={{ fontSize: 11, fontWeight: 700, color: "var(--navy)", textDecoration: "none", flexShrink: 0 }}>
-                {label.get(h.instrumentId)}
-              </Link>
-            ) : (
-              // Work done while the unit lived somewhere the viewer can't see:
-              // the event stays in the history, the system stays anonymous.
-              <span className="mut mono" style={{ fontSize: 11, flexShrink: 0 }}>another system</span>
-            ))}
-            {KIND_LABEL[h.kind] && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[h.kind]}</span>}
-            <span style={{ flex: 1, minWidth: 160 }}>
-              {h.text}
-              {h.detail && <span className="mut" style={{ fontSize: 12 }}> — {h.detail}</span>}
-            </span>
-          </div>
-        ))}
-        {history.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No history yet.</div>}
-      </div>
-
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 8 }}>Activity</div>
-        {canEdit && <ActivityNoteForm target={target} />}
-        <ActivityFeed items={activity.map((a) => ({
-          id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,
-          when: shopTime(a.createdAt),
-        }))} />
-      </div>
+      {/* Same two-column shell as the system page - a unit's record runs just
+          as long. See PanelLayout. */}
+      <PanelLayout
+        storageKey="layout:asset"
+        defaultRight={["files", "hours", "update", "history", "activity"]}
+        panels={[
+          { key: "unit", label: "Unit", node: (
+            <div className="card">
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
+                  {asset.kind} — {asset.model || "(no model)"}
+                </div>
+                {asset.forSale && <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>}
+              </div>
+              <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
+                {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
+                  asset.location && `@ ${asset.location}`].filter(Boolean).join(" · ") || "No identifiers yet."}
+              </div>
+              <div style={{ fontSize: 13, margin: "8px 0 10px" }}>
+                {home ? (
+                  <>Currently in{" "}
+                    <Link href={`/instruments/${home.id}`} style={{ fontWeight: 700, textDecoration: "none" }}>
+                      {home.externalId} — {home.model}
+                    </Link>
+                  </>
+                ) : (
+                  <span className="mut">{asset.status === "Decommissioned" ? "Retired - not attached to any system." : "Not attached to a system."}</span>
+                )}
+                {totalMinutes > 0 && <span className="mut"> · {formatHours(totalMinutes)} logged lifetime</span>}
+              </div>
+              {asset.asFound && (
+                <div style={{ fontSize: 13, background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
+                  <span className="eyebrow" style={{ color: "#8A5410" }}>As found</span>
+                  <div style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{asset.asFound}</div>
+                </div>
+              )}
+              {asset.note && <div className="mut" style={{ fontSize: 13, marginBottom: 10, whiteSpace: "pre-wrap" }}>{asset.note}</div>}
+              <AssetControls
+                asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
+                systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
+                owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
+                kinds={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
+                models={vocab.reduce<Record<string, string[]>>((acc, v) => {
+                  if (v.kind === "model" && v.assetType) (acc[v.assetType] ??= []).push(v.name);
+                  return acc;
+                }, {})}
+                canEdit={canEdit} isStaff={isStaff}
+              />
+              <GasPanel target={target} gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
+                knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]} canEdit={canEdit} isStaff={isStaff} />
+              <SharePanel target="asset" targetId={asset.id}
+                shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
+                orgOptions={orgRows} ownerOrgId={asset.ownerOrgId}
+                canManageAll={isStaff} canAddProvider={!isStaff && canSell} />
+              {canSell && (
+                <SalePanel target="asset" targetId={asset.id} forSale={asset.forSale}
+                  saleNote={asset.saleNote} listingToken={asset.listingToken} />
+              )}
+            </div>
+          ) },
+          { key: "tasks", label: "Tasks", node: (
+            <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
+              systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+          ) },
+          { key: "maintenance", label: "Maintenance", node: (
+            <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
+              people={peopleRows.map((p) => p.name)}
+              schedules={pmRows.map((s) => ({
+                id: s.id, title: s.title, body: s.body, assignee: s.assignee,
+                everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+                parts: schedulePartsOf(s),
+                openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
+              }))} />
+          ) },
+          { key: "parts", label: "Parts", node: (
+            <PartsPanel target={target}
+              parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId)
+                .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+              systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
+          ) },
+          { key: "files", label: "Files", node: (
+            <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+              evidenceTasks={evidenceTasks}
+              canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell} />
+          ) },
+          { key: "hours", label: "Hours", node: (
+            <HoursPanel target={target}
+              entries={[...taggedTime].sort((a, b) => (a.date < b.date ? 1 : -1))
+                .map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+              people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+              today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+          ) },
+          { key: "update", label: "Today's update", node: (
+             modules.eod && (isStaff || ownerIsViewer) && (
+              <DailyUpdatePanel target={target}
+                systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
+            )
+          ) },
+          { key: "history", label: "Service history", node: (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 4 }}>Service history</div>
+              <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+                Lifecycle plus every task, part, and hour on this asset - its own work and anything tagged to it
+                on a system, across every system it has lived in.
+              </div>
+              {history.map((h, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap", alignItems: "baseline" }}>
+                  <span className="mut mono" style={{ fontSize: 11, flexShrink: 0, width: 108 }}>{shopTime(h.at)}</span>
+                  {h.instrumentId !== null && (label.get(h.instrumentId) ? (
+                    <Link href={`/instruments/${h.instrumentId}`} className="mono" style={{ fontSize: 11, fontWeight: 700, color: "var(--navy)", textDecoration: "none", flexShrink: 0 }}>
+                      {label.get(h.instrumentId)}
+                    </Link>
+                  ) : (
+                    // Work done while the unit lived somewhere the viewer can't see:
+                    // the event stays in the history, the system stays anonymous.
+                    <span className="mut mono" style={{ fontSize: 11, flexShrink: 0 }}>another system</span>
+                  ))}
+                  {KIND_LABEL[h.kind] && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[h.kind]}</span>}
+                  <span style={{ flex: 1, minWidth: 160 }}>
+                    {h.text}
+                    {h.detail && <span className="mut" style={{ fontSize: 12 }}> — {h.detail}</span>}
+                  </span>
+                </div>
+              ))}
+              {history.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No history yet.</div>}
+            </div>
+          ) },
+          { key: "activity", label: "Activity", node: (
+            <div className="card">
+              <div className="card-title" style={{ marginBottom: 8 }}>Activity</div>
+              {canEdit && <ActivityNoteForm target={target} />}
+              <ActivityFeed items={activity.map((a) => ({
+                id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,
+                when: shopTime(a.createdAt),
+              }))} />
+            </div>
+          ) },
+        ]}
+      />
     </div>
   );
 }

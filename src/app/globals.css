@@ -31,6 +31,37 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .container.page { max-width: 760px; }   /* records, lists, settings, packets */
 .container.wide { max-width: 1080px; }  /* multi-column grids: import, EOD, parity */
 .container.form { max-width: 420px; }   /* sign-in */
+/* Record pages that carry a dozen panels. One 760px column wasted most of a
+   wide monitor and buried the bottom half of the page below three screens of
+   scrolling; these split into two columns from 1200px up. */
+.container.split { max-width: 1560px; }
+
+/* Two independent stacks, so cards pack tightly instead of aligning into rows
+   with gaps (CSS grid has no masonry yet). Below the breakpoint the wrappers
+   collapse and the cards stack in DOM order - which is why the default column
+   assignment is chosen to read correctly when flattened. */
+.panel-cols { display: grid; grid-template-columns: 1fr; gap: 0; align-items: start; }
+@media (min-width: 1200px) {
+  .panel-cols { grid-template-columns: 1fr 1fr; gap: 0 16px; }
+}
+/* Edit mode: each panel gets a grab strip, and its contents stop taking
+   clicks so a drag can't trip a button inside a card. */
+.panel-slot { position: relative; }
+.panel-slot.editing { outline: 1px dashed var(--line); outline-offset: 3px; border-radius: 12px; margin-bottom: 12px; }
+.panel-slot.editing > .panel-body { pointer-events: none; opacity: 0.55; }
+.panel-slot.dragging { opacity: 0.4; }
+.panel-slot.dropbefore::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -6px; height: 3px;
+  background: var(--navy); border-radius: 2px;
+}
+.panel-grip {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  background: #F4F7FB; border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 8px; margin-bottom: 4px; cursor: grab; font-size: 12px; font-weight: 700;
+  color: var(--navy);
+}
+.panel-drop-tail { min-height: 44px; border-radius: 10px; border: 1px dashed var(--line); margin-bottom: 12px; }
+.panel-drop-tail.over { border-color: var(--navy); background: #F4F7FB; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
 .card-title { font-weight: 700; font-size: 14px; color: var(--navy); }
 .spectrum { height: 4px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }

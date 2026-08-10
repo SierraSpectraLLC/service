@@ -32,6 +32,7 @@ import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
+import PanelLayout from "@/components/PanelLayout";
 import { canKick, daysSince, queueView } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
@@ -203,7 +204,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   }));
 
   return (
-    <div className="container page">
+    <div className="container split">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← All instruments
@@ -227,143 +228,162 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         )}
       </div>
 
-      <SystemPanel
-        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
-          location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken }}
-        label={systemLabel(inst, assetRows)}
-        clients={systemRows.map((c) => c.client)}
-        categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
-        stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
-        gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
-        knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]}
-        people={peopleRows.map((p) => p.name)}
-        shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
-        orgOptions={orgRows}
-        accessRequests={requestRows.map((r) => ({
-          id: r.id, orgName: r.orgName, orgKind: r.orgKind, kind: r.kind, requestedBy: r.requestedBy,
-          message: r.message, when: shopTime(r.createdAt),
-        }))}
-        ownerOrgId={inst.ownerOrgId}
-        canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
-        canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
+      {/* One 760px column wasted a wide monitor and buried half the record
+          below three screens of scroll. Two columns from 1200px up, arranged
+          by whoever is reading - see PanelLayout. */}
+      <PanelLayout
+        storageKey="layout:system"
+        defaultRight={["custody", "files", "hours", "update", "discussion", "activity"]}
+        panels={[
+          { key: "system", label: "System", node: (
+            <SystemPanel
+              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
+                location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken }}
+              label={systemLabel(inst, assetRows)}
+              clients={systemRows.map((c) => c.client)}
+              categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
+              stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
+              gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
+              knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]}
+              people={peopleRows.map((p) => p.name)}
+              shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
+              orgOptions={orgRows}
+              accessRequests={requestRows.map((r) => ({
+                id: r.id, orgName: r.orgName, orgKind: r.orgKind, kind: r.kind, requestedBy: r.requestedBy,
+                message: r.message, when: shopTime(r.createdAt),
+              }))}
+              ownerOrgId={inst.ownerOrgId}
+              canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
+              canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
+            />
+          ) },
+          // Whose move it is. High on the page: on a parked system it's the first thing that explains why nothing is happening.
+          { key: "queue", label: "Queue", node: (
+            <QueuePanel
+              instrumentId={inst.id} externalId={inst.externalId}
+              holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
+              isMine={queueView(user, inst) === "mine"}
+              since={shopTime(inst.queueSince ?? inst.createdAt)}
+              days={daysSince(inst.queueSince ?? inst.createdAt, new Date())}
+              reason={inst.queueReason}
+              legs={queueRows.map((q) => ({
+                id: q.id, fromName: q.fromName, toName: q.toName, reason: q.reason,
+                actor: q.actor, when: shopTime(q.at),
+              }))}
+              // Only organizations that can actually open the system.
+              options={shareRows.filter((s) => s.orgId !== inst.queueOrgId).map((s) => ({ id: s.orgId, name: s.name, kind: s.kind }))}
+              ourName={brand.operatorName}
+              canKick={canKick(user, inst)}
+            />
+          ) },
+          { key: "assets", label: "Assets", node: (
+            <AssetsPanel
+              instrumentId={inst.id}
+              assets={assetRows.map((a) => ({
+                id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
+                openItems:
+                  taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
+                  partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +
+                  ownTasks.filter((t) => t.assetId === a.id && t.state !== "Done").length +
+                  ownParts.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
+              }))}
+              unassigned={unassignedRows.map((a) => ({
+                id: a.id,
+                label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
+              }))}
+              kinds={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
+              canEdit={canEdit}
+              catalogModels={catalogModels} gridModels={gridModels}
+              owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
+            />
+          ) },
+          { key: "tasks", label: "Tasks", node: (
+            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+          ) },
+          { key: "maintenance", label: "Maintenance", node: (
+            <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
+              people={peopleRows.map((p) => p.name)}
+              schedules={pmRows.map((s) => {
+                const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;
+                return {
+                  id: s.id, title: s.title, body: s.body, assignee: s.assignee,
+                  everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+                  parts: schedulePartsOf(s),
+                  onAsset: onAsset ? `${onAsset.kind} — ${onAsset.model || onAsset.serial || "?"}` : undefined,
+                  openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
+                };
+              })} />
+          ) },
+          { key: "parts", label: "Parts", node: (
+            <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
+              parts={redactParts(partRows, user, inst.ownerOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+              systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
+              canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
+          ) },
+          // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
+          { key: "custody", label: "Ownership history", node: (
+            <CustodyPanel
+              instrumentId={inst.id} externalId={inst.externalId}
+              events={custodyRows.map((c) => ({
+                id: c.id, kind: c.kind, fromName: c.fromName, toName: c.toName, note: c.note,
+                when: shopTime(c.at), actor: c.actor,
+              }))}
+              ownerName={inst.ownerOrgId === null ? "nobody yet (house-stewarded)" : orgName.get(inst.ownerOrgId) ?? "an unknown organization"}
+              providers={shareRows.filter((s) => s.orgId !== inst.ownerOrgId)
+                .map((s) => ({ name: s.name, kind: s.kind, access: s.access }))}
+              orgOptions={orgRows.filter((o) => o.id !== inst.ownerOrgId)}
+              canHandOff={isStaff}
+            />
+          ) },
+          { key: "files", label: "Files", node: (
+            <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+              evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
+              listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))} />
+          ) },
+          { key: "hours", label: "Hours", node: (
+            <HoursPanel target={{ instrumentId: inst.id, assetId: null }}
+              entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+              people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+              today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+          ) },
+          // Today's client-facing note sits with the conversation it feeds, not up in the system's identity block.
+          { key: "update", label: "Today's update", node: (
+             modules.eod && (isStaff || ownerIsViewer) && (
+              <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
+                systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+                updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
+            )
+          ) },
+          { key: "discussion", label: "Discussion", node: (
+            <DiscussionPanel
+              instrumentId={inst.id}
+              threadId={inst.id}
+              posts={visiblePosts.map((p) => ({
+                ...p, createdAt: p.createdAt.toISOString(),
+                authorParty: partyName(p.authorOrgId), internal: p.audience === "internal",
+              }))}
+              canEdit={canEdit}
+              partyName={partyName(viewer.isHouse ? null : user.orgId)}
+              sharedWith={sharedWith}
+              newCount={(() => {
+                const seen = readRows[0]?.lastSeenAt;
+                return visiblePosts.filter((p) => p.authorEmail !== user.email && (!seen || p.createdAt > seen)).length;
+              })()}
+            />
+          ) },
+          { key: "activity", label: "Activity", node: (
+            <div className="card">
+              <div className="card-title">Activity</div>
+              <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>Append-only. Nothing here can be edited or erased.</div>
+              {canEdit && <ActivityNoteForm target={{ instrumentId: inst.id, assetId: null }} />}
+              <ActivityFeed items={activity.map((a) => ({
+                id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,
+                when: shopTime(a.createdAt),
+              }))} />
+            </div>
+          ) },
+        ]}
       />
-
-      {/* Whose move it is. High on the page: on a parked system it's the first
-          thing that explains why nothing is happening. */}
-      <QueuePanel
-        instrumentId={inst.id} externalId={inst.externalId}
-        holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
-        isMine={queueView(user, inst) === "mine"}
-        since={shopTime(inst.queueSince ?? inst.createdAt)}
-        days={daysSince(inst.queueSince ?? inst.createdAt, new Date())}
-        reason={inst.queueReason}
-        legs={queueRows.map((q) => ({
-          id: q.id, fromName: q.fromName, toName: q.toName, reason: q.reason,
-          actor: q.actor, when: shopTime(q.at),
-        }))}
-        // Only organizations that can actually open the system.
-        options={shareRows.filter((s) => s.orgId !== inst.queueOrgId).map((s) => ({ id: s.orgId, name: s.name, kind: s.kind }))}
-        ourName={brand.operatorName}
-        canKick={canKick(user, inst)}
-      />
-
-      {/* Provenance, and the handoff that extends it - staff only, because a
-          change of hands needs a witness at the operator. */}
-      <CustodyPanel
-        instrumentId={inst.id} externalId={inst.externalId}
-        events={custodyRows.map((c) => ({
-          id: c.id, kind: c.kind, fromName: c.fromName, toName: c.toName, note: c.note,
-          when: shopTime(c.at), actor: c.actor,
-        }))}
-        ownerName={inst.ownerOrgId === null ? "nobody yet (house-stewarded)" : orgName.get(inst.ownerOrgId) ?? "an unknown organization"}
-        providers={shareRows.filter((s) => s.orgId !== inst.ownerOrgId)
-          .map((s) => ({ name: s.name, kind: s.kind, access: s.access }))}
-        orgOptions={orgRows.filter((o) => o.id !== inst.ownerOrgId)}
-        canHandOff={isStaff}
-      />
-
-      <AssetsPanel
-        instrumentId={inst.id}
-        assets={assetRows.map((a) => ({
-          id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
-          openItems:
-            taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
-            partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +
-            ownTasks.filter((t) => t.assetId === a.id && t.state !== "Done").length +
-            ownParts.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
-        }))}
-        unassigned={unassignedRows.map((a) => ({
-          id: a.id,
-          label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
-        }))}
-        kinds={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
-        canEdit={canEdit}
-        catalogModels={catalogModels} gridModels={gridModels}
-        owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
-      />
-
-      <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
-        parts={redactParts(partRows, user, inst.ownerOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-        systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
-        canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
-
-      <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
-        evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
-        listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))} />
-
-      <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
-
-      <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
-        people={peopleRows.map((p) => p.name)}
-        schedules={pmRows.map((s) => {
-          const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;
-          return {
-            id: s.id, title: s.title, body: s.body, assignee: s.assignee,
-            everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
-            parts: schedulePartsOf(s),
-            onAsset: onAsset ? `${onAsset.kind} — ${onAsset.model || onAsset.serial || "?"}` : undefined,
-            openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
-          };
-        })} />
-
-      <HoursPanel target={{ instrumentId: inst.id, assetId: null }}
-        entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
-        people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
-        today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
-
-      {/* Today's client-facing note sits with the conversation it feeds, not up
-          in the system's identity block. */}
-      {modules.eod && (isStaff || ownerIsViewer) && (
-        <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
-          systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-          updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
-      )}
-
-      <DiscussionPanel
-        instrumentId={inst.id}
-        threadId={inst.id}
-        posts={visiblePosts.map((p) => ({
-          ...p, createdAt: p.createdAt.toISOString(),
-          authorParty: partyName(p.authorOrgId), internal: p.audience === "internal",
-        }))}
-        canEdit={canEdit}
-        partyName={partyName(viewer.isHouse ? null : user.orgId)}
-        sharedWith={sharedWith}
-        newCount={(() => {
-          const seen = readRows[0]?.lastSeenAt;
-          return visiblePosts.filter((p) => p.authorEmail !== user.email && (!seen || p.createdAt > seen)).length;
-        })()}
-      />
-
-      <div className="card">
-        <div className="card-title">Activity</div>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>Append-only. Nothing here can be edited or erased.</div>
-        {canEdit && <ActivityNoteForm target={{ instrumentId: inst.id, assetId: null }} />}
-        <ActivityFeed items={activity.map((a) => ({
-          id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,
-          when: shopTime(a.createdAt),
-        }))} />
-      </div>
     </div>
   );
 }
