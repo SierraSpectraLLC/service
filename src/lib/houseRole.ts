@@ -21,6 +21,19 @@ export type MemberRow = { email: string; role: string };
 
 const norm = (s: string) => s.trim().toLowerCase();
 
+/**
+ * Is this role the house (the operator), rather than a client organization?
+ *
+ * Lives here rather than in lib/tenancy - which re-exports it - because this
+ * module has no imports at all, and lib/tenancy reaches the database. Client
+ * components legitimately need this predicate (a redaction or access rule
+ * rendered in the browser), and importing it from tenancy would drag src/db
+ * into the client bundle, where `neon(process.env.DATABASE_URL!)` throws at
+ * import time. Neither tsc nor `next build` catches that; only opening the
+ * page does. tests/clientBundle.test.ts guards the rule now.
+ */
+export const isHouse = (role: string) => role === "owner" || role === "staff";
+
 /** The un-revocable owner from the environment, or null if none is configured. */
 export function rootOwner(envStaff: string[]): string | null {
   return envStaff.length ? norm(envStaff[0]) : null;

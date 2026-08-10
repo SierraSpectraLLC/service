@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, assetShares, systemShares } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
+import { isHouse } from "@/lib/houseRole";
 
 // Who can see what. Sierra Spectra staff (owner/staff, from STAFF_EMAILS) are
 // the house and see everything. Everyone else belongs to one organization and
@@ -12,7 +13,10 @@ import type { Role, SessionUser } from "@/lib/authz";
 
 export type ShareRow = { instrumentId: number; access: string };
 
-export const isHouse = (role: Role) => role === "owner" || role === "staff";
+// Defined in lib/houseRole (which imports nothing) and re-exported here so
+// every existing server-side import keeps working. Client components must
+// import it from lib/houseRole - this module reaches the database.
+export { isHouse };
 
 /**
  * Pure core, kept separate from the DB so the rules are testable:

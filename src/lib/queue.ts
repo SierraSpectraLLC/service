@@ -3,7 +3,7 @@
 // to make the next move. Pure, so the dashboard, the system page and the
 // reports all answer the question the same way.
 import type { Role } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
+import { isHouse } from "@/lib/houseRole";
 
 export type QueueState = {
   /** Null = the operator's own queue. */

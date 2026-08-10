@@ -259,7 +259,6 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               ))}
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {!i.queueMine && <Pill bg="#FAF0DC" fg="#8A5410">their move</Pill>}
               {i.missingFromSheet && <Pill bg="#FBE9E9" fg="#A32D2D">not on sheet</Pill>}
               {i.overdue > 0 && <Pill bg="#FBE9E9" fg="#A32D2D">{i.overdue} overdue</Pill>}
               {i.assetIssues.map((x) => (
@@ -269,7 +268,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               {i.gasIssues.map((g) => (
                 <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
               ))}
-              {i.queueMine && !i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
+              {!i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </Link>
         ))}

@@ -3,7 +3,7 @@
 // is even possible. The DB gates in app/actions wrap these.
 import { normalizePn } from "@/lib/priceBook";
 import type { Role } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
+import { isHouse } from "@/lib/houseRole";
 
 export const STOCK_KINDS = ["shop", "client", "mobile"] as const;
 

@@ -4,7 +4,7 @@
 // above all - sees them blank. Vendor stays visible: it says where a part came
 // from, not what was paid.
 import type { SessionUser } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
+import { isHouse } from "@/lib/houseRole";
 
 export function canSeeCosts(user: Pick<SessionUser, "role" | "orgId">, ownerOrgId: number | null): boolean {
   if (isHouse(user.role)) return true;
