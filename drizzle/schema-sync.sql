@@ -373,6 +373,15 @@ CREATE TABLE IF NOT EXISTS "stock_moves" (
   "actor" text NOT NULL DEFAULT '',
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "house_members" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "email" text NOT NULL,
+  "role" text NOT NULL DEFAULT 'staff',
+  "name" text NOT NULL DEFAULT '',
+  "added_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT "house_member_email_unique" UNIQUE("email")
+);
 CREATE TABLE IF NOT EXISTS "queue_events" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,

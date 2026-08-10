@@ -2,7 +2,7 @@ import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
 import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
-import { parseList } from "@/auth";
+import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { getBrand } from "@/lib/brand";
 
@@ -89,8 +89,8 @@ export async function composeDigest(): Promise<{ subject: string; html: string }
 
 /** Compose and email the digest to all staff via Resend. */
 export async function runDailyDigest(): Promise<{ sent: boolean; to: string[]; subject: string }> {
-  const to = parseList(process.env.STAFF_EMAILS);
-  if (!to.length) throw new Error("STAFF_EMAILS is empty");
+  const to = await houseEmails();
+  if (!to.length) throw new Error("No house members configured (STAFF_EMAILS or Settings > Admin)");
   const { subject, html } = await composeDigest();
   await sendEmail(to, subject, html);
   return { sent: true, to, subject };

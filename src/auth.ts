@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { users, accounts, sessions, verificationTokens, appSettings, clientAllowlist, orgs } from "@/db/schema";
 
 import { parseList, matchesEntry, roleForEmail } from "@/lib/allowMatch";
+import { houseRoleForEmail } from "@/lib/house";
 
 export { parseList, matchesEntry, roleForEmail };
 
@@ -108,27 +109,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user }) {
       const email = user.email?.toLowerCase();
       if (!email) return false;
-      const role = roleForEmail(email);
-      if (role === "owner" || role === "staff") return true;
+      // House membership is owner-managed in the database now, with the first
+      // STAFF_EMAILS entry as an un-revocable root (see lib/houseRole).
+      if (await houseRoleForEmail(email)) return true;
       // Everyone else is a client: the access toggle must be on, and the email
       // must match the env list or the owner-managed list in Settings. Both
       // reads are independent, so they go out together - on the sign-in path
       // two sequential round trips is two waits the person can feel.
+      const envRole = roleForEmail(email);
       const [[s], allowed] = await Promise.all([
         db.select().from(appSettings).where(eq(appSettings.id, 1)),
-        role === "client_viewer" ? Promise.resolve(true) : emailInClientAllowlist(email),
+        envRole === "client_viewer" ? Promise.resolve(true) : emailInClientAllowlist(email),
       ]);
       if (!s?.clientAccessEnabled) return false;
       return allowed;
     },
     async session({ session, user }) {
-      // Keep the DB role fresh on every session read.
+      // Keep the stored role in step with the live rules on every session read,
+      // in BOTH directions. Only ever promoting would mean a revoked owner kept
+      // their powers until someone thought to edit the row by hand.
       const email = user.email?.toLowerCase() || "";
-      const envRole = roleForEmail(email);
-      let role = (user as { role?: string }).role || "client_viewer";
-      if (envRole && envRole !== "client_viewer" && role !== envRole) {
-        await db.update(users).set({ role: envRole }).where(eq(users.id, user.id));
-        role = envRole;
+      const houseRole = await houseRoleForEmail(email);
+      const stored = (user as { role?: string }).role || "client_viewer";
+      let role = houseRole ?? "client_viewer";
+      if (stored !== role) {
+        await db.update(users).set({ role }).where(eq(users.id, user.id));
       }
       // Clients are scoped to one organization; staff and owner are the house
       // and see everything, so they carry no org. Editor vs viewer comes from

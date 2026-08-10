@@ -177,6 +177,28 @@ export const engagementRecords = pgTable("engagement_records", {
   data: jsonb("data").notNull(),
 }, (t) => [index("engagement_records_org_idx").on(t.orgId)]);
 
+// The operator's own people, and what they can do. Owner-managed from Settings
+// so adding or revoking a colleague no longer means editing an environment
+// variable and redeploying.
+//
+// Exact emails only - no "@domain" entries, for the same reason STAFF_EMAILS
+// never allowed them: house access sees every organization's data, and one
+// mistyped domain would hand that to everyone who happens to share it.
+//
+// role 'none' is a deliberate third value: it revokes somebody who is still
+// listed in STAFF_EMAILS. The env list stays authoritative for the ROOT owner
+// (see lib/houseRole) precisely so a bad edit here can never lock everyone out
+// of an instance, but everyone else has to be revocable from the UI, and the
+// only way to say "env says staff, we say no" is to record it.
+export const houseMembers = pgTable("house_members", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("staff"), // owner | staff | none
+  name: text("name").notNull().default(""),      // display only
+  addedBy: text("added_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("house_member_email_unique").on(t.email)]);
+
 // Chain of custody. instruments.owner_org_id is the fast "who owns it now"
 // pointer; this is the history behind it, and for a resale market that history
 // is the product - a serial number that can prove who has held a system and

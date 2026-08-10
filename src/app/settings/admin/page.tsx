@@ -9,6 +9,8 @@ import { systemLabel } from "@/lib/systemLabel";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import SettingsTabs from "@/components/SettingsTabs";
+import HouseMembersPanel from "@/components/HouseMembersPanel";
+import { listHouseMembers } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,10 @@ export default async function AdminSettingsPage() {
       .orderBy(asc(engagementRecords.revokedAt)),
   ]);
 
+  // Who we are, before who owns what: this is the list that decides who can
+  // change everything else on this page.
+  const houseRows = await listHouseMembers();
+
   const byId = new Map(rows.map((i) => [i.id, i]));
   const pendingBySystem = new Map<number, typeof requestRows>();
   for (const r of requestRows) {
@@ -49,6 +55,8 @@ export default async function AdminSettingsPage() {
   return (
     <div className="container page">
       <SettingsTabs active="admin" />
+
+      <HouseMembersPanel members={houseRows} myEmail={user.email} />
 
       <div className="card">
         <div className="card-title">Access &amp; ownership</div>

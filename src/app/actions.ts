@@ -12,7 +12,7 @@ import {
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
-  purchaseOrders, poLines, custodyEvents, queueEvents,
+  purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -39,6 +39,8 @@ import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
 import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
+import { houseEmails, houseMemberRows } from "@/lib/house";
+import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
@@ -1786,7 +1788,7 @@ export async function setEodSkip(
 async function postAudience(p: {
   instrumentId: number | null; audience: Audience; authorOrgId: number | null; roomOrgId: number | null;
 }): Promise<string[]> {
-  const staff = parseList(process.env.STAFF_EMAILS);
+  const staff = await houseEmails();
   const entries = await db.select().from(clientAllowlist);
   const emailsFor = (orgId: number) => entries
     .filter((e) => e.orgId === orgId && !e.entry.trim().startsWith("@"))
@@ -2729,7 +2731,7 @@ export async function kickToQueue(
   // Tell the side that now owns the next move. Landing in our own queue tells
   // staff; landing in an org's queue tells that org's people.
   const recipients = toOrgId === null
-    ? parseList(process.env.STAFF_EMAILS)
+    ? await houseEmails()
     : (await db.select({ entry: clientAllowlist.entry }).from(clientAllowlist)
         .where(eq(clientAllowlist.orgId, toOrgId)))
         // An "@domain" entry names a domain, not a mailbox.
@@ -3217,7 +3219,7 @@ export async function setAttachmentListed(attachmentId: number, on: boolean): Pr
 
 /** Who decides on (and hears about) an access request: staff, plus the owning org's sign-in emails. */
 async function ownerAudience(ownerOrgId: number | null): Promise<string[]> {
-  const staff = parseList(process.env.STAFF_EMAILS);
+  const staff = await houseEmails();
   if (ownerOrgId === null) return staff;
   const entries = await db.select().from(clientAllowlist).where(eq(clientAllowlist.orgId, ownerOrgId));
   // A @domain entry names no one in particular, so it can't be a recipient.
@@ -3613,6 +3615,119 @@ export async function addVocabTerms(
     else created++;
   }
   return { created, failures };
+}
+
+// ── House members (owner / staff) ───────────────────────────────────────────
+// Owner-only, and every path goes through memberGuard so the four ways an owner
+// could lock themselves or the instance out are refused in one place rather
+// than three. The first STAFF_EMAILS entry stays an un-revocable root owner:
+// managing roles in a database means a mistake is possible, and this is the way
+// back in when one happens.
+
+const revHouse = () => {
+  revalidatePath("/settings/admin");
+  revalidatePath("/", "layout");
+};
+
+async function guardFor(actorEmail: string, subjectEmail: string, next: "owner" | "staff" | "revoke") {
+  const members = await houseMemberRows();
+  return { members, guard: memberGuard({ actorEmail, subjectEmail, next, envStaff: parseList(process.env.STAFF_EMAILS), members }) };
+}
+
+/** Add somebody to the house, or change what they already are. */
+export async function setHouseMember(
+  email: string, role: string, name?: string,
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const want = role === "owner" ? "owner" : "staff";
+  const e = email.trim().toLowerCase();
+  const { guard } = await guardFor(u.email, e, want);
+  if (!guard.ok) return { error: guard.error };
+  const [existing] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  const label = (name ?? "").trim().slice(0, 80);
+  if (existing) {
+    if (existing.role === want && existing.name === label) return {};
+    await db.update(houseMembers).set({ role: want, name: label || existing.name }).where(eq(houseMembers.id, existing.id));
+    await audit({
+      actor: u.email, entityType: "house", entityId: e,
+      action: existing.role === want
+        ? `renamed house member ${e}`
+        : `changed ${e} from ${existing.role === "none" ? "revoked" : existing.role} to ${want}`,
+      field: "role", oldValue: existing.role, newValue: want,
+    });
+  } else {
+    await db.insert(houseMembers).values({ email: e, role: want, name: label, addedBy: u.email });
+    await audit({
+      actor: u.email, entityType: "house", entityId: e,
+      action: `granted ${e} ${want} access to the whole shop`,
+      field: "role", newValue: want,
+    });
+  }
+  // Their next session read picks the new role up (src/auth.ts) - no redeploy,
+  // and no need for them to sign out and back in.
+  revHouse();
+  return {};
+}
+
+/**
+ * Take house access away. Somebody added here is deleted outright; somebody the
+ * environment still lists gets a 'none' row instead, because deleting nothing
+ * would leave STAFF_EMAILS granting them staff on the next sign-in.
+ */
+export async function revokeHouseMember(email: string, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const e = email.trim().toLowerCase();
+  const { guard } = await guardFor(u.email, e, "revoke");
+  if (!guard.ok) return { error: guard.error };
+  const inEnv = parseList(process.env.STAFF_EMAILS).includes(e);
+  const [existing] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  if (inEnv) {
+    if (existing) await db.update(houseMembers).set({ role: "none" }).where(eq(houseMembers.id, existing.id));
+    else await db.insert(houseMembers).values({ email: e, role: "none", addedBy: u.email });
+  } else if (existing) {
+    await db.delete(houseMembers).where(eq(houseMembers.id, existing.id));
+  } else {
+    return {};
+  }
+  // Downgrade the stored role now rather than waiting for their next session
+  // read, so an open session loses its powers at the next request.
+  await db.update(users).set({ role: "client_viewer" }).where(eq(users.email, e));
+  await audit({
+    actor: u.email, entityType: "house", entityId: e,
+    action: `revoked ${e}'s house access${inEnv ? " (still listed in STAFF_EMAILS - overridden here)" : ""} - reason: ${why}`,
+    field: "role", oldValue: existing?.role ?? "staff", newValue: "none",
+  });
+  revHouse();
+  return {};
+}
+
+/** The list for Settings, with each row's provenance and what may be done to it. */
+export async function listHouseMembers(): Promise<{
+  email: string; role: string; name: string; fromEnv: boolean; isRoot: boolean; locked: boolean;
+}[]> {
+  const u = await requireOwner();
+  const env = parseList(process.env.STAFF_EMAILS);
+  const members = await houseMemberRows();
+  const root = rootOwner(env);
+  const owners = ownerEmails(env, members);
+  const rows = await db.select().from(houseMembers);
+  const emails = [...new Set([...env, ...rows.map((r) => r.email.toLowerCase())])];
+  return emails
+    .map((email) => {
+      const row = rows.find((r) => r.email.toLowerCase() === email);
+      const isRoot = email === root;
+      const role = isRoot ? "owner" : row ? row.role : "staff";
+      return {
+        email, role, name: row?.name ?? "", fromEnv: env.includes(email), isRoot,
+        // The root is the environment's; nobody edits their own; the last owner
+        // stays. Same three rules memberGuard enforces server-side.
+        locked: isRoot || email === u.email.toLowerCase() || (owners.length === 1 && owners[0] === email),
+      };
+    })
+    .filter((r) => r.role !== "none" || r.fromEnv)
+    .sort((a, b) => Number(b.isRoot) - Number(a.isRoot) || a.email.localeCompare(b.email));
 }
 
 // ── Stock ───────────────────────────────────────────────────────────────────

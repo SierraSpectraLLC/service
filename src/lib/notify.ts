@@ -6,7 +6,7 @@
 import { inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { users, people, notifications, notificationPrefs } from "@/db/schema";
-import { parseList } from "@/lib/allowMatch";
+import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { emailAllowed, type NotifyKind } from "@/lib/inbox";
 import { getBrand } from "@/lib/brand";
@@ -92,7 +92,7 @@ export async function notifyTaskAssigned(opts: {
   taskTitle: string; instrumentId?: number; assetId?: number; externalId: string;
 }) {
   try {
-    const staff = parseList(process.env.STAFF_EMAILS);
+    const staff = await houseEmails();
     const [userRows, roster] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
       db.select({ name: people.name, email: people.email }).from(people),
@@ -119,7 +119,7 @@ export async function notifySystemAssigned(opts: {
   actorEmail: string; actorName: string; lead: string; instrumentId: number; externalId: string; label: string;
 }) {
   try {
-    const staff = parseList(process.env.STAFF_EMAILS);
+    const staff = await houseEmails();
     const [userRows, roster] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
       db.select({ name: people.name, email: people.email }).from(people),
@@ -147,7 +147,7 @@ export async function notifyDiscussion(opts: {
   allowedEmails?: string[] | null;
 }) {
   try {
-    const staff = parseList(process.env.STAFF_EMAILS);
+    const staff = await houseEmails();
     const [userRows, roster] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
       db.select({ name: people.name, email: people.email }).from(people),
@@ -282,7 +282,7 @@ export async function notifyInvite(opts: { to: string; inviterName: string; orgN
 
 export async function notifyGasEmpty(opts: { actorEmail: string; actorName: string; gas: string; instrumentId: number; externalId: string }) {
   try {
-    const to = parseList(process.env.STAFF_EMAILS).filter((e) => e !== opts.actorEmail.toLowerCase());
+    const to = (await houseEmails()).filter((e) => e !== opts.actorEmail.toLowerCase());
     if (!to.length) return;
     const url = appUrl();
     await deliver({

@@ -29,7 +29,7 @@ Sierra-specific (no orgs, no platform name, optional modules off).
 | `AUTH_SECRET` | `openssl rand -base64 33` |
 | `AUTH_RESEND_KEY` | Resend API key |
 | `EMAIL_FROM` | e.g. `Portal <portal@notify.customer-domain.com>` |
-| `STAFF_EMAILS` | The platform-operator logins. First entry is the **owner** (superuser: Settings, view-as, hard deletes); the rest are staff. |
+| `STAFF_EMAILS` | Bootstrap operator logins. The **first entry is the root owner** - always a superuser, and the only house role that cannot be revoked from the UI, so it is the way back in if the members list is ever left without a working owner. Later entries seed staff. Everyone else is added and revoked in **Settings → Admin → Our people**, no redeploy. |
 | `SHOP_TZ` | Instance timezone, e.g. `America/Chicago`. Drives "today" for EOD keys, date stamps, digests. |
 | `APP_URL` | The instance's canonical URL once the domain is attached |
 | `CRON_SECRET` | Random string; must match the header the cron jobs send |
@@ -65,29 +65,33 @@ picker references it and none accepts free text. Each
 organization then has its own page at `/settings/organizations/<id>`, which is
 also the page that organization's own editors get.
 
-1. Sign in with the first `STAFF_EMAILS` address (magic link).
-2. **Configuration → This instance**: name the instance; set the tagline.
-3. **Personnel → Organizations**: create the operator's own org (kind
+1. Sign in with the first `STAFF_EMAILS` address (magic link) - the root owner.
+2. **Admin → Our people**: add the rest of the operator's staff and any
+   co-owners. Owners get Settings, organizations, stages, branding, hard
+   deletes and signature revocation; staff get every system and all the work.
+   Roles take effect on the person's next page load.
+3. **Configuration → This instance**: name the instance; set the tagline.
+4. **Personnel → Organizations**: create the operator's own org (kind
    `provider`), then set it as **Operated by** back in Configuration — its
    name and logo go on sign-off packets and reports. Create the first client
    org(s).
-4. **Personnel → Client sign-in**: switch the master toggle on. Then open each
+5. **Personnel → Client sign-in**: switch the master toggle on. Then open each
    organization and invite its people from its own page (each entry gets an
    editor/viewer role; invitations email automatically).
-5. **Configuration → Modules**: switch on EOD / digest / sheet sync only if
+6. **Configuration → Modules**: switch on EOD / digest / sheet sync only if
    this operator wants them. Fresh instances have all three off.
-6. **Catalog**: add the system types this operator services (LC-MS, GC-MS),
+7. **Catalog**: add the system types this operator services (LC-MS, GC-MS),
    the module types (a fresh install ships the 13 starters), and the models
    under each. Models tagged to no system type are offered everywhere, which
    is right for control PCs and gas generators. Give each model its
    **manufacturer** - the catalog groups by it, and asset entry fills the
    unit's maker in from the model. Asset and system forms only offer what's
    defined here; a CSV import auto-registers what it brings in.
-7. **/import** or **Assets → Several at once**: bring the fleet in. Both use
+8. **/import** or **Assets → Several at once**: bring the fleet in. Both use
    the same columns (Type, Model, Serial, Mfr, Owner, Location, As found,
    Notes), so a template downloaded from the grid imports through /import
    unchanged - and a block copied out of Excel pastes straight into the grid. Assets and systems land with ownership and shares handled.
-8. Upload the operator org's logo on its own settings page (Workspace
+9. Upload the operator org's logo on its own settings page (Workspace
    appearance).
 
 ## 5. Smoke checks before handing over
