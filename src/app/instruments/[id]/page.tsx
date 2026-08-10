@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  pmSchedules, procedures, signoffs, timeEntries, partPrices,
+  pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -30,6 +30,7 @@ import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
+import CustodyPanel from "@/components/CustodyPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   }
 
   const showCosts = canSeeCosts(user, inst.ownerOrgId);
+
+  // Chain of custody, oldest first - it reads as a story.
+  const custodyRows = await db.select().from(custodyEvents)
+    .where(eq(custodyEvents.instrumentId, instId))
+    .orderBy(asc(custodyEvents.at), asc(custodyEvents.id));
 
   // Labor on this system, newest first. Work tagged to an installed asset
   // carries instrumentId too (resolveTarget), so one filter catches it all.
@@ -235,6 +241,21 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
       />
 
+      {/* Provenance, and the handoff that extends it - staff only, because a
+          change of hands needs a witness at the operator. */}
+      <CustodyPanel
+        instrumentId={inst.id} externalId={inst.externalId}
+        events={custodyRows.map((c) => ({
+          id: c.id, kind: c.kind, fromName: c.fromName, toName: c.toName, note: c.note,
+          when: shopTime(c.at), actor: c.actor,
+        }))}
+        ownerName={inst.ownerOrgId === null ? "nobody yet (house-stewarded)" : orgName.get(inst.ownerOrgId) ?? "an unknown organization"}
+        providers={shareRows.filter((s) => s.orgId !== inst.ownerOrgId)
+          .map((s) => ({ name: s.name, kind: s.kind, access: s.access }))}
+        orgOptions={orgRows.filter((o) => o.id !== inst.ownerOrgId)}
+        canHandOff={isStaff}
+      />
+
       <AssetsPanel
         instrumentId={inst.id}
         assets={assetRows.map((a) => ({
@@ -256,7 +277,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       />
 
       <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
-        parts={redactParts(partRows, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        parts={redactParts(partRows, user, inst.ownerOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
         canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
 

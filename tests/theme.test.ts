@@ -44,10 +44,35 @@ describe("cost redaction", () => {
   });
 
   it("blanks exactly the priced fields", () => {
-    const [r] = redactParts([part], false);
+    const provider = { role: "client_editor" as const, orgId: 7 };
+    const owner = { role: "client_editor" as const, orgId: 5 };
+    const [r] = redactParts([part], provider, 5);
     expect(r.cost).toBe("");
     expect(r.po).toBe("");
     expect(r.name).toBe("Pump seal kit");
-    expect(redactParts([part], true)[0].cost).toBe("1,240");
+    expect(redactParts([part], owner, 5)[0].cost).toBe("1,240");
+  });
+
+  it("costs follow whoever paid, not whoever owns the system now", () => {
+    // LabZen (5) bought this part, then handed the system to Acme (9).
+    const bought = { ...part, ownerOrgId: 5 };
+    const acme = { role: "client_editor" as const, orgId: 9 };
+    const labzen = { role: "client_editor" as const, orgId: 5 };
+    // Acme owns the system now and still must not see what LabZen paid.
+    expect(redactParts([bought], acme, 9)[0].cost).toBe("");
+    expect(redactParts([bought], labzen, 9)[0].cost).toBe("1,240");
+    // Acme's own later purchase on the same system is theirs to see.
+    const mine = { ...part, ownerOrgId: 9 };
+    expect(redactParts([mine], acme, 9)[0].cost).toBe("1,240");
+    expect(redactParts([mine], labzen, 9)[0].cost).toBe("");
+  });
+
+  it("an unstamped row falls back to the system's owner", () => {
+    // Pre-handoff rows: nothing had changed hands, so today's owner is right.
+    const legacy = { ...part, ownerOrgId: null };
+    expect(redactParts([legacy], { role: "client_editor", orgId: 5 }, 5)[0].cost).toBe("1,240");
+    expect(redactParts([legacy], { role: "client_editor", orgId: 7 }, 5)[0].cost).toBe("");
+    // Staff always see costs, stamped or not.
+    expect(redactParts([legacy], { role: "staff", orgId: null }, 5)[0].cost).toBe("1,240");
   });
 });

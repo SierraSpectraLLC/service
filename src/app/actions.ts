@@ -3,7 +3,7 @@
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { eq, and, asc, inArray, isNull, or, sql } from "drizzle-orm";
+import { eq, and, asc, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
@@ -12,7 +12,7 @@ import {
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
-  purchaseOrders, poLines,
+  purchaseOrders, poLines, custodyEvents,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -21,7 +21,7 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -1098,6 +1098,7 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
   const [p] = await db.insert(parts).values({
     instrumentId, assetId: s.assetId, name, partNumber: want.number,
     qty: "1", status: "Needed", note: `for maintenance '${s.title}'`,
+    ownerOrgId: await costOwnerOrg({ instrumentId, assetId: s.assetId }),
     ...(best ? { vendor: best.vendor, cost: centsToInput(best.priceCents), costCents: best.priceCents } : {}),
   }).returning();
   await audit({
@@ -1311,6 +1312,7 @@ async function fileReplacementRequest(
     name: removed.name, partNumber: removed.partNumber, qty: removed.qty,
     specs: removed.specs, vendor: removed.vendor, status: "Needed",
     note: "replacement for removed unit",
+    ownerOrgId: await costOwnerOrg(removed),
   }).returning();
   await audit({
     actor: actorEmail, instrumentId: removed.instrumentId, assetId: removed.assetId,
@@ -1367,13 +1369,17 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   if (!data.name.trim()) return { error: "Name required" };
   const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: raw.assetId ?? target.assetId ?? null });
   if ("error" in t0) return t0;
-  if (!isHouse(u.role) && !canSeeCosts(u, await costOwnerOrg(t0))) { data.cost = ""; data.po = ""; }
+  const payer = await costOwnerOrg(t0);
+  if (!isHouse(u.role) && !canSeeCosts(u, payer)) { data.cost = ""; data.po = ""; }
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
   const taggedAsset = t0.asset;
   const [p] = await db.insert(parts).values({
     ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
     // The summable copy, parsed after the redaction strip so it follows cost.
     costCents: parseMoney(data.cost),
+    // Whose money this was. Stamped now so a later handoff can't reveal it to
+    // the next owner - see lib/redact.
+    ownerOrgId: payer,
   }).returning();
   const verb = partStatusVerb(p.status);
   const noun = p.kind === "consumable" ? "consumable" : "part";
@@ -2656,10 +2662,110 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
 }
 
 /**
+ * A system changes hands. This is the whole event, not just a repointed owner:
+ *
+ * - custody is recorded, so the chain reads "LabZen Jun '24 -> Acme Aug '26"
+ *   forever - for resale, that provenance is the product
+ * - the outgoing owner gets a frozen engagement record of their tenure, the
+ *   same dossier a departing provider gets, and then loses live access unless
+ *   they're kept on as a viewer (a reseller usually wants that)
+ * - service providers keep their shares. Sierra shipped it and still maintains
+ *   it; the new owner sees exactly who else has access and can revoke
+ * - part costs do NOT transfer. Each part row already carries the org that
+ *   bought it (parts.owner_org_id), so what LabZen paid stays LabZen's - see
+ *   lib/redact. Nothing else about the record is hidden from the new owner:
+ *   they inherit the full service history, which is the point
+ *
+ * Staff-only, deliberately. A serial number is not proof of purchase and
+ * neither is a request; somebody at the operator has to witness the transfer.
+ */
+export async function handOffSystem(instrumentId: number, toOrgId: number, opts?: {
+  note?: string; keepPreviousAsViewer?: boolean;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
+  if (!to) return { error: "Unknown organization" };
+  if (inst.ownerOrgId === toOrgId) return { error: `${to.name} already owns ${inst.externalId}` };
+  const [from] = inst.ownerOrgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, inst.ownerOrgId));
+  const note = (opts?.note ?? "").trim().slice(0, 300);
+
+  // Freeze the outgoing owner's record BEFORE anything moves, so the dossier is
+  // their tenure as it actually stood and nothing recorded afterwards leaks in.
+  if (from) {
+    const dossier = await composeSystemDossier(instrumentId, from.id);
+    if (dossier) {
+      await db.insert(engagementRecords).values({
+        instrumentId, orgId: from.id, externalId: inst.externalId, label: dossier.label,
+        revokedBy: u.email, data: dossier,
+      });
+    }
+  }
+
+  await db.update(instruments).set({ ownerOrgId: toOrgId }).where(eq(instruments.id, instrumentId));
+  // The new owner needs to be able to see what they now own.
+  await db.insert(systemShares)
+    .values({ instrumentId, orgId: toOrgId, access: "edit", addedBy: u.email })
+    .onConflictDoUpdate({ target: [systemShares.instrumentId, systemShares.orgId], set: { access: "edit" } });
+
+  if (from) {
+    if (opts?.keepPreviousAsViewer) {
+      await db.update(systemShares).set({ access: "view" })
+        .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, from.id)));
+    } else {
+      await db.delete(systemShares)
+        .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, from.id)));
+    }
+  }
+
+  await db.insert(custodyEvents).values({
+    instrumentId, kind: "transfer",
+    fromOrgId: from?.id ?? null, toOrgId,
+    fromName: from?.name ?? "", toName: to.name,
+    note, actor: u.email,
+  });
+
+  // Who's left with access, named in the audit line: after a handoff the first
+  // question is always "so who can still see this?"
+  const remaining = await db.select({ name: orgs.name })
+    .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
+    .where(and(eq(systemShares.instrumentId, instrumentId), ne(systemShares.orgId, toOrgId)));
+  await audit({
+    actor: u.email, instrumentId, entityType: "custody", entityId: inst.externalId,
+    action: `handed ${inst.externalId} from ${from?.name ?? "house stewardship"} to ${to.name}`
+      + (from ? `; ${from.name} keeps a frozen record${opts?.keepPreviousAsViewer ? " and read-only access" : " and loses access"}` : "")
+      + (remaining.length ? `; still shared with ${remaining.map((r) => r.name).join(", ")}` : "")
+      + (note ? ` - ${note}` : ""),
+    field: "owner", oldValue: from?.name ?? "", newValue: to.name,
+  });
+
+  // Tell the new owner's people, and the outgoing owner's, in one go.
+  const audience = await db.select({ entry: clientAllowlist.entry })
+    .from(clientAllowlist)
+    .where(from ? inArray(clientAllowlist.orgId, [toOrgId, from.id]) : eq(clientAllowlist.orgId, toOrgId));
+  // Exact addresses only - an "@domain" entry names a domain, not a mailbox.
+  const exact = audience.map((a) => a.entry.trim()).filter((e) => e.includes("@") && !e.startsWith("@"));
+  if (exact.length) {
+    await notifyHandoff({
+      to: exact, externalId: inst.externalId, instrumentId,
+      fromName: from?.name ?? "house stewardship", toName: to.name, note,
+    });
+  }
+  rev(instrumentId);
+  revalidatePath("/records");
+  return {};
+}
+
+/**
  * Whose system it is. Ownership doesn't grant visibility (shares do) - it
  * says which client org's editors decide access requests. Setting it is the
  * house's call, and it's also the claim flow: when the real owner of an
  * unclaimed, provider-created system joins the platform, staff hand it over.
+ *
+ * For an actual change of hands use handOffSystem, which records custody and
+ * settles the outgoing owner's access and record. This one is the blunt
+ * correction: fixing a mis-assignment, or returning a system to the house.
  */
 export async function setSystemOwner(instrumentId: number, orgId: number | null): Promise<{ error?: string }> {
   const u = await requireStaff();
@@ -3701,6 +3807,7 @@ export async function issueStock(
   const [p] = await db.insert(parts).values({
     instrumentId: t0.instrumentId, assetId: t0.assetId, name, partNumber: item.partNumber,
     qty: String(qty), status, ...stamps,
+    ownerOrgId: await costOwnerOrg(t0),
     vendor: item.unitCostCents === null && best ? best.vendor : "",
     note: [`from stock: ${acc.room.name}`, (opts?.note ?? "").trim()].filter(Boolean).join(" - "),
     ...(unitCents !== null ? { cost: centsToInput(unitCents * qty), costCents: unitCents * qty } : {}),

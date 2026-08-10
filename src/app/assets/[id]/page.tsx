@@ -215,7 +215,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         )}
       </div>
 
-      <PartsPanel target={target} parts={redactParts(taggedParts, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+      <PartsPanel target={target}
+        parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId)
+          .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
 
       <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

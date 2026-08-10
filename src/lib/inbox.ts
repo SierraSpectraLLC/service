@@ -7,6 +7,7 @@ export const NOTIFY_KINDS = [
   { kind: "discussion", label: "Discussion posts and @mentions" },
   { kind: "access_request", label: "Access requests and ownership claims" },
   { kind: "gas_empty", label: "A gas is marked empty" },
+  { kind: "handoff", label: "A system changes hands" },
 ] as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];

@@ -164,6 +164,36 @@ export const engagementRecords = pgTable("engagement_records", {
   data: jsonb("data").notNull(),
 }, (t) => [index("engagement_records_org_idx").on(t.orgId)]);
 
+// Chain of custody. instruments.owner_org_id is the fast "who owns it now"
+// pointer; this is the history behind it, and for a resale market that history
+// is the product - a serial number that can prove who has held a system and
+// when is worth more than one that can't.
+//
+// A handoff (LabZen ships a refurbished system to their own client) writes one
+// row here, leaves the service provider's share in place, and freezes an
+// engagement record for the outgoing owner. Backfilled with one 'intake' row
+// per already-owned system so the chain has a start.
+export const custodyEvents = pgTable("custody_events", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
+  // intake (first known owner) | transfer (handed on) | claim (granted via a
+  // serial claim) | release (back to house stewardship)
+  kind: text("kind").notNull().default("transfer"),
+  fromOrgId: integer("from_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  toOrgId: integer("to_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // Names kept as text as well as ids: an org row can be deleted, but the
+  // custody record has to stay readable forever.
+  fromName: text("from_name").notNull().default(""),
+  toName: text("to_name").notNull().default(""),
+  note: text("note").notNull().default(""),
+  actor: text("actor").notNull().default(""),
+  at: timestamp("at").notNull().defaultNow(),
+}, (t) => [
+  index("custody_instrument_idx").on(t.instrumentId),
+  index("custody_asset_idx").on(t.assetId),
+]);
+
 // Someone knocking on the door: they matched a serial in /lookup and asked to
 // be let onto the system. An 'access' request asks to be let in and is decided
 // by staff or the owning org's editors; a 'claim' asserts "this instrument is
@@ -349,6 +379,12 @@ export const parts = pgTable("parts", {
   // Parsed from `cost` server-side on every write (lib/money) so reports can
   // sum spend. Null = never parsed / not money-shaped; 0 is a real zero.
   costCents: integer("cost_cents"),
+  // Whose money bought it, stamped at write time from the system's owner then.
+  // Cost visibility follows THIS, not the system's current owner: when a system
+  // is handed on, the new owner must not inherit sight of what the previous one
+  // paid. Null = pre-handoff rows and house-stewarded work, which fall back to
+  // the system's owner (correct, since nothing had changed hands yet).
+  ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   carrier: text("carrier").notNull().default(""),
   tracking: text("tracking").notNull().default(""),
   orderedAt: text("ordered_at").notNull().default(""),

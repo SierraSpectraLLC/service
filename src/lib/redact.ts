@@ -1,8 +1,8 @@
 // What gets blacked out for whom. Part cost and PO number are the operator's
-// (and the paying client's) business data: platform staff and the system's
-// owning organization see them; every other party on a shared system - service
-// providers above all - sees them blank. Vendor stays visible: it says where a
-// part came from, not what was paid.
+// (and the paying client's) business data: platform staff and the organization
+// that PAID see them; every other party on a shared system - service providers
+// above all - sees them blank. Vendor stays visible: it says where a part came
+// from, not what was paid.
 import type { SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/tenancy";
 
@@ -18,6 +18,21 @@ export function redactPart<T extends { cost: string; po: string; costCents?: num
   return { ...row, cost: "", po: "", costCents: null };
 }
 
-export function redactParts<T extends { cost: string; po: string; costCents?: number | null }>(rows: T[], showCosts: boolean): T[] {
-  return showCosts ? rows : rows.map(redactPart);
+/**
+ * Per-row redaction. A part's cost belongs to whoever bought it, so each row is
+ * judged on its own owner stamp rather than on who owns the system today. That
+ * distinction only matters after a handoff - and it matters a lot: repointing
+ * ownership must not hand the new owner sight of every price the previous owner
+ * paid. Rows with no stamp predate handoffs and fall back to the system's
+ * owner, which is what they were bought under.
+ */
+export function redactParts<
+  T extends { cost: string; po: string; costCents?: number | null; ownerOrgId?: number | null },
+>(
+  rows: T[],
+  viewer: Pick<SessionUser, "role" | "orgId">,
+  systemOwnerOrgId: number | null,
+): T[] {
+  return rows.map((r) =>
+    canSeeCosts(viewer, r.ownerOrgId ?? systemOwnerOrgId) ? r : redactPart(r));
 }

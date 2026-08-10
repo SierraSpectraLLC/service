@@ -209,6 +209,31 @@ export async function notifyAccessRequest(opts: {
   }
 }
 
+/**
+ * A system changed hands. Both sides hear about it in one send - the new owner
+ * because they now own it, the outgoing owner because their access just changed
+ * and they should know a record was kept for them.
+ */
+export async function notifyHandoff(opts: {
+  to: string[]; externalId: string; instrumentId: number; fromName: string; toName: string; note: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "handoff", href: `/instruments/${opts.instrumentId}`,
+      title: `${opts.externalId} changed hands: ${opts.fromName} → ${opts.toName}`,
+      subject: `${opts.externalId}: now owned by ${opts.toName}`,
+      html: await wrap(`<b>${esc(opts.externalId)}</b> has been handed from <b>${esc(opts.fromName)}</b> to <b>${esc(opts.toName)}</b>.
+        ${opts.note ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.note)}</div>` : ""}
+        <div style="margin-top:8px;">The full service history transfers with it. ${esc(opts.fromName)} keeps a frozen
+        record of their period of ownership.</div>
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] handoff email failed:", (e as Error).message);
+  }
+}
+
 // Invitations stay plain email, not deliver(): the recipient has never signed
 // in, so an inbox row would greet them with old news and an opt-out would be
 // self-defeating - the email IS the invitation.

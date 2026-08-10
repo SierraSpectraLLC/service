@@ -373,6 +373,19 @@ CREATE TABLE IF NOT EXISTS "stock_moves" (
   "actor" text NOT NULL DEFAULT '',
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "custody_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer,
+  "asset_id" integer,
+  "kind" text NOT NULL DEFAULT 'transfer',
+  "from_org_id" integer,
+  "to_org_id" integer,
+  "from_name" text NOT NULL DEFAULT '',
+  "to_name" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "actor" text NOT NULL DEFAULT '',
+  "at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "purchase_orders" (
   "id" serial PRIMARY KEY NOT NULL,
   "number" text NOT NULL,
@@ -598,6 +611,7 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT 
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "manufacturer" text NOT NULL DEFAULT '';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "cost_cents" integer;
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -625,6 +639,8 @@ CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("crea
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 CREATE INDEX IF NOT EXISTS "notifications_email_idx" ON "notifications" ("email");
+CREATE INDEX IF NOT EXISTS "custody_instrument_idx" ON "custody_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "custody_asset_idx" ON "custody_events" ("asset_id");
 CREATE INDEX IF NOT EXISTS "po_status_idx" ON "purchase_orders" ("status");
 CREATE INDEX IF NOT EXISTS "po_lines_po_idx" ON "po_lines" ("po_id");
 CREATE INDEX IF NOT EXISTS "stockrooms_org_idx" ON "stockrooms" ("org_id");
@@ -1328,5 +1344,58 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','part','cost-cents-backfill',
             'parsed ' || v_count || ' part cost(s) into cents for reporting - non-numeric costs stay text-only');
+  END IF;
+END $$;
+
+-- ── Part cost ownership ───────────────────────────────────────────────────
+-- Cost visibility used to follow the system's CURRENT owner, which means a
+-- handoff would have handed the new owner sight of every price the previous
+-- one paid. Costs now follow the org that bought the part. Stamping existing
+-- rows from today's owner is correct precisely because nothing has changed
+-- hands yet - this runs before the first handoff is possible.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'part' AND "entity_id" = 'cost-owner-backfill') THEN
+    UPDATE "parts" p
+    SET "owner_org_id" = i."owner_org_id"
+    FROM "instruments" i
+    WHERE p."instrument_id" = i."id" AND p."owner_org_id" IS NULL AND i."owner_org_id" IS NOT NULL;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    UPDATE "parts" p
+    SET "owner_org_id" = a."owner_org_id"
+    FROM "assets" a
+    WHERE p."instrument_id" IS NULL AND p."asset_id" = a."id"
+      AND p."owner_org_id" IS NULL AND a."owner_org_id" IS NOT NULL;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','part','cost-owner-backfill',
+            'stamped ' || v_count || ' part(s) with the org that paid, so a handoff cannot expose a previous owner''s prices');
+  END IF;
+END $$;
+
+-- ── Chain of custody ──────────────────────────────────────────────────────
+-- One 'intake' row per already-owned system and shelf asset, so the custody
+-- chain has a documented start rather than beginning at the first handoff.
+-- Dated from the record's own creation, which is the earliest defensible date.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'custody' AND "entity_id" = 'intake-backfill') THEN
+    INSERT INTO "custody_events" ("instrument_id","kind","to_org_id","to_name","note","actor","at")
+    SELECT i."id", 'intake', i."owner_org_id", o."name",
+           'first owner on record', 'schema-sync', i."created_at"
+    FROM "instruments" i JOIN "orgs" o ON o."id" = i."owner_org_id"
+    WHERE i."owner_org_id" IS NOT NULL;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    INSERT INTO "custody_events" ("asset_id","kind","to_org_id","to_name","note","actor","at")
+    SELECT a."id", 'intake', a."owner_org_id", o."name",
+           'first owner on record', 'schema-sync', a."created_at"
+    FROM "assets" a JOIN "orgs" o ON o."id" = a."owner_org_id"
+    WHERE a."owner_org_id" IS NOT NULL AND a."instrument_id" IS NULL;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','custody','intake-backfill',
+            'opened the custody chain for ' || v_count || ' owned system(s) and every owned shelf unit');
   END IF;
 END $$;
