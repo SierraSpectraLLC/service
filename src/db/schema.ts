@@ -126,6 +126,19 @@ export const instruments = pgTable("instruments", {
   // platform ("unclaimed"). The owner's editors approve access requests;
   // visibility itself still comes only from system_shares.
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // WHOSE QUEUE the system is sitting in - a third axis, independent of both
+  // ownership and access. A refurbished system parked with the client while
+  // they run application tests is still ours to own and everyone's to see, but
+  // it is not our move: nothing we do clears it. Null = our queue.
+  //
+  // This is what lets a finished system leave the shop's board without being
+  // archived or shipped, and it's why turnaround can stop counting days that
+  // were never ours to spend (see lib/reports).
+  queueOrgId: integer("queue_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  queueReason: text("queue_reason").notNull().default(""), // "waiting on your N2 generator tech"
+  // When it landed in the current queue. Null = never moved, so read it as the
+  // system's own createdAt rather than backfilling every row.
+  queueSince: timestamp("queue_since"),
   // Resale state, set by the owning org (or staff). While for_sale is true the
   // listing_token URL serves a public, heavily redacted view of the system:
   // maintenance history and opted-in reports, never location/client/costs.
@@ -193,6 +206,27 @@ export const custodyEvents = pgTable("custody_events", {
   index("custody_instrument_idx").on(t.instrumentId),
   index("custody_asset_idx").on(t.assetId),
 ]);
+
+// Every time a system changed hands as WORK - who was expected to act next,
+// and why. Distinct from custody_events, which is ownership: LabZen can own a
+// system that sits in our queue, and can hold the queue on a system Acme owns.
+//
+// Kept as a ledger because the durations matter: three weeks waiting on the
+// client's nitrogen contractor should not land in our turnaround figures, and
+// the only way to prove that is a record of when the ball was in whose court.
+export const queueEvents = pgTable("queue_events", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  fromOrgId: integer("from_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  toOrgId: integer("to_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // Null org ids mean the house, whose name isn't in the orgs table on every
+  // instance - so both names are stored as text too, and stay readable forever.
+  fromName: text("from_name").notNull().default(""),
+  toName: text("to_name").notNull().default(""),
+  reason: text("reason").notNull().default(""),
+  actor: text("actor").notNull().default(""),
+  at: timestamp("at").notNull().defaultNow(),
+}, (t) => [index("queue_events_instrument_idx").on(t.instrumentId), index("queue_events_at_idx").on(t.at)]);
 
 // Someone knocking on the door: they matched a serial in /lookup and asked to
 // be let onto the system. An 'access' request asks to be let in and is decided

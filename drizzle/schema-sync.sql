@@ -373,6 +373,17 @@ CREATE TABLE IF NOT EXISTS "stock_moves" (
   "actor" text NOT NULL DEFAULT '',
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "queue_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer NOT NULL,
+  "from_org_id" integer,
+  "to_org_id" integer,
+  "from_name" text NOT NULL DEFAULT '',
+  "to_name" text NOT NULL DEFAULT '',
+  "reason" text NOT NULL DEFAULT '',
+  "actor" text NOT NULL DEFAULT '',
+  "at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "custody_events" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -612,6 +623,9 @@ ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "manufacturer" text NOT NULL 
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "cost_cents" integer;
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_org_id" integer;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_reason" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_since" timestamp;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -639,6 +653,8 @@ CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("crea
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
 CREATE INDEX IF NOT EXISTS "notifications_email_idx" ON "notifications" ("email");
+CREATE INDEX IF NOT EXISTS "queue_events_instrument_idx" ON "queue_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "queue_events_at_idx" ON "queue_events" ("at");
 CREATE INDEX IF NOT EXISTS "custody_instrument_idx" ON "custody_events" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "custody_asset_idx" ON "custody_events" ("asset_id");
 CREATE INDEX IF NOT EXISTS "po_status_idx" ON "purchase_orders" ("status");

@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents,
+  pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -31,6 +31,8 @@ import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
+import QueuePanel from "@/components/QueuePanel";
+import { canKick, daysSince, queueView } from "@/lib/queue";
 
 export const dynamic = "force-dynamic";
 
@@ -88,9 +90,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const showCosts = canSeeCosts(user, inst.ownerOrgId);
 
   // Chain of custody, oldest first - it reads as a story.
-  const custodyRows = await db.select().from(custodyEvents)
-    .where(eq(custodyEvents.instrumentId, instId))
-    .orderBy(asc(custodyEvents.at), asc(custodyEvents.id));
+  const [custodyRows, queueRows] = await Promise.all([
+    db.select().from(custodyEvents)
+      .where(eq(custodyEvents.instrumentId, instId))
+      .orderBy(asc(custodyEvents.at), asc(custodyEvents.id)),
+    db.select().from(queueEvents)
+      .where(eq(queueEvents.instrumentId, instId))
+      .orderBy(desc(queueEvents.at), desc(queueEvents.id)).limit(20),
+  ]);
 
   // Labor on this system, newest first. Work tagged to an installed asset
   // carries instrumentId too (resolveTarget), so one filter catches it all.
@@ -239,6 +246,25 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         ownerOrgId={inst.ownerOrgId}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
         canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
+      />
+
+      {/* Whose move it is. High on the page: on a parked system it's the first
+          thing that explains why nothing is happening. */}
+      <QueuePanel
+        instrumentId={inst.id} externalId={inst.externalId}
+        holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
+        isMine={queueView(user, inst) === "mine"}
+        since={shopTime(inst.queueSince ?? inst.createdAt)}
+        days={daysSince(inst.queueSince ?? inst.createdAt, new Date())}
+        reason={inst.queueReason}
+        legs={queueRows.map((q) => ({
+          id: q.id, fromName: q.fromName, toName: q.toName, reason: q.reason,
+          actor: q.actor, when: shopTime(q.at),
+        }))}
+        // Only organizations that can actually open the system.
+        options={shareRows.filter((s) => s.orgId !== inst.queueOrgId).map((s) => ({ id: s.orgId, name: s.name, kind: s.kind }))}
+        ourName={brand.operatorName}
+        canKick={canKick(user, inst)}
       />
 
       {/* Provenance, and the handoff that extends it - staff only, because a

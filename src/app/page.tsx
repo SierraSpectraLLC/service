@@ -1,7 +1,9 @@
 import { and, asc, eq, desc, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
+import { daysSince, queueView } from "@/lib/queue";
+import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -40,6 +42,16 @@ export default async function Home() {
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
   ]);
+
+  // Queue holders, named for the row badges. The house's own queue is labelled
+  // with the operator's name rather than "us", so a client reading their own
+  // board sees who they're waiting on.
+  const [orgNames, brand] = await Promise.all([
+    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+    getBrand(),
+  ]);
+  const queueName = (id: number | null) =>
+    id === null ? brand.operatorName : orgNames.find((o) => o.id === id)?.name ?? "another organization";
 
   // A service provider's shelf of past engagements: frozen records kept from
   // systems whose access was later revoked. Only their own org's records.
@@ -89,6 +101,13 @@ export default async function Home() {
         .map((a) => `${a.kind.toLowerCase()} ${a.status === "Down" ? "down" : "attn"}`),
       missingFromSheet: droppedFromSheet.has(i.externalId),
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
+      // Whose move it is. A system parked with the client is still visible -
+      // hiding it would just move the forgetting somewhere else - but it reads
+      // as theirs, and the "Ours to move" filter takes it off the board.
+      queueMine: queueView(user, i) === "mine",
+      queueWith: queueName(i.queueOrgId),
+      queueDays: daysSince(i.queueSince ?? i.createdAt, new Date()),
+      queueReason: i.queueReason,
     };
   });
 

@@ -7,6 +7,7 @@ export const NOTIFY_KINDS = [
   { kind: "discussion", label: "Discussion posts and @mentions" },
   { kind: "access_request", label: "Access requests and ownership claims" },
   { kind: "gas_empty", label: "A gas is marked empty" },
+  { kind: "queue", label: "A system moves into my queue" },
   { kind: "handoff", label: "A system changes hands" },
 ] as const;
 

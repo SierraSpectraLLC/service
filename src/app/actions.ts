@@ -12,7 +12,7 @@ import {
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
-  purchaseOrders, poLines, custodyEvents,
+  purchaseOrders, poLines, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -21,7 +21,7 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -38,6 +38,7 @@ import { bestPrice } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
 import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
+import { canKick } from "@/lib/queue";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
@@ -2657,6 +2658,89 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
     actor: u.email, instrumentId, entityType: "share", entityId: inst.externalId,
     action: `removed ${org.name}'s access to ${inst.externalId}${org.kind === "provider" ? " - they keep a frozen record of the engagement" : ""}`,
   });
+  rev(instrumentId);
+  return {};
+}
+
+/**
+ * Move a system into somebody else's queue - or take it back into ours.
+ *
+ * This is the "not our move" button. A repaired system sitting in Checkout
+ * while the client runs their application tests is finished work as far as the
+ * shop is concerned, but archiving it would be a lie and shipping it hasn't
+ * happened yet. Parking it with the client clears it off our board, tells them
+ * it's theirs to act on, and keeps the clock honest: days spent in their queue
+ * are excluded from our turnaround (lib/reports).
+ *
+ * The same mechanism covers a blockage - "waiting on your nitrogen generator
+ * contractor" - and the last mile, where a reseller takes the system back to
+ * hand it on to their own customer.
+ *
+ * toOrgId null means our queue. A reason is always required: a system landing
+ * in your queue with no explanation is worse than an email.
+ */
+export async function kickToQueue(
+  instrumentId: number, toOrgId: number | null, reason: string,
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!(await canSeeSystemSafe(u, instrumentId))) return { error: "Not found" };
+  if (!canKick(u, inst)) {
+    return {
+      error: inst.archived
+        ? "That system is archived"
+        : "Only the operator, whoever currently holds it, or the owner can move a system between queues",
+    };
+  }
+  if (inst.queueOrgId === toOrgId) {
+    return { error: toOrgId === null ? "It's already in our queue" : "It's already in that queue" };
+  }
+  // You can't park a system with an organization that can't see it - they'd get
+  // a notification about a record they can't open.
+  let to: typeof orgs.$inferSelect | undefined;
+  if (toOrgId !== null) {
+    [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
+    if (!to) return { error: "Unknown organization" };
+    const [share] = await db.select({ id: systemShares.id }).from(systemShares)
+      .where(and(eq(systemShares.instrumentId, instrumentId), eq(systemShares.orgId, toOrgId)));
+    if (!share) return { error: `${to.name} doesn't have access to ${inst.externalId} - share it with them first` };
+  }
+  const [from] = inst.queueOrgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, inst.queueOrgId));
+  const brand = await getBrand();
+  const fromName = from?.name ?? brand.operatorName;
+  const toName = to?.name ?? brand.operatorName;
+
+  await db.update(instruments)
+    .set({ queueOrgId: toOrgId, queueReason: why, queueSince: new Date() })
+    .where(eq(instruments.id, instrumentId));
+  await db.insert(queueEvents).values({
+    instrumentId, fromOrgId: inst.queueOrgId, toOrgId,
+    fromName, toName, reason: why, actor: u.email,
+  });
+  await audit({
+    actor: u.email, instrumentId, entityType: "queue", entityId: inst.externalId,
+    action: `moved ${inst.externalId} from ${fromName}'s queue to ${toName}'s - ${why}`,
+    field: "queue", oldValue: fromName, newValue: toName,
+  });
+
+  // Tell the side that now owns the next move. Landing in our own queue tells
+  // staff; landing in an org's queue tells that org's people.
+  const recipients = toOrgId === null
+    ? parseList(process.env.STAFF_EMAILS)
+    : (await db.select({ entry: clientAllowlist.entry }).from(clientAllowlist)
+        .where(eq(clientAllowlist.orgId, toOrgId)))
+        // An "@domain" entry names a domain, not a mailbox.
+        .map((a) => a.entry.trim()).filter((e) => e.includes("@") && !e.startsWith("@"));
+  const audience = recipients.filter((e) => e.toLowerCase() !== u.email.toLowerCase());
+  if (audience.length) {
+    await notifyQueueKick({
+      to: audience, externalId: inst.externalId, instrumentId,
+      fromName, toName, reason: why, stages: inst.stages,
+    });
+  }
   rev(instrumentId);
   return {};
 }

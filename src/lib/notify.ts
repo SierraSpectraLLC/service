@@ -210,6 +210,34 @@ export async function notifyAccessRequest(opts: {
 }
 
 /**
+ * A system has landed in your queue. This is the one notification that carries
+ * an expectation with it, so it leads with the reason: what the sender is
+ * waiting on is the only thing the recipient actually needs.
+ */
+export async function notifyQueueKick(opts: {
+  to: string[]; externalId: string; instrumentId: number;
+  fromName: string; toName: string; reason: string; stages: string[];
+}) {
+  try {
+    const url = appUrl();
+    const stage = opts.stages.length ? opts.stages[opts.stages.length - 1] : "";
+    await deliver({
+      to: opts.to, kind: "queue", href: `/instruments/${opts.instrumentId}`,
+      title: `${opts.externalId} is in ${opts.toName}'s queue: ${opts.reason}`,
+      subject: `${opts.externalId}: over to you - ${opts.reason}`,
+      html: await wrap(`<b>${esc(opts.fromName)}</b> moved <b>${esc(opts.externalId)}</b> into
+        <b>${esc(opts.toName)}</b>'s queue${stage ? ` (currently ${esc(stage)})` : ""}.
+        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.reason)}</div>
+        <div style="margin-top:8px;">Nothing is blocked at ${esc(opts.fromName)}'s end. Move it back whenever
+        it's theirs again - the record and the history stay exactly as they are.</div>
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] queue email failed:", (e as Error).message);
+  }
+}
+
+/**
  * A system changed hands. Both sides hear about it in one send - the new owner
  * because they now own it, the outgoing owner because their access just changed
  * and they should know a record was kept for them.

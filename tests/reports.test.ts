@@ -44,14 +44,38 @@ describe("shippedTurnaround", () => {
     ];
     const ev = (instrumentId: number, stage: string, kind: string, iso: string) =>
       ({ instrumentId, stage, kind, at: at(iso) });
-    const days = shippedTurnaround(insts, [
+    const rows = shippedTurnaround(insts, [
       ev(1, "Shipped", "add", "2026-07-11"),      // 40 days, in window
       ev(1, "Shipped", "add", "2026-08-01"),      // re-ship: ignored, first wins
       ev(1, "Shipped", "remove", "2026-07-20"),
       ev(2, "Shipped", "add", "2026-06-01"),      // before window: out
       ev(3, "Checkout", "add", "2026-07-05"),     // not a ship
     ], at("2026-07-01"));
-    expect(days).toEqual([40]);
+    expect(rows).toEqual([{ id: 1, gross: 40, parked: 0, net: 40 }]);
+  });
+
+  it("nets out days the system sat in someone else's queue", () => {
+    const insts = [{ id: 1, createdAt: at("2026-06-01") }];
+    const ship = [{ instrumentId: 1, stage: "Shipped", kind: "add", at: at("2026-07-11") }];
+    // Parked with the client for 10 of those 40 days, waiting on their tech.
+    const legs = new Map([[1, [
+      { toOrgId: 7, at: at("2026-06-10") },
+      { toOrgId: null, at: at("2026-06-20") },
+    ]]]);
+    expect(shippedTurnaround(insts, ship, at("2026-07-01"), legs))
+      .toEqual([{ id: 1, gross: 40, parked: 10, net: 30 }]);
+  });
+
+  it("never lets parked time exceed the gross span", () => {
+    const insts = [{ id: 1, createdAt: at("2026-07-05") }];
+    const ship = [{ instrumentId: 1, stage: "Shipped", kind: "add", at: at("2026-07-10") }];
+    // A queue move recorded before the system existed (imported history):
+    // clamped, so net can never go negative.
+    const legs = new Map([[1, [{ toOrgId: 7, at: at("2026-05-01") }]]]);
+    const [row] = shippedTurnaround(insts, ship, at("2026-07-01"), legs);
+    expect(row.gross).toBe(5);
+    expect(row.parked).toBe(5);
+    expect(row.net).toBe(0);
   });
 });
 

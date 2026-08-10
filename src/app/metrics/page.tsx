@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { asc, eq, gte } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, stageEvents, tasks, timeEntries, parts } from "@/db/schema";
+import { instruments, stageEvents, tasks, timeEntries, parts, queueEvents } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
@@ -45,8 +45,18 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   // ---- window reports (pure math in lib/reports) ----
   const pm = pmCompliance(pmTasks, windowStartIso, today, dayOf);
   const pmTotal = pm.onTime + pm.late + pm.openOverdue + pm.openNotDue;
-  const turnaround = shippedTurnaround(allInsts, events, windowStart);
-  const avgTurn = turnaround.length ? Math.round(turnaround.reduce((a, b) => a + b, 0) / turnaround.length) : 0;
+  // Queue moves, so turnaround can separate the days we could have shortened
+  // from the days a system sat in someone else's queue.
+  const queueLegs = new Map<number, { toOrgId: number | null; at: Date }[]>();
+  for (const q of await db.select({ instrumentId: queueEvents.instrumentId, toOrgId: queueEvents.toOrgId, at: queueEvents.at }).from(queueEvents)) {
+    const list = queueLegs.get(q.instrumentId);
+    if (list) list.push(q); else queueLegs.set(q.instrumentId, [q]);
+  }
+  const turnaround = shippedTurnaround(allInsts, events, windowStart, queueLegs);
+  const avg = (ns: number[]) => (ns.length ? Math.round(ns.reduce((a, b) => a + b, 0) / ns.length) : 0);
+  const avgTurn = avg(turnaround.map((t) => t.gross));
+  const avgNet = avg(turnaround.map((t) => t.net));
+  const parkedTotal = turnaround.reduce((n, t) => n + t.parked, 0);
   const clientOf = new Map(allInsts.map((i) => [i.id, i.client || "(no client)"]));
   const hoursByClient = [...minutesBy(
     timeRows.map((t) => ({ minutes: t.minutes, date: t.date, key: t.instrumentId !== null ? clientOf.get(t.instrumentId) ?? "(no client)" : "Shelf work" })),
@@ -126,7 +136,9 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Turnaround · systems shipped in the last {days} days</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Days from a system entering the shop to its first Shipped.
+          Days from a system entering the shop to its first Shipped. Days it spent in
+          another organization&apos;s queue are shown separately - the client waited for
+          them, but nobody here could have shortened them.
         </div>
         {turnaround.length === 0 ? (
           <div className="mut" style={{ fontSize: 13 }}>Nothing shipped in this window.</div>
@@ -134,7 +146,16 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           <div style={{ fontSize: 13 }}>
             <b>{avgTurn} day{avgTurn === 1 ? "" : "s"}</b>
             <span className="mut"> average across {turnaround.length} system{turnaround.length === 1 ? "" : "s"} · </span>
-            <span className="mut">fastest {Math.min(...turnaround)}d · slowest {Math.max(...turnaround)}d</span>
+            <span className="mut">
+              fastest {Math.min(...turnaround.map((t) => t.gross))}d · slowest {Math.max(...turnaround.map((t) => t.gross))}d
+            </span>
+            {parkedTotal > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <b style={{ color: "#085041" }}>{avgNet} day{avgNet === 1 ? "" : "s"}</b>
+                <span className="mut"> average on our side · {parkedTotal} day{parkedTotal === 1 ? "" : "s"} total
+                  spent in someone else&apos;s queue</span>
+              </div>
+            )}
           </div>
         )}
       </div>

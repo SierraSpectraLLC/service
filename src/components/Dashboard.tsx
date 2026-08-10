@@ -13,6 +13,9 @@ type Row = {
   id: number; externalId: string; client: string; category: string; label: string; priority: number; lead: string;
   stages: string[]; notes: string; openParts: number; gasIssues: string[];
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
+  // Whose move it is. Parked rows stay on the board but read as somebody
+  // else's, and "Ours to move" filters them away.
+  queueMine: boolean; queueWith: string; queueDays: number; queueReason: string;
 };
 
 const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
@@ -33,7 +36,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", lead: "" });
   const [pending, startTransition] = useTransition();
 
-  const FLAGS = ["Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention", ...(isStaff ? ["Not on sheet"] : [])];
+  const FLAGS = ["Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention", ...(isStaff ? ["Not on sheet"] : [])];
   const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
   const CATS = [...new Set(data.map((i) => i.category).filter(Boolean))].sort();
   const catKey = (c: string) => `cat:${c}`;
@@ -42,7 +45,9 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
 
   const matchesFlag = (i: Row, f: string) =>
-    f === "Overdue tasks" ? i.overdue > 0
+    f === "Ours to move" ? i.queueMine
+    : f === "With someone else" ? !i.queueMine
+    : f === "Overdue tasks" ? i.overdue > 0
     : f === "Awaiting parts" ? i.openParts > 0
     : f === "Gas attention" ? i.gasIssues.length > 0
     : f === "Asset attention" ? i.assetIssues.length > 0
@@ -64,10 +69,14 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       const s = q.toLowerCase();
       list = list.filter((i) =>
         [i.externalId, i.client, i.category, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "),
-          i.missingFromSheet ? "not on sheet" : "", i.lastActivity].join(" ").toLowerCase().includes(s)
+          i.missingFromSheet ? "not on sheet" : "", i.lastActivity,
+          i.queueMine ? "" : `with ${i.queueWith}`, i.queueReason].join(" ").toLowerCase().includes(s)
       );
     }
-    return list;
+    // Parked systems sink: they're not nothing, but they're not this week's
+    // work either, and the top of the board should be what we can move. A
+    // stable sort, so priority order survives inside each group.
+    return [...list].sort((a, b) => Number(b.queueMine) - Number(a.queueMine));
   }, [data, selected, q]);
 
   const counts = {
@@ -76,6 +85,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     waiting: data.filter((i) => i.openParts > 0).length,
     gas: data.filter((i) => i.gasIssues.length > 0).length,
     shipped: data.filter((i) => i.stages.includes("Shipped") || i.stages.includes("Waiting to ship")).length,
+    parked: data.filter((i) => !i.queueMine).length,
   };
 
   const submitNew = () => {
@@ -96,6 +106,9 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {([
           ["Total systems", counts.total, "var(--navy)"],
+          // Reads as "how much of the board isn't ours to move" - the number
+          // this whole axis exists to make visible.
+          ["With someone else", counts.parked, "#8A5410"],
           ["Waiting / blocked", counts.blocked, "#A32D2D"],
           ["Awaiting parts", counts.waiting, "#8A5410"],
           ["Gas attention", counts.gas, "#A33A1A"],
@@ -219,7 +232,12 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         </div>
         {filtered.map((i) => (
           <Link key={i.id} href={`/instruments/${i.id}`} className="grid-row row-hover"
-            style={{ padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none", color: "inherit" }}>
+            style={{
+              padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none",
+              color: "inherit",
+              // Parked rows read as somebody else's without being hidden.
+              ...(i.queueMine ? {} : { background: "#FCFAF5", borderLeft: "3px solid #E8C99B", paddingLeft: 11 }),
+            }}>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
             <span style={{ minWidth: 0 }}>
               <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.label || <span className="mut">No assets listed yet</span>}</span>
@@ -228,6 +246,12 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
                 {i.lead && <span style={{ color: "var(--navy)", fontWeight: 700 }}> · {i.lead}</span>}
                 {i.missingFromSheet && <span style={{ color: "#A32D2D", fontWeight: 700 }}> · not on sheet</span>}
               </span>
+              {!i.queueMine && (
+                <span style={{ display: "block", fontSize: 11, color: "#8A5410" }}>
+                  with <b>{i.queueWith}</b> {i.queueDays > 0 && `${i.queueDays}d`}
+                  {i.queueReason ? ` · ${i.queueReason}` : ""}
+                </span>
+              )}
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {i.stages.map((s) => (
@@ -235,6 +259,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               ))}
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {!i.queueMine && <Pill bg="#FAF0DC" fg="#8A5410">their move</Pill>}
               {i.missingFromSheet && <Pill bg="#FBE9E9" fg="#A32D2D">not on sheet</Pill>}
               {i.overdue > 0 && <Pill bg="#FBE9E9" fg="#A32D2D">{i.overdue} overdue</Pill>}
               {i.assetIssues.map((x) => (
@@ -244,7 +269,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               {i.gasIssues.map((g) => (
                 <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
               ))}
-              {!i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
+              {i.queueMine && !i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </Link>
         ))}

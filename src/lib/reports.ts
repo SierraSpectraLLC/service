@@ -2,6 +2,10 @@
 // discipline as stageAges - the queries live in the page, the arithmetic lives
 // here where it can be pinned down by tests, because a wrong report quietly
 // misinforms every decision made off it.
+//
+// The one exception to "no imports": turnaround has to know when the ball
+// wasn't in the shop's court, and that rule lives in lib/queue (also pure).
+import { parkedDaysBefore, type QueueLeg } from "@/lib/queue";
 
 export type PmTaskRow = {
   origin: string;
@@ -40,27 +44,46 @@ export function pmCompliance(
 
 export type ShipEvent = { instrumentId: number; stage: string; kind: string; at: Date };
 
+export type TurnaroundRow = {
+  id: number;
+  /** Creation to first ship, wall-clock. */
+  gross: number;
+  /** Of that, days the system sat in someone else's queue. */
+  parked: number;
+  /** gross - parked: the part the shop could actually have shortened. */
+  net: number;
+};
+
 /**
  * Days from a system's creation to its FIRST "Shipped", for systems shipped
  * inside the window. Creation → shipped is the whole-engagement turnaround;
  * per-stage detail stays with completedDurations.
+ *
+ * Reported gross AND net of time parked in another organization's queue,
+ * because those are answers to different questions: gross is what the client
+ * waited, net is what the shop is answerable for. Reporting only gross would
+ * charge the operator for a client's three-week nitrogen contractor.
  */
 export function shippedTurnaround(
   insts: { id: number; createdAt: Date }[],
   events: ShipEvent[],
   windowStart: Date,
-): number[] {
+  /** Queue moves per system id; omit for gross-only (parked comes back 0). */
+  queueLegs?: Map<number, QueueLeg[]>,
+): TurnaroundRow[] {
   const firstShip = new Map<number, Date>();
   for (const e of events) {
     if (e.stage !== "Shipped" || e.kind !== "add") continue;
     const seen = firstShip.get(e.instrumentId);
     if (!seen || e.at < seen) firstShip.set(e.instrumentId, e.at);
   }
-  const out: number[] = [];
+  const out: TurnaroundRow[] = [];
   for (const i of insts) {
     const shipped = firstShip.get(i.id);
     if (!shipped || shipped < windowStart) continue;
-    out.push(Math.max(0, Math.round((shipped.getTime() - i.createdAt.getTime()) / 86400000)));
+    const gross = Math.max(0, Math.round((shipped.getTime() - i.createdAt.getTime()) / 86400000));
+    const parked = Math.min(gross, parkedDaysBefore(queueLegs?.get(i.id) ?? [], shipped));
+    out.push({ id: i.id, gross, parked, net: gross - parked });
   }
   return out;
 }
