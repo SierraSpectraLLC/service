@@ -68,11 +68,19 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    Columns are declared once as --reg-cols so the header and every row align. */
 .reg { --reg-cols: 12px minmax(150px, 1.6fr) minmax(110px, 1.1fr) minmax(100px, 1fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 112px; }
 .reg.selectable { --reg-cols: 18px 12px minmax(150px, 1.6fr) minmax(110px, 1.1fr) minmax(100px, 1fr) minmax(90px, 1fr) minmax(130px, 1.4fr) 112px; }
+/* Zebra striping, with the stripe assigned in the component rather than by
+   nth-child: rows sit alongside their group heading, so counting siblings would
+   put the stripe on the wrong row and break again the next time the markup
+   moves. Kept faint enough that the hover tint still reads on top of it. */
 .reg-row {
   display: grid; grid-template-columns: var(--reg-cols);
-  gap: 12px; align-items: center; padding: 7px 6px;
+  gap: 12px; align-items: center; padding: 8px 6px;
   border-top: 1px solid var(--line);
 }
+.reg-row.alt { background: #F7F9FC; }
+/* Hover has to win over the stripe, so it's stated after it and matched with
+   equal specificity. */
+.reg-row.row-hover:hover, .reg-row.alt.row-hover:hover { background: #EDF3FA; }
 .reg-head {
   display: grid; grid-template-columns: var(--reg-cols);
   gap: 12px; align-items: end; padding: 8px 6px 6px;
@@ -82,11 +90,17 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   /* A few hundred units scroll a long way past their column names. */
   position: sticky; top: 0; z-index: 2; background: var(--card);
 }
+/* A group heading IS a title, so it carries the title weight - and a rule under
+   it, which works here because unlike a card title it owns its whole row. */
 .reg-group {
   display: flex; align-items: baseline; gap: 8px;
-  padding: 14px 6px 4px; border-bottom: 1px solid var(--line);
+  padding: 20px 6px 5px; border-bottom: 2px solid var(--navy);
 }
-.reg-group:first-of-type { padding-top: 8px; }
+.reg-group-name { font-weight: 800; font-size: 15px; letter-spacing: -0.2px; color: var(--navy); }
+.reg-group-count {
+  font-size: 11px; font-weight: 700; color: var(--mut);
+  background: #EEF1F5; border-radius: 999px; padding: 2px 8px;
+}
 .reg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Narrow: back to the flowing row, which was never the problem. */
@@ -96,7 +110,13 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .reg-cell { white-space: normal; }
 }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-.card-title { font-weight: 700; font-size: 14px; color: var(--navy); }
+/* Section titles used to sit at 14px/700 - the same weight as a bold value
+   inside the card, so they read as emphasis rather than as headings. Bigger,
+   heavier and slightly tighter separates "what this section is" from "something
+   important in it". Most titles share a flex row with buttons or pills, so this
+   is typographic only: a rule under the element would underline just the words
+   and float beside whatever sits next to it. */
+.card-title { font-weight: 800; font-size: 16px; line-height: 1.25; letter-spacing: -0.2px; color: var(--navy); }
 .spectrum { height: 4px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }
 .pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
 .btn {
@@ -121,6 +141,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .dash-form { border: 1px dashed var(--sky); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: #F7FBFE; }
 
 .grid-row { display: grid; grid-template-columns: 76px minmax(0,2.2fr) minmax(0,1.4fr) minmax(64px,auto); gap: 10px; align-items: center; }
+/* Same striping as the asset registry - the dashboard is the app's other long
+   table, and one of them banded while the other didn't would be worse than
+   neither. A row with its own state (parked with a client) keeps that tint:
+   meaning outranks rhythm. */
+.grid-row.alt { background: #F7F9FC; }
+.grid-row.row-hover:hover, .grid-row.alt.row-hover:hover { background: #EDF3FA; }
 .metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .pf2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pf3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }

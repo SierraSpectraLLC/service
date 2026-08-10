@@ -230,8 +230,8 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         <div className="grid-row eyebrow" style={{ padding: "9px 14px", borderBottom: "1px solid var(--line)" }}>
           <span>ID</span><span>System</span><span className="hide-m">Stages</span><span className="hide-m">Parts / gas</span>
         </div>
-        {filtered.map((i) => (
-          <Link key={i.id} href={`/instruments/${i.id}`} className="grid-row row-hover"
+        {filtered.map((i, n) => (
+          <Link key={i.id} href={`/instruments/${i.id}`} className={`grid-row row-hover${n % 2 ? " alt" : ""}`}
             style={{
               padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none",
               color: "inherit",

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import { removeAssets } from "@/app/actions";
@@ -37,6 +38,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
   rows: RegistryRow[];
   canSelect: boolean;
 }) {
+  const router = useRouter();
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
@@ -154,15 +156,27 @@ export default function AssetRegistryList({ rows, canSelect }: {
                   aria-label={`Select all ${list.length} ${kind}`}
                   style={{ width: 15, height: 15, flexShrink: 0 }} />
               )}
-              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{kind}</span>
-              <span style={mut}>{list.length}</span>
+              <span className="reg-group-name">{kind}</span>
+              <span className="reg-group-count">{list.length}</span>
             </div>
 
-            {list.map((a) => {
+            {list.map((a, i) => {
               const on = picked.has(a.id);
               const isDupe = visibleDupes.includes(a.id);
               return (
-                <div key={a.id} className="reg-row row-hover" style={on ? { background: "#FDF4F4" } : undefined}>
+                // The stripe is assigned here, not by nth-child: rows are
+                // siblings of their group heading, so counting children would
+                // land it on the wrong row. Selection beats both stripe and
+                // hover, which is the right precedence.
+                <div key={a.id} className={`reg-row row-hover${i % 2 ? " alt" : ""}`}
+                  style={on ? { background: "#FDF4F4" } : undefined}
+                  // The row is a div now (it holds a checkbox), but it still
+                  // hover-highlights, so it has to actually be clickable -
+                  // except on the controls inside it, which own their clicks.
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("input, a, button")) return;
+                    router.push(`/assets/${a.id}`);
+                  }}>
                   {canSelect && (
                     <input type="checkbox" checked={on} onChange={() => toggle(a.id)} disabled={pending}
                       aria-label={`Select ${a.kind} ${a.model}${a.serial ? ` SN ${a.serial}` : ""}`}
