@@ -326,6 +326,18 @@ CREATE TABLE IF NOT EXISTS "vocab_terms" (
   "categories" text[] NOT NULL DEFAULT '{}',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "part_prices" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "part_number" text NOT NULL,
+  "vendor" text NOT NULL,
+  "is_oem" boolean NOT NULL DEFAULT false,
+  "price_cents" integer NOT NULL,
+  "url" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "updated_by" text NOT NULL DEFAULT '',
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "checkout_items" (
   "id" serial PRIMARY KEY NOT NULL,
   "asset_type" text NOT NULL,
@@ -522,6 +534,11 @@ CREATE INDEX IF NOT EXISTS "discussion_instrument_idx" ON "discussion_posts" ("i
 CREATE INDEX IF NOT EXISTS "discussion_created_idx" ON "discussion_posts" ("created_at");
 CREATE INDEX IF NOT EXISTS "template_items_task_idx" ON "template_items" ("template_task_id");
 
+-- One price per (PN, vendor) pair regardless of how either was capitalized.
+-- Lives here alone: drizzle's pgTable can't declare expression indexes, so the
+-- app enforces the same rule with a select-then-write (see addPartPrices) and
+-- this index backstops races.
+CREATE UNIQUE INDEX IF NOT EXISTS "part_prices_pn_vendor" ON "part_prices" (lower("part_number"), lower("vendor"));
 CREATE INDEX IF NOT EXISTS "system_shares_org_idx" ON "system_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "engagement_records_org_idx" ON "engagement_records" ("org_id");
 CREATE INDEX IF NOT EXISTS "asset_shares_org_idx" ON "asset_shares" ("org_id");

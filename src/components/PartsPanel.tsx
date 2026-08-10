@@ -5,6 +5,8 @@ import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import { createPart, updatePart, setPartStatus, setPartAsset, deletePart, type WorkTarget } from "@/app/actions";
+import { pricesFor, type PriceEntry } from "@/lib/priceBook";
+import { formatCents, centsToInput } from "@/lib/money";
 
 type Part = {
   id: number; kind: string; assetId: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
@@ -51,11 +53,13 @@ const empty = { kind: "part", assetId: null as number | null, name: "", partNumb
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [] }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
   // Cost and PO are the owner's business data: hidden (and blanked by the
   // server before they get here) for providers and other non-owner orgs.
   showCosts: boolean;
+  // House price book entries; the server only sends these alongside showCosts.
+  priceBook?: PriceEntry[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -136,6 +140,27 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Restek" /></div>
             <div><label>Qty</label><input value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="1" /></div>
           </div>
+          {showCosts && (() => {
+            // Known offers for the PN as typed - tap one to fill vendor + cost.
+            const offers = pricesFor(priceBook, draft.partNumber);
+            if (!offers.length) return null;
+            return (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                <span className="mut" style={{ fontSize: 11 }}>Price book:</span>
+                {offers.map((o, i) => (
+                  <button key={`${o.vendor}-${i}`} className="pill" type="button"
+                    onClick={() => setDraft({ ...draft, vendor: o.vendor, cost: centsToInput(o.priceCents) })}
+                    style={{
+                      border: "none", cursor: "pointer",
+                      background: draft.vendor === o.vendor ? "var(--navy)" : "#EEF1F5",
+                      color: draft.vendor === o.vendor ? "#fff" : "#475569",
+                    }}>
+                    {o.vendor} {formatCents(o.priceCents)}{o.isOem ? " · OEM" : ""}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
           {systemAssets.length > 0 ? (
             <div style={{ marginBottom: 8 }}>
               <label>For asset</label>

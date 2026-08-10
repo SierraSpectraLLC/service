@@ -615,6 +615,31 @@ export const vocabTerms = pgTable("vocab_terms", {
   // to apply to several system types, not a row per type.
 }, (t) => [unique("vocab_term_unique").on(t.kind, t.assetType, t.name)]);
 
+// The house price book: what a part number costs from each vendor who sells
+// it. One row per (PN, vendor) pair - the OEM's price and every third-party
+// price sit side by side, so "request part" can pick the cheapest and an
+// engineer filling in a part form sees what the shop last paid. House-curated
+// like the catalog; prices are staff data and only ever shown where costs
+// already are (lib/redact governs the read side).
+//
+// Case-insensitive uniqueness on (part_number, vendor) is an expression index
+// in drizzle/schema-sync.sql ("part_prices_pn_vendor") - drizzle's pgTable
+// can't declare lower() indexes, so the mirror carries it alone.
+export const partPrices = pgTable("part_prices", {
+  id: serial("id").primaryKey(),
+  partNumber: text("part_number").notNull(),
+  vendor: text("vendor").notNull(),
+  // The maker's own listing vs a third party. Breaks price ties in the OEM's
+  // favor - at the same price, provenance wins.
+  isOem: boolean("is_oem").notNull().default(false),
+  priceCents: integer("price_cents").notNull(),
+  url: text("url").notNull().default(""),   // where to order it
+  note: text("note").notNull().default(""), // "min order 5", "6wk lead time"
+  updatedBy: text("updated_by").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it
 // except the older checkout_rules seed migration that fills it.

@@ -1,10 +1,11 @@
 import { asc } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { assets, instruments, vocabTerms } from "@/db/schema";
+import { assets, instruments, partPrices, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
+import PriceBookCard from "@/components/PriceBookCard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,11 +19,15 @@ export default async function CatalogPage() {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
 
-  const [terms, assetRows, systemRows] = await Promise.all([
+  const [terms, assetRows, systemRows, priceRows] = await Promise.all([
     db.select().from(vocabTerms).orderBy(asc(vocabTerms.assetType), asc(vocabTerms.name)),
     // Usage counts, so removing something can say what it would leave behind.
     db.select({ kind: assets.kind, model: assets.model }).from(assets),
     db.select({ category: instruments.category }).from(instruments),
+    db.select({
+      id: partPrices.id, partNumber: partPrices.partNumber, vendor: partPrices.vendor,
+      isOem: partPrices.isOem, priceCents: partPrices.priceCents, url: partPrices.url, note: partPrices.note,
+    }).from(partPrices).orderBy(asc(partPrices.partNumber), asc(partPrices.vendor)),
   ]);
 
   const defined = terms.filter((t) => t.kind === "category");
@@ -69,6 +74,7 @@ export default async function CatalogPage() {
     <div className="container page">
       <SettingsTabs active="catalog" isOwner={user.role === "owner"} />
       <CatalogForm categories={categories} models={models} types={types} />
+      <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
     </div>
   );
 }

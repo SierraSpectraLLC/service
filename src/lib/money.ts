@@ -13,6 +13,19 @@ export function parseMoney(input: string): number | null {
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
+/**
+ * Cents back into the shape someone would have typed into a cost field -
+ * no "$", commas kept, ".00" dropped. Round-trips through parseMoney, so a
+ * value the server fills in (price-book autofill) re-parses to the same cents
+ * on the next edit.
+ */
+export function centsToInput(cents: number): string {
+  return (cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export function formatCents(cents: number): string {
   const dollars = cents / 100;
   return dollars.toLocaleString("en-US", {

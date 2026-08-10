@@ -10,7 +10,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
-  engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs,
+  engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
@@ -31,7 +31,8 @@ import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
-import { parseMoney } from "@/lib/money";
+import { parseMoney, centsToInput, formatCents } from "@/lib/money";
+import { bestPrice } from "@/lib/priceBook";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
@@ -1083,13 +1084,23 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
     return { error: `PN ${want.number} is already requested and not yet installed` };
   }
   const name = want.name || s.title;
+  // Best offer from the house price book, if anyone prices this PN. Filling
+  // cost/vendor here doesn't breach the "editors who can't see costs can't
+  // write them" rule: the numbers are server-derived staff data, not caller
+  // input, and lib/redact still governs who sees them on the way back out.
+  const book = await db.select().from(partPrices);
+  const best = bestPrice(book, want.number);
   const [p] = await db.insert(parts).values({
     instrumentId, assetId: s.assetId, name, partNumber: want.number,
     qty: "1", status: "Needed", note: `for maintenance '${s.title}'`,
+    ...(best ? { vendor: best.vendor, cost: centsToInput(best.priceCents), costCents: best.priceCents } : {}),
   }).returning();
   await audit({
     actor: u.email, instrumentId, assetId: s.assetId, entityType: "part", entityId: p.id,
-    action: `requested part '${name}' (PN ${want.number}) for maintenance '${s.title}'`,
+    // No price in the audit line: activity feeds are visible to every org on
+    // a shared system, and cost never appears where lib/redact would blank it.
+    action: `requested part '${name}' (PN ${want.number}) for maintenance '${s.title}'`
+      + (best ? ` - from ${best.vendor}${best.isOem ? " (OEM)" : ""} per the price book` : ""),
   });
   revWork(p);
   return {};
@@ -3365,6 +3376,90 @@ export async function addVocabTerms(
     else created++;
   }
   return { created, failures };
+}
+
+// ── Price book ──────────────────────────────────────────────────────────────
+
+export type PartPriceInput = {
+  partNumber: string; vendor: string; price: string; isOem?: boolean; url?: string; note?: string;
+};
+
+/** One row, validated and case-insensitively matched against what's on file. */
+async function cleanPriceRow(r: PartPriceInput): Promise<
+  | { ok: false; error: string }
+  | { ok: true; pn: string; vendor: string; cents: number; isOem: boolean; url: string; note: string;
+      existing: typeof partPrices.$inferSelect | undefined }
+> {
+  const pn = r.partNumber.trim().slice(0, 80);
+  const vendor = r.vendor.trim().slice(0, 80);
+  if (!pn || !vendor) return { ok: false, error: "Part number and vendor are both required" };
+  const cents = parseMoney(r.price);
+  if (cents === null) return { ok: false, error: `"${r.price.trim() || "(blank)"}" isn't a price - use a number like 129.95` };
+  const [existing] = await db.select().from(partPrices).where(and(
+    sql`lower(${partPrices.partNumber}) = ${pn.toLowerCase()}`,
+    sql`lower(${partPrices.vendor}) = ${vendor.toLowerCase()}`,
+  ));
+  return { ok: true, pn, vendor, cents, isOem: !!r.isOem, url: (r.url ?? "").trim().slice(0, 300), note: (r.note ?? "").trim().slice(0, 200), existing };
+}
+
+/**
+ * The price book's write path, spreadsheet-shaped like the rest of the
+ * catalog. A (PN, vendor) pair that's already on file gets its price updated
+ * rather than erroring - re-pasting last quarter's sheet with new numbers is
+ * exactly how this will be maintained. Select-then-write rather than an
+ * ON CONFLICT clause because the uniqueness lives in an expression index
+ * (lower/lower) the ORM can't target; the index still backstops races.
+ */
+export async function addPartPrices(
+  rows: PartPriceInput[],
+): Promise<{ error?: string; created?: number; updated?: number; failures?: { row: number; name: string; error: string }[] }> {
+  const u = await requireStaff();
+  const usable = rows.filter((r) => r.partNumber.trim() || r.vendor.trim() || r.price.trim());
+  if (!usable.length) return { error: "Nothing to save" };
+  if (usable.length > 300) return { error: "Save 300 rows at a time" };
+  const failures: { row: number; name: string; error: string }[] = [];
+  let created = 0, updated = 0;
+  for (let i = 0; i < usable.length; i++) {
+    const row = await cleanPriceRow(usable[i]);
+    if (!row.ok) { failures.push({ row: i + 1, name: usable[i].partNumber.trim() || "(no PN)", error: row.error }); continue; }
+    const { pn, vendor, cents, isOem, url, note, existing } = row;
+    if (existing) {
+      await db.update(partPrices).set({ priceCents: cents, isOem, url, note, updatedBy: u.email, updatedAt: new Date() })
+        .where(eq(partPrices.id, existing.id));
+      if (existing.priceCents !== cents) {
+        await audit({
+          actor: u.email, entityType: "price", entityId: existing.id,
+          action: `re-priced PN ${pn} at ${vendor}: ${formatCents(existing.priceCents)} -> ${formatCents(cents)}`,
+          field: "price_cents", oldValue: String(existing.priceCents), newValue: String(cents),
+        });
+      }
+      updated++;
+    } else {
+      const [p] = await db.insert(partPrices).values({
+        partNumber: pn, vendor, priceCents: cents, isOem, url, note, updatedBy: u.email,
+      }).returning();
+      await audit({
+        actor: u.email, entityType: "price", entityId: p.id,
+        action: `priced PN ${pn} at ${formatCents(cents)} from ${vendor}${isOem ? " (OEM)" : ""}`,
+      });
+      created++;
+    }
+  }
+  revalidatePath("/settings/catalog");
+  return { created, updated, failures };
+}
+
+export async function deletePartPrice(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [p] = await db.select().from(partPrices).where(eq(partPrices.id, id));
+  if (!p) return {};
+  await db.delete(partPrices).where(eq(partPrices.id, id));
+  await audit({
+    actor: u.email, entityType: "price", entityId: id,
+    action: `removed ${p.vendor}'s price for PN ${p.partNumber} (${formatCents(p.priceCents)})`,
+  });
+  revalidatePath("/settings/catalog");
+  return {};
 }
 
 /** Who makes a model. Blank is honest for kit whose maker nobody recorded. */

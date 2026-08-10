@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs, eodUpdates,
-  pmSchedules, vocabTerms, procedures,
+  pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
@@ -105,6 +105,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];
   const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId);
+  // Vendor offers for the part form - only sent to viewers who can see costs.
+  const priceBook = showCosts
+    ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
+    : [];
   // Today's client-facing update for this unit, picked up by the EOD page.
   const modules = await getModules();
   const ownerIsViewer = asset.ownerOrgId !== null && asset.ownerOrgId === user.orgId;
@@ -212,7 +216,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <PartsPanel target={target} parts={redactParts(taggedParts, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-        systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} />
+        systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
 
       <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         evidenceTasks={evidenceTasks}

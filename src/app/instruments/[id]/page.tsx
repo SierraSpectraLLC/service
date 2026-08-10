@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  pmSchedules, procedures, signoffs, timeEntries,
+  pmSchedules, procedures, signoffs, timeEntries, partPrices,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -84,11 +84,20 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     (gridModels[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
   }
 
+  const showCosts = canSeeCosts(user, inst.ownerOrgId);
+
   // Labor on this system, newest first. Work tagged to an installed asset
   // carries instrumentId too (resolveTarget), so one filter catches it all.
-  const timeRows = await db.select().from(timeEntries)
-    .where(eq(timeEntries.instrumentId, instId))
-    .orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(100);
+  // The price book rides along only for viewers who can see costs at all -
+  // it never reaches a browser that lib/redact would blank.
+  const [timeRows, priceBook] = await Promise.all([
+    db.select().from(timeEntries)
+      .where(eq(timeEntries.instrumentId, instId))
+      .orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(100),
+    showCosts
+      ? db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
+      : Promise.resolve([]),
+  ]);
 
   // The system's own schedules plus those living on its installed assets - a
   // pump's seal job shows up wherever the pump currently works.
@@ -247,9 +256,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       />
 
       <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
-        parts={redactParts(partRows, canSeeCosts(user, inst.ownerOrgId)).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+        parts={redactParts(partRows, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
-        canEdit={canEdit} isStaff={isStaff} showCosts={canSeeCosts(user, inst.ownerOrgId)} />
+        canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
 
       <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
