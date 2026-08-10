@@ -4,7 +4,7 @@ import { getBrand } from "@/lib/brand";
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ sent?: string }> }) {
   const [{ sent }, brand] = await Promise.all([searchParams, getBrand()]);
   return (
-    <div className="container" style={{ maxWidth: 420, paddingTop: 60 }}>
+    <div className="container form" style={{ paddingTop: 60 }}>
       <div className="card">
         <div style={{ fontWeight: 700, fontSize: 16, color: "var(--navy)", marginBottom: 4 }}>Sign in to {brand.name}</div>
         {sent ? (

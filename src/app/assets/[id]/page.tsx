@@ -138,7 +138,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   );
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link href="/assets" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← Assets

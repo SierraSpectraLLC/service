@@ -46,7 +46,7 @@ export default async function MetricsPage() {
     .filter((x): x is { stage: string; avg: number; n: number } => x !== null);
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Time in stage</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>

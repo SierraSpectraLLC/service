@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="container">
+    <div className="container page">
       <div className="skeleton" style={{ width: 110, height: 13, marginBottom: 12 }} />
       <div className="card">
         <div className="skeleton" style={{ width: 180, height: 12 }} />

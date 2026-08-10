@@ -24,7 +24,13 @@ input, select, textarea {
 }
 label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); margin-bottom: 3px; }
 
+/* Page widths are a fixed set, not a per-page guess - blocks lined up
+   differently on every route before this existed. Forms and records share one
+   column width; only genuine data grids go wide. */
 .container { max-width: 960px; margin: 0 auto; padding: 16px; }
+.container.page { max-width: 760px; }   /* records, lists, settings, packets */
+.container.wide { max-width: 1080px; }  /* multi-column grids: import, EOD, parity */
+.container.form { max-width: 420px; }   /* sign-in */
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
 .card-title { font-weight: 700; font-size: 14px; color: var(--navy); }
 .spectrum { height: 4px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }

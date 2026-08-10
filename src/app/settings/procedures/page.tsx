@@ -33,7 +33,7 @@ export default async function ProceduresPage() {
   }
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <SettingsTabs active="procedures" isOwner={user.role === "owner"} />
       <ProceduresPanel
         assetTypes={assetTypes}

@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import SettingsTabs from "@/components/SettingsTabs";
@@ -47,7 +47,7 @@ export default async function AdminSettingsPage() {
   }
 
   return (
-    <div className="container">
+    <div className="container page">
       <SettingsTabs active="admin" />
 
       <div className="card">
@@ -80,7 +80,7 @@ export default async function AdminSettingsPage() {
 
       {rows.map((inst) => {
         const shares = shareRows.filter((s) => s.instrumentId === inst.id);
-        const label = composeSystemLabel(assetRows.filter((a) => a.instrumentId === inst.id), inst.model);
+        const label = systemLabel(inst, assetRows.filter((a) => a.instrumentId === inst.id));
         const records = recordRows.filter((r) => r.instrumentId === inst.id);
         return (
           <div className="card" key={inst.id}>

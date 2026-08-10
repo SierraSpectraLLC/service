@@ -14,6 +14,8 @@ const FIELDS = [
   ["model", "Model"],
   ["serial", "Serial"],
   ["manufacturer", "Manufacturer"],
+  ["owner", "Owner"],
+  ["asFound", "As found"],
   ["note", "Note"],
 ] as const;
 type FieldKey = (typeof FIELDS)[number][0];
@@ -22,6 +24,9 @@ type FieldKey = (typeof FIELDS)[number][0];
 function guessField(header: string): FieldKey {
   const h = header.toLowerCase();
   if (/system|instrument.*id|^id$|asset.*tag/.test(h)) return "systemId";
+  // "Owner" alone is the asset's owner; "client" wording stays the system's.
+  if (/^owner/.test(h)) return "owner";
+  if (/as.?found|condition/.test(h)) return "asFound";
   if (/client|owner|customer|site/.test(h)) return "client";
   if (/categor/.test(h)) return "category";
   if (/location|room|bench|building/.test(h)) return "location";
@@ -56,7 +61,7 @@ export default function ImportPanel() {
 
   const toRows = (): ImportRow[] =>
     body.map((cells) => {
-      const r: ImportRow = { systemId: "", client: "", category: "", location: "", kind: "", model: "", serial: "", manufacturer: "", note: "" };
+      const r: ImportRow = { systemId: "", client: "", category: "", location: "", kind: "", model: "", serial: "", manufacturer: "", note: "", owner: "", asFound: "" };
       mapping.forEach((f, i) => { if (f) r[f] = (r[f] ? r[f] + " " : "") + (cells[i] ?? "").trim(); });
       return r;
     });
@@ -88,7 +93,7 @@ export default function ImportPanel() {
             onChange={async (e) => { const f = e.target.files?.[0]; if (f) load(await f.text()); }} />
           <button className="btn sm accent" onClick={() => fileRef.current?.click()}>Choose CSV file</button>
           <a className="btn link" href={"data:text/csv;charset=utf-8," + encodeURIComponent(
-            "System ID,Client,Category,Location,Asset type,Model,Serial,Manufacturer,Note\r\nT-001,Acme Labs,LC-MS,Bench 3,Mass spec,LCMS-8050,SN12345,Shimadzu,\r\nT-001,Acme Labs,LC-MS,Bench 3,Pump,LC-40D,SN12346,Shimadzu,\r\n,,,Warehouse,Autosampler,SIL-40C,SN99001,Shimadzu,spare on the shelf\r\n"
+            "System ID,Client,Category,Location,Asset type,Model,Serial,Manufacturer,Owner,As found,Note\r\nT-001,Acme Labs,LC-MS,Bench 3,Mass spec,LCMS-8050,SN12345,Shimadzu,Acme Labs,,\r\nT-001,Acme Labs,LC-MS,Bench 3,Pump,LC-40D,SN12346,Shimadzu,Acme Labs,leaking seal,\r\n,,,Warehouse,Autosampler,SIL-40C,SN99001,Shimadzu,Acme Labs,,spare on the shelf\r\n"
           )} download="import-template.csv">download the template</a>
         </div>
       )}

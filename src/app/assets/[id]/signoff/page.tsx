@@ -87,7 +87,7 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
   const relevantParts = partRows.filter((p) => p.status === "Installed" || p.status === "Received" || p.status === "Removed");
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <Link href={`/assets/${asset.id}`} className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← Back to the asset

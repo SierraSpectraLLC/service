@@ -1,6 +1,6 @@
 export default function Loading() {
   return (
-    <div className="container">
+    <div className="container page">
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {[0, 1, 2, 3, 4].map((i) => (
           <div key={i} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, assets, tasks, parts, attachments } from "@/db/schema";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { getBrand } from "@/lib/brand";
 import { shopMonthDay } from "@/lib/shopday";
 
@@ -52,7 +52,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
   // anything; the procurement pipeline is internal.
   const fitted = partRows.filter((p) => p.status === "Installed" || p.status === "Removed");
   const label = inst
-    ? composeSystemLabel(assetRows, inst.model)
+    ? systemLabel(inst, assetRows)
     : `${soloAsset.kind}${soloAsset.model ? ` — ${soloAsset.model}` : ""}`;
   const category = inst?.category ?? "";
   const saleNote = inst?.saleNote ?? soloAsset?.saleNote ?? "";
@@ -60,7 +60,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
   // The root layout already draws the platform header (it renders for
   // anonymous viewers too), so this page starts straight at the listing.
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="mut" style={{ fontSize: 12, padding: "2px 2px 8px" }}>Instrument listing</div>
 
       <div className="card">

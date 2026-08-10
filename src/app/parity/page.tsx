@@ -15,7 +15,7 @@ export default async function ParityPage() {
   const diffs = await db.select().from(sheetDiffs).orderBy(asc(sheetDiffs.resolved), desc(sheetDiffs.runAt)).limit(100);
   const openCount = diffs.filter((d) => !d.resolved).length;
   return (
-    <div className="container">
+    <div className="container wide">
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: "var(--navy)" }}>Google Sheet parity</div>

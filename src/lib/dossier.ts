@@ -8,7 +8,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, taskNotes, itemNotes,
   parts, attachments, auditLog, discussionPosts, assets,
 } from "@/db/schema";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 
 export type SystemDossier = {
@@ -79,7 +79,7 @@ export async function composeSystemDossier(instrumentId: number, forOrgId: numbe
       externalId: inst.externalId, client: inst.client, category: inst.category,
       location: inst.location, lead: inst.lead, notes: inst.notes, stages: inst.stages,
     },
-    label: composeSystemLabel(assetRows, inst.model),
+    label: systemLabel(inst, assetRows),
     assets: assetRows.map((a) => ({
       kind: a.kind, model: a.model, serial: a.serial, manufacturer: a.manufacturer,
       status: a.status, asFound: a.asFound, note: a.note,

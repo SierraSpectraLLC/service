@@ -2,10 +2,14 @@ import { inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { assets } from "@/db/schema";
 
-// A system is a collection of assets, so its name is composed from them:
-// "LCMS-8050 + LC-40 + SIL-40". Systems recorded before assets were tracked
-// fall back to the description they were created/imported with, so nothing
-// goes blank while the shop fills the catalog in.
+// What a system is called, in priority order:
+//   1. the name someone chose for it (instruments.name) - always wins;
+//   2. composed from its assets: "LCMS-8050 + LC-40 + SIL-40";
+//   3. the legacy description it was created or imported with.
+//
+// Composing is right for a two-box system and useless once seven LC modules add
+// up to a paragraph, which is why a chosen name overrides rather than seeds it:
+// nothing you type is ever recomputed away.
 
 export type LabelAsset = { kind: string; model: string; sortOrder?: number };
 
@@ -26,9 +30,11 @@ export function composeSystemLabel(assetList: LabelAsset[], legacy = ""): string
 
 /**
  * Labels for a batch of systems in one query. Pass the instrument rows you
- * already have - `model` is used only as the pre-asset fallback.
+ * already have; `name` wins when set and `model` is the pre-asset fallback.
+ * Rows without a `name` field still work - older call sites just get the
+ * composed label.
  */
-export async function getSystemLabels(rows: { id: number; model: string }[]): Promise<Map<number, string>> {
+export async function getSystemLabels(rows: { id: number; model: string; name?: string }[]): Promise<Map<number, string>> {
   const ids = rows.map((r) => r.id);
   const assetRows = ids.length
     ? await db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, sortOrder: assets.sortOrder })
@@ -36,7 +42,14 @@ export async function getSystemLabels(rows: { id: number; model: string }[]): Pr
     : [];
   const out = new Map<number, string>();
   for (const r of rows) {
-    out.set(r.id, composeSystemLabel(assetRows.filter((a) => a.instrumentId === r.id), r.model));
+    const chosen = (r.name ?? "").trim();
+    out.set(r.id, chosen || composeSystemLabel(assetRows.filter((a) => a.instrumentId === r.id), r.model));
   }
   return out;
 }
+
+/** One system's label: the chosen name if there is one, else composed. */
+export const systemLabel = (
+  inst: { name?: string; model: string },
+  assetList: LabelAsset[],
+): string => (inst.name ?? "").trim() || composeSystemLabel(assetList, inst.model);

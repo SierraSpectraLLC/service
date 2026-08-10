@@ -12,7 +12,7 @@ export default async function ImportPage() {
   if (user.role === "client_viewer") redirect("/");
 
   return (
-    <div className="container" style={{ maxWidth: 860 }}>
+    <div className="container wide">
       <div style={{ marginBottom: 10 }}>
         <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Dashboard</Link>
       </div>

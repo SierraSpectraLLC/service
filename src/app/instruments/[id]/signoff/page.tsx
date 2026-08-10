@@ -4,7 +4,7 @@ import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, tasks, checklistItems, parts, attachments, assets, procedures, signoffs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
 import { getBrand } from "@/lib/brand";
@@ -87,7 +87,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const relevantParts = partRows.filter((p) => p.status === "Installed" || p.status === "Received" || p.status === "Removed");
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <Link href={`/instruments/${inst.id}`} className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← Back to {inst.externalId}
@@ -113,7 +113,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
 
         <Row label="System ID" value={inst.externalId} />
         {/* Composed from the assets listed below, which carry the serials. */}
-        <Row label="System" value={composeSystemLabel(moduleRows, inst.model)} />
+        <Row label="System" value={systemLabel(inst, moduleRows)} />
         <Row label="Client" value={inst.client} />
         <Row label="Location" value={inst.location} />
         <Row label="Intake" value={shopMonthDay(inst.createdAt)} />

@@ -8,6 +8,7 @@ import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { ASSET_COLOR, ASSET_STATES } from "@/lib/stages";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
+import AssetGridToggle from "@/components/AssetGridToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +34,14 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   // old units, because filtering must reach everything that exists.
   const catalogKinds = vocab.filter((v) => v.kind === "asset_type").map((v) => v.name);
   const filterKinds = [...new Set([...catalogKinds, ...rows.map((a) => a.kind)].filter(Boolean))];
-  // Standalone stock has no system context, so every model of the type is fair game.
+  // Standalone stock has no system context, so every model of the type is fair
+  // game. The grid also wants each model's maker so it can fill that column in.
   const catalogModels: Record<string, string[]> = {};
+  const gridModels: Record<string, { name: string; manufacturer: string }[]> = {};
   for (const v of vocab) {
     if (v.kind !== "model" || !v.assetType) continue;
     (catalogModels[v.assetType] ??= []).push(v.name);
+    (gridModels[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
   }
 
   const needle = q.trim().toLowerCase();
@@ -53,7 +57,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   const unattached = rows.filter((a) => a.instrumentId === null && a.status !== "Decommissioned").length;
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <div className="card-title" style={{ marginBottom: 4 }}>Assets</div>
@@ -67,7 +71,12 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
           Every unit we track - in a system, on the shelf, or retired. Tap one for its full service
           history.{unattached > 0 ? ` ${unattached} not in a system right now.` : ""}
         </div>
-        {user.role !== "client_viewer" && <NewAssetForm owners={owners} kinds={catalogKinds} models={catalogModels} />}
+        {user.role !== "client_viewer" && (
+          <>
+            <NewAssetForm owners={owners} kinds={catalogKinds} models={catalogModels} />
+            <AssetGridToggle instrumentId={null} kinds={catalogKinds} models={gridModels} owners={owners} />
+          </>
+        )}
         <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner}
           kinds={filterKinds} statuses={[...ASSET_STATES]} owners={owners} />
 

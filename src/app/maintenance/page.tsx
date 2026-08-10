@@ -48,7 +48,7 @@ export default async function MaintenancePage() {
   const mdy = (iso: string) => { const [y, m, d] = iso.split("-"); return `${parseInt(m)}/${parseInt(d)}/${y.slice(2)}`; };
 
   return (
-    <div className="container" style={{ maxWidth: 760 }}>
+    <div className="container page">
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Maintenance calendar</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>

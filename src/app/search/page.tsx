@@ -88,7 +88,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       : [];
     const assetLabels = new Map(assetRows.map((a) => [a.id, `${a.kind} — ${a.model || a.serial || "(no model)"}`]));
     const named = ids.size
-      ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model })
+      ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, name: instruments.name })
           .from(instruments).where(and(inArray(instruments.id, [...ids]), inSystems(instruments.id)))
       : [];
     const composed = await getSystemLabels(named);
@@ -142,7 +142,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const createCategories = catalogTerms.filter((v) => v.kind === "category").map((v) => v.name);
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="card">
         <div className="card-title" style={{ marginBottom: 8 }}>Search</div>
         <SearchBox initial={q} />

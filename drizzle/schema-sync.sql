@@ -492,6 +492,8 @@ ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "procedure_id" integer;
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "required" boolean NOT NULL DEFAULT false;
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "procedure_id" integer;
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "task_id" integer;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT '';
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "manufacturer" text NOT NULL DEFAULT '';
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
@@ -1156,5 +1158,34 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','procedure','procedures-merge',
             'merged ' || v_items || ' checkout item(s) and ' || v_tpls || ' maintenance template(s) into the procedure catalog - same-named pairs were kept separate for hand reconciliation');
+  END IF;
+END $$;
+
+-- ── Migration: model manufacturers ──────────────────────────────────────────
+-- Models gained a maker so the catalog can group by it. Seed each one from the
+-- fleet: if every unit recorded as this model agrees on a manufacturer, that is
+-- the model's manufacturer. Disagreement means the data is dirty, so those are
+-- left blank for someone to set by hand rather than guessed at.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'vocab' AND "entity_id" = 'model-manufacturers') THEN
+    UPDATE "vocab_terms" v SET "manufacturer" = agreed.mfr
+    FROM (
+      SELECT a."kind", a."model", min(btrim(a."manufacturer")) AS mfr
+      FROM "assets" a
+      WHERE btrim(a."manufacturer") <> '' AND btrim(a."model") <> ''
+      GROUP BY a."kind", a."model"
+      HAVING count(DISTINCT lower(btrim(a."manufacturer"))) = 1
+    ) agreed
+    WHERE v."kind" = 'model' AND v."manufacturer" = ''
+      AND lower(v."asset_type") = lower(agreed."kind") AND lower(v."name") = lower(agreed."model");
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    -- Marker written unconditionally: a rerun must not overwrite a maker
+    -- someone has since corrected by hand.
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','vocab','model-manufacturers',
+            'set the manufacturer on ' || v_count || ' catalog model(s) from the fleet - models whose units disagreed were left blank to set by hand');
   END IF;
 END $$;

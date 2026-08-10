@@ -28,7 +28,7 @@ export default async function ArchivePage() {
   const color = (name: string) => defs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
 
   return (
-    <div className="container" style={{ maxWidth: 720 }}>
+    <div className="container page">
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Archived systems</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>

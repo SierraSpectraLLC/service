@@ -90,7 +90,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   const shown = isToday ? built : built.filter((g) => g.entries.length > 0);
 
   return (
-    <div className="container">
+    <div className="container wide">
       <EodDateNav date={date} today={today} dates={dates} />
       {shown.map((g) => (
         <EodPanel key={g.orgId ?? "own"} clientName={g.name} orgId={g.orgId}

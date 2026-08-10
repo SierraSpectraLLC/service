@@ -32,7 +32,7 @@ import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { composeSystemDossier } from "@/lib/dossier";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess,
@@ -44,7 +44,7 @@ import { sendEmail } from "@/lib/email";
 /** A system is named by its assets; the stored description is the fallback. */
 async function systemLabelFor(inst: { id: number; model: string }) {
   const rows = await db.select().from(assets).where(eq(assets.instrumentId, inst.id));
-  return composeSystemLabel(rows, inst.model);
+  return systemLabel(inst, rows);
 }
 
 const rev = (id?: number | null) => {
@@ -160,7 +160,7 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; category?: string; priority: number; location?: string },
+  data: { externalId?: string; client: string; category?: string; priority: number; location?: string; name?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -178,14 +178,18 @@ export async function updateInstrument(
   const priority = data.priority || inst.priority;
   const location = (data.location ?? inst.location).trim();
   const category = (data.category ?? inst.category).trim();
+  // A chosen name wins over the composed one; clearing it hands naming back to
+  // the assets rather than freezing whatever they last spelled out.
+  const name = (data.name ?? inst.name).trim().slice(0, 120);
   const changed: [string, string, string][] = [];
+  if (name !== inst.name) changed.push(["name", inst.name || "(from assets)", name || "(from assets)"]);
   if (externalId !== inst.externalId) changed.push(["externalId", inst.externalId, externalId]);
   if (location !== inst.location) changed.push(["location", inst.location, location]);
   if (client !== inst.client) changed.push(["client", inst.client, client]);
   if (category !== inst.category) changed.push(["category", inst.category, category]);
   if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, category, priority, location, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments).set({ externalId, client, category, priority, location, name, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.
@@ -407,7 +411,7 @@ async function creatorOwns(orgId: number | null): Promise<number | null> {
 // First-class units systems are built from. Work is recorded on the system
 // and tagged with the asset; lifecycle rows here give the dossier its spine.
 
-type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; asFound?: string; location: string; note: string };
+export type AssetInput = { kind: string; model: string; serial: string; manufacturer: string; owner: string; asFound?: string; location: string; note: string };
 
 const cleanAsset = (d: AssetInput) => ({
   // Open vocabulary: MODULE_KINDS is just the starter list, so the shop can
@@ -531,6 +535,31 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   revalidatePath("/assets");
   revalidatePath(`/assets/${row.id}`);
   return { id: row.id };
+}
+
+/**
+ * Several assets in one go - the spreadsheet path. Each row goes through
+ * createAsset, so imported-by-grid units get exactly what hand-entered ones do:
+ * ownership, intake procedures, recurring schedules, audit. Rows that fail are
+ * reported by index rather than aborting the batch, because losing nine good
+ * rows to one typo is the thing that makes people go back to Excel.
+ */
+export async function createAssets(
+  instrumentId: number | null,
+  rows: AssetInput[],
+): Promise<{ error?: string; created?: number; failures?: { row: number; error: string }[] }> {
+  await requireEditor();
+  const usable = rows.filter((r) => r.kind.trim() && (r.model.trim() || r.serial.trim()));
+  if (!usable.length) return { error: "Nothing to save - each row needs a type and either a model or a serial" };
+  if (usable.length > 200) return { error: "Save 200 rows at a time" };
+  const failures: { row: number; error: string }[] = [];
+  let created = 0;
+  for (let i = 0; i < usable.length; i++) {
+    const res = await createAsset(instrumentId, usable[i]);
+    if (res.error) failures.push({ row: i + 1, error: res.error });
+    else created++;
+  }
+  return { created, failures };
 }
 
 export async function updateAsset(assetId: number, data: AssetInput): Promise<{ error?: string }> {
@@ -2555,6 +2584,9 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
 export type ImportRow = {
   systemId: string; client: string; category: string; location: string;
   kind: string; model: string; serial: string; manufacturer: string; note: string;
+  // Same columns the on-screen grid uses, so a template exported from one
+  // imports through the other without rearranging anything.
+  owner: string; asFound: string;
 };
 export type ImportRowResult = { row: number; action: string; error?: string };
 
@@ -2621,7 +2653,10 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
       if (!dryRun) {
         const res = await createAsset(instrumentId === -1 ? null : instrumentId, {
           kind, model: r.model.trim(), serial: r.serial.trim(), manufacturer: r.manufacturer.trim(),
-          owner: r.client.trim(), asFound: "", location: r.location.trim(), note: r.note.trim(),
+          // An explicit Owner column wins; falling back to Client keeps older
+          // templates working.
+          owner: (r.owner || r.client).trim(), asFound: (r.asFound ?? "").trim(),
+          location: r.location.trim(), note: r.note.trim(),
         });
         if (res.error) { results.push({ row: n + 1, action: "failed", error: res.error }); continue; }
       }
@@ -3206,7 +3241,7 @@ export async function setSheetOrg(orgId: number | null) {
 // values already in use.
 
 export async function addVocabTerm(
-  kind: string, assetType: string, name: string, categories: string[] = [],
+  kind: string, assetType: string, name: string, categories: string[] = [], manufacturer = "",
 ): Promise<{ error?: string }> {
   // The catalog is house-curated: the owner and their staff, never clients.
   const u = await requireStaff();
@@ -3237,16 +3272,36 @@ export async function addVocabTerm(
     }
     return { error: `${n} is already defined` };
   }
-  const [row] = await db.insert(vocabTerms).values({ kind, assetType: at, name: n, categories: cats }).returning();
+  const [row] = await db.insert(vocabTerms)
+    .values({ kind, assetType: at, name: n, categories: cats, manufacturer: kind === "model" ? manufacturer.trim() : "" })
+    .returning();
   await audit({
     actor: u.email, entityType: "vocab", entityId: row.id,
     action: kind === "category" ? `defined system category "${n}"`
       : kind === "asset_type" ? `defined asset type "${n}"`
-      : `defined model "${n}" for ${at}${cats.length ? ` under ${cats.join(", ")}` : " (all system types)"}`,
+      : `defined model "${n}"${manufacturer.trim() ? ` by ${manufacturer.trim()}` : ""} for ${at}${cats.length ? ` under ${cats.join(", ")}` : " (all system types)"}`,
   });
   revalidatePath("/settings/catalog");
   revalidatePath("/checkout");
   revalidatePath("/maintenance");
+  rev();
+  return {};
+}
+
+/** Who makes a model. Blank is honest for kit whose maker nobody recorded. */
+export async function setVocabManufacturer(termId: number, manufacturer: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t || t.kind !== "model") return { error: "Not found" };
+  const mfr = manufacturer.trim().slice(0, 60);
+  if (mfr === t.manufacturer) return {};
+  await db.update(vocabTerms).set({ manufacturer: mfr }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId,
+    action: `model "${t.name}" (${t.assetType}) is made by ${mfr || "nobody recorded"}`,
+    field: "manufacturer", oldValue: t.manufacturer, newValue: mfr,
+  });
+  revalidatePath("/settings/catalog");
   rev();
   return {};
 }

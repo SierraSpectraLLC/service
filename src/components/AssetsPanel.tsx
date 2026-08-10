@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ASSET_COLOR } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
 import CatalogSelect from "./CatalogSelect";
+import AssetGrid, { type GridModel } from "./AssetGrid";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
@@ -12,15 +13,19 @@ export type AssetRow = {
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels }: {
+export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels, gridModels, owners }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).
   instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[];
   kinds: string[]; canEdit: boolean;
   // Catalog models already narrowed to this system's type, keyed by asset type,
   // so the Model field suggests the right kit instead of every model in the shop.
   catalogModels: Record<string, string[]>;
+  /** The same models with their makers, for the grid's Mfr column. */
+  gridModels: Record<string, GridModel[]>;
+  owners: string[];
 }) {
   const [open, setOpen] = useState(false);
+  const [grid, setGrid] = useState(false);
   const [picking, setPicking] = useState(false);
   const [checked, setChecked] = useState<number[]>([]);
   const [filter, setFilter] = useState("");
@@ -62,7 +67,10 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
                 {picking ? "Cancel" : "Add existing"}
               </button>
             )}
-            <button className="btn sm primary" onClick={() => { setOpen((v) => !v); setPicking(false); }}>
+            <button className="btn sm" onClick={() => { setGrid((v) => !v); setOpen(false); setPicking(false); }}>
+              {grid ? "Cancel" : "＋ Several"}
+            </button>
+            <button className="btn sm primary" onClick={() => { setOpen((v) => !v); setPicking(false); setGrid(false); }}>
               {open ? "Cancel" : "+ New asset"}
             </button>
           </div>
@@ -90,6 +98,13 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           <button className="btn sm accent" onClick={attachChecked} disabled={pending || !checked.length}>
             {pending ? "Adding..." : `Add ${checked.length || ""} asset${checked.length === 1 ? "" : "s"}`.replace("  ", " ")}
           </button>
+        </div>
+      )}
+
+      {grid && (
+        <div className="dash-form">
+          <AssetGrid instrumentId={instrumentId} kinds={kinds} models={gridModels} owners={owners}
+            onDone={() => setGrid(false)} />
         </div>
       )}
 

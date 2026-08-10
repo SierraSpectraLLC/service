@@ -14,7 +14,7 @@ import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumen
 type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
   lead: string; notes: string; archived: boolean; archivedBy: string;
-  location: string;
+  location: string; name: string;
   forSale: boolean; saleNote: string; listingToken: string;
 };
 
@@ -44,7 +44,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -52,6 +52,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
     setDraft({
       externalId: instrument.externalId, client: instrument.client, category: instrument.category,
       priority: String(instrument.priority), notes: instrument.notes, location: instrument.location,
+      name: instrument.name,
     });
     setError("");
     setEditing(true);
@@ -64,7 +65,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
         const res = await updateInstrument(instrument.id, {
           externalId: draft.externalId, client: draft.client, category: draft.category,
           priority: parseInt(draft.priority) || instrument.priority,
-          location: draft.location,
+          location: draft.location, name: draft.name,
         });
         if (res?.error) { setError(res.error); return; } // keep the form open with the bad value
       }
@@ -136,6 +137,18 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                     onChange={(client) => setDraft({ ...draft, client })} />
                 </div>
                 <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} /></div>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label>Name</label>
+                {/* Blank means "name it from the assets" - which is right until
+                    seven LC modules make a paragraph of it. */}
+                <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  placeholder={label || "Named from its assets"} />
+                <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+                  {draft.name.trim()
+                    ? "Yours - the assets will never overwrite it."
+                    : `Empty, so it's named from its assets: ${label || "nothing listed yet"}`}
+                </div>
               </div>
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>

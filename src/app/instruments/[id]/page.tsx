@@ -17,7 +17,7 @@ import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
@@ -75,10 +75,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // a GC-MS should offer FID and TCD, not every detector the shop knows. A model
   // tagged to no category is universal kit, so it's always offered.
   const catalogModels: Record<string, string[]> = {};
+  const gridModels: Record<string, { name: string; manufacturer: string }[]> = {};
   for (const v of vocabRows) {
     if (v.kind !== "model" || !v.assetType) continue;
     if (v.categories.length && !v.categories.some((c) => c.toLowerCase() === inst.category.trim().toLowerCase())) continue;
     (catalogModels[v.assetType] ??= []).push(v.name);
+    (gridModels[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
   }
 
   // The system's own schedules plus those living on its installed assets - a
@@ -172,7 +174,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   }));
 
   return (
-    <div className="container">
+    <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
         <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← All instruments
@@ -197,9 +199,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       </div>
 
       <SystemPanel
-        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy,
+        instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
           location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken }}
-        label={composeSystemLabel(assetRows, inst.model)}
+        label={systemLabel(inst, assetRows)}
         clients={systemRows.map((c) => c.client)}
         categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
         stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
@@ -233,7 +235,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         }))}
         kinds={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
         canEdit={canEdit}
-        catalogModels={catalogModels}
+        catalogModels={catalogModels} gridModels={gridModels}
+        owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
       />
 
       <PartsPanel target={{ instrumentId: inst.id, assetId: null }}

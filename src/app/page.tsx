@@ -5,7 +5,7 @@ import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, task
 import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { getStageDefs } from "@/lib/stageDefs";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { requireUser } from "@/lib/authz";
 import { visibleSystemIds } from "@/lib/tenancy";
@@ -76,7 +76,7 @@ export default async function Home() {
       category: i.category,
       // A system is what it's built from; the stored description is only a
       // fallback for systems whose assets haven't been entered yet.
-      label: composeSystemLabel(assetRows.filter((a) => a.instrumentId === i.id), i.model),
+      label: systemLabel(i, assetRows.filter((a) => a.instrumentId === i.id)),
       priority: i.priority,
       lead: i.lead,
       stages: i.stages,

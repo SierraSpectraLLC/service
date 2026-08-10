@@ -18,7 +18,7 @@ export default async function SettingsPage() {
     db.select().from(orgs).orderBy(asc(orgs.kind), asc(orgs.name)),
   ]);
   return (
-    <div className="container" style={{ maxWidth: 620 }}>
+    <div className="container page">
       <SettingsTabs active="configuration" />
       <ConfigurationForm
         stageDefs={stageDefList}

@@ -38,7 +38,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   if (!org) notFound();
 
   return (
-    <div className="container" style={{ maxWidth: 620 }}>
+    <div className="container page">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {isOwner && (
           <Link href="/settings/personnel" className="btn sm" style={{ textDecoration: "none" }}>← Personnel</Link>

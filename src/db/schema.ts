@@ -109,9 +109,13 @@ export const instruments = pgTable("instruments", {
   // Shop-defined grouping, e.g. "LC-MS", "GC", "N2 generator". Added on the fly
   // from the system form; the vocabulary is whatever is in use.
   category: text("category").notNull().default(""),
-  // Legacy free-text description. No longer edited: a system is named by its
-  // assets (lib/systemLabel). Kept as the fallback for pre-asset records and
-  // sheet imports.
+  // A name you chose, which always wins over the composed one. Blank means
+  // "name it from the assets" - fine for a two-box system, useless once seven
+  // LC modules add up to a paragraph. See lib/systemLabel.
+  name: text("name").notNull().default(""),
+  // Legacy free-text description. No longer edited: a system with no chosen
+  // name is named by its assets (lib/systemLabel). Kept as the fallback for
+  // pre-asset records and sheet imports.
   model: text("model").notNull(),
   manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
   serial: text("serial").notNull().default(""),             // the instrument's own serial
@@ -593,6 +597,10 @@ export const vocabTerms = pgTable("vocab_terms", {
   kind: text("kind").notNull(),                        // 'category' | 'asset_type' | 'model'
   assetType: text("asset_type").notNull().default(""), // models only: which asset type
   name: text("name").notNull(),
+  // Models only: who makes it. Thirty pumps across seven makers in one pile is
+  // unusable, so the catalog groups by this and asset forms fill the unit's
+  // manufacturer in from it.
+  manufacturer: text("manufacturer").notNull().default(""),
   // Models only: system categories this model appears under. [] = all of them.
   // An array rather than one value because a pump can serve LC-MS and HPLC
   // alike - same reasoning as checkout_items.model_scope.

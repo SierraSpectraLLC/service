@@ -20,7 +20,7 @@ export default async function PersonnelPage() {
     db.select({ orgId: systemShares.orgId }).from(systemShares),
   ]);
   return (
-    <div className="container" style={{ maxWidth: 620 }}>
+    <div className="container page">
       <SettingsTabs active="personnel" />
       <PersonnelForm
         clientAccessEnabled={s?.clientAccessEnabled ?? false}

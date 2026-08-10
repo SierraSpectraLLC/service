@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { assets, instruments } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { visibleSystemIds } from "@/lib/tenancy";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { toCsv } from "@/lib/csv";
 import { shopToday } from "@/lib/shopday";
 
@@ -29,7 +29,7 @@ export async function GET() {
     header,
     ...rows.map((i) => [
       i.externalId,
-      composeSystemLabel(assetRows.filter((a) => a.instrumentId === i.id), i.model),
+      systemLabel(i, assetRows.filter((a) => a.instrumentId === i.id)),
       i.client, i.category, i.location, i.stages.join("; "), i.priority, i.lead,
       i.archived ? "yes" : "", i.notes,
     ]),

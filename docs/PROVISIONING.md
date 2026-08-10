@@ -79,10 +79,14 @@ also the page that organization's own editors get.
 6. **Catalog**: add the system types this operator services (LC-MS, GC-MS),
    the module types (a fresh install ships the 13 starters), and the models
    under each. Models tagged to no system type are offered everywhere, which
-   is right for control PCs and gas generators. Asset and system forms only
-   offer what's defined here; a CSV import auto-registers what it brings in.
-7. **/import**: bring the fleet in from their spreadsheet (template on the
-   page). Assets and systems land with ownership and shares handled.
+   is right for control PCs and gas generators. Give each model its
+   **manufacturer** - the catalog groups by it, and asset entry fills the
+   unit's maker in from the model. Asset and system forms only offer what's
+   defined here; a CSV import auto-registers what it brings in.
+7. **/import** or **Assets → Several at once**: bring the fleet in. Both use
+   the same columns (Type, Model, Serial, Mfr, Owner, Location, As found,
+   Notes), so a template downloaded from the grid imports through /import
+   unchanged - and a block copied out of Excel pastes straight into the grid. Assets and systems land with ownership and shares handled.
 8. Upload the operator org's logo on its own settings page (Workspace
    appearance).
 

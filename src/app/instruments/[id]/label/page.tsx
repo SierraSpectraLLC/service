@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { assets, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { canSeeSystem } from "@/lib/tenancy";
-import { composeSystemLabel } from "@/lib/systemLabel";
+import { systemLabel } from "@/lib/systemLabel";
 import { getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import LabelCard from "@/components/LabelCard";
@@ -32,7 +32,7 @@ export default async function SystemLabelPage({ params }: { params: Promise<{ id
     <LabelCard
       url={base ? `${base}/instruments/${inst.id}` : ""}
       headline={inst.externalId}
-      lines={[composeSystemLabel(assetRows, inst.model), inst.client]}
+      lines={[systemLabel(inst, assetRows), inst.client]}
       brandName={brand.operatorName}
     />
   );
