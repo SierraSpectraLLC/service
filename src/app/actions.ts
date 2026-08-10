@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
+  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
@@ -31,6 +31,8 @@ import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
+import { parseMoney } from "@/lib/money";
+import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
 import { composeSystemDossier } from "@/lib/dossier";
@@ -1352,7 +1354,11 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   if (!isHouse(u.role) && !canSeeCosts(u, await costOwnerOrg(t0))) { data.cost = ""; data.po = ""; }
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
   const taggedAsset = t0.asset;
-  const [p] = await db.insert(parts).values({ ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId }).returning();
+  const [p] = await db.insert(parts).values({
+    ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
+    // The summable copy, parsed after the redaction strip so it follows cost.
+    costCents: parseMoney(data.cost),
+  }).returning();
   const verb = partStatusVerb(p.status);
   const noun = p.kind === "consumable" ? "consumable" : "part";
   const pn = p.partNumber ? ` (PN ${p.partNumber})` : "";
@@ -1382,7 +1388,10 @@ export async function updatePart(partId: number, raw: PartInput) {
   await assertWorkEditable(u, before);
   // An editor who can't see costs must not overwrite them blind.
   if (!isHouse(u.role) && !canSeeCosts(u, await costOwnerOrg(before))) { data.cost = before.cost; data.po = before.po; }
-  await db.update(parts).set({ ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim() }).where(eq(parts.id, partId));
+  await db.update(parts).set({
+    ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim(),
+    costCents: parseMoney(data.cost),
+  }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
     ? verb
@@ -2463,6 +2472,51 @@ export async function removeClientAccess(id: number) {
     action: `removed client sign-in: ${row.entry}`,
   });
   revalidatePath("/settings");
+}
+
+// ---------------- Time entries ----------------
+// The labor half of the record. Anyone who can edit the work can log hours;
+// the entry names who did the work (roster name), not just who typed it in.
+
+export async function logTime(
+  target: WorkTarget,
+  data: { hours: string; person: string; date: string; note: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const minutes = parseHours(data.hours);
+  if (minutes === null || minutes <= 0) return { error: "Enter hours like 1.5, 1:30 or 45m" };
+  const date = data.date.trim();
+  if (!isIsoDay(date)) return { error: "Pick a date" };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const person = data.person.trim() || u.name;
+  const [row] = await db.insert(timeEntries).values({
+    instrumentId: t0.instrumentId, assetId: t0.assetId,
+    person, date, minutes, note: data.note.trim(), loggedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "time", entityId: row.id,
+    action: `logged ${formatHours(minutes)} - ${person}${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}${row.note ? ` - ${row.note}` : ""}`,
+  });
+  revWork(row);
+  return {};
+}
+
+export async function deleteTimeEntry(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [row] = await db.select().from(timeEntries).where(eq(timeEntries.id, id));
+  if (!row) return {};
+  await assertWorkEditable(u, row);
+  await db.delete(timeEntries).where(eq(timeEntries.id, id));
+  await audit({
+    actor: u.email, instrumentId: row.instrumentId, assetId: row.assetId, entityType: "time", entityId: id,
+    action: `removed a ${formatHours(row.minutes)} entry (${row.person}, ${row.date}) - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revWork(row);
+  return {};
 }
 
 // ---------------- Sharing ----------------

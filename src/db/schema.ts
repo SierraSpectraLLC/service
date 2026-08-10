@@ -345,7 +345,10 @@ export const parts = pgTable("parts", {
   specs: text("specs").notNull().default(""),
   vendor: text("vendor").notNull().default(""),
   po: text("po").notNull().default(""),
-  cost: text("cost").notNull().default(""), // free text: "1,240" - money math not needed yet
+  cost: text("cost").notNull().default(""), // free text, the display source of truth
+  // Parsed from `cost` server-side on every write (lib/money) so reports can
+  // sum spend. Null = never parsed / not money-shaped; 0 is a real zero.
+  costCents: integer("cost_cents"),
   carrier: text("carrier").notNull().default(""),
   tracking: text("tracking").notNull().default(""),
   orderedAt: text("ordered_at").notNull().default(""),
@@ -464,7 +467,9 @@ export const sheetDiffs = pgTable("sheet_diffs", {
 // Feeds the per-system total and, with parts cost, the true cost of a refurb.
 export const timeEntries = pgTable("time_entries", {
   id: serial("id").primaryKey(),
-  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  // System, standalone asset, or both - at least one set, enforced by
+  // resolveTarget like every other work row.
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset the hours went into
   person: text("person").notNull().default(""),
   date: text("date").notNull(),           // YYYY-MM-DD in shop time

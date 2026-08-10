@@ -12,10 +12,12 @@ export function canSeeCosts(user: Pick<SessionUser, "role" | "orgId">, ownerOrgI
 }
 
 /** Blank the priced fields on a part row. Cheap enough to run on every read. */
-export function redactPart<T extends { cost: string; po: string }>(row: T): T {
-  return { ...row, cost: "", po: "" };
+export function redactPart<T extends { cost: string; po: string; costCents?: number | null }>(row: T): T {
+  // costCents is the same number in another shape - blanking the text while
+  // shipping the cents would be redaction theater.
+  return { ...row, cost: "", po: "", costCents: null };
 }
 
-export function redactParts<T extends { cost: string; po: string }>(rows: T[], showCosts: boolean): T[] {
+export function redactParts<T extends { cost: string; po: string; costCents?: number | null }>(rows: T[], showCosts: boolean): T[] {
   return showCosts ? rows : rows.map(redactPart);
 }

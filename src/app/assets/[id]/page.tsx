@@ -25,6 +25,7 @@ import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
+import HoursPanel from "@/components/HoursPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import RunCheckoutButton from "@/components/RunCheckoutButton";
@@ -228,6 +229,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           parts: schedulePartsOf(s),
           openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
         }))} />
+
+      <HoursPanel target={target}
+        entries={[...taggedTime].sort((a, b) => (a.date < b.date ? 1 : -1))
+          .map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+        people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+        today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
 
       {modules.eod && (isStaff || ownerIsViewer) && (
         <DailyUpdatePanel target={target}

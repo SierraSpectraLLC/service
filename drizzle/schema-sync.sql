@@ -494,6 +494,7 @@ ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "procedure_id" integer;
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "task_id" integer;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "name" text NOT NULL DEFAULT '';
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "manufacturer" text NOT NULL DEFAULT '';
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "cost_cents" integer;
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
@@ -534,7 +535,7 @@ CREATE INDEX IF NOT EXISTS "access_requests_instrument_idx" ON "access_requests"
 DO $$
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['tasks','parts','attachments','instrument_gases','eod_updates'] LOOP
+  FOREACH t IN ARRAY ARRAY['tasks','parts','attachments','instrument_gases','eod_updates','time_entries'] LOOP
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = 'public' AND table_name = t
                  AND column_name = 'instrument_id' AND is_nullable = 'NO') THEN
@@ -1187,5 +1188,27 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','vocab','model-manufacturers',
             'set the manufacturer on ' || v_count || ' catalog model(s) from the fleet - models whose units disagreed were left blank to set by hand');
+  END IF;
+END $$;
+
+-- ── Migration: numeric part costs ───────────────────────────────────────────
+-- cost stays the free-text display value; cost_cents is the summable copy the
+-- reports read. Backfill parses only unambiguously money-shaped values
+-- ("1,240", "$95.50") and leaves prose ("call for quote") null rather than
+-- guessing. Marker written unconditionally so a rerun never re-parses a value
+-- someone has since corrected.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'part' AND "entity_id" = 'cost-cents-backfill') THEN
+    UPDATE "parts"
+    SET "cost_cents" = round(replace(regexp_replace(btrim("cost"), '^\$', ''), ',', '')::numeric * 100)
+    WHERE "cost_cents" IS NULL
+      AND btrim("cost") ~ '^\$?\d{1,3}(,\d{3})*(\.\d{1,2})?$|^\$?\d+(\.\d{1,2})?$';
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','part','cost-cents-backfill',
+            'parsed ' || v_count || ' part cost(s) into cents for reporting - non-numeric costs stay text-only');
   END IF;
 END $$;

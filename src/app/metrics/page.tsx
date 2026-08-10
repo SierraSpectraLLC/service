@@ -1,25 +1,65 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, gte } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, stageEvents } from "@/db/schema";
+import { instruments, stageEvents, tasks, timeEntries, parts } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { sinceByStage, completedDurations, ageDays } from "@/lib/stageAges";
+import { pmCompliance, shippedTurnaround, minutesBy, spendBy } from "@/lib/reports";
+import { formatHours } from "@/lib/hours";
+import { formatCents } from "@/lib/money";
+import { addDays } from "@/lib/pm";
+import { shopToday } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
 
-export default async function MetricsPage() {
+const WINDOWS = [30, 90] as const;
+
+export default async function MetricsPage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (user.role !== "owner" && user.role !== "staff") redirect("/");
+  const { days: daysParam } = await searchParams;
+  const days = daysParam === "90" ? 90 : 30;
+  const today = shopToday();
+  const windowStartIso = addDays(today, -days);
+  const windowStart = new Date(`${windowStartIso}T00:00:00`);
+  const tz = process.env.SHOP_TZ || "America/Los_Angeles";
+  const dayOf = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: tz });
 
-  const [rows, events, defs] = await Promise.all([
+  const [rows, events, defs, allInsts, pmTasks, timeRows, partRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(stageEvents).orderBy(asc(stageEvents.at), asc(stageEvents.id)),
     getStageDefs(),
+    // Archived systems included: shipped and retired work still counts in a window.
+    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client, createdAt: instruments.createdAt }).from(instruments),
+    db.select({ origin: tasks.origin, dueDate: tasks.dueDate, completedAt: tasks.completedAt, state: tasks.state })
+      .from(tasks).where(eq(tasks.origin, "pm")),
+    db.select().from(timeEntries).where(gte(timeEntries.date, windowStartIso)),
+    db.select({ instrumentId: parts.instrumentId, costCents: parts.costCents, createdAt: parts.createdAt })
+      .from(parts).where(gte(parts.createdAt, windowStart)),
   ]);
+
+  // ---- window reports (pure math in lib/reports) ----
+  const pm = pmCompliance(pmTasks, windowStartIso, today, dayOf);
+  const pmTotal = pm.onTime + pm.late + pm.openOverdue + pm.openNotDue;
+  const turnaround = shippedTurnaround(allInsts, events, windowStart);
+  const avgTurn = turnaround.length ? Math.round(turnaround.reduce((a, b) => a + b, 0) / turnaround.length) : 0;
+  const clientOf = new Map(allInsts.map((i) => [i.id, i.client || "(no client)"]));
+  const hoursByClient = [...minutesBy(
+    timeRows.map((t) => ({ minutes: t.minutes, date: t.date, key: t.instrumentId !== null ? clientOf.get(t.instrumentId) ?? "(no client)" : "Shelf work" })),
+    windowStartIso,
+  ).entries()].sort((a, b) => b[1] - a[1]);
+  const hoursByPerson = [...minutesBy(
+    timeRows.map((t) => ({ minutes: t.minutes, date: t.date, key: t.person || "(unnamed)" })),
+    windowStartIso,
+  ).entries()].sort((a, b) => b[1] - a[1]);
+  const spend = [...spendBy(
+    partRows.map((p) => ({ costCents: p.costCents, createdAt: p.createdAt, key: p.instrumentId !== null ? clientOf.get(p.instrumentId) ?? "(no client)" : "Shelf stock" })),
+    windowStart,
+  ).entries()].sort((a, b) => b[1].cents - a[1].cents);
 
   const since = sinceByStage(events);
   const labels = await getSystemLabels(rows);
@@ -47,6 +87,111 @@ export default async function MetricsPage() {
 
   return (
     <div className="container page">
+      <div className="card" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span className="mut" style={{ fontSize: 12 }}>Window</span>
+        <div className="seg" role="group" aria-label="Report window">
+          {WINDOWS.map((w) => (
+            <Link key={w} href={w === 30 ? "/metrics" : `/metrics?days=${w}`} aria-pressed={days === w}
+              className={days === w ? "btn sm accent" : "btn sm"} style={{ textDecoration: "none" }}>
+              {w} days
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 4 }}>PM compliance · last {days} days</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Scheduled maintenance that fell due in the window. A task reopened after being done counts as open -
+          the work is not done.
+        </div>
+        {pmTotal === 0 ? (
+          <div className="mut" style={{ fontSize: 13 }}>No scheduled maintenance fell due in this window.</div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{pm.onTime} on time</span>
+              <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{pm.late} done late</span>
+              <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>{pm.openOverdue} overdue, open</span>
+              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{pm.openNotDue} due soon</span>
+            </div>
+            <div style={{ fontSize: 13 }}>
+              <b>{Math.round((pm.onTime / Math.max(1, pm.onTime + pm.late + pm.openOverdue)) * 100)}%</b>
+              <span className="mut"> of due maintenance was done on time.</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 4 }}>Turnaround · systems shipped in the last {days} days</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Days from a system entering the shop to its first Shipped.
+        </div>
+        {turnaround.length === 0 ? (
+          <div className="mut" style={{ fontSize: 13 }}>Nothing shipped in this window.</div>
+        ) : (
+          <div style={{ fontSize: 13 }}>
+            <b>{avgTurn} day{avgTurn === 1 ? "" : "s"}</b>
+            <span className="mut"> average across {turnaround.length} system{turnaround.length === 1 ? "" : "s"} · </span>
+            <span className="mut">fastest {Math.min(...turnaround)}d · slowest {Math.max(...turnaround)}d</span>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 4 }}>Hours · last {days} days</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or
+          unit where they happened.
+        </div>
+        {hoursByClient.length === 0 ? (
+          <div className="mut" style={{ fontSize: 13 }}>No hours logged in this window.</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>By client</div>
+              {hoursByClient.map(([k, min]) => (
+                <div key={k} style={{ display: "flex", gap: 8, padding: "4px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
+                  <b>{formatHours(min)}</b>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>By person</div>
+              {hoursByPerson.map(([k, min]) => (
+                <div key={k} style={{ display: "flex", gap: 8, padding: "4px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
+                  <b>{formatHours(min)}</b>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 4 }}>Parts spend · recorded in the last {days} days</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          By client, from parts recorded in the window whose cost parsed as money. Free-text costs
+          (&quot;call for quote&quot;) are counted but not summed, so this is a floor.
+        </div>
+        {spend.length === 0 ? (
+          <div className="mut" style={{ fontSize: 13 }}>No parts recorded in this window.</div>
+        ) : (
+          spend.map(([k, v]) => (
+            <div key={k} style={{ display: "flex", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>{k}</span>
+              <b>{formatCents(v.cents)}</b>
+              <span className="mut" style={{ fontSize: 11 }}>
+                {v.counted} priced{v.unpriced ? ` · ${v.unpriced} unpriced` : ""}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Time in stage</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>

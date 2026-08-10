@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  pmSchedules, procedures, signoffs,
+  pmSchedules, procedures, signoffs, timeEntries,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -26,6 +26,7 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
+import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
@@ -82,6 +83,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     (catalogModels[v.assetType] ??= []).push(v.name);
     (gridModels[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
   }
+
+  // Labor on this system, newest first. Work tagged to an installed asset
+  // carries instrumentId too (resolveTarget), so one filter catches it all.
+  const timeRows = await db.select().from(timeEntries)
+    .where(eq(timeEntries.instrumentId, instId))
+    .orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(100);
 
   // The system's own schedules plus those living on its installed assets - a
   // pump's seal job shows up wherever the pump currently works.
@@ -262,6 +269,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
           };
         })} />
+
+      <HoursPanel target={{ instrumentId: inst.id, assetId: null }}
+        entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+        people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+        today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
 
       {/* Today's client-facing note sits with the conversation it feeds, not up
           in the system's identity block. */}
