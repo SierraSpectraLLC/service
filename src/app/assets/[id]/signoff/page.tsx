@@ -1,13 +1,16 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, tasks, checklistItems, parts, attachments, instruments } from "@/db/schema";
+import { assets, tasks, checklistItems, parts, attachments, instruments, procedures, signoffs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
 import { getBrand } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
+import SignoffPanel, { type SignatureRow } from "@/components/SignoffPanel";
+import SignatureBlock from "@/components/SignatureBlock";
+import { signoffGate, signatureIsStale, type SignoffSnapshot } from "@/lib/signoff";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +52,38 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
     : [];
   const done = taskRows.filter((t) => t.state === "Done");
   const openTasks = taskRows.length - done.length;
+
+  // Release readiness for this unit alone. Recomputed server-side on signing.
+  const gateProcIds = [...new Set(taskRows.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
+  const [gateProcs, signRows] = await Promise.all([
+    gateProcIds.length
+      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+          .from(procedures).where(inArray(procedures.id, gateProcIds))
+      : [],
+    db.select().from(signoffs).where(and(eq(signoffs.assetId, assetId), isNull(signoffs.revokedAt)))
+      .orderBy(asc(signoffs.createdAt)),
+  ]);
+  const gateTaskIds = taskRows.map((t) => t.id);
+  const reportRows = gateTaskIds.length
+    ? await db.select({ taskId: attachments.taskId }).from(attachments).where(inArray(attachments.taskId, gateTaskIds))
+    : [];
+  const reportsByTask = new Map<number, number>();
+  for (const r of reportRows) if (r.taskId !== null) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+  const gate = signoffGate(
+    taskRows.map((t) => {
+      const pr = gateProcs.find((x) => x.id === t.procedureId);
+      return { id: t.id, title: t.title, state: t.state, required: pr?.required ?? false, kind: pr?.kind ?? "task" };
+    }),
+    reportsByTask,
+  );
+  const signatures: SignatureRow[] = signRows.map((r) => {
+    const snap = r.data as SignoffSnapshot;
+    return {
+      id: r.id, signedBy: r.signedBy, signerName: r.signerName, signerTitle: r.signerTitle,
+      meaning: r.meaning, note: r.note, when: shopTime(r.createdAt),
+      stale: signatureIsStale(snap, gate), snapshot: snap,
+    };
+  });
   const relevantParts = partRows.filter((p) => p.status === "Installed" || p.status === "Received" || p.status === "Removed");
 
   return (
@@ -135,17 +170,12 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
         ))}
         {attachRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>None.</div>}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 36, breakInside: "avoid" }}>
-          {[brand.operatorName, asset.owner || "Buyer"].map((party) => (
-            <div key={party}>
-              <div style={{ borderBottom: "1px solid var(--ink)", height: 36 }} />
-              <div style={{ fontSize: 12, marginTop: 4 }}>{party} - signature</div>
-              <div style={{ borderBottom: "1px solid var(--ink)", height: 28, marginTop: 14 }} />
-              <div style={{ fontSize: 12, marginTop: 4 }}>Date</div>
-            </div>
-          ))}
-        </div>
+        <SignatureBlock signatures={signatures} operatorName={brand.operatorName} clientName={asset.owner || "Buyer"} />
       </div>
+
+      <SignoffPanel target={{ instrumentId: null, assetId: asset.id }}
+        ready={gate.ready} blockers={gate.blockers} signatures={signatures}
+        canSign isOwner={user.role === "owner"} myEmail={user.email} myName={user.name} />
     </div>
   );
 }

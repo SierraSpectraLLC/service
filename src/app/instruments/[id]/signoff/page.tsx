@@ -1,14 +1,17 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, tasks, checklistItems, parts, attachments, assets } from "@/db/schema";
+import { instruments, tasks, checklistItems, parts, attachments, assets, procedures, signoffs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { composeSystemLabel } from "@/lib/systemLabel";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
 import { getBrand } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
+import SignoffPanel, { type SignatureRow } from "@/components/SignoffPanel";
+import SignatureBlock from "@/components/SignatureBlock";
+import { signoffGate, signatureIsStale, type SignoffSnapshot } from "@/lib/signoff";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +46,44 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
     : [];
   const done = taskRows.filter((t) => t.state === "Done");
   const openTasks = taskRows.length - done.length;
+
+  // Release readiness spans the system AND its installed assets - a pump with a
+  // failed test is not a shippable system. Recomputed here, and again server-side
+  // when anyone actually signs.
+  const assetIds = moduleRows.map((m) => m.id);
+  const gateTasks = await db.select().from(tasks).where(
+    assetIds.length ? or(eq(tasks.instrumentId, instId), inArray(tasks.assetId, assetIds)) : eq(tasks.instrumentId, instId)
+  );
+  const gateProcIds = [...new Set(gateTasks.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
+  const [gateProcs, signRows] = await Promise.all([
+    gateProcIds.length
+      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+          .from(procedures).where(inArray(procedures.id, gateProcIds))
+      : [],
+    db.select().from(signoffs).where(and(eq(signoffs.instrumentId, instId), isNull(signoffs.revokedAt)))
+      .orderBy(asc(signoffs.createdAt)),
+  ]);
+  const gateTaskIds = gateTasks.map((t) => t.id);
+  const reportRows = gateTaskIds.length
+    ? await db.select({ taskId: attachments.taskId }).from(attachments).where(inArray(attachments.taskId, gateTaskIds))
+    : [];
+  const reportsByTask = new Map<number, number>();
+  for (const r of reportRows) if (r.taskId !== null) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+  const gate = signoffGate(
+    gateTasks.map((t) => {
+      const pr = gateProcs.find((x) => x.id === t.procedureId);
+      return { id: t.id, title: t.title, state: t.state, required: pr?.required ?? false, kind: pr?.kind ?? "task" };
+    }),
+    reportsByTask,
+  );
+  const signatures: SignatureRow[] = signRows.map((r) => {
+    const snap = r.data as SignoffSnapshot;
+    return {
+      id: r.id, signedBy: r.signedBy, signerName: r.signerName, signerTitle: r.signerTitle,
+      meaning: r.meaning, note: r.note, when: shopTime(r.createdAt),
+      stale: signatureIsStale(snap, gate), snapshot: snap,
+    };
+  });
   const relevantParts = partRows.filter((p) => p.status === "Installed" || p.status === "Received" || p.status === "Removed");
 
   return (
@@ -132,17 +173,12 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
         ))}
         {attachRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>None.</div>}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 36, breakInside: "avoid" }}>
-          {[brand.operatorName, inst.client || "Client"].map((party) => (
-            <div key={party}>
-              <div style={{ borderBottom: "1px solid var(--ink)", height: 36 }} />
-              <div style={{ fontSize: 12, marginTop: 4 }}>{party} - signature</div>
-              <div style={{ borderBottom: "1px solid var(--ink)", height: 28, marginTop: 14 }} />
-              <div style={{ fontSize: 12, marginTop: 4 }}>Date</div>
-            </div>
-          ))}
-        </div>
+        <SignatureBlock signatures={signatures} operatorName={brand.operatorName} clientName={inst.client || "Client"} />
       </div>
+
+      <SignoffPanel target={{ instrumentId: inst.id, assetId: null }}
+        ready={gate.ready} blockers={gate.blockers} signatures={signatures}
+        canSign isOwner={user.role === "owner"} myEmail={user.email} myName={user.name} />
     </div>
   );
 }

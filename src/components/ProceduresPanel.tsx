@@ -10,7 +10,7 @@ export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean;
-  runsAtIntake: boolean; intervalDays: number | null;
+  runsAtIntake: boolean; intervalDays: number | null; required: boolean;
   parts: ProcPart[]; modelScope: string[];
 };
 
@@ -47,7 +47,7 @@ type Draft = {
   kind: string; name: string; notes: string;
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
-  runsAtIntake: boolean; repeats: boolean; intervalDays: string;
+  runsAtIntake: boolean; repeats: boolean; intervalDays: string; required: boolean;
   parts: ProcPart[]; modelScope: string[];
 };
 const emptyDraft: Draft = {
@@ -55,7 +55,7 @@ const emptyDraft: Draft = {
   resultType: "pass_fail", target: "", tolerancePct: "",
   requiresNote: false, consumesPart: false,
   // Filters never pre-fill this: a new procedure always starts with both off.
-  runsAtIntake: false, repeats: false, intervalDays: "90",
+  runsAtIntake: false, repeats: false, intervalDays: "90", required: false,
   parts: [], modelScope: [],
 };
 
@@ -188,7 +188,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
       resultType: i.resultType, target: i.target ?? "", tolerancePct: i.tolerancePct ?? "",
       requiresNote: i.requiresNote, consumesPart: i.consumesPart,
       runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
-      intervalDays: String(i.intervalDays ?? 90),
+      intervalDays: String(i.intervalDays ?? 90), required: i.required,
       parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
     });
     setTimingBefore({ intervalDays: i.intervalDays });
@@ -218,7 +218,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
       assetType: sheet.assetType, kind: draft.kind, name: draft.name, notes: draft.notes,
       resultType: draft.resultType, target: draft.target, tolerancePct: draft.tolerancePct,
       requiresNote: draft.requiresNote, consumesPart: draft.consumesPart,
-      runsAtIntake: draft.runsAtIntake,
+      runsAtIntake: draft.runsAtIntake, required: draft.required,
       intervalDays: draft.repeats && !isSystem ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
     };
@@ -310,6 +310,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
               <span className="mono" style={{ fontSize: 11, color: "var(--slate)", background: "#F1F4F8", borderRadius: 4, padding: "1px 5px" }}>
                 {summarizeItem({ ...i })}
               </span>
+            )}
+            {i.required && (
+              <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}
+                title="Must be done before sign-off; a test also needs a report on file">Required</span>
             )}
             {i.runsAtIntake && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>At intake</span>}
             {i.intervalDays !== null && (
@@ -519,6 +523,19 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
                 </div>
               )}
             </div>
+
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "0 0 10px", fontWeight: 400, color: "var(--ink)" }}>
+              <input type="checkbox" checked={draft.required} style={{ width: 15, height: 15, marginTop: 2 }}
+                onChange={(e) => setDraft({ ...draft, required: e.target.checked })} />
+              <span>
+                Required for sign-off
+                <span className="mut" style={{ display: "block", fontSize: 11 }}>
+                  {draft.kind === "test"
+                    ? "Nobody can sign off until this test is done and a report is filed against it."
+                    : "Nobody can sign off until this is done."}
+                </span>
+              </span>
+            </label>
 
             {/* Only on edit, and only when the timing actually changed: what
                 happens to existing units, with the opt-in to apply it now. */}

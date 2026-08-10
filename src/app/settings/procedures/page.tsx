@@ -42,7 +42,7 @@ export default async function ProceduresPage() {
           id: r.id, assetType: r.assetType, kind: r.kind, name: r.name, notes: r.notes, position: r.position,
           resultType: r.resultType, target: r.target, tolerancePct: r.tolerancePct,
           requiresNote: r.requiresNote, consumesPart: r.consumesPart,
-          runsAtIntake: r.runsAtIntake, intervalDays: r.intervalDays,
+          runsAtIntake: r.runsAtIntake, intervalDays: r.intervalDays, required: r.required,
           parts: parseProcParts(r.parts), modelScope: r.modelScope,
         }))}
       />

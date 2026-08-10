@@ -9,7 +9,6 @@ import CatalogSelect from "./CatalogSelect";
 import SharePanel, { type ShareEntry } from "./SharePanel";
 import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
 import SalePanel from "./SalePanel";
-import DailyUpdatePanel from "./DailyUpdatePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 
 type Inst = {
@@ -32,7 +31,7 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
-export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell, dailyUpdate }: {
+export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
   instrument: Inst; label: string; clients: string[]; categories: string[];
   stages: string[]; stageDefs: StageDefLite[];
@@ -43,7 +42,6 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   /** Staff or the owning org's editors: may list the system for sale. */
   canSell: boolean;
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */
-  dailyUpdate: { systemUpdate: string; actionItem: string; updatedBy: string; canEdit: boolean } | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "" });
@@ -186,11 +184,6 @@ export default function SystemPanel({ instrument, label, clients, categories, st
         </div>
       )}
 
-      {dailyUpdate && (
-        <DailyUpdatePanel target={{ instrumentId: instrument.id, assetId: null }}
-          systemUpdate={dailyUpdate.systemUpdate} actionItem={dailyUpdate.actionItem}
-          updatedBy={dailyUpdate.updatedBy} canEdit={dailyUpdate.canEdit} />
-      )}
       <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
       <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
       <SharePanel targetId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}

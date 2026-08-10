@@ -4,7 +4,7 @@ import { promptReason } from "@/lib/reason";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, type WorkTarget } from "@/app/actions";
+import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 
 // No `url`: raw blob URLs never reach the client. Every read goes through
@@ -12,6 +12,8 @@ import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uplo
 type Attachment = {
   id: number; fileName: string; kind: string; description: string; size: number;
   uploadedBy: string; createdAt: string; showOnListing: boolean;
+  /** The task this file is evidence for, if any. */
+  taskId: number | null;
 };
 
 type Staged = {
@@ -154,8 +156,11 @@ async function relayUpload(file: File): Promise<{ url: string }> {
   throw lastErr;
 }
 
-export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false }: {
+export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [] }: {
   target: WorkTarget; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
+  // Tasks a file can be filed against as its report. A mandatory test needs one
+  // before anything can be signed off, so the picker highlights those.
+  evidenceTasks?: { id: number; title: string; required: boolean }[];
   // True when the system is for sale AND the viewer may curate its listing
   // (staff or the owning org's editors): each file gets a show-on-listing toggle.
   listingCuration?: boolean;
@@ -392,6 +397,19 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 </span>
               </div>
             </div>
+            {canEdit && evidenceTasks.length > 0 && (
+              <select value={a.taskId ?? ""} aria-label={`Evidence for, ${a.fileName}`}
+                onChange={(e) => {
+                  const v = e.target.value ? parseInt(e.target.value) : null;
+                  startTransition(async () => { await setAttachmentTask(a.id, v); });
+                }}
+                style={{ width: "auto", maxWidth: 150, fontSize: 11, padding: "1px 4px", flexShrink: 0 }}>
+                <option value="">not evidence</option>
+                {evidenceTasks.map((t) => (
+                  <option key={t.id} value={t.id}>{t.required ? "★ " : ""}{t.title}</option>
+                ))}
+              </select>
+            )}
             {listingCuration && (
               <label style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontSize: 11, fontWeight: 400, color: a.showOnListing ? "#2E6B2E" : "var(--mut)", flexShrink: 0, textTransform: "none", letterSpacing: 0 }}
                 title="Public buyers see this file on the listing page">

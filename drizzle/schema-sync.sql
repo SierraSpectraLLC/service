@@ -221,6 +221,21 @@ CREATE TABLE IF NOT EXISTS "asset_events" (
   "actor" text NOT NULL DEFAULT '',
   "at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "signoffs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "instrument_id" integer,
+  "asset_id" integer,
+  "signed_by" text NOT NULL,
+  "signer_name" text NOT NULL,
+  "signer_title" text NOT NULL DEFAULT '',
+  "meaning" text NOT NULL DEFAULT 'Approved for release',
+  "note" text NOT NULL DEFAULT '',
+  "data" jsonb NOT NULL,
+  "revoked_at" timestamp,
+  "revoked_by" text NOT NULL DEFAULT '',
+  "revoked_reason" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "discussion_posts" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -474,6 +489,9 @@ ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL 
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "template_id" integer;
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "parts" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "procedure_id" integer;
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "required" boolean NOT NULL DEFAULT false;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "procedure_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "task_id" integer;
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "categories" text[] NOT NULL DEFAULT '{}';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
@@ -490,6 +508,8 @@ CREATE INDEX IF NOT EXISTS "diffs_resolved_idx" ON "sheet_diffs" ("resolved");
 CREATE INDEX IF NOT EXISTS "eod_date_idx" ON "eod_updates" ("date");
 CREATE INDEX IF NOT EXISTS "template_tasks_template_idx" ON "template_tasks" ("template_id");
 CREATE INDEX IF NOT EXISTS "stage_events_instrument_idx" ON "stage_events" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "signoffs_instrument_idx" ON "signoffs" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "signoffs_asset_idx" ON "signoffs" ("asset_id");
 CREATE INDEX IF NOT EXISTS "pm_instrument_idx" ON "pm_schedules" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "pm_asset_idx" ON "pm_schedules" ("asset_id");
 CREATE INDEX IF NOT EXISTS "time_instrument_idx" ON "time_entries" ("instrument_id");
@@ -640,6 +660,22 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_asset_id_assets_id_fk') THEN
     ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_asset_id_assets_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_procedure_id_procedures_id_fk') THEN
+    ALTER TABLE "tasks" ADD CONSTRAINT "tasks_procedure_id_procedures_id_fk"
+      FOREIGN KEY ("procedure_id") REFERENCES "procedures"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_task_id_tasks_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_task_id_tasks_id_fk"
+      FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'signoffs_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "signoffs" ADD CONSTRAINT "signoffs_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'signoffs_asset_id_assets_id_fk') THEN
+    ALTER TABLE "signoffs" ADD CONSTRAINT "signoffs_asset_id_assets_id_fk"
       FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_procedure_id_procedures_id_fk') THEN

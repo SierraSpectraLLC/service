@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  pmSchedules,
+  pmSchedules, procedures, signoffs,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
@@ -25,6 +25,7 @@ import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import TasksPanel from "@/components/TasksPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
+import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
 import AssetsPanel from "@/components/AssetsPanel";
@@ -111,6 +112,21 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const itemIds = items.map((i) => i.id);
   const iNotes = itemIds.length ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt)) : [];
 
+  // Which of this system's tasks a report can be filed against, and which of
+  // those are mandatory - the ★ in the attachment picker and the sign-off gate.
+  const procIds = [...new Set(taskRows.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
+  const [procRows, signRows] = await Promise.all([
+    procIds.length
+      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+          .from(procedures).where(inArray(procedures.id, procIds))
+      : [],
+    db.select().from(signoffs).where(and(eq(signoffs.instrumentId, instId), isNull(signoffs.revokedAt))),
+  ]);
+  const evidenceTasks = taskRows.map((t) => {
+    const pr = procRows.find((x) => x.id === t.procedureId);
+    return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
+  });
+
   // A view-level share is read-only even for an org whose role can edit.
   const canEdit = await canEditSystem(user, instId);
   const isStaff = user.role === "owner" || user.role === "staff";
@@ -170,6 +186,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             </Link>
             <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
               Sign-off packet
+              {signRows.length > 0 && (
+                <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E", marginLeft: 6 }}>
+                  signed{signRows.length > 1 ? ` ×${signRows.length}` : ""}
+                </span>
+              )}
             </Link>
           </>
         )}
@@ -194,10 +215,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         ownerOrgId={inst.ownerOrgId}
         canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
         canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
-        dailyUpdate={modules.eod && (isStaff || ownerIsViewer) ? {
-          systemUpdate: todayUpdate?.systemUpdate ?? "", actionItem: todayUpdate?.actionItem ?? "",
-          updatedBy: todayUpdate?.updatedBy ?? "", canEdit: isStaff,
-        } : null}
       />
 
       <AssetsPanel
@@ -224,7 +241,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
         canEdit={canEdit} isStaff={isStaff} showCosts={canSeeCosts(user, inst.ownerOrgId)} />
 
-      <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))} canEdit={canEdit} isStaff={isStaff}
+      <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+        evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
         listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))} />
 
       <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
@@ -241,6 +259,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
           };
         })} />
+
+      {/* Today's client-facing note sits with the conversation it feeds, not up
+          in the system's identity block. */}
+      {modules.eod && (isStaff || ownerIsViewer) && (
+        <DailyUpdatePanel target={{ instrumentId: inst.id, assetId: null }}
+          systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+          updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
+      )}
 
       <DiscussionPanel
         instrumentId={inst.id}

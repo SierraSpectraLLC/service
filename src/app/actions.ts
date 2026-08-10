@@ -3,18 +3,19 @@
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { eq, and, asc, inArray, isNull, sql } from "drizzle-orm";
+import { eq, and, asc, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs,
-  engagementRecords, accessRequests, assetShares, pmSchedules, procedures,
+  engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
 import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
+import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -457,7 +458,7 @@ async function generateCheckout(
   for (const i of fresh) {
     await db.insert(tasks).values({
       instrumentId, title: i.name, body: procedureTaskBody(i, parseProcParts(i.parts)), origin: "checkout",
-      assetId: target.id, sortOrder: i.position,
+      assetId: target.id, sortOrder: i.position, procedureId: i.id ?? null,
     });
   }
   const label = target.id !== null ? assetLabel(target as { kind: string; model: string; serial: string }) : "the system";
@@ -2046,6 +2047,134 @@ export async function deleteProcedure(procedureId: number): Promise<{ error?: st
   });
   revalidatePath("/settings/procedures");
   revalidatePath("/maintenance");
+  return {};
+}
+
+// ---------------- Sign-off ----------------
+
+/**
+ * Resolve the gate for a target from live data. Both the page and the sign
+ * action call this - the action recomputes rather than trusting anything the
+ * browser sent, because the gate IS the meaning of the signature.
+ *
+ * A system's gate spans its own work AND the work on its installed assets: a
+ * pump with a failed test is not a shippable system.
+ */
+async function gateFor(target: WorkTarget) {
+  let taskRows: (typeof tasks.$inferSelect)[] = [];
+  if (target.instrumentId !== null) {
+    const installed = await db.select({ id: assets.id }).from(assets).where(eq(assets.instrumentId, target.instrumentId));
+    const ids = installed.map((a) => a.id);
+    taskRows = await db.select().from(tasks).where(
+      ids.length ? or(eq(tasks.instrumentId, target.instrumentId), inArray(tasks.assetId, ids))
+        : eq(tasks.instrumentId, target.instrumentId)
+    );
+  } else if (target.assetId !== null) {
+    taskRows = await db.select().from(tasks).where(eq(tasks.assetId, target.assetId));
+  }
+  const procIds = [...new Set(taskRows.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
+  const procRows = procIds.length
+    ? await db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+        .from(procedures).where(inArray(procedures.id, procIds))
+    : [];
+  const taskIds = taskRows.map((t) => t.id);
+  const reportRows = taskIds.length
+    ? await db.select({ taskId: attachments.taskId }).from(attachments).where(inArray(attachments.taskId, taskIds))
+    : [];
+  const reportsByTask = new Map<number, number>();
+  for (const r of reportRows) {
+    if (r.taskId !== null) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+  }
+  return signoffGate(
+    taskRows.map((t) => {
+      const p = procRows.find((x) => x.id === t.procedureId);
+      return { id: t.id, title: t.title, state: t.state, required: p?.required ?? false, kind: p?.kind ?? "task" };
+    }),
+    reportsByTask,
+  );
+}
+
+export async function signOffTarget(
+  target: WorkTarget,
+  data: { signerName: string; signerTitle: string; meaning: string; note: string },
+): Promise<{ error?: string }> {
+  // The house releases equipment; a client signing their own acceptance is a
+  // different document and not this one.
+  const u = await requireStaff();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  // Typing your own name is the act of signing - an empty box is not a signature.
+  const signerName = data.signerName.trim();
+  if (signerName.length < 2) return { error: "Type your full name to sign" };
+  const gate = await gateFor(target);
+  if (!gate.ready) return { error: `Not ready to sign: ${gate.blockers.map((b) => b.text).join("; ")}` };
+  const existing = await db.select().from(signoffs).where(
+    and(
+      target.instrumentId !== null ? eq(signoffs.instrumentId, target.instrumentId) : eq(signoffs.assetId, target.assetId!),
+      isNull(signoffs.revokedAt),
+    )
+  );
+  if (existing.some((e) => e.signedBy.toLowerCase() === u.email.toLowerCase())) {
+    return { error: "You have already signed this" };
+  }
+  const [row] = await db.insert(signoffs).values({
+    instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+    signedBy: u.email, signerName, signerTitle: data.signerTitle.trim(),
+    meaning: data.meaning.trim() || "Approved for release",
+    note: data.note.trim(), data: snapshotOf(gate),
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "signoff", entityId: row.id,
+    action: `signed off ${targetLabel(t0.externalId, t0.asset)} as "${signerName}" - ${row.meaning} (${gate.tasksDone}/${gate.tasksTotal} tasks, ${gate.requiredTests.length} mandatory test${gate.requiredTests.length === 1 ? "" : "s"} evidenced)`,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
+/**
+ * Withdraw a signature. Kept, not deleted, with a reason - the fact that
+ * something was signed and then withdrawn is exactly the kind of history a
+ * sign-off record exists to hold.
+ */
+export async function revokeSignoff(signoffId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [row] = await db.select().from(signoffs).where(eq(signoffs.id, signoffId));
+  if (!row || row.revokedAt) return {};
+  await db.update(signoffs).set({ revokedAt: new Date(), revokedBy: u.email, revokedReason: why })
+    .where(eq(signoffs.id, signoffId));
+  await audit({
+    actor: u.email, instrumentId: row.instrumentId, assetId: row.assetId, entityType: "signoff", entityId: signoffId,
+    action: `withdrew ${row.signerName}'s sign-off - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revWork({ instrumentId: row.instrumentId, assetId: row.assetId });
+  return {};
+}
+
+/** File an uploaded document as the evidence for one task, or unfile it. */
+export async function setAttachmentTask(attachmentId: number, taskId: number | null): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  if (!a) return { error: "Not found" };
+  await assertWorkEditable(u, a);
+  if (taskId !== null) {
+    // The task has to belong to the same system or unit as the file, or a
+    // report could be filed as evidence for work it has nothing to do with.
+    const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+    if (!t) return { error: "Not found" };
+    const sameSystem = a.instrumentId !== null && t.instrumentId === a.instrumentId;
+    const sameAsset = a.assetId !== null && t.assetId === a.assetId;
+    if (!sameSystem && !sameAsset) return { error: "That task belongs to something else" };
+  }
+  await db.update(attachments).set({ taskId }).where(eq(attachments.id, attachmentId));
+  const [t] = taskId !== null ? await db.select().from(tasks).where(eq(tasks.id, taskId)) : [];
+  await audit({
+    actor: u.email, instrumentId: a.instrumentId, assetId: a.assetId, entityType: "attachment", entityId: attachmentId,
+    action: t ? `filed ${a.fileName} as the report for '${t.title}'` : `unfiled ${a.fileName} from its task`,
+  });
+  revWork(a);
   return {};
 }
 

@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs, eodUpdates,
-  pmSchedules, vocabTerms,
+  pmSchedules, vocabTerms, procedures,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
@@ -74,6 +74,18 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   ]);
   const itemIds = items.map((i) => i.id);
   const iNotes = itemIds.length ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt)) : [];
+
+  // Reports can be filed against this unit's own tasks; ★ marks the mandatory
+  // tests that must be evidenced before sign-off.
+  const procIds = [...new Set(taggedTasks.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
+  const procRows = procIds.length
+    ? await db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+        .from(procedures).where(inArray(procedures.id, procIds))
+    : [];
+  const evidenceTasks = taggedTasks.map((t) => {
+    const pr = procRows.find((x) => x.id === t.procedureId);
+    return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
+  });
 
   const canEdit = access.edit;
   const isStaff = user.role === "owner" || user.role === "staff";
@@ -196,17 +208,13 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           <SalePanel target="asset" targetId={asset.id} forSale={asset.forSale}
             saleNote={asset.saleNote} listingToken={asset.listingToken} />
         )}
-        {modules.eod && (isStaff || ownerIsViewer) && (
-          <DailyUpdatePanel target={target}
-            systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
-            updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
-        )}
       </div>
 
       <PartsPanel target={target} parts={redactParts(taggedParts, showCosts).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
         systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} />
 
       <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+        evidenceTasks={evidenceTasks}
         canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell} />
 
       <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
@@ -220,6 +228,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           parts: schedulePartsOf(s),
           openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
         }))} />
+
+      {modules.eod && (isStaff || ownerIsViewer) && (
+        <DailyUpdatePanel target={target}
+          systemUpdate={todayUpdate?.systemUpdate ?? ""} actionItem={todayUpdate?.actionItem ?? ""}
+          updatedBy={todayUpdate?.updatedBy ?? ""} canEdit={isStaff} />
+      )}
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Service history</div>

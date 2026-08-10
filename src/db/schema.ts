@@ -212,6 +212,9 @@ export const procedures = pgTable("procedures", {
   // Timing. Both may be true; both false is rejected by the actions.
   runsAtIntake: boolean("runs_at_intake").notNull().default(false),
   intervalDays: integer("interval_days"),
+  // Mandatory for sign-off: the work it generates must be Done, and a test
+  // must additionally have a report filed against it, before anyone can sign.
+  required: boolean("required").notNull().default(false),
   parts: text("parts").notNull().default(""),       // JSON [{name, number}], "" = none
   modelScope: text("model_scope").array().notNull().default([]), // [] = all models
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -275,6 +278,9 @@ export const tasks = pgTable("tasks", {
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset this is about
   // Which schedule generated this task; completing it advances that schedule.
   pmScheduleId: integer("pm_schedule_id").references(() => pmSchedules.id, { onDelete: "set null" }),
+  // Which catalog procedure generated it (intake work). Kept so sign-off can
+  // tell which tasks are mandatory without matching on titles.
+  procedureId: integer("procedure_id").references(() => procedures.id, { onDelete: "set null" }),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
@@ -361,10 +367,44 @@ export const attachments = pgTable("attachments", {
   url: text("url").notNull(),         // Vercel Blob URL
   size: integer("size").notNull().default(0), // bytes
   uploadedBy: text("uploaded_by").notNull(),
+  // The task this file is evidence FOR - how a mandatory test proves it
+  // passed. Null for general documents (manuals, photos, delivery paperwork).
+  taskId: integer("task_id").references(() => tasks.id, { onDelete: "set null" }),
   // Files are opt-in on a for-sale listing, so no report leaks by accident.
   showOnListing: boolean("show_on_listing").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("attachments_instrument_idx").on(t.instrumentId)]);
+
+/**
+ * A release signature: one person, at one moment, stating that a system (or a
+ * standalone unit) is fit to hand over. Append-only in spirit - a signature is
+ * revoked with a reason rather than edited, and the revocation is kept.
+ *
+ * `data` freezes what was true at signing (task counts, the mandatory tests and
+ * the reports that evidenced them) because that is what the signature actually
+ * attests to. The live record keeps moving; the claim does not.
+ *
+ * Honest limits: identity comes from the authenticated session and intent from
+ * a typed name, not from re-entering a password - this instance signs in by
+ * magic link, so there is no password to re-challenge. That makes this a strong
+ * audited approval, not a 21 CFR 11 electronic signature. Getting there needs a
+ * second factor at the moment of signing.
+ */
+export const signoffs = pgTable("signoffs", {
+  id: serial("id").primaryKey(),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
+  signedBy: text("signed_by").notNull(),       // authenticated email
+  signerName: text("signer_name").notNull(),   // typed at signing, the intent
+  signerTitle: text("signer_title").notNull().default(""),
+  meaning: text("meaning").notNull().default("Approved for release"),
+  note: text("note").notNull().default(""),
+  data: jsonb("data").notNull(),               // frozen evidence snapshot
+  revokedAt: timestamp("revoked_at"),
+  revokedBy: text("revoked_by").notNull().default(""),
+  revokedReason: text("revoked_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("signoffs_instrument_idx").on(t.instrumentId), index("signoffs_asset_idx").on(t.assetId)]);
 
 // One row per (system or asset, day): the client-facing end-of-day update.
 // Written where the work happens - on the system's or asset's own page - and

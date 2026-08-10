@@ -98,6 +98,10 @@ also the page that organization's own editors get.
   reports create actions and no errors.
 - Trigger `api/cron/daily-digest` with the `CRON_SECRET` header → `skipped`
   unless the module is on.
+- Mark a procedure **Required for sign-off** in Settings → Procedures, open a
+  system's sign-off packet, and confirm the Sign off button is blocked with the
+  reason. Finish the work, file a report against the test (the "not evidence"
+  dropdown on the file), and confirm signing then succeeds and prints.
 - Define a maintenance template on /maintenance for an asset type in the
   fleet → it reports how many existing units it scheduled; add a new asset of
   that type → the schedule is on it from birth.
@@ -112,6 +116,12 @@ also the page that organization's own editors get.
   `/discussions`, confirm a client sees only their own room.
 
 ## Notes
+
+- **Sign-off signatures are audited approvals, not 21 CFR 11 e-signatures.**
+  Identity comes from the authenticated session and intent from a typed name;
+  there is no password to re-challenge at signing because sign-in is by magic
+  link. Tell customers that plainly. Closing the gap means a second factor at
+  the moment of signing.
 
 - **Timezone is an env var by design** (`SHOP_TZ`): shop-day helpers run
   synchronously in render paths. Set it at provisioning; changing it later is
