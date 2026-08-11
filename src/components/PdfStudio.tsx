@@ -23,10 +23,17 @@ type StudioDoc = {
   error?: string;
 };
 
-type WorkPage = { uid: number; docKey: string; pageIx: number; rotate: 0 | 90 | 180 | 270 };
+type WorkPage = {
+  uid: number; docKey: string; pageIx: number; rotate: 0 | 90 | 180 | 270;
+  /** Header for this page alone. "" inherits the source document's title. */
+  title: string;
+};
 
 const MAX_TOTAL = 120 * 1024 * 1024; // the browser holds every byte; stay honest about it
-const THUMB_W = 150;
+// Raster width for a thumbnail. The grid decides how wide a card is drawn, so
+// this only sets sharpness - a little bigger than the widest card keeps a phone
+// (fewer, wider columns) from showing an upscaled blur.
+const THUMB_W = 200;
 
 const fmtSize = (b: number) =>
   !b ? "" : b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`;
@@ -64,6 +71,8 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
   const [cover, setCover] = useState("");
   const [numbers, setNumbers] = useState(true);
   const [headers, setHeaders] = useState(true);
+  const [bulkTitle, setBulkTitle] = useState("");
+  const [moveTo, setMoveTo] = useState("");
   const [dest, setDest] = useState("download");
   const [fileName, setFileName] = useState("packet.pdf");
   const [busy, setBusy] = useState("");
@@ -143,7 +152,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
       void pdf.cleanup();
       setDocs((ds) => ds.map((d) => (d.key === key ? { ...d, bytes, pageCount: count, state: "ready" } : d)));
       // Every page joins the working set; unwanted ones are one click to drop.
-      setPages((ps) => [...ps, ...Array.from({ length: count }, (_, i) => ({ uid: uidCounter++, docKey: key, pageIx: i, rotate: 0 as const }))]);
+      setPages((ps) => [...ps, ...Array.from({ length: count }, (_, i) => ({ uid: uidCounter++, docKey: key, pageIx: i, rotate: 0 as const, title: "" }))]);
       renderQueue.current.push(...Array.from({ length: count }, (_, i) => ({ docKey: key, pageIx: i })));
       void pumpThumbs();
     } catch (e) {
@@ -201,6 +210,38 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
     });
   };
 
+  /**
+   * One step left or right. Dragging is nicer with a mouse and impossible with
+   * a finger - touch fires no drag events at all - so nudging is the reorder
+   * that always works. It's also the keyboard one.
+   */
+  const nudge = (uid: number, dir: -1 | 1) =>
+    setPages((ps) => {
+      const ix = ps.findIndex((p) => p.uid === uid);
+      const j = ix + dir;
+      if (ix < 0 || j < 0 || j >= ps.length) return ps;
+      const next = [...ps];
+      [next[ix], next[j]] = [next[j], next[ix]];
+      return next;
+    });
+
+  /**
+   * Send every selected page to a position, in their current relative order.
+   * Nudging page 30 to the front is thirty taps; this is one. 1-based, because
+   * that's what the badges on the thumbnails say.
+   */
+  const moveSelectedTo = (position: number) =>
+    setPages((ps) => {
+      const moving = ps.filter((p) => selected.has(p.uid));
+      if (!moving.length) return ps;
+      const rest = ps.filter((p) => !selected.has(p.uid));
+      const at = Math.min(Math.max(position - 1, 0), rest.length);
+      return [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+    });
+
+  const setTitles = (uids: Set<number>, title: string) =>
+    setPages((ps) => ps.map((p) => (uids.has(p.uid) ? { ...p, title } : p)));
+
   // ---- save ---------------------------------------------------------------
 
   const save = async (mode: "download" | "store") => {
@@ -212,7 +253,11 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
       const usedKeys = [...new Set(pages.map((p) => p.docKey))];
       const usedDocs = usedKeys.map((k) => docs.find((d) => d.key === k)!).filter((d) => d.bytes);
       const docIx = new Map(usedDocs.map((d, i) => [d.key, i]));
-      const refs: PageRef[] = pages.map((p) => ({ docIx: docIx.get(p.docKey)!, pageIx: p.pageIx, rotate: p.rotate }));
+      // A blank page title means "inherit the document's" - lib/pdfCombine
+      // resolves that, so send it through as-is rather than pre-flattening it.
+      const refs: PageRef[] = pages.map((p) => ({
+        docIx: docIx.get(p.docKey)!, pageIx: p.pageIx, rotate: p.rotate, title: p.title,
+      }));
       const { assemblePdf } = await import("@/lib/pdfCombine");
       const bytes = await assemblePdf(
         usedDocs.map((d) => ({ bytes: d.bytes!, title: d.title })),
@@ -271,7 +316,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
   const canStore = dest !== "download";
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 300px) 1fr", gap: 14, alignItems: "start" }}>
+    <div className="pdf-studio">
       {/* ── Sources ── */}
       <div>
         <div className="card">
@@ -289,7 +334,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or record"
               style={{ fontSize: 12, marginBottom: 8 }} />
           )}
-          <div style={{ maxHeight: 420, overflowY: "auto" }}>
+          <div className="pdf-srclist">
             {shownSources.map((s) => (
               <div key={s.id} style={{ display: "flex", gap: 6, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
                 <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }} onClick={() => addAttachment(s)}>+ add</button>
@@ -305,7 +350,10 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
 
         {docs.length > 0 && (
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 6 }}>In this packet</div>
+            <div className="card-title" style={{ marginBottom: 2 }}>In this packet</div>
+            <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+              Each title is the default header for that document&apos;s pages. Any page can override it.
+            </div>
             {docs.map((d) => (
               <div key={d.key} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -334,63 +382,98 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
             <div className="card-title">Pages</div>
             <span className="mut" style={{ fontSize: 12 }}>
-              {pages.length ? `${pages.length} page${pages.length === 1 ? "" : "s"} - drag to reorder, click to select` : "Add a source to begin"}
+              {pages.length
+                ? <>{pages.length} page{pages.length === 1 ? "" : "s"} · tap a page to select<span className="pdf-drag-hint">, drag or use ‹ › to reorder</span></>
+                : "Add a source to begin"}
             </span>
-            {selected.size > 0 && (
-              <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-                <b style={{ fontSize: 12 }}>{selected.size} selected</b>
-                <button className="btn sm" onClick={() => rotateUids(selected, -1)}>⟲ rotate</button>
-                <button className="btn sm" onClick={() => rotateUids(selected, 1)}>⟳ rotate</button>
-                <button className="btn sm" style={{ color: "#A32D2D" }} onClick={() => removeUids(selected)}>Remove</button>
-                <button className="btn link" style={{ fontSize: 12 }} onClick={() => setSelected(new Set())}>clear</button>
-              </span>
-            )}
           </div>
+          {pages.length > 0 && (
+            <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+              The box under each page is its header title. Leave it blank and the page takes its
+              document&apos;s title from the left; type in it and that page alone says something different.
+            </div>
+          )}
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, minHeight: 120 }}>
+          {/* Bulk operations. Wraps to its own rows on a narrow screen rather
+              than squeezing into the title line. */}
+          {selected.size > 0 && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10,
+              background: "#F4F6F9", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px" }}>
+              <b style={{ fontSize: 12 }}>{selected.size} selected</b>
+              <button className="btn sm" onClick={() => rotateUids(selected, -1)}>⟲</button>
+              <button className="btn sm" onClick={() => rotateUids(selected, 1)}>⟳</button>
+              <button className="btn sm" style={{ color: "#A32D2D" }} onClick={() => removeUids(selected)}>Remove</button>
+              <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <input value={bulkTitle} onChange={(e) => setBulkTitle(e.target.value)}
+                  aria-label="Header title for the selected pages" placeholder="header for these pages"
+                  style={{ fontSize: 12, width: 150 }} />
+                <button className="btn sm" onClick={() => setTitles(selected, bulkTitle.trim())}>Set</button>
+              </span>
+              <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <label className="mut" style={{ fontSize: 12 }} htmlFor="pdf-moveto">to page</label>
+                <input id="pdf-moveto" value={moveTo} onChange={(e) => setMoveTo(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric" style={{ fontSize: 12, width: 52 }} />
+                <button className="btn sm" disabled={!moveTo} onClick={() => moveSelectedTo(parseInt(moveTo) || 1)}>Move</button>
+              </span>
+              <button className="btn link" style={{ fontSize: 12 }} onClick={() => setSelected(new Set())}>clear</button>
+            </div>
+          )}
+
+          <div className="pdf-pages">
             {pages.map((p, ix) => {
               const key = `${p.docKey}:${p.pageIx}`;
               const src = thumbs.current.get(key);
               const isSel = selected.has(p.uid);
+              const docTitle = docs.find((d) => d.key === p.docKey)?.title ?? "";
               return (
-                <div key={p.uid}
-                  draggable
-                  onDragStart={() => setDrag(p.uid)}
-                  onDragEnd={() => { setDrag(null); setOver(null); }}
+                <div key={p.uid} className="pdf-page"
                   onDragOver={(e) => { if (drag !== null) { e.preventDefault(); setOver(p.uid); } }}
                   onDrop={(e) => { if (drag !== null) { e.preventDefault(); dropAt(drag, p.uid); setDrag(null); setOver(null); } }}
                   style={{
-                    width: THUMB_W, cursor: "grab", position: "relative",
                     opacity: drag === p.uid ? 0.4 : 1,
                     outline: isSel ? "3px solid var(--navy)" : over === p.uid && drag !== null ? "2px dashed var(--navy)" : "1px solid var(--line)",
-                    outlineOffset: 2, borderRadius: 4,
+                    outlineOffset: 2,
                   }}
-                  onClick={() => toggleSelect(p.uid)}
                 >
-                  {src ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={src} alt={`Page ${ix + 1}`} draggable={false}
-                      style={{ width: "100%", display: "block", borderRadius: 4, transform: p.rotate ? `rotate(${p.rotate}deg)` : undefined }} />
-                  ) : (
-                    <div style={{ width: "100%", height: 190, display: "grid", placeItems: "center", background: "#F4F6F9", borderRadius: 4 }}>
-                      <span className="mut" style={{ fontSize: 11 }}>{src === "" ? "no preview" : "rendering…"}</span>
-                    </div>
-                  )}
-                  <span style={{
-                    position: "absolute", top: 4, left: 4, fontSize: 10, fontWeight: 700, color: "#fff",
-                    background: docColor(p.docKey), borderRadius: 4, padding: "1px 5px",
-                  }}>{ix + 1}</span>
-                  {p.rotate !== 0 && (
-                    <span className="mut" style={{ position: "absolute", top: 4, right: 4, fontSize: 9, background: "#fff", borderRadius: 4, padding: "0 3px" }}>
-                      {p.rotate}°
-                    </span>
-                  )}
-                  <span style={{ position: "absolute", bottom: 4, right: 4, display: "flex", gap: 2 }}
-                    onClick={(e) => e.stopPropagation()}>
-                    <button className="btn sm" style={{ padding: "1px 6px", fontSize: 11 }} aria-label={`Rotate page ${ix + 1}`}
+                  {/* Only the thumbnail is draggable: an input inside a
+                      draggable element can't be selected in every browser. */}
+                  <div className="pdf-thumb"
+                    draggable
+                    onDragStart={() => setDrag(p.uid)}
+                    onDragEnd={() => { setDrag(null); setOver(null); }}
+                    onClick={() => toggleSelect(p.uid)}
+                  >
+                    {src ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={src} alt={`Page ${ix + 1}`} draggable={false}
+                        style={{ width: "100%", display: "block", borderRadius: 4, transform: p.rotate ? `rotate(${p.rotate}deg)` : undefined }} />
+                    ) : (
+                      <div style={{ width: "100%", aspectRatio: "17 / 22", display: "grid", placeItems: "center", background: "#F4F6F9", borderRadius: 4 }}>
+                        <span className="mut" style={{ fontSize: 11 }}>{src === "" ? "no preview" : "rendering…"}</span>
+                      </div>
+                    )}
+                    <span style={{
+                      position: "absolute", top: 4, left: 4, fontSize: 10, fontWeight: 700, color: "#fff",
+                      background: docColor(p.docKey), borderRadius: 4, padding: "1px 5px",
+                    }}>{ix + 1}</span>
+                    {p.rotate !== 0 && (
+                      <span className="mut" style={{ position: "absolute", top: 4, right: 4, fontSize: 9, background: "#fff", borderRadius: 4, padding: "0 3px" }}>
+                        {p.rotate}°
+                      </span>
+                    )}
+                  </div>
+                  <input value={p.title} placeholder={docTitle || "no header"}
+                    aria-label={`Header title for page ${ix + 1}`}
+                    onChange={(e) => setTitles(new Set([p.uid]), e.target.value)} />
+                  <span className="pdf-acts">
+                    <button className="btn sm" disabled={ix === 0} aria-label={`Move page ${ix + 1} earlier`}
+                      onClick={() => nudge(p.uid, -1)}>‹</button>
+                    <button className="btn sm" aria-label={`Rotate page ${ix + 1}`}
                       onClick={() => rotateUids(new Set([p.uid]), 1)}>⟳</button>
-                    <button className="btn sm" style={{ padding: "1px 6px", fontSize: 11, color: "#A32D2D" }} aria-label={`Remove page ${ix + 1}`}
+                    <button className="btn sm" style={{ color: "#A32D2D" }} aria-label={`Remove page ${ix + 1}`}
                       onClick={() => removeUids(new Set([p.uid]))}>×</button>
+                    <button className="btn sm" disabled={ix === pages.length - 1} aria-label={`Move page ${ix + 1} later`}
+                      onClick={() => nudge(p.uid, 1)}>›</button>
                   </span>
                 </div>
               );
@@ -400,7 +483,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
                 onDragOver={(e) => { e.preventDefault(); setOver("end"); }}
                 onDrop={(e) => { e.preventDefault(); dropAt(drag, "end"); setDrag(null); setOver(null); }}
                 style={{
-                  width: THUMB_W, minHeight: 120, borderRadius: 4, display: "grid", placeItems: "center",
+                  minHeight: 120, borderRadius: 4, display: "grid", placeItems: "center",
                   border: `2px dashed ${over === "end" ? "var(--navy)" : "var(--line)"}`,
                 }}
               ><span className="mut" style={{ fontSize: 11 }}>to the end</span></div>
@@ -435,7 +518,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
               <input type="checkbox" checked={headers} onChange={(e) => setHeaders(e.target.checked)} style={{ width: 15, height: 15 }} />
-              Header bar per source document
+              Header bar on each page
             </label>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

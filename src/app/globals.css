@@ -159,6 +159,42 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
 }
 
+/* ── PDF studio ─────────────────────────────────────────────────────────────
+   Sources beside the working set on a desktop, stacked on a phone. The page
+   grid reflows rather than scrolling sideways, because a horizontal scroll
+   inside a vertical page is how you lose track of where page 30 went.
+
+   The studio also has to work with a finger. HTML5 drag-and-drop raises no
+   events at all on touch, so every reorder the drag offers is also a button -
+   see the per-card move controls in PdfStudio. */
+.pdf-studio {
+  display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 14px; align-items: start;
+}
+.pdf-srclist { max-height: 420px; overflow-y: auto; }
+.pdf-pages {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 10px; min-height: 120px;
+}
+.pdf-page { border-radius: 4px; min-width: 0; }
+.pdf-page .pdf-thumb { position: relative; cursor: grab; }
+.pdf-page input { font-size: 11px; padding: 3px 5px; width: 100%; }
+/* Move / rotate / remove, spread across the card's width so each is a target
+   rather than a pinpoint. */
+.pdf-page .pdf-acts { display: flex; gap: 2px; margin-top: 3px; }
+.pdf-page .pdf-acts .btn { flex: 1; padding: 3px 0; font-size: 12px; min-height: 26px; }
+@media (max-width: 860px) {
+  .pdf-studio { grid-template-columns: minmax(0, 1fr); }
+  /* A source list that fills the viewport buries the pages under it. */
+  .pdf-srclist { max-height: 200px; }
+}
+/* No mouse: bigger everything, and no point advertising a drag that can't fire. */
+@media (hover: none) {
+  .pdf-page .pdf-acts .btn { min-height: 34px; font-size: 14px; }
+  .pdf-page .pdf-thumb { cursor: default; }
+  .pdf-drag-hint { display: none; }
+}
+
 /* Bottom sheet (checkout item editor). Scrim + sheet are plain fixed divs -
    no portal - so keep them last inside the card that opens them. */
 .scrim {

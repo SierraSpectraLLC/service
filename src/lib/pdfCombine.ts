@@ -103,12 +103,24 @@ export type PageRef = {
   pageIx: number;
   /** Extra quarter-turns applied on top of the page's own rotation: 0|90|180|270. */
   rotate: 0 | 90 | 180 | 270;
+  /**
+   * Header-bar title for THIS page, overriding its document's. Blank or absent
+   * inherits the document title, which is what most pages want - a nine-page
+   * report is one title, typed once. The override is for the pages that carry
+   * their own meaning: "Leak check - post-repair", "As-found chromatogram".
+   */
+  title?: string;
 };
 
 /**
  * Compose an arbitrary page list drawn from several documents - reordered,
- * subset, interleaved, rotated - into one PDF, with the same cover page,
- * header bars and page numbering the whole-document combiner produces.
+ * subset, interleaved, rotated, individually titled - into one PDF, with a
+ * cover page, header bars and continuous page numbering.
+ *
+ * Numbering is over the finished packet, not the sources: "Page 7 of 31" means
+ * the seventh sheet you'd hold, cover included. Titles resolve per page, so a
+ * packet can read "As-found chromatogram" on one sheet and "Post-repair" on the
+ * next even though both came out of the same report.
  *
  * Runs in the browser as well as in Node (pdf-lib is plain JS both places):
  * the studio assembles client-side, so a 60MB working set never has to fit
@@ -124,6 +136,24 @@ export async function assemblePdf(
   const font = await out.embedFont(StandardFonts.Helvetica);
   const bold = await out.embedFont(StandardFonts.HelveticaBold);
 
+  // Load each source once however many of its pages are used. Before the cover,
+  // so a page list naming a document nobody supplied fails immediately.
+  const used = [...new Set(pages.map((p) => p.docIx))];
+  const loaded = new Map<number, PDFDocument>();
+  for (const ix of used) {
+    if (!docs[ix]) throw new Error(`Page list names document ${ix + 1}, which wasn't provided`);
+    loaded.set(ix, await PDFDocument.load(docs[ix].bytes, { ignoreEncryption: true }));
+  }
+
+  // Every page's header, resolved up front: the page's own title wins, its
+  // document's is the fallback, "" means no bar. Kept as text rather than as a
+  // document index because a title is page-level - two pages of one report can
+  // say different things - and because the cover's contents list is built from
+  // this same array, so a binder's contents and its header bars cannot disagree.
+  const coverOffset = options.coverTitle ? 1 : 0;
+  const heading = new Array<string>(coverOffset).fill("")
+    .concat(pages.map((ref) => (ref.title ?? "").trim() || docs[ref.docIx].title));
+
   if (options.coverTitle) {
     const cover = out.addPage([612, 792]);
     const { width, height } = cover.getSize();
@@ -132,28 +162,33 @@ export async function assemblePdf(
     options.coverLines.filter(Boolean).forEach((line, i) => {
       cover.drawText(fit(line, 90), { x: 72, y: height - 232 - i * 20, size: 12, font, color: MUT });
     });
-    // Contents by source document, in first-appearance order of the page list.
-    const seen: number[] = [];
-    for (const p of pages) if (!seen.includes(p.docIx)) seen.push(p.docIx);
+    // Contents by section: each run of consecutive pages sharing a header, and
+    // the packet page it opens on. With no per-page titles that collapses to one
+    // line per source document, which is what it always was - plus the page
+    // number a printed binder needs to be navigable.
+    const runs: { title: string; page: number }[] = [];
+    heading.forEach((h, i) => {
+      if (i < coverOffset) return;
+      if (!runs.length || runs[runs.length - 1].title !== h) runs.push({ title: h, page: i + 1 });
+    });
     const tocTop = height - 232 - options.coverLines.length * 20 - 36;
     cover.drawText("Contents", { x: 72, y: tocTop, size: 11, font: bold, color: NAVY });
-    seen.forEach((docIx, i) => {
-      const n = pages.filter((p) => p.docIx === docIx).length;
-      cover.drawText(fit(`${i + 1}.  ${docs[docIx]?.title || "(untitled document)"} — ${n} page${n === 1 ? "" : "s"}`, 88), {
+    // A 60-section packet used to draw its contents off the bottom of the page.
+    // Fill what fits and say how much didn't.
+    const room = Math.max(1, Math.floor((tocTop - 20 - 72) / 16) + 1);
+    const shown = runs.length > room ? runs.slice(0, room - 1) : runs;
+    shown.forEach((run, i) => {
+      cover.drawText(fit(`${i + 1}.  ${run.title || "(untitled)"} — p. ${run.page}`, 88), {
         x: 72, y: tocTop - 20 - i * 16, size: 10, font, color: MUT,
       });
     });
+    if (shown.length < runs.length) {
+      cover.drawText(`and ${runs.length - shown.length} more section${runs.length - shown.length === 1 ? "" : "s"}`, {
+        x: 72, y: tocTop - 20 - shown.length * 16, size: 10, font, color: MUT,
+      });
+    }
   }
 
-  // Load each source once however many of its pages are used.
-  const used = [...new Set(pages.map((p) => p.docIx))];
-  const loaded = new Map<number, PDFDocument>();
-  for (const ix of used) {
-    if (!docs[ix]) throw new Error(`Page list names document ${ix + 1}, which wasn't provided`);
-    loaded.set(ix, await PDFDocument.load(docs[ix].bytes, { ignoreEncryption: true }));
-  }
-
-  const owner: number[] = new Array(options.coverTitle ? 1 : 0).fill(-1);
   for (const ref of pages) {
     const src = loaded.get(ref.docIx)!;
     if (ref.pageIx < 0 || ref.pageIx >= src.getPageCount()) {
@@ -165,18 +200,16 @@ export async function assemblePdf(
       page.setRotation(degrees(((current + ref.rotate) % 360) as 0 | 90 | 180 | 270));
     }
     out.addPage(page);
-    owner.push(ref.docIx);
   }
 
   const total = out.getPageCount();
   for (let n = 0; n < total; n++) {
     const page = out.getPage(n);
     const { width, height } = page.getSize();
-    const docIx = owner[n];
-    if (options.headers && docIx >= 0 && docs[docIx].title) {
+    if (options.headers && heading[n]) {
       page.drawRectangle({ x: 0, y: height - 22, width, height: 22, color: rgb(0.96, 0.97, 0.99), opacity: 0.9 });
       page.drawLine({ start: { x: 0, y: height - 22 }, end: { x: width, y: height - 22 }, thickness: 0.7, color: LINE });
-      page.drawText(fit(docs[docIx].title, 95), { x: 14, y: height - 15, size: 8, font: bold, color: NAVY });
+      page.drawText(fit(heading[n], 95), { x: 14, y: height - 15, size: 8, font: bold, color: NAVY });
     }
     if (options.pageNumbers) {
       const label = `Page ${n + 1} of ${total}`;
