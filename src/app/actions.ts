@@ -21,7 +21,7 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -1261,6 +1261,28 @@ export async function deleteChecklistItem(itemId: number) {
   if (t) revWork(t);
 }
 
+/**
+ * Who a task-note @mention may reach: everyone who could open the page the
+ * note sits on. The notification quotes the note, so the audience is the
+ * task's readership and never wider - same discipline as discussion emails.
+ */
+async function taskMentionAudience(t: { instrumentId: number | null; assetId: number | null }): Promise<string[]> {
+  if (t.instrumentId !== null) {
+    return postAudience({ instrumentId: t.instrumentId, audience: "all", authorOrgId: null, roomOrgId: null });
+  }
+  const staff = await houseEmails();
+  if (!t.assetId) return staff;
+  const [a] = await db.select({ ownerOrgId: assets.ownerOrgId }).from(assets).where(eq(assets.id, t.assetId));
+  const shares = await db.select({ orgId: assetShares.orgId }).from(assetShares).where(eq(assetShares.assetId, t.assetId));
+  const orgIds = [...new Set([...(a?.ownerOrgId !== null && a?.ownerOrgId !== undefined ? [a.ownerOrgId] : []), ...shares.map((s) => s.orgId)])];
+  if (!orgIds.length) return staff;
+  const entries = await db.select().from(clientAllowlist).where(inArray(clientAllowlist.orgId, orgIds));
+  return [...new Set([...staff, ...entries.filter((e) => !e.entry.trim().startsWith("@")).map((e) => e.entry.toLowerCase())])];
+}
+
+const noteHref = (t: { instrumentId: number | null; assetId: number | null }) =>
+  t.instrumentId !== null ? `/instruments/${t.instrumentId}` : t.assetId ? `/assets/${t.assetId}` : "";
+
 export async function addItemNote(itemId: number, text: string) {
   const u = await requireEditor();
   if (!text.trim()) return;
@@ -1273,7 +1295,14 @@ export async function addItemNote(itemId: number, text: string) {
     actor: u.email, instrumentId: t?.instrumentId, entityType: "item_note", entityId: itemId,
     action: `noted on '${item.text}': "${text.trim()}"`,
   });
-  if (t) revWork(t);
+  if (t) {
+    await notifyMention({
+      actorEmail: u.email, actorName: u.name, body: text.trim(),
+      where: `'${item.text}'`, href: noteHref(t),
+      allowedEmails: await taskMentionAudience(t),
+    });
+    revWork(t);
+  }
 }
 
 export async function addTaskNote(taskId: number, text: string) {
@@ -1286,6 +1315,11 @@ export async function addTaskNote(taskId: number, text: string) {
   await audit({
     actor: u.email, instrumentId: t.instrumentId, entityType: "task_note", entityId: taskId,
     action: `commented on '${t.title}': "${text.trim()}"`,
+  });
+  await notifyMention({
+    actorEmail: u.email, actorName: u.name, body: text.trim(),
+    where: `task '${t.title}'`, href: noteHref(t),
+    allowedEmails: await taskMentionAudience(t),
   });
   revWork(t);
 }

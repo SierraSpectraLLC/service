@@ -5,6 +5,7 @@ export const NOTIFY_KINDS = [
   { kind: "task_assigned", label: "A task is assigned to me" },
   { kind: "system_assigned", label: "I'm made lead on a system" },
   { kind: "discussion", label: "Discussion posts and @mentions" },
+  { kind: "mention", label: "I'm @mentioned in a task note" },
   { kind: "access_request", label: "Access requests and ownership claims" },
   { kind: "gas_empty", label: "A gas is marked empty" },
   { kind: "queue", label: "A system moves into my queue" },

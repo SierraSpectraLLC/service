@@ -9,6 +9,7 @@ import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import { signOut } from "@/auth";
 import NavMore from "@/components/NavMore";
 import ViewAsBar from "@/components/ViewAsBar";
+import NotificationCenter from "@/components/NotificationCenter";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import "./globals.css";
@@ -93,9 +94,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
                 <Link className="btn sm" href="/discussions" style={{ textDecoration: "none" }}>Discussion</Link>
                 <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
-                <Link className="btn sm" href="/inbox" style={{ textDecoration: "none", fontWeight: unread ? 700 : undefined }}>
-                  Inbox{unread ? ` (${unread})` : ""}
-                </Link>
+                {/* Live: polls for new arrivals, toasts them, and (opt-in)
+                    raises OS notifications when the tab is hidden. */}
+                <NotificationCenter initialUnread={unread} />
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
                 {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Stock</Link>}
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}

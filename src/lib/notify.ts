@@ -210,6 +210,50 @@ export async function notifyAccessRequest(opts: {
 }
 
 /**
+ * Somebody wrote @Name in a task or checklist note. Same name resolution as
+ * discussion mentions (roster, then users, then a staff-email prefix), and the
+ * same visibility discipline: the note's text travels in the notification, so
+ * only people who could open the task may be pinged by it - the caller passes
+ * that audience in.
+ */
+export async function notifyMention(opts: {
+  actorEmail: string; actorName: string; body: string;
+  where: string;               // "task 'Replace seals' on SS-1042"
+  href: string;                // in-app path to the page that holds the note
+  allowedEmails: string[] | null; // null = house-only context, no restriction
+}) {
+  try {
+    const staff = await houseEmails();
+    const [userRows, roster] = await Promise.all([
+      db.select({ name: users.name, email: users.email }).from(users),
+      db.select({ name: people.name, email: people.email }).from(people),
+    ]);
+    const actor = opts.actorEmail.toLowerCase();
+    const to = new Set<string>();
+    for (const name of parseMentions(opts.body, roster.map((p) => p.name))) {
+      const email = resolveAssigneeEmail(name, staff, userRows, roster);
+      if (email && email !== actor) to.add(email);
+    }
+    if (opts.allowedEmails) {
+      const allowed = new Set(opts.allowedEmails.map((e) => e.toLowerCase()));
+      for (const e of [...to]) if (!allowed.has(e)) to.delete(e);
+    }
+    if (!to.size) return;
+    const url = appUrl();
+    await deliver({
+      to: [...to], kind: "mention", href: opts.href,
+      title: `${opts.actorName} mentioned you on ${opts.where}`,
+      subject: `You were mentioned on ${opts.where}`,
+      html: await wrap(`<b>${esc(opts.actorName)}</b> mentioned you on ${esc(opts.where)}:
+        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.body)}</div>
+        ${url ? `<a href="${url}${opts.href}">Open it</a>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] mention email failed:", (e as Error).message);
+  }
+}
+
+/**
  * A system has landed in your queue. This is the one notification that carries
  * an expectation with it, so it leads with the reason: what the sender is
  * waiting on is the only thing the recipient actually needs.
