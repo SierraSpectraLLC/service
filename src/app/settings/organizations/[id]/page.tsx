@@ -2,7 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
-import { appSettings, clientAllowlist, orgs, systemShares } from "@/db/schema";
+import { appSettings, clientAllowlist, orgs, remoteDevices, systemShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { storeQuota } from "@/lib/storeUsage";
@@ -38,6 +38,10 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   ]);
   if (!org) notFound();
   const quota = await storeQuota(orgId);
+  // How many machines this organization has enrolled - the number the remote
+  // tier is sold against, and what billing would eventually read.
+  const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
+    .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
   return (
     <div className="container page">
@@ -55,6 +59,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
           eodRecipients: org.eodRecipients, systems: shareRows.length,
           storageLimitMb: org.storageLimitMb, quota,
+          remoteAccessEnabled: org.remoteAccessEnabled, remoteDevices: deviceCount,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
         people={allowRows.map((r) => ({ id: r.id, entry: r.entry, canEdit: r.canEdit }))}
@@ -62,6 +67,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         isOwner={isOwner}
         showRecipients={s?.eodEnabled ?? false}
         showSheetSync={s?.sheetSyncEnabled ?? false}
+        showRemote={s?.remoteEnabled ?? false}
       />
     </div>
   );

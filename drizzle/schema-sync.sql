@@ -524,6 +524,18 @@ CREATE TABLE IF NOT EXISTS "asset_shares" (
   "added_by" text NOT NULL DEFAULT '',
   "created_at" timestamp NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS "remote_devices" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "org_id" integer,
+  "instrument_id" integer,
+  "node_id" text NOT NULL DEFAULT '',
+  "name" text NOT NULL DEFAULT '',
+  "platform" text NOT NULL DEFAULT 'windows',
+  "consent_override" boolean,
+  "last_seen_at" timestamp,
+  "enrolled_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "engagement_records" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
@@ -652,6 +664,9 @@ ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "superseded_at" timest
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "org_id" integer;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "storage_limit_mb" integer NOT NULL DEFAULT 5120;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "remote_enabled" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_access_enabled" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_group_id" text NOT NULL DEFAULT '';
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -700,6 +715,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS "stock_items_room_pn" ON "stock_items" ("stock
 CREATE UNIQUE INDEX IF NOT EXISTS "part_prices_pn_vendor" ON "part_prices" (lower("part_number"), lower("vendor"));
 CREATE INDEX IF NOT EXISTS "system_shares_org_idx" ON "system_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "engagement_records_org_idx" ON "engagement_records" ("org_id");
+CREATE INDEX IF NOT EXISTS "remote_devices_org_idx" ON "remote_devices" ("org_id");
+CREATE INDEX IF NOT EXISTS "remote_devices_instrument_idx" ON "remote_devices" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "asset_shares_org_idx" ON "asset_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "access_requests_instrument_idx" ON "access_requests" ("instrument_id");
 
@@ -757,6 +774,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'discussion_reads_user_thread') THEN
     ALTER TABLE "discussion_reads" ADD CONSTRAINT "discussion_reads_user_thread" UNIQUE ("user_email","thread_id");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'remote_device_node_unique') THEN
+    ALTER TABLE "remote_devices" ADD CONSTRAINT "remote_device_node_unique" UNIQUE ("node_id");
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'people_name_unique') THEN
     ALTER TABLE "people" ADD CONSTRAINT "people_name_unique" UNIQUE ("name");
@@ -848,6 +868,14 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_task_id_tasks_id_fk') THEN
     ALTER TABLE "attachments" ADD CONSTRAINT "attachments_task_id_tasks_id_fk"
       FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'remote_devices_org_id_orgs_id_fk') THEN
+    ALTER TABLE "remote_devices" ADD CONSTRAINT "remote_devices_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'remote_devices_instrument_id_instruments_id_fk') THEN
+    ALTER TABLE "remote_devices" ADD CONSTRAINT "remote_devices_instrument_id_instruments_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE SET NULL;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_org_id_orgs_id_fk') THEN
     ALTER TABLE "attachments" ADD CONSTRAINT "attachments_org_id_orgs_id_fk"

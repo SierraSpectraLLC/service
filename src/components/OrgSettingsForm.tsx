@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   setOrgAppearance, updateEodRecipients, addClientAccess, removeClientAccess,
-  setClientAccessRole, removeOrg, setSheetOrg, setOrgStorageLimit,
+  setClientAccessRole, removeOrg, setSheetOrg, setOrgStorageLimit, setOrgRemoteAccess,
 } from "@/app/actions";
 import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
@@ -23,12 +23,15 @@ type Entry = { id: number; entry: string; canEdit: boolean };
  * report recipients, sheet sync, removal) rather than hiding them behind a
  * second page that would drift from this one.
  */
-export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync }: {
+export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync, showRemote = false }: {
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
     eodRecipients: string; systems: number; isOperator: boolean; isSheetOrg: boolean;
     storageLimitMb: number; quota: Quota;
+    remoteAccessEnabled: boolean; remoteDevices: number;
   };
+  /** Whether the instance has the remote-support module on at all. */
+  showRemote?: boolean;
   people: Entry[];
   platformName: string;
   isOwner: boolean;
@@ -71,6 +74,10 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
       else setLookSaved(true);
     });
   };
+
+  // Remote support tier
+  const [remoteOn, setRemoteOn] = useState(org.remoteAccessEnabled);
+  const [remoteMsg, setRemoteMsg] = useState("");
 
   // Storage ceiling
   const [limitMb, setLimitMb] = useState(org.storageLimitMb);
@@ -226,6 +233,36 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           {recipientsMsg && (
             <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
           )}
+        </div>
+      )}
+
+      {isOwner && showRemote && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 4 }}>Remote support</div>
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            We can always reach {org.name}&apos;s machines - that is the service. This switch is about
+            <b> their</b> side: with it on, {org.name}&apos;s own editors can connect to their own lab PCs from
+            the portal. {org.remoteDevices > 0
+              ? `${org.remoteDevices} machine${org.remoteDevices === 1 ? "" : "s"} enrolled.`
+              : "No machines enrolled yet."}
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button className={`btn sm${remoteOn ? "" : " accent"}`} disabled={pending}
+              onClick={() => {
+                const next = !remoteOn;
+                setRemoteOn(next); setRemoteMsg("");
+                startTransition(async () => {
+                  const res = await setOrgRemoteAccess(org.id, next);
+                  if (res?.error) { setRemoteOn(!next); setRemoteMsg(res.error); }
+                });
+              }}>
+              {remoteOn ? "Turn client access off" : "Turn client access on"}
+            </button>
+            <span className="pill" style={{ background: remoteOn ? "#E5F3E5" : "#EEF1F5", color: remoteOn ? "#2E6B2E" : "#475569" }}>
+              {remoteOn ? "their editors can connect" : "support only"}
+            </span>
+          </div>
+          {remoteMsg && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{remoteMsg}</div>}
         </div>
       )}
 

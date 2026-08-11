@@ -6,15 +6,16 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 
-export type Modules = { sheetSync: boolean; eod: boolean; digest: boolean };
+export type Modules = { sheetSync: boolean; eod: boolean; digest: boolean; remote: boolean };
 
 export const getModules = cache(async (): Promise<Modules> => {
   try {
     const [s] = await db.select({
       sheetSync: appSettings.sheetSyncEnabled, eod: appSettings.eodEnabled, digest: appSettings.digestEnabled,
+      remote: appSettings.remoteEnabled,
     }).from(appSettings).where(eq(appSettings.id, 1));
-    return { sheetSync: s?.sheetSync ?? false, eod: s?.eod ?? false, digest: s?.digest ?? false };
+    return { sheetSync: s?.sheetSync ?? false, eod: s?.eod ?? false, digest: s?.digest ?? false, remote: s?.remote ?? false };
   } catch {
-    return { sheetSync: false, eod: false, digest: false };
+    return { sheetSync: false, eod: false, digest: false, remote: false };
   }
 });

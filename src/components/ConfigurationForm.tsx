@@ -41,7 +41,7 @@ type OrgRow = { id: number; name: string; kind: string };
 export default function ConfigurationForm(props: {
   stageDefs: StageRow[];
   orgs: OrgRow[];
-  modules: { sheetSync: boolean; eod: boolean; digest: boolean };
+  modules: { sheetSync: boolean; eod: boolean; digest: boolean; remote: boolean };
   platformName: string; platformTagline: string; operatorOrgId: number | null;
 }) {
   const [moduleState, setModuleState] = useState<Record<string, boolean>>({});
@@ -148,6 +148,7 @@ export default function ConfigurationForm(props: {
           ["sheetSync", "Google Sheet tracker sync", props.modules.sheetSync],
           ["eod", "Daily client reports", props.modules.eod],
           ["digest", "Daily staff digest", props.modules.digest],
+          ["remote", "Remote support", props.modules.remote],
         ] as const).map(([key, label, on]) => (
           <div key={key} style={{ display: "flex", gap: 12, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <Toggle on={moduleState[key] ?? on} label={label}

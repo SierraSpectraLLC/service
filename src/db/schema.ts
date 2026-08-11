@@ -72,6 +72,14 @@ export const orgs = pgTable("orgs", {
   // organizations start at the default and the operator moves them from
   // Settings. See lib/storage for what counts toward it.
   storageLimitMb: integer("storage_limit_mb").notNull().default(5120),
+  // Remote support, sold as a tier: with this on, the organization's own editors
+  // can reach their own machines from the portal. House staff always can - that
+  // is the base service - so this dial is only about client self-service.
+  remoteAccessEnabled: boolean("remote_access_enabled").notNull().default(false),
+  // The engine's device group for this organization, created the first time a
+  // machine is enrolled for them. One group per org is what keeps one client's
+  // machines invisible to another. Blank = no group yet.
+  remoteGroupId: text("remote_group_id").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("org_name_unique").on(t.name)]);
 
@@ -1026,4 +1034,51 @@ export const appSettings = pgTable("app_settings", {
   sheetSyncEnabled: boolean("sheet_sync_enabled").notNull().default(false),
   eodEnabled: boolean("eod_enabled").notNull().default(false),
   digestEnabled: boolean("digest_enabled").notNull().default(false),
+  // Remote support: reaching a lab PC from the portal. Off until an operator
+  // stands up the relay host and sets REMOTE_URL - the pages check both, so a
+  // flag flipped before the infrastructure exists says so instead of failing.
+  remoteEnabled: boolean("remote_enabled").notNull().default(false),
 });
+
+/**
+ * A lab PC we can reach - the instrument controller running LabSolutions,
+ * MassHunter, ChemStation. One row per machine an agent was installed on.
+ *
+ * This replaces "the PC's password", which is how remote support works today
+ * with TeamViewer and UltraViewer: a shared secret that everyone who ever
+ * needed access still knows, that is probably on a label, that cannot be
+ * revoked without walking to the machine, and that leaves no record of who
+ * connected. Here identity comes from the portal session, and every connection
+ * writes an audit row naming a person.
+ *
+ * `orgId` is stamped at enrolment and is whose machine it is. It is deliberately
+ * NOT re-derived from the linked system, because comparing the two is what tells
+ * us the system has changed hands since the PC was enrolled - see
+ * lib/remoteAccess, which turns that into a consent prompt.
+ *
+ * `nodeId` is the engine's own identifier for the machine. Everything else here
+ * is a cache of what the engine knows, so the page still renders a useful list
+ * when the relay host is unreachable.
+ */
+export const remoteDevices = pgTable("remote_devices", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  // The system this PC drives, when it drives one. A pointer, so the device
+  // survives the system being detached or deleted.
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
+  nodeId: text("node_id").notNull().default(""),
+  name: text("name").notNull().default(""),
+  platform: text("platform").notNull().default("windows"),
+  // Staff's answer to "must somebody be at this machine?", overruling the one
+  // derived from custody. Null - the normal state - means derive it.
+  consentOverride: boolean("consent_override"),
+  // Last time the agent said hello. Null until it first does. A cache: the
+  // engine is the authority, this is what we can show without it.
+  lastSeenAt: timestamp("last_seen_at"),
+  enrolledBy: text("enrolled_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  unique("remote_device_node_unique").on(t.nodeId),
+  index("remote_devices_org_idx").on(t.orgId),
+  index("remote_devices_instrument_idx").on(t.instrumentId),
+]);

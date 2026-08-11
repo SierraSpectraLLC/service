@@ -158,3 +158,113 @@ also the page that organization's own editors get.
   that an internal note exists (in the audit log) but never its text.
 - Deleting an instance: snapshot the Neon database first — the audit log is
   the customer's record.
+
+---
+
+## Remote support (optional module, needs a host)
+
+Reaching a lab PC from the portal. Replaces the arrangement where an instrument
+controller runs TeamViewer or UltraViewer permanently and an engineer gets in
+with **the PC's password** — a shared secret everyone who ever needed access
+still knows, usually on a label, not revocable without walking to the machine,
+and leaving no record of who connected. Here identity comes from the portal
+session: access is per-person, revoked by a toggle, and every session writes an
+audit row naming a human.
+
+The portal is never in the media path. Vercel functions cannot hold a socket
+open, so a **relay host** carries sessions and the agent reaches it by checking
+in — a lab PC behind NAT has no address anything could dial. The portal only
+decides who may connect, writes down that they did, and hands the browser a
+short-lived URL.
+
+### The host (AWS Lightsail)
+
+- **2 GB tier.** 512 MB will not run the engine comfortably.
+- **Region: nearest the labs.** Engineers move around; benches don't.
+- **Allocate and attach a static IP _before enrolling a single agent_.**
+  Lightsail's static IP is free but not automatic — without one, a stop/start
+  changes the address and every installed agent is left pointing at nothing.
+- Open `443` and `80` in the instance's **Networking** tab (Lightsail's own
+  firewall, not EC2 security groups). Port 80 is only for the ACME challenge.
+- **Turn on automatic snapshots.** That is the entire backup story, and it
+  covers the agent certificates — lose those and every machine needs
+  re-enrolling.
+- Lightsail CPU is burstable. Sustained relay is network-bound so this is
+  usually fine; credit exhaustion under load is the signal to move up a tier.
+  The bundled transfer allowance is a few TB and a relayed session consumes it
+  on both legs — irrelevant at a handful of concurrent sessions, worth watching
+  if that changes.
+- DNS: one A record, `remote.<instance-domain>` → the static IP.
+
+### Portal env vars
+
+| Var | What |
+| --- | --- |
+| `REMOTE_URL` | `https://remote.<domain>` — the relay host |
+| `REMOTE_LOGIN_KEY` | Shared key the portal mints session cookies with |
+| `REMOTE_ADMIN_USER` | The engine identity the portal acts as |
+
+**`REMOTE_LOGIN_KEY` outranks `CRON_SECRET`.** Whoever holds it can mint admin
+cookies for the host. It lives in Vercel env and the host's config, nowhere
+else; rotation means editing both and restarting the engine.
+
+All three absent is a supported state: `/remote` says "no support host
+configured yet" and lists machines without offering to connect. The module flag
+and the host are deliberately separate so the flag can go on first.
+
+### Setup gate — do this before trusting any of it
+
+Not optional, and not something to skip because the portal side already builds.
+The one piece the portal cannot verify from here is the session-cookie format,
+which has changed between engine releases: `mintAuthCookie` in
+`src/lib/remote.ts` throws until it is implemented against **the exact pinned
+engine build**, with a round-trip test. A plausible-looking implementation of
+somebody else's crypto format is the worst kind of done — it typechecks, ships,
+and fails at the only moment that matters.
+
+Then prove the whole path by hand:
+
+1. Enrol a real Windows PC from the installer link on `/remote`.
+2. Reboot it. It must come back on its own — that is what "unattended" means.
+3. Connect from a browser. Control the desktop.
+4. Confirm a session recording exists.
+5. Confirm the audit row names you.
+6. Hand the linked system off in the portal and confirm the machine flips to
+   "asks first" (see below).
+7. Stop the host and confirm `/remote` still renders the cached list and refuses
+   politely rather than erroring.
+
+### Attended vs unattended follows custody
+
+Unattended in the shop, consent required once a system reaches a customer —
+derived, not toggled, because the failure mode of a manual switch is the
+sentence you never want to say to an auditor: *"we still had silent unattended
+access to a customer's instrument PC eight months after we sold it to them."*
+
+The rules live in `src/lib/remoteAccess.ts` (pure, and tested):
+
+- `Shipped` on the linked system → consent required
+- the system's owner no longer matching the org the PC was enrolled under →
+  consent required (this is what a handoff does)
+- otherwise → unattended
+- staff can override per machine, either way. Unattended-after-handoff is a
+  legitimate paid exception; that override is the tier.
+
+### Who can connect
+
+House staff always — that is the service. A client organization's own editors
+reach their own machines only when **Settings → that organization → Remote
+support** is on; that switch is the sellable tier. A view-as persona may look
+but never connect: taking control of a customer's PC belongs to a real
+identity, not a lens.
+
+### Rollout: parallel, never a cutover
+
+Do not uninstall TeamViewer on day one. When remote access fails an engineer
+cannot do their job, and a new agent will not be as battle-hardened as software
+that has spent fifteen years fighting corporate firewalls. Enrol one bench PC,
+run both side by side, and pull TV per-machine once ours has earned it.
+
+Removing a device row **does not remove access** — the agent keeps checking in
+until somebody uninstalls it on the machine itself. The confirmation dialog says
+so, and so should you.

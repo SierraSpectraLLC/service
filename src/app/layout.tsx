@@ -58,6 +58,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Staff always get the Stock link; an org only gets it once it has a room of
   // its own or one shared with it, so a client without inventory sees no
   // dead end.
+  // Remote support in the client's nav only when their own tier is on - an entry
+  // leading to a page that redirects is worse than no entry. Same forgiving read
+  // as every other count in the shell.
+  const orgRemoteOn = !isStaff && modules.remote && user?.orgId != null && (
+    await db.select({ on: orgs.remoteAccessEnabled }).from(orgs).where(eq(orgs.id, user.orgId))
+      .catch(() => [])
+  )[0]?.on === true;
   const hasStock = isStaff || (user?.orgId != null && (
     await db.select({ id: stockrooms.id }).from(stockrooms)
       .leftJoin(stockroomShares, eq(stockroomShares.stockroomId, stockrooms.id))
@@ -113,6 +120,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     { href: "/purchasing", label: "Purchasing" },
                     { href: "/pdf", label: "PDF studio" },
                     { href: "/documents", label: "Files" },
+                    ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
@@ -128,6 +136,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <NavMore items={[
                     { href: "/documents", label: "Files" },
                     { href: "/pdf", label: "PDF studio" },
+                    ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
                   ]} />
                 )}
 

@@ -12,12 +12,16 @@ import {
   stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
-  purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts,
+  purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
 import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
+import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
+import {
+  agentInstallerLink, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured,
+} from "@/lib/remote";
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -28,7 +32,8 @@ import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
 import { storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
-import { requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner, VIEW_AS_COOKIE, type SessionUser } from "@/lib/authz";
+import { requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner, viewContext, VIEW_AS_COOKIE, type SessionUser } from "@/lib/authz";
+import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
@@ -2722,6 +2727,154 @@ export async function removePerson(id: number) {
  * they are already holding rather than silently accepting a limit they've
  * already blown past.
  */
+// ---------------- Remote support ----------------
+
+/**
+ * Whether an organization's own editors may reach their own machines. The house
+ * always can - that is the service being sold - so this is the client
+ * self-service tier and nothing else. Owner-only, like every other commercial
+ * dial on that page.
+ */
+export async function setOrgRemoteAccess(orgId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ remoteAccessEnabled: on }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `turned remote support for ${org.name} ${on ? "on" : "off"}`,
+    field: "remoteAccessEnabled", oldValue: String(org.remoteAccessEnabled), newValue: String(on),
+  });
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * An installer link that joins one organization's device group. Staff-only: this
+ * is a capability to enrol a machine, and handing it out is our act, not a
+ * client's. Short-lived by construction on the engine side.
+ */
+export async function enrollRemoteDevice(orgId: number): Promise<{ error?: string; url?: string }> {
+  const u = await requireStaff();
+  if (!mayEnroll(u, { moduleOn: (await getModules()).remote })) return { error: "Remote support is off" };
+  if (!remoteConfigured()) return { error: NOT_CONFIGURED };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  const group = await ensureOrgGroup(orgId);
+  if ("error" in group) return group;
+  const url = await agentInstallerLink(group.groupId);
+  if (!url) return { error: "Couldn't reach the remote-support host to build an installer." };
+  await audit({
+    actor: u.email, entityType: "remote", entityId: orgId,
+    action: `generated a remote-support installer for ${org.name}`,
+  });
+  return { url };
+}
+
+/**
+ * Open a session. The order here is the point: decide, then WRITE IT DOWN, then
+ * mint. An unused token is a non-event; an unaudited connection to a customer's
+ * instrument PC is the thing this module exists to make impossible.
+ */
+export async function connectRemoteDevice(deviceId: number): Promise<{ error?: string; url?: string }> {
+  const u = await requireUser();
+  const { remote: moduleOn } = await getModules();
+  const row = await deviceWithOrg(deviceId);
+  if (!row) return { error: "Not found" };
+  const { device } = row;
+
+  // A persona may look at a client's remote view but never reach through it.
+  const { persona } = await viewContext();
+  const ability = remoteAbility(
+    u, { moduleOn, personaActive: persona !== null },
+    { orgId: device.orgId }, { remoteAccessEnabled: row.orgRemote ?? false },
+  );
+  if (!ability.see) return { error: "Not found" };
+  if (!ability.connect) return { error: ability.refusal || "You can't connect to this machine." };
+
+  const [system] = device.instrumentId === null ? [] : await db
+    .select({ ownerOrgId: instruments.ownerOrgId, stages: instruments.stages, externalId: instruments.externalId })
+    .from(instruments).where(eq(instruments.id, device.instrumentId));
+  const consent = consentModeFor(device, system ?? null);
+
+  const where = system?.externalId ? ` on ${system.externalId}` : "";
+  await audit({
+    actor: u.email, instrumentId: device.instrumentId, entityType: "remote", entityId: device.id,
+    action: `opened a remote session to ${device.name || "a machine"}${where}`
+      + ` at ${row.orgName ?? "an unassigned organization"}`
+      + ` (${consent.mode === "consent" ? "consent required" : "unattended"}: ${consent.why})`,
+  });
+
+  const url = connectUrl(device.nodeId, { consent: consent.mode === "consent" });
+  if (typeof url !== "string") return url;
+  return { url };
+}
+
+/** Point a device at the system it drives, or clear the link. Staff only. */
+export async function linkRemoteDevice(deviceId: number, instrumentId: number | null): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const row = await deviceWithOrg(deviceId);
+  if (!row) return { error: "Not found" };
+  let label = "nothing";
+  if (instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+    if (!inst) return { error: "Not found" };
+    label = inst.externalId;
+  }
+  await db.update(remoteDevices).set({ instrumentId }).where(eq(remoteDevices.id, deviceId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "remote", entityId: deviceId,
+    action: `linked ${row.device.name || "a machine"} to ${label}`,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Force a consent prompt on, force it off, or go back to deriving it from
+ * custody. Off-after-handoff is the paid exception; on-in-the-shop is for a
+ * machine somebody is sitting at all day.
+ */
+export async function setRemoteConsent(deviceId: number, mode: "derive" | "always" | "never"): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const row = await deviceWithOrg(deviceId);
+  if (!row) return { error: "Not found" };
+  const consentOverride = mode === "derive" ? null : mode === "always";
+  await db.update(remoteDevices).set({ consentOverride }).where(eq(remoteDevices.id, deviceId));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "remote", entityId: deviceId,
+    action: `set ${row.device.name || "a machine"} to ${
+      mode === "derive" ? "follow custody for consent" : mode === "always" ? "always ask before connecting" : "never ask before connecting"
+    }`,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Forget a machine. Deliberately does NOT claim to have removed access: an agent
+ * that is still installed keeps checking in, and the only way to stop it is to
+ * uninstall it on the machine. The caller's confirmation says so.
+ */
+export async function removeRemoteDevice(deviceId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const row = await deviceWithOrg(deviceId);
+  if (!row) return {};
+  await db.delete(remoteDevices).where(eq(remoteDevices.id, deviceId));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "remote", entityId: deviceId,
+    action: `removed ${row.device.name || "a machine"} from remote support`
+      + ` - the agent stays installed until somebody uninstalls it - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/remote");
+  return {};
+}
+
 export async function setOrgStorageLimit(orgId: number, limitMb: number): Promise<{ error?: string }> {
   const u = await requireOwner();
   const mb = Math.max(0, Math.round(Number(limitMb) || 0));
@@ -3894,14 +4047,22 @@ export async function setOperatorOrg(orgId: number | null): Promise<{ error?: st
   return {};
 }
 
-/** Optional modules, per instance: the sheet tracker, EOD report and digest. */
+/** Optional modules, per instance. A fresh install ships with all of them off. */
+const MODULES = {
+  sheetSync: { col: "sheetSyncEnabled", label: "sheet tracker sync" },
+  eod: { col: "eodEnabled", label: "EOD client report" },
+  digest: { col: "digestEnabled", label: "daily digest" },
+  remote: { col: "remoteEnabled", label: "remote support" },
+} as const;
+
 export async function setModule(
-  moduleKey: "sheetSync" | "eod" | "digest", on: boolean,
+  moduleKey: keyof typeof MODULES, on: boolean,
 ): Promise<{ error?: string }> {
   const u = await requireOwner();
-  const col = moduleKey === "sheetSync" ? { sheetSyncEnabled: on } : moduleKey === "eod" ? { eodEnabled: on } : { digestEnabled: on };
-  await db.update(appSettings).set(col).where(eq(appSettings.id, 1));
-  const label = moduleKey === "sheetSync" ? "sheet tracker sync" : moduleKey === "eod" ? "EOD client report" : "daily digest";
+  const m = MODULES[moduleKey];
+  if (!m) return { error: "Unknown module" };
+  await db.update(appSettings).set({ [m.col]: on }).where(eq(appSettings.id, 1));
+  const label = m.label;
   await audit({
     actor: u.email, entityType: "settings", entityId: `module_${moduleKey}`,
     action: `turned the ${label} ${on ? "on" : "off"}`,
