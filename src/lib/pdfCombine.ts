@@ -6,7 +6,7 @@
 // which is plain JavaScript - no native binaries, so it runs in a serverless
 // function (and in vitest, where the tests build real PDFs and re-parse the
 // output rather than trusting that drawing calls happened).
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
 
 export type CombineItem = {
   bytes: Uint8Array | ArrayBuffer;
@@ -89,6 +89,98 @@ export async function combinePdfs(items: CombineItem[], options: CombineOptions)
       page.drawText(label, {
         x: width - 14 - font.widthOfTextAtSize(label, 8), y: 8, size: 8, font, color: MUT,
       });
+    }
+  }
+
+  return out.save();
+}
+
+// ── Page-level assembly (the PDF studio) ────────────────────────────────────
+
+/** One page of the working set: which source document, which page, how turned. */
+export type PageRef = {
+  docIx: number;
+  pageIx: number;
+  /** Extra quarter-turns applied on top of the page's own rotation: 0|90|180|270. */
+  rotate: 0 | 90 | 180 | 270;
+};
+
+/**
+ * Compose an arbitrary page list drawn from several documents - reordered,
+ * subset, interleaved, rotated - into one PDF, with the same cover page,
+ * header bars and page numbering the whole-document combiner produces.
+ *
+ * Runs in the browser as well as in Node (pdf-lib is plain JS both places):
+ * the studio assembles client-side, so a 60MB working set never has to fit
+ * through a serverless request body.
+ */
+export async function assemblePdf(
+  docs: { bytes: Uint8Array | ArrayBuffer; title: string }[],
+  pages: PageRef[],
+  options: CombineOptions,
+): Promise<Uint8Array> {
+  if (!pages.length) throw new Error("Nothing to assemble - the page list is empty");
+  const out = await PDFDocument.create();
+  const font = await out.embedFont(StandardFonts.Helvetica);
+  const bold = await out.embedFont(StandardFonts.HelveticaBold);
+
+  if (options.coverTitle) {
+    const cover = out.addPage([612, 792]);
+    const { width, height } = cover.getSize();
+    cover.drawText(fit(options.coverTitle, 60), { x: 72, y: height - 180, size: 24, font: bold, color: NAVY, maxWidth: width - 144 });
+    cover.drawLine({ start: { x: 72, y: height - 200 }, end: { x: width - 72, y: height - 200 }, thickness: 2, color: NAVY });
+    options.coverLines.filter(Boolean).forEach((line, i) => {
+      cover.drawText(fit(line, 90), { x: 72, y: height - 232 - i * 20, size: 12, font, color: MUT });
+    });
+    // Contents by source document, in first-appearance order of the page list.
+    const seen: number[] = [];
+    for (const p of pages) if (!seen.includes(p.docIx)) seen.push(p.docIx);
+    const tocTop = height - 232 - options.coverLines.length * 20 - 36;
+    cover.drawText("Contents", { x: 72, y: tocTop, size: 11, font: bold, color: NAVY });
+    seen.forEach((docIx, i) => {
+      const n = pages.filter((p) => p.docIx === docIx).length;
+      cover.drawText(fit(`${i + 1}.  ${docs[docIx]?.title || "(untitled document)"} — ${n} page${n === 1 ? "" : "s"}`, 88), {
+        x: 72, y: tocTop - 20 - i * 16, size: 10, font, color: MUT,
+      });
+    });
+  }
+
+  // Load each source once however many of its pages are used.
+  const used = [...new Set(pages.map((p) => p.docIx))];
+  const loaded = new Map<number, PDFDocument>();
+  for (const ix of used) {
+    if (!docs[ix]) throw new Error(`Page list names document ${ix + 1}, which wasn't provided`);
+    loaded.set(ix, await PDFDocument.load(docs[ix].bytes, { ignoreEncryption: true }));
+  }
+
+  const owner: number[] = new Array(options.coverTitle ? 1 : 0).fill(-1);
+  for (const ref of pages) {
+    const src = loaded.get(ref.docIx)!;
+    if (ref.pageIx < 0 || ref.pageIx >= src.getPageCount()) {
+      throw new Error(`Document ${ref.docIx + 1} has no page ${ref.pageIx + 1}`);
+    }
+    const [page] = await out.copyPages(src, [ref.pageIx]);
+    if (ref.rotate) {
+      const current = page.getRotation().angle;
+      page.setRotation(degrees(((current + ref.rotate) % 360) as 0 | 90 | 180 | 270));
+    }
+    out.addPage(page);
+    owner.push(ref.docIx);
+  }
+
+  const total = out.getPageCount();
+  for (let n = 0; n < total; n++) {
+    const page = out.getPage(n);
+    const { width, height } = page.getSize();
+    const docIx = owner[n];
+    if (options.headers && docIx >= 0 && docs[docIx].title) {
+      page.drawRectangle({ x: 0, y: height - 22, width, height: 22, color: rgb(0.96, 0.97, 0.99), opacity: 0.9 });
+      page.drawLine({ start: { x: 0, y: height - 22 }, end: { x: width, y: height - 22 }, thickness: 0.7, color: LINE });
+      page.drawText(fit(docs[docIx].title, 95), { x: 14, y: height - 15, size: 8, font: bold, color: NAVY });
+    }
+    if (options.pageNumbers) {
+      const label = `Page ${n + 1} of ${total}`;
+      page.drawText(label, { x: width - 14 - font.widthOfTextAtSize(label, 8), y: 8, size: 8, font, color: MUT });
     }
   }
 

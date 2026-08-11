@@ -111,6 +111,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <NavMore items={[
                     { href: "/maintenance", label: "Maintenance" },
                     { href: "/purchasing", label: "Purchasing" },
+                    { href: "/pdf", label: "PDF studio" },
+                    { href: "/documents", label: "Document library" },
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),

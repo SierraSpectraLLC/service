@@ -23,13 +23,30 @@ export const dynamic = "force-dynamic";
  * without tying up a function. Everything else is a plain 404: the file's
  * existence is itself information.
  */
-export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const fileId = parseInt(id);
   if (isNaN(fileId)) return new NextResponse(null, { status: 404 });
   const [file] = await db.select().from(attachments).where(eq(attachments.id, fileId));
   if (!file) return new NextResponse(null, { status: 404 });
 
-  if (await mayReadAttachment(file)) return NextResponse.redirect(file.url, 302);
-  return new NextResponse(null, { status: 404 });
+  if (!(await mayReadAttachment(file))) return new NextResponse(null, { status: 404 });
+
+  // ?raw=1 streams the bytes through our origin instead of redirecting to
+  // Blob. The PDF studio reads files with fetch() and parses them in the
+  // browser; a cross-origin redirect would put that at the mercy of the
+  // storage host's CORS headers, and "sometimes the studio can't open files"
+  // is not a bug anyone should get to meet. Downloads keep the redirect -
+  // Blob serving bytes doesn't tie up a function.
+  if (new URL(req.url).searchParams.get("raw") === "1") {
+    const upstream = await fetch(file.url);
+    if (!upstream.ok || !upstream.body) return new NextResponse(null, { status: 502 });
+    return new NextResponse(upstream.body, {
+      headers: {
+        "Content-Type": upstream.headers.get("Content-Type") ?? "application/octet-stream",
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+  return NextResponse.redirect(file.url, 302);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PDFDocument } from "pdf-lib";
-import { combinePdfs, looksLikePdf } from "@/lib/pdfCombine";
+import { assemblePdf, combinePdfs, looksLikePdf } from "@/lib/pdfCombine";
 
 /** A real n-page PDF, built rather than fixtured, so the test owns its input. */
 async function makePdf(pages: number): Promise<Uint8Array> {
@@ -59,5 +59,66 @@ describe("looksLikePdf", () => {
   it("rejects not-a-pdf", () => {
     expect(looksLikePdf(new TextEncoder().encode("PNG or whatever"))).toBe(false);
     expect(looksLikePdf(new Uint8Array(0))).toBe(false);
+  });
+});
+
+describe("assemblePdf (page-level)", () => {
+
+  /** Pages tagged by size so the output order is verifiable. */
+  async function sizedPdf(widths: number[]): Promise<Uint8Array> {
+    const doc = await PDFDocument.create();
+    for (const w of widths) doc.addPage([w, 700]);
+    return doc.save();
+  }
+
+  it("reorders, subsets and interleaves across documents", async () => {
+    const a = await sizedPdf([100, 101, 102]); // pages identified by width
+    const b = await sizedPdf([200, 201]);
+    const out = await PDFDocument.load(await assemblePdf(
+      [{ bytes: a, title: "A" }, { bytes: b, title: "B" }],
+      [
+        { docIx: 1, pageIx: 1, rotate: 0 },  // B2
+        { docIx: 0, pageIx: 2, rotate: 0 },  // A3
+        { docIx: 0, pageIx: 0, rotate: 0 },  // A1 (A2 dropped)
+      ],
+      { coverTitle: "", coverLines: [], pageNumbers: true, headers: true },
+    ));
+    expect(out.getPageCount()).toBe(3);
+    expect([0, 1, 2].map((i) => Math.round(out.getPage(i).getSize().width))).toEqual([201, 102, 100]);
+  });
+
+  it("applies rotation on top of the page's own", async () => {
+    const src = await PDFDocument.create();
+    src.addPage([300, 700]);
+    const out = await PDFDocument.load(await assemblePdf(
+      [{ bytes: await src.save(), title: "t" }],
+      [{ docIx: 0, pageIx: 0, rotate: 90 }],
+      { coverTitle: "", coverLines: [], pageNumbers: false, headers: false },
+    ));
+    expect(out.getPage(0).getRotation().angle).toBe(90);
+  });
+
+  it("names an out-of-range page instead of crashing on it", async () => {
+    const a = await sizedPdf([100]);
+    await expect(assemblePdf(
+      [{ bytes: a, title: "A" }],
+      [{ docIx: 0, pageIx: 5, rotate: 0 }],
+      { coverTitle: "", coverLines: [], pageNumbers: false, headers: false },
+    )).rejects.toThrow("no page 6");
+  });
+
+  it("refuses an empty page list", async () => {
+    await expect(assemblePdf([], [], { coverTitle: "", coverLines: [], pageNumbers: false, headers: false }))
+      .rejects.toThrow("empty");
+  });
+
+  it("cover page counts pages per document in first-use order", async () => {
+    const a = await sizedPdf([100, 101]);
+    const out = await PDFDocument.load(await assemblePdf(
+      [{ bytes: a, title: "Calibration" }],
+      [{ docIx: 0, pageIx: 0, rotate: 0 }, { docIx: 0, pageIx: 1, rotate: 0 }],
+      { coverTitle: "Packet", coverLines: ["SS-1"], pageNumbers: true, headers: true },
+    ));
+    expect(out.getPageCount()).toBe(3); // cover + 2
   });
 });

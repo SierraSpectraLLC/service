@@ -97,9 +97,14 @@ export default function PdfCombiner({ target, pdfs, defaultCover, coverLines }: 
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
       {!open ? (
-        <button className="btn link" style={{ fontSize: 12 }} onClick={openIt}>
-          Combine {pdfs.length} PDFs into one packet…
-        </button>
+        <span style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <button className="btn link" style={{ fontSize: 12 }} onClick={openIt}>
+            Combine {pdfs.length} PDFs into one packet…
+          </button>
+          <a className="btn link" style={{ fontSize: 12 }} href="/pdf">
+            page-level editing in the PDF studio →
+          </a>
+        </span>
       ) : (
         <div className="dash-form">
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>

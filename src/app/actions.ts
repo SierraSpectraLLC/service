@@ -1617,6 +1617,34 @@ export async function recordAttachments(
   return {};
 }
 
+/**
+ * File something in the document library - storage that belongs to no system
+ * or unit. Staff-only on both write and read: the download gate shows
+ * homeless files to the house alone, so this is the operator's own shelf
+ * (blank templates, assembled packets awaiting a destination), never a place
+ * a client's record can quietly end up.
+ */
+export async function recordLibraryFiles(
+  files: { fileName: string; url: string; size: number; description: string }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!files.length) return {};
+  const rows = await db.insert(attachments)
+    .values(files.map((f) => ({
+      ...f, description: f.description.trim(), kind: "Report",
+      instrumentId: null, assetId: null, uploadedBy: u.name,
+    })))
+    .returning();
+  for (const a of rows) {
+    await audit({
+      actor: u.email, entityType: "attachment", entityId: a.id,
+      action: `filed ${a.fileName} in the document library`,
+    });
+  }
+  revalidatePath("/documents");
+  return {};
+}
+
 export async function updateAttachment(attachmentId: number, data: { fileName: string; kind: string; description: string }) {
   const u = await requireEditor();
   const fileName = data.fileName.trim();
