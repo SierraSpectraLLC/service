@@ -160,20 +160,35 @@ export const instruments = pgTable("instruments", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-// A service provider's frozen copy of a system's record, written the moment its
-// share is revoked ("they keep their own service reports"). `data` is the full
+// An organization's frozen copy of a system's record. `data` is the full
 // dossier as of that instant - immutable by construction, later edits to the
-// live system can never reach it. Only provider-kind orgs get one; unsharing a
-// client stays a clean delete. The record outlives the system (FK set null) and
-// carries its own external_id/label so it still reads on its own.
+// live system can never reach it. The record outlives the system (FK set null)
+// and carries its own external_id/label so it still reads on its own.
+//
+// Two things mint one, and they read very differently to the holder:
+//   'revoked'  a service provider's share was withdrawn - "they keep their own
+//              service reports". Clients don't get one; unsharing a client is
+//              cleanup, not the end of an engagement.
+//   'handoff'  the system changed hands and this org was the outgoing owner.
+//              Unlike a revocation this does NOT imply access ended: a reseller
+//              kept on as a viewer holds a record AND still sees the live
+//              system, which is why listings filter on live visibility rather
+//              than assuming the record means "gone".
+//
+// A repeat event of the same kind for the same org supersedes the earlier
+// record rather than stacking beside it - the newer dossier covers the same
+// tenure. Superseded rows are kept (a dossier is evidence, never deleted) and
+// simply drop out of the listings.
 export const engagementRecords = pgTable("engagement_records", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
   orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("revoked"),
   externalId: text("external_id").notNull().default(""),
   label: text("label").notNull().default(""),
   revokedBy: text("revoked_by").notNull().default(""),
   revokedAt: timestamp("revoked_at").notNull().defaultNow(),
+  supersededAt: timestamp("superseded_at"),
   data: jsonb("data").notNull(),
 }, (t) => [index("engagement_records_org_idx").on(t.orgId)]);
 

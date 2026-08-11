@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import { instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
@@ -36,8 +36,11 @@ export default async function AdminSettingsPage() {
     db.select({ id: accessRequests.id, instrumentId: accessRequests.instrumentId, kind: accessRequests.kind, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind })
       .from(accessRequests).innerJoin(orgs, eq(orgs.id, accessRequests.orgId))
       .where(eq(accessRequests.status, "pending")).orderBy(asc(accessRequests.createdAt)),
-    db.select({ id: engagementRecords.id, instrumentId: engagementRecords.instrumentId, externalId: engagementRecords.externalId, revokedAt: engagementRecords.revokedAt, orgName: orgs.name })
+    // Current records only: a superseded one is still on disk and still reads
+    // at its URL, but "who holds a frozen copy" is answered by the live set.
+    db.select({ id: engagementRecords.id, instrumentId: engagementRecords.instrumentId, kind: engagementRecords.kind, externalId: engagementRecords.externalId, revokedAt: engagementRecords.revokedAt, orgName: orgs.name })
       .from(engagementRecords).innerJoin(orgs, eq(orgs.id, engagementRecords.orgId))
+      .where(isNull(engagementRecords.supersededAt))
       .orderBy(asc(engagementRecords.revokedAt)),
   ]);
 
@@ -114,7 +117,7 @@ export default async function AdminSettingsPage() {
               orgOptions={orgRows} ownerOrgId={inst.ownerOrgId} canManageAll canAddProvider={false} />
             {records.length > 0 && (
               <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
-                Frozen records held by: {records.map((r) => `${r.orgName} (ended ${shopTime(r.revokedAt)})`).join(", ")}
+                Frozen records held by: {records.map((r) => `${r.orgName} (${r.kind === "handoff" ? "handed on" : "access ended"} ${shopTime(r.revokedAt)})`).join(", ")}
               </div>
             )}
           </div>

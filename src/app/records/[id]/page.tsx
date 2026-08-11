@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import { engagementRecords } from "@/db/schema";
@@ -15,10 +15,10 @@ const fmtSize = (b: number) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` 
 const when = (iso: string) => shopTime(new Date(iso));
 
 /**
- * A frozen engagement record: the system's dossier exactly as it stood when
- * the viewer's organization was taken off it. Read-only by construction - the
- * page renders stored JSON, not live rows, so nothing that happened since the
- * revocation can appear here.
+ * A frozen engagement record: the system's dossier exactly as it stood at the
+ * moment the holder's involvement changed - their share withdrawn, or the
+ * system handed on to a new owner. Read-only by construction: the page renders
+ * stored JSON, not live rows, so nothing recorded since can appear here.
  */
 export default async function RecordPage({ params }: { params: Promise<{ id: string }> }) {
   let user;
@@ -30,6 +30,17 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
   // Yours or staff's - another org's record doesn't exist as far as you know.
   if (!rec || (!isHouse(user.role) && rec.orgId !== user.orgId)) notFound();
   const d = rec.data as SystemDossier;
+  const handoff = rec.kind === "handoff";
+  // A superseded record still reads - it is evidence, and someone may have
+  // linked to it - but it says so, and points at the one that replaced it.
+  const [current] = rec.supersededAt === null || rec.instrumentId === null ? [] : await db
+    .select({ id: engagementRecords.id }).from(engagementRecords)
+    .where(and(
+      eq(engagementRecords.instrumentId, rec.instrumentId),
+      eq(engagementRecords.orgId, rec.orgId),
+      eq(engagementRecords.kind, rec.kind),
+      isNull(engagementRecords.supersededAt),
+    ));
 
   return (
     <div className="container page">
@@ -40,7 +51,17 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
           <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>Frozen record</span>
-          <span className="mut" style={{ fontSize: 12 }}>Engagement ended {shopTime(rec.revokedAt)}. Never updates.</span>
+          <span className="mut" style={{ fontSize: 12 }}>
+            {handoff
+              ? `Handed on ${shopTime(rec.revokedAt)}. Your tenure as it stood that day - it never updates, and the live system has moved on without it.`
+              : `Engagement ended ${shopTime(rec.revokedAt)}. Never updates.`}
+          </span>
+          {rec.supersededAt !== null && (
+            <span className="mut" style={{ fontSize: 12 }}>
+              · Superseded {shopTime(rec.supersededAt)}
+              {current && <> — <Link href={`/records/${current.id}`}>the current record</Link> covers this system</>}
+            </span>
+          )}
         </div>
 
         <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>

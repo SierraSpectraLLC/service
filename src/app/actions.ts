@@ -2791,6 +2791,24 @@ export async function shareSystem(instrumentId: number, orgId: number, access: s
   return {};
 }
 
+/**
+ * A system can end the same way twice - a provider brought back and let go
+ * again, a reseller who buys a system back and sells it on. The second record
+ * covers the same tenure as the first, so it supersedes rather than stacks:
+ * otherwise the holder's shelf fills with near-identical copies of one system.
+ * Nothing is deleted - a frozen dossier is evidence, and the superseded row
+ * still reads at its own URL. It simply leaves the listings.
+ */
+async function supersedeRecords(instrumentId: number, orgId: number, kind: string) {
+  await db.update(engagementRecords).set({ supersededAt: new Date() })
+    .where(and(
+      eq(engagementRecords.instrumentId, instrumentId),
+      eq(engagementRecords.orgId, orgId),
+      eq(engagementRecords.kind, kind),
+      isNull(engagementRecords.supersededAt),
+    ));
+}
+
 export async function unshareSystem(instrumentId: number, orgId: number): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -2813,8 +2831,9 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
   if (org.kind === "provider") {
     const dossier = await composeSystemDossier(instrumentId, orgId);
     if (dossier) {
+      await supersedeRecords(instrumentId, orgId, "revoked");
       await db.insert(engagementRecords).values({
-        instrumentId, orgId, externalId: inst.externalId, label: dossier.label,
+        instrumentId, orgId, kind: "revoked", externalId: inst.externalId, label: dossier.label,
         revokedBy: u.email, data: dossier,
       });
     }
@@ -2951,8 +2970,9 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
   if (from) {
     const dossier = await composeSystemDossier(instrumentId, from.id);
     if (dossier) {
+      await supersedeRecords(instrumentId, from.id, "handoff");
       await db.insert(engagementRecords).values({
-        instrumentId, orgId: from.id, externalId: inst.externalId, label: dossier.label,
+        instrumentId, orgId: from.id, kind: "handoff", externalId: inst.externalId, label: dossier.label,
         revokedBy: u.email, data: dossier,
       });
     }

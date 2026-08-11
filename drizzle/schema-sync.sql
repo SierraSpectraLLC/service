@@ -527,10 +527,12 @@ CREATE TABLE IF NOT EXISTS "engagement_records" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer,
   "org_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'revoked',
   "external_id" text NOT NULL DEFAULT '',
   "label" text NOT NULL DEFAULT '',
   "revoked_by" text NOT NULL DEFAULT '',
   "revoked_at" timestamp NOT NULL DEFAULT now(),
+  "superseded_at" timestamp,
   "data" jsonb NOT NULL
 );
 CREATE TABLE IF NOT EXISTS "access_requests" (
@@ -643,6 +645,8 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_org_id" integer;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_reason" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_since" timestamp;
+ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'revoked';
+ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "superseded_at" timestamp;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -1430,5 +1434,34 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','custody','intake-backfill',
             'opened the custody chain for ' || v_count || ' owned system(s) and every owned shelf unit');
+  END IF;
+END $$;
+
+-- ── Engagement records: what kind of ending is this? ──────────────────────
+-- Records were minted by two very different events long before the column
+-- existed: a provider's share being withdrawn, and a system changing hands.
+-- The default stamps everything 'revoked', which is wrong for the handoffs, so
+-- reclassify from the custody chain: a handoff writes the outgoing owner's
+-- record and its own custody 'transfer' row inside one action, seconds apart.
+-- A ten-minute window is generous enough for a slow dossier and far tighter
+-- than any two real events on the same system and org.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'record' AND "entity_id" = 'record-kind-backfill') THEN
+    UPDATE "engagement_records" r
+    SET "kind" = 'handoff'
+    WHERE EXISTS (
+      SELECT 1 FROM "custody_events" c
+      WHERE c."kind" = 'transfer'
+        AND c."instrument_id" = r."instrument_id"
+        AND c."from_org_id" = r."org_id"
+        AND c."at" BETWEEN r."revoked_at" - interval '10 minutes' AND r."revoked_at" + interval '10 minutes'
+    );
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','record','record-kind-backfill',
+            'reclassified ' || v_count || ' frozen record(s) as handoffs; the rest stand as withdrawn shares');
   END IF;
 END $$;

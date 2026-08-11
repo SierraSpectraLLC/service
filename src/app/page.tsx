@@ -1,4 +1,4 @@
-import { and, asc, eq, desc, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
@@ -11,6 +11,7 @@ import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { requireUser } from "@/lib/authz";
 import { visibleSystemIds } from "@/lib/tenancy";
+import { shelveRecords } from "@/lib/records";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 
@@ -53,12 +54,19 @@ export default async function Home() {
   const queueName = (id: number | null) =>
     id === null ? brand.operatorName : orgNames.find((o) => o.id === id)?.name ?? "another organization";
 
-  // A service provider's shelf of past engagements: frozen records kept from
-  // systems whose access was later revoked. Only their own org's records.
-  const pastEngagements = user.orgId === null ? [] : await db
-    .select({ id: engagementRecords.id, externalId: engagementRecords.externalId, label: engagementRecords.label, revokedAt: engagementRecords.revokedAt })
-    .from(engagementRecords).where(eq(engagementRecords.orgId, user.orgId))
+  // An organization's shelf of frozen records: service work whose share was
+  // withdrawn, and systems it used to own. Only their own org's, and only the
+  // current record for each ending - a superseded one still reads at its URL
+  // but doesn't clutter the shelf. lib/records decides what shelves where.
+  const frozenRows = user.orgId === null ? [] : await db
+    .select({
+      id: engagementRecords.id, kind: engagementRecords.kind, instrumentId: engagementRecords.instrumentId,
+      externalId: engagementRecords.externalId, label: engagementRecords.label, revokedAt: engagementRecords.revokedAt,
+    })
+    .from(engagementRecords)
+    .where(and(eq(engagementRecords.orgId, user.orgId), isNull(engagementRecords.supersededAt)))
     .orderBy(desc(engagementRecords.revokedAt));
+  const { pastEngagements, previouslyOwned } = shelveRecords(frozenRows, new Set(rows.map((r) => r.id)));
 
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
   // Internal parity detail, so staff eyes only.
@@ -122,25 +130,53 @@ export default async function Home() {
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
       />
-      {pastEngagements.length > 0 && (
+      {(pastEngagements.length > 0 || previouslyOwned.length > 0) && (
         <div className="container" style={{ paddingTop: 0 }}>
-          <div className="card">
-            <div className="card-title">Past engagements</div>
-            <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
-              Frozen, read-only records from engagements that ended.
-            </div>
-            {pastEngagements.map((r) => (
-              <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-                <Link href={`/records/${r.id}`} className="mono" style={{ fontWeight: 700, fontSize: 13, textDecoration: "none", color: "var(--navy)" }}>
-                  {r.externalId}
-                </Link>
-                <span style={{ fontSize: 13 }}>{r.label || <span className="mut">No assets were listed</span>}</span>
-                <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>ended {shopTime(r.revokedAt)}</span>
-              </div>
-            ))}
-          </div>
+          {pastEngagements.length > 0 && (
+            <FrozenShelf
+              title="Past engagements"
+              blurb="Systems you serviced until the share was withdrawn. Frozen, read-only, and never updated again."
+              verb="access ended"
+              rows={pastEngagements}
+            />
+          )}
+          {previouslyOwned.length > 0 && (
+            <FrozenShelf
+              title="Previously owned"
+              blurb="Systems that changed hands. Your record of the tenure stays yours; the live system belongs to whoever holds it now."
+              verb="handed on"
+              rows={previouslyOwned}
+            />
+          )}
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * One shelf of frozen records. Both shelves read identically - a link to the
+ * dossier and the date it closed - because to the holder they are the same
+ * object; only the reason they hold it differs, and that's what the title and
+ * blurb carry.
+ */
+function FrozenShelf({ title, blurb, verb, rows }: {
+  title: string; blurb: string; verb: string;
+  rows: { id: number; externalId: string; label: string; revokedAt: Date }[];
+}) {
+  return (
+    <div className="card">
+      <div className="card-title">{title}</div>
+      <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>{blurb}</div>
+      {rows.map((r) => (
+        <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+          <Link href={`/records/${r.id}`} className="mono" style={{ fontWeight: 700, fontSize: 13, textDecoration: "none", color: "var(--navy)" }}>
+            {r.externalId}
+          </Link>
+          <span style={{ fontSize: 13 }}>{r.label || <span className="mut">No assets were listed</span>}</span>
+          <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>{verb} {shopTime(r.revokedAt)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
