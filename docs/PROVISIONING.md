@@ -179,6 +179,11 @@ short-lived URL.
 
 ### The host (AWS Lightsail)
 
+**Step-by-step setup lives in [REMOTE_HOST_SETUP.md](./REMOTE_HOST_SETUP.md)** -
+follow that the first time. The summary below is the parts worth remembering
+after you have done it once.
+
+
 - **2 GB tier.** 512 MB will not run the engine comfortably.
 - **Region: nearest the labs.** Engineers move around; benches don't.
 - **Allocate and attach a static IP _before enrolling a single agent_.**
