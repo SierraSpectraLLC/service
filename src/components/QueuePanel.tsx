@@ -56,11 +56,15 @@ export default function QueuePanel({
     <div className="card" style={parked ? { borderLeft: "3px solid #8A5410" } : undefined}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
         <div className="card-title">Queue</div>
-        <span className="pill" style={{
-          background: parked ? "#FAF0DC" : "#E7EFF8", color: parked ? "#8A5410" : "#1D6396", fontWeight: 700,
-        }}>
-          {isMine ? "Your move" : `With ${holderName}`}
-        </span>
+        {/* Only worth a chip when someone else is holding it - "ours" is the
+            default state of every system on the board and says nothing. */}
+        {!isMine && (
+          <span className="pill" style={{
+            background: parked ? "#FAF0DC" : "#E7EFF8", color: parked ? "#8A5410" : "#1D6396", fontWeight: 700,
+          }}>
+            With {holderName}
+          </span>
+        )}
         <span className="mut" style={{ fontSize: 12 }}>
           {days === 0 ? "since today" : `${days} day${days === 1 ? "" : "s"}`} · {since}
         </span>

@@ -3,40 +3,30 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { markNotificationRead } from "@/app/actions";
+import { DESKTOP_KEY } from "@/lib/inbox";
 
 type Fresh = { id: number; kind: string; title: string; href: string };
 
 const POLL_MS = 45_000;
 const TOAST_MS = 9_000;
-const DESKTOP_KEY = "notify:desktop"; // "on" once the person enabled OS alerts
 
 /**
- * The nav's live inbox: badge, toast popups for new arrivals, and opt-in OS
- * notifications for when the tab is in the background.
+ * The nav's live inbox: one link with an unread count, and toast popups for new
+ * arrivals. Raises OS notifications too when the tab is hidden and the person
+ * has opted in on the inbox page - the switch lives there rather than behind a
+ * caret in the header, which is a permanent button for a setting nobody
+ * changes twice.
  *
  * "Live" is polling (~45s, plus a poll on tab-focus), because a serverless
  * function can't hold a socket open. That cadence is honest for a shop: an
  * assignment arriving 30 seconds late costs nothing, and the fallback is the
  * email that already went out.
- *
- * OS notifications are double-gated: the browser's own permission AND an
- * explicit toggle here, stored per browser. Permission is only ever requested
- * from the toggle click - never on page load, which is how sites get
- * permanently blocked.
  */
 export default function NotificationCenter({ initialUnread }: { initialUnread: number }) {
   const [unread, setUnread] = useState(initialUnread);
   const [toasts, setToasts] = useState<Fresh[]>([]);
-  const [desktop, setDesktop] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const cursor = useRef(0);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
-
-  useEffect(() => {
-    setDesktop(typeof Notification !== "undefined"
-      && Notification.permission === "granted"
-      && window.localStorage.getItem(DESKTOP_KEY) === "on");
-  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -83,16 +73,6 @@ export default function NotificationCenter({ initialUnread }: { initialUnread: n
     };
   }, []);
 
-  const enableDesktop = async () => {
-    if (typeof Notification === "undefined") return;
-    const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
-    if (perm === "granted") {
-      window.localStorage.setItem(DESKTOP_KEY, "on");
-      setDesktop(true);
-    }
-  };
-  const disableDesktop = () => { window.localStorage.setItem(DESKTOP_KEY, "off"); setDesktop(false); };
-
   const dismiss = (id: number) => {
     const t = timers.current.get(id);
     if (t) { clearTimeout(t); timers.current.delete(id); }
@@ -101,41 +81,9 @@ export default function NotificationCenter({ initialUnread }: { initialUnread: n
 
   return (
     <>
-      <span style={{ position: "relative", display: "inline-flex" }}>
-        <Link className="btn sm" href="/inbox" style={{ textDecoration: "none", fontWeight: unread ? 700 : undefined }}
-          onContextMenu={(e) => { e.preventDefault(); setMenuOpen((v) => !v); }}>
-          Inbox{unread ? ` (${unread})` : ""}
-        </Link>
-        <button aria-label="Notification options" className="btn sm" style={{ padding: "8px 6px", marginLeft: 2 }}
-          onClick={() => setMenuOpen((v) => !v)}>▾</button>
-        {menuOpen && (
-          <>
-            <span onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 30 }} />
-            <span style={{
-              position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 31, background: "#fff",
-              border: "1px solid var(--line)", borderRadius: 10, boxShadow: "0 8px 24px rgba(23,42,74,0.14)",
-              padding: "10px 12px", minWidth: 230, color: "var(--ink)",
-            }}>
-              <span className="eyebrow" style={{ display: "block", marginBottom: 6 }}>Alerts</span>
-              {typeof Notification === "undefined" ? (
-                <span className="mut" style={{ fontSize: 12 }}>This browser can&apos;t show desktop alerts.</span>
-              ) : desktop ? (
-                <button className="btn sm" onClick={disableDesktop} style={{ width: "100%" }}>
-                  Turn off desktop alerts
-                </button>
-              ) : (
-                <button className="btn sm primary" onClick={enableDesktop} style={{ width: "100%" }}>
-                  Enable desktop alerts
-                </button>
-              )}
-              <span className="mut" style={{ display: "block", fontSize: 11, marginTop: 6 }}>
-                Pops up on this computer when something lands in your inbox while
-                you&apos;re in another tab. Per-kind email switches live in the inbox.
-              </span>
-            </span>
-          </>
-        )}
-      </span>
+      <Link className="btn sm" href="/inbox" style={{ textDecoration: "none", fontWeight: unread ? 700 : undefined }}>
+        Inbox{unread ? ` (${unread})` : ""}
+      </Link>
 
       {toasts.length > 0 && (
         <div aria-live="polite" style={{

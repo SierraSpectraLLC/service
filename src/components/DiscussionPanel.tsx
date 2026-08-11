@@ -3,6 +3,7 @@
 import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
 import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
+import { fmtWhen } from "@/lib/when";
 import ThreadSeen from "./ThreadSeen";
 
 export type Post = {
@@ -12,7 +13,7 @@ export type Post = {
   internal: boolean;
 };
 
-const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const when = (iso: string) => fmtWhen(iso);
 
 /** Bold @mentions so pings stand out. */
 const renderBody = (body: string) =>

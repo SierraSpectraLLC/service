@@ -36,6 +36,13 @@ export type EodEntry = {
  * records silently: a system that has since shipped, been archived, or been
  * handed to a client lead has left the ACTIVE set, but its recorded update is
  * still history and must keep showing. Pure, so it is unit-tested.
+ *
+ * `recordedIds` is what THIS org recorded on this date, taken from the stamp on
+ * the saved row rather than from who owns the system now. That distinction is
+ * the difference between a report and a rewrite: a system sold last week must
+ * not drag last month's updates onto the buyer's reports, nor off the seller's.
+ * Today's list still reads current ownership, because a system nobody has
+ * written about yet has no stamp to read.
  */
 export function includesSystem(
   i: { id: number; ownerOrgId: number | null; archived: boolean; stages: string[]; lead: string },
@@ -44,11 +51,20 @@ export function includesSystem(
   recordedIds: Set<number>,
   clientLed: Set<string>,
 ): boolean {
-  if ((i.ownerOrgId ?? null) !== orgId) return false;
-  // History is driven by what was written, never by today's activity filters.
+  // History is driven by what was written, never by today's activity filters -
+  // and never by today's owner.
   if (historical) return recordedIds.has(i.id);
+  if ((i.ownerOrgId ?? null) !== orgId) return false;
   return !i.archived && !i.stages.includes("Shipped") && !clientLed.has(i.lead);
 }
+
+/**
+ * A row that exists but says nothing - somebody clicked into the box and back
+ * out - is not a record of anything, and must not make the day look reported.
+ * A skipped line is different: leaving it out was the decision.
+ */
+const recordsSomething = (s: { systemUpdate: string; actionItem: string; skipped: boolean }) =>
+  !!(s.systemUpdate.trim() || s.actionItem.trim() || s.skipped);
 
 /**
  * Everything that belongs on one client's report for a date, in report order:
@@ -75,7 +91,10 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
   // Systems led by one of the client's own people are theirs to report on, not
   // the operator's - a live-report rule only, never applied to history.
   const clientLed = new Set(roster.filter((p) => orgRow?.name && p.org === orgRow.name).map((p) => p.name));
-  const recorded = new Set(saved.filter((s) => s.instrumentId !== null).map((s) => s.instrumentId as number));
+  // What this org recorded that day, per the stamp on the row.
+  const recorded = new Set(saved
+    .filter((s) => s.instrumentId !== null && (s.ownerOrgId ?? null) === orgId && recordsSomething(s))
+    .map((s) => s.instrumentId as number));
   const mine = rows.filter((i) => includesSystem(i, orgId, historical, recorded, clientLed));
 
   const labels = await getSystemLabels(mine);
@@ -95,11 +114,13 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
   // only shelf units get their own line (one on a system is covered by that
   // system's); in history every recorded line stands, wherever the unit sits
   // now.
-  const assetUpdates = saved.filter((s) => s.assetId !== null);
+  const assetUpdates = saved.filter((s) => s.assetId !== null
+    && (historical ? (s.ownerOrgId ?? null) === orgId && recordsSomething(s) : true));
   if (assetUpdates.length) {
     const ids = assetUpdates.map((s) => s.assetId!) as number[];
     const owned = (await db.select().from(assets).where(inArray(assets.id, ids)))
-      .filter((a) => (a.ownerOrgId ?? null) === orgId && (historical || a.instrumentId === null));
+      // History trusts the stamp already applied above; today reads live ownership.
+      .filter((a) => (historical || ((a.ownerOrgId ?? null) === orgId && a.instrumentId === null)));
     for (const a of owned) {
       const u = assetUpdates.find((s) => s.assetId === a.id)!;
       entries.push({
@@ -116,17 +137,18 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
 
 /**
  * Which client groups a date has. Today: every org that owns active work, so
- * nothing waiting to be written is missed. A past day: every org that owns
- * something which recorded an update, so a client with no active systems left
- * still shows the history they have.
+ * nothing waiting to be written is missed. A past day: every org a saved row is
+ * STAMPED to - so a client with no active systems left still shows the history
+ * they have, and a system that has since changed hands stays on the report of
+ * the client it was written for.
  */
 export async function eodGroups(date: string, historical = false): Promise<{ orgId: number | null; name: string; recipients: string }[]> {
   const [rows, orgRows, brand, standalone, saved] = await Promise.all([
     db.select({ id: instruments.id, ownerOrgId: instruments.ownerOrgId, archived: instruments.archived }).from(instruments),
     db.select().from(orgs).orderBy(asc(orgs.name)),
     getBrand(),
-    db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId }).from(assets)
-      .where(historical ? undefined : and(
+    historical ? Promise.resolve([]) : db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId }).from(assets)
+      .where(and(
         isNull(assets.instrumentId),
         // A retired unit on tonight's client report is noise.
         ne(assets.status, "Decommissioned"),
@@ -134,10 +156,9 @@ export async function eodGroups(date: string, historical = false): Promise<{ org
     historical ? db.select().from(eodUpdates).where(eq(eodUpdates.date, date)) : Promise.resolve([]),
   ]);
   const owners = historical
-    ? new Set<number | null>([
-        ...rows.filter((r) => saved.some((s) => s.instrumentId === r.id)).map((r) => r.ownerOrgId ?? null),
-        ...standalone.filter((a) => saved.some((s) => s.assetId === a.id)).map((a) => a.ownerOrgId ?? null),
-      ])
+    // Straight off the rows: no join to who owns the equipment now, which is
+    // what used to let a handoff move a past day's report between clients.
+    ? new Set<number | null>(saved.filter(recordsSomething).map((s) => s.ownerOrgId ?? null))
     : new Set<number | null>([
         ...rows.filter((r) => !r.archived).map((r) => r.ownerOrgId ?? null),
         ...standalone.map((r) => r.ownerOrgId ?? null),

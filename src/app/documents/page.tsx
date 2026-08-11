@@ -33,8 +33,8 @@ export default async function DocumentsPage() {
         </div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           The shop&apos;s own shelf - files attached to no system or unit. Only staff see
-          these; move one onto a record by rebuilding it in the studio with that
-          destination.
+          these. To put one on a record, open its Files panel and choose
+          &ldquo;From library&rdquo;; the shelf keeps its copy.
         </div>
         <LibraryList files={rows.map((r) => ({
           id: r.id, fileName: r.fileName, size: r.size, description: r.description,

@@ -163,8 +163,7 @@ export default function ConfigurationForm(props: {
 
       {/* Equipment vocabulary - system types and models - lives in Settings >
           Catalog; stages are workflow, so they stay with the instance. */}
-      <Section title="Stages"
-        hint="The steps work moves through. Pick a background color - the text color adjusts itself. Built-in names are locked (sync and reports key on them); stages you add can be renamed or deleted.">
+      <Section title="Stages">
 
         {props.stageDefs.map((s) => (
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)" }}>

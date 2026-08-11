@@ -40,13 +40,17 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    with gaps (CSS grid has no masonry yet). Below the breakpoint the wrappers
    collapse and the cards stack in DOM order - which is why the default column
    assignment is chosen to read correctly when flattened. */
-.panel-cols { display: grid; grid-template-columns: 1fr; gap: 0; align-items: start; }
+/* minmax(0,·) rather than 1fr: a grid track's automatic minimum is its
+   content, so one long unbreakable string - a 90-character attachment name -
+   would widen its column and squeeze the other. The tracks stay equal and the
+   name ellipsises inside them. */
+.panel-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; align-items: start; }
 @media (min-width: 1200px) {
-  .panel-cols { grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .panel-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
 }
 /* Edit mode: each panel gets a grab strip, and its contents stop taking
    clicks so a drag can't trip a button inside a card. */
-.panel-slot { position: relative; }
+.panel-slot { position: relative; min-width: 0; }
 .panel-slot.editing { outline: 1px dashed var(--line); outline-offset: 3px; border-radius: 12px; margin-bottom: 12px; }
 .panel-slot.editing > .panel-body { pointer-events: none; opacity: 0.55; }
 .panel-slot.dragging { opacity: 0.4; }
@@ -158,6 +162,36 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
 }
+
+/* ── Native disclosure menus (components/Dropdown) ──────────────────────────
+   The browser opens these, not our JavaScript. The summary is styled as a
+   button; the default triangle marker is removed two ways because the older
+   WebKit pseudo-element and the standard `display: list-item` suppression are
+   honored by different engines. */
+.menu { position: relative; }
+.menu > summary { list-style: none; cursor: pointer; display: inline-block; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::marker { content: ""; }
+/* Hide the panel ourselves rather than trusting how an engine implements the
+   closed state. Chrome hides details content with content-visibility on a
+   ::details-content pseudo-element, which leaves an absolutely positioned child
+   with real layout; other engines use display: none. Being explicit means the
+   closed menu is closed everywhere. */
+.menu:not([open]) > .menu-panel { display: none; }
+.menu-panel {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(23, 42, 74, 0.14);
+  padding: 6px; min-width: 170px; display: flex; flex-direction: column;
+  color: var(--ink);
+}
+.menu-panel.left { right: auto; left: 0; }
+.menu-panel a, .menu-panel button {
+  padding: 8px 10px; font-size: 13px; color: var(--ink); text-decoration: none;
+  border-radius: 6px; text-align: left; background: none; border: none;
+  font-weight: 400; cursor: pointer;
+}
+.menu-panel a:hover, .menu-panel button:hover { background: #EDF3FA; }
 
 /* ── PDF studio ─────────────────────────────────────────────────────────────
    Sources beside the working set on a desktop, stacked on a phone. The page

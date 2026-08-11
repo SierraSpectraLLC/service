@@ -76,10 +76,6 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           </button>
         )}
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-        Recurring upkeep on a calendar. When one comes due it appears under Tasks; completing that task books
-        the next cycle from the day it was done.
-      </div>
 
       {open && (
         <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>

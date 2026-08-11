@@ -529,6 +529,12 @@ export const eodUpdates = pgTable("eod_updates", {
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
   date: text("date").notNull(), // YYYY-MM-DD in shop time
+  // Whose report this line belonged to ON THIS DATE, stamped at write time and
+  // never updated. Reading the owner off the system instead meant a handoff
+  // rewrote history: a system sold on Tuesday took Monday's update with it,
+  // vanishing from the old client's report and appearing on the new owner's,
+  // who had nothing to do with the work. Null is the operator's own group.
+  ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
   systemUpdate: text("system_update").notNull().default(""),
   actionItem: text("action_item").notNull().default(""),
   skipped: boolean("skipped").notNull().default(false), // left out of today's email

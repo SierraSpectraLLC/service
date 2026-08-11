@@ -81,10 +81,13 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
 
   const pdfjsRef = useRef<PdfJs | null>(null);
   const thumbs = useRef(new Map<string, string>());
-  const renderQueue = useRef<{ docKey: string; pageIx: number }[]>([]);
+  // The queue carries its own bytes. Reading them back off `docs` through a ref
+  // was a race nobody could see: setDocs is asynchronous, so a page queued in
+  // the same tick found no bytes yet, got skipped, and - already shifted off -
+  // never came back. That is the "rendering…" that never finishes.
+  const renderQueue = useRef<{ docKey: string; pageIx: number; bytes: ArrayBuffer }[]>([]);
   const rendering = useRef(false);
-  const docsRef = useRef(docs);
-  docsRef.current = docs;
+  const dropped = useRef(new Set<string>()); // doc keys removed mid-render
 
   const totalBytes = docs.reduce((n, d) => n + (d.bytes?.byteLength ?? 0), 0);
 
@@ -96,7 +99,13 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
     return mod;
   }, []);
 
-  /** Sequential thumbnail renderer - one page at a time keeps memory flat. */
+  /**
+   * Sequential thumbnail renderer - one page at a time keeps memory flat.
+   *
+   * Only one pump runs at a time; a second caller is turned away by the guard
+   * and its pages are drained by the pass already running, because the loop
+   * re-reads the shared queue on every iteration.
+   */
   const pumpThumbs = useCallback(async () => {
     if (rendering.current) return;
     rendering.current = true;
@@ -110,13 +119,13 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
           const next = renderQueue.current.shift();
           if (!next) break;
           const cacheKey = `${next.docKey}:${next.pageIx}`;
-          if (thumbs.current.has(cacheKey)) continue;
-          const doc = docsRef.current.find((d) => d.key === next.docKey);
-          if (!doc?.bytes) continue;
+          if (thumbs.current.has(cacheKey) || dropped.current.has(next.docKey)) continue;
           try {
             let pdf = open.get(next.docKey);
             if (!pdf) {
-              pdf = await lib.getDocument({ data: doc.bytes.slice(0) }).promise;
+              // slice(0) every time: pdfjs takes ownership of the buffer it is
+              // handed and detaches it, so the original must never be passed.
+              pdf = await lib.getDocument({ data: next.bytes.slice(0) }).promise;
               open.set(next.docKey, pdf);
             }
             const page = await pdf.getPage(next.pageIx + 1);
@@ -153,7 +162,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
       setDocs((ds) => ds.map((d) => (d.key === key ? { ...d, bytes, pageCount: count, state: "ready" } : d)));
       // Every page joins the working set; unwanted ones are one click to drop.
       setPages((ps) => [...ps, ...Array.from({ length: count }, (_, i) => ({ uid: uidCounter++, docKey: key, pageIx: i, rotate: 0 as const, title: "" }))]);
-      renderQueue.current.push(...Array.from({ length: count }, (_, i) => ({ docKey: key, pageIx: i })));
+      renderQueue.current.push(...Array.from({ length: count }, (_, i) => ({ docKey: key, pageIx: i, bytes })));
       void pumpThumbs();
     } catch (e) {
       setDocs((ds) => ds.map((d) => (d.key === key ? { ...d, state: "error", error: (e as Error).message } : d)));
@@ -174,6 +183,9 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
   };
 
   const removeDoc = (key: string) => {
+    // Tell an in-flight pump to stop drawing pages nobody will look at.
+    dropped.current.add(key);
+    renderQueue.current = renderQueue.current.filter((q) => q.docKey !== key);
     setDocs((ds) => ds.filter((d) => d.key !== key));
     setPages((ps) => ps.filter((p) => p.docKey !== key));
     setSelected(new Set());

@@ -4,9 +4,10 @@ import { promptReason } from "@/lib/reason";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
-import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, type WorkTarget } from "@/app/actions";
+import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, attachLibraryFile, listLibraryFiles, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
+import { fmtWhen } from "@/lib/when";
 
 // No `url`: raw blob URLs never reach the client. Every read goes through
 // /api/files/[id], which applies the same authorization as the pages.
@@ -173,7 +174,20 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ fileName: "", kind: "Other", description: "" });
-  const [, startTransition] = useTransition();
+  // null = picker closed. "loading" while the library is being fetched - it is
+  // pulled on demand rather than shipped with every record page.
+  type LibFile = { id: number; fileName: string; kind: string; description: string; size: number };
+  const [library, setLibrary] = useState<"loading" | LibFile[] | null>(null);
+  const [libraryError, setLibraryError] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  const openLibrary = () => {
+    setLibrary("loading"); setLibraryError("");
+    startTransition(async () => {
+      try { setLibrary((await listLibraryFiles()).files); }
+      catch (e) { setLibrary([]); setLibraryError((e as Error).message || "Couldn't load the library"); }
+    });
+  };
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
@@ -283,7 +297,12 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       <div style={{ display: "flex", alignItems: "center", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
         <div className="card-title">Attachments</div>
         {canEdit && (
-          <div style={{ marginLeft: "auto" }}>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+            {isStaff && (
+              <button className="btn sm" onClick={openLibrary} disabled={uploading}>
+                From library
+              </button>
+            )}
             <button className="btn sm primary" onClick={() => fileRef.current?.click()} disabled={uploading}>
               + Add files
             </button>
@@ -294,6 +313,38 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
         Tune files, test data, reports, source photos. Stored permanently and attributed.
       </div>
+
+      {library !== null && (
+        <div className="dash-form" style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+            <b style={{ fontSize: 13, color: "var(--navy)" }}>Document library</b>
+            <span className="mut" style={{ fontSize: 11 }}>
+              files on the shop&apos;s shelf; filing one here leaves the library&apos;s copy in place
+            </span>
+            <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }} onClick={() => setLibrary(null)}>close</button>
+          </div>
+          {library === "loading" && <div className="mut" style={{ fontSize: 12 }}>Loading…</div>}
+          {Array.isArray(library) && library.length === 0 && (
+            <div className="mut" style={{ fontSize: 12 }}>
+              The library is empty. Files land there from the PDF studio, or from an upload with no record.
+            </div>
+          )}
+          {Array.isArray(library) && library.map((f) => (
+            <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+              <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }} disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const res = await attachLibraryFile(target, f.id);
+                  setLibraryError(res?.error ?? "");
+                  if (!res?.error) setLibrary(null);
+                })}>+ file it here</button>
+              <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                title={f.description || f.fileName}>{f.fileName}</span>
+              <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{fmtSize(f.size)}</span>
+            </div>
+          ))}
+          {libraryError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{libraryError}</div>}
+        </div>
+      )}
 
       {staged.length > 0 && (
         <div className="dash-form" style={{ marginBottom: 12 }}>
@@ -396,7 +447,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                 <span className="pill" style={{ background: m.bg, color: m.fg }}>{a.kind}</span>
                 <span style={{ marginLeft: 6 }}>
-                  {fmtSize(a.size)} · {a.uploadedBy} · {new Date(a.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                  {fmtSize(a.size)} · {a.uploadedBy} · {fmtWhen(a.createdAt)}
                 </span>
               </div>
             </div>

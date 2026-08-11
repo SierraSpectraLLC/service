@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useTransition } from "react";
 import { markNotificationRead, markAllNotificationsRead, setNotificationPref } from "@/app/actions";
 import { NOTIFY_KINDS } from "@/lib/inbox";
+import DesktopAlerts from "@/components/DesktopAlerts";
 
 export type InboxItem = {
   id: number; kind: string; title: string; href: string;
@@ -64,6 +65,8 @@ export default function InboxPanel({ items, prefs }: {
           );
         })}
       </div>
+
+      <DesktopAlerts />
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Email preferences</div>

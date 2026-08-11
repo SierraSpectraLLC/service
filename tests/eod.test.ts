@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { includesSystem } from "@/lib/eodEmail";
 
-// Regression guard. Grouping the daily report by client introduced a bug: the
-// list was built from CURRENTLY ACTIVE systems, so as soon as a system shipped
-// or was archived its recorded updates vanished from the history pages. Since
-// shipping is the normal end state, that quietly erased most of the archive.
-// History must be driven by what was written, not by today's activity filters.
+// Regression guard, twice over.
+//
+// First: grouping the daily report by client built the list from CURRENTLY
+// ACTIVE systems, so as soon as a system shipped or was archived its recorded
+// updates vanished from the history pages. Since shipping is the normal end
+// state, that quietly erased most of the archive.
+//
+// Then, less obviously, history still read CURRENT OWNERSHIP. Handing a system
+// to its buyer moved every past update with it: yesterday's report went blank
+// for the client who paid for the work and reappeared under a new owner who had
+// never seen the instrument. `recordedIds` is now "what this org recorded that
+// day", read off the stamp on the saved row, and history consults nothing else.
 
 const sys = (over: Partial<Parameters<typeof includesSystem>[0]> = {}) => ({
   id: 1, ownerOrgId: 5, archived: false, stages: ["Refurbishment"], lead: "Joe", ...over,
@@ -35,9 +42,17 @@ describe("who lands on a client's daily report", () => {
     expect(includesSystem(sys(), 5, true, new Set([2]), none)).toBe(false);
   });
 
-  it("never crosses clients, live or historical", () => {
+  it("live: never crosses clients", () => {
     expect(includesSystem(sys({ ownerOrgId: 7 }), 5, false, new Set(), none)).toBe(false);
-    expect(includesSystem(sys({ ownerOrgId: 7 }), 5, true, new Set([1]), none)).toBe(false);
+  });
+
+  it("history: a since-sold system stays on the report of the client it was written for", () => {
+    // The reported bug. The system belongs to org 7 today; org 5 recorded the
+    // update on the day in question, so it is org 5's line and nobody else's.
+    expect(includesSystem(sys({ ownerOrgId: 7 }), 5, true, new Set([1]), none)).toBe(true);
+    // And it must NOT appear on the new owner's report for that day - their set
+    // is built from their own stamped rows, which don't include it.
+    expect(includesSystem(sys({ ownerOrgId: 7 }), 7, true, new Set(), none)).toBe(false);
   });
 
   it("house-stewarded work groups under the operator (orgId null)", () => {

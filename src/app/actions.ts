@@ -3,7 +3,7 @@
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { eq, and, asc, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { eq, and, asc, desc, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
@@ -1667,15 +1667,84 @@ export async function updateAttachment(attachmentId: number, data: { fileName: s
   revWork(a);
 }
 
-/** Best-effort blob removal - never lets a storage hiccup block the record delete. */
+/**
+ * Best-effort blob removal - never lets a storage hiccup block the record
+ * delete. Call AFTER the rows are gone: a URL still referenced by a surviving
+ * attachment row is kept, because filing one library document onto three assets
+ * makes three rows over one stored file, and deleting any one of them must not
+ * blank the other two.
+ */
 async function deleteBlobs(urls: string[]) {
   if (!urls.length) return;
+  const unique = [...new Set(urls)];
+  const stillUsed = new Set(
+    (await db.select({ url: attachments.url }).from(attachments).where(inArray(attachments.url, unique)))
+      .map((r) => r.url),
+  );
+  const orphans = unique.filter((u) => !stillUsed.has(u));
+  if (!orphans.length) return;
   try {
     const { del } = await import("@vercel/blob");
-    await del(urls);
+    await del(orphans);
   } catch (e) {
     console.error("[blob] delete failed (orphaned file, harmless but billed):", (e as Error).message);
   }
+}
+
+/**
+ * File an existing library document onto a system or unit. The library keeps
+ * its copy: this is a second reference to one stored file, not a duplicate
+ * upload, so the same calibration certificate can sit on every unit it covers
+ * without paying for storage five times. deleteBlobs refcounts accordingly.
+ *
+ * House-only, because the library itself is house-only - an org editor must not
+ * be able to pull the shop's shelf onto a record it happens to be able to edit.
+ */
+export async function attachLibraryFile(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const t = await resolveTarget(target);
+  if ("error" in t) return t;
+  const [src] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  // Must actually be a library file. Re-filing one record's attachment onto
+  // another would move evidence between systems by a different name.
+  if (!src || src.instrumentId !== null || src.assetId !== null) return { error: "Not a library file" };
+  const already = await db.select({ id: attachments.id }).from(attachments)
+    .where(and(
+      eq(attachments.url, src.url),
+      t.instrumentId !== null ? eq(attachments.instrumentId, t.instrumentId) : eq(attachments.assetId, t.assetId!),
+    ));
+  if (already.length) return { error: `${src.fileName} is already on this record` };
+  const [row] = await db.insert(attachments).values({
+    instrumentId: t.instrumentId, assetId: t.assetId,
+    fileName: src.fileName, kind: src.kind, description: src.description,
+    url: src.url, size: src.size, uploadedBy: u.name,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId,
+    entityType: "attachment", entityId: row.id,
+    action: `filed ${src.fileName} from the document library onto ${t.externalId || "this unit"}`,
+  });
+  revWork(row);
+  return {};
+}
+
+/**
+ * The library, for the picker on a record's Files panel. An action rather than
+ * a page prop so a record page doesn't query the whole library on every load
+ * just in case somebody opens the picker.
+ */
+export async function listLibraryFiles(): Promise<{
+  files: { id: number; fileName: string; kind: string; description: string; size: number }[];
+}> {
+  await requireStaff();
+  const rows = await db.select({
+    id: attachments.id, fileName: attachments.fileName, kind: attachments.kind,
+    description: attachments.description, size: attachments.size,
+  }).from(attachments)
+    .where(and(isNull(attachments.instrumentId), isNull(attachments.assetId)))
+    .orderBy(desc(attachments.createdAt))
+    .limit(300);
+  return { files: rows };
 }
 
 export async function deleteAttachment(attachmentId: number, reason: string): Promise<{ error?: string }> {
@@ -1803,11 +1872,14 @@ export async function saveEodUpdate(
   const date = shopToday();
   const systemUpdate = data.systemUpdate.trim();
   const actionItem = data.actionItem.trim();
+  // owner_org_id is stamped on the way in and deliberately absent from the
+  // conflict SET: the line belongs to whoever owned the system the day it was
+  // written, forever, whatever happens to the system afterwards.
   if (target.instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
     if (!inst) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ instrumentId: target.instrumentId, date, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .values({ instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.instrumentId, eodUpdates.date],
         set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
@@ -1816,7 +1888,7 @@ export async function saveEodUpdate(
     const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
     if (!a) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ assetId: target.assetId, date, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .values({ assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.assetId, eodUpdates.date],
         set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
@@ -1880,7 +1952,7 @@ export async function setEodSkip(
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
     if (!inst) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ instrumentId: target.instrumentId, date, skipped, updatedBy: u.name, updatedAt: new Date() })
+      .values({ instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.instrumentId, eodUpdates.date],
         set: { skipped, updatedBy: u.name, updatedAt: new Date() },
@@ -1889,7 +1961,7 @@ export async function setEodSkip(
     const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
     if (!a) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ assetId: target.assetId, date, skipped, updatedBy: u.name, updatedAt: new Date() })
+      .values({ assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.assetId, eodUpdates.date],
         set: { skipped, updatedBy: u.name, updatedAt: new Date() },

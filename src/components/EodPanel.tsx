@@ -179,8 +179,12 @@ export default function EodPanel({
         <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>No recipients set for {clientName} yet - add them in Settings.</div>
       )}
 
-      {filled.length === 0 && blanks.length === 0 && (
-        <div className="mut" style={{ fontSize: 13 }}>Nothing to report.</div>
+      {/* Read-only days never render the blanks, so their emptiness has to be
+          said out loud - an empty card reads as a broken page. */}
+      {filled.length === 0 && (readOnly || blanks.length === 0) && (
+        <div className="mut" style={{ fontSize: 13 }}>
+          {readOnly ? "Nothing was recorded for this client on this day." : "Nothing to report."}
+        </div>
       )}
 
       {filled.map((e, i) => (readOnly ? (

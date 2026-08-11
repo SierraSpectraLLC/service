@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { resolveDiff } from "@/app/actions";
+import { fmtWhen } from "@/lib/when";
 
 type Diff = {
   id: number; externalId: string; field: string; sheetValue: string; dbValue: string;
@@ -15,8 +16,7 @@ const RESOLUTION_LABEL: Record<string, string> = {
   auto_cleared: "auto-cleared",
 };
 
-const when = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const when = (iso: string) => fmtWhen(iso);
 
 export default function ParityList({ diffs }: { diffs: Diff[] }) {
   const [pending, startTransition] = useTransition();

@@ -1,6 +1,13 @@
 // The notification vocabulary and the one preference rule. Pure - the
 // tables live in db/schema, the writes in lib/notify and app/actions.
 
+/**
+ * localStorage key for the OS-alerts opt-in. Shared, because two components
+ * touch it from opposite ends of the app: the inbox page sets it, and the
+ * header's poller reads it when something new arrives.
+ */
+export const DESKTOP_KEY = "notify:desktop";
+
 export const NOTIFY_KINDS = [
   { kind: "task_assigned", label: "A task is assigned to me" },
   { kind: "system_assigned", label: "I'm made lead on a system" },

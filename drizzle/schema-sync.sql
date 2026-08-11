@@ -551,6 +551,7 @@ CREATE TABLE IF NOT EXISTS "eod_updates" (
   "id" serial PRIMARY KEY NOT NULL,
   "instrument_id" integer NOT NULL,
   "date" text NOT NULL,
+  "owner_org_id" integer,
   "system_update" text NOT NULL DEFAULT '',
   "action_item" text NOT NULL DEFAULT '',
   "skipped" boolean NOT NULL DEFAULT false,
@@ -647,6 +648,7 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_reason" text NOT NULL 
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_since" timestamp;
 ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'revoked';
 ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "superseded_at" timestamp;
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -1463,5 +1465,42 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','record','record-kind-backfill',
             'reclassified ' || v_count || ' frozen record(s) as handoffs; the rest stand as withdrawn shares');
+  END IF;
+END $$;
+
+-- ── EOD history: whose report was this, on the day it was written? ────────
+-- The report used to read ownership off the system, so selling a system moved
+-- every past update with it - Monday's work vanished from the client who paid
+-- for it and appeared under a new owner who had never seen the instrument.
+-- Stamp each existing row from the custody chain: the owner as of the end of
+-- that row's own date, which is exactly what the report should have said.
+-- NULL stays NULL and means the operator's own group.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'eod' AND "entity_id" = 'eod-owner-backfill') THEN
+    UPDATE "eod_updates" e
+    SET "owner_org_id" = (
+      SELECT c."to_org_id" FROM "custody_events" c
+      WHERE c."instrument_id" = e."instrument_id"
+        AND c."at" < (e."date"::date + 1)
+      ORDER BY c."at" DESC, c."id" DESC
+      LIMIT 1
+    )
+    WHERE e."instrument_id" IS NOT NULL AND e."owner_org_id" IS NULL;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    UPDATE "eod_updates" e
+    SET "owner_org_id" = (
+      SELECT c."to_org_id" FROM "custody_events" c
+      WHERE c."asset_id" = e."asset_id"
+        AND c."at" < (e."date"::date + 1)
+      ORDER BY c."at" DESC, c."id" DESC
+      LIMIT 1
+    )
+    WHERE e."asset_id" IS NOT NULL AND e."owner_org_id" IS NULL;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','eod','eod-owner-backfill',
+            'pinned ' || v_count || ' recorded update(s) to the org that owned the system that day, so a handoff cannot rewrite a past report');
   END IF;
 END $$;

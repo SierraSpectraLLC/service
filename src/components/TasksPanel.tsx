@@ -4,6 +4,7 @@ import { promptReason } from "@/lib/reason";
 import { useOptimistic, useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
+import { fmtWhen } from "@/lib/when";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
@@ -19,7 +20,7 @@ type Task = {
 };
 type SystemAsset = { id: number; label: string };
 
-const when = (iso: string) => new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const when = (iso: string) => fmtWhen(iso);
 
 /** Due-date chip: red when overdue, amber today/tomorrow, plain otherwise. Dates are shop-day strings. */
 function DueChip({ due, done, today }: { due: string; done: boolean; today: string }) {
