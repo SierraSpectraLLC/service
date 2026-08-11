@@ -250,7 +250,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks}
-              canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell} />
+              canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell}
+              combineTitle={`${asset.kind}${asset.model ? ` ${asset.model}` : ""} report packet`}
+              combineLines={[asset.serial ? `SN ${asset.serial}` : "", asset.owner, `Prepared by ${user.name}`].filter(Boolean)} />
           ) },
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={target}

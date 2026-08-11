@@ -345,7 +345,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
-              listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))} />
+              listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))}
+              combineTitle={`${inst.externalId} report packet`}
+              combineLines={[systemLabel(inst, assetRows), inst.client, `Prepared by ${user.name}`].filter(Boolean)} />
           ) },
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={{ instrumentId: inst.id, assetId: null }}

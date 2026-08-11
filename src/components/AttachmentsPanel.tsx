@@ -6,6 +6,7 @@ import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
+import PdfCombiner from "@/components/PdfCombiner";
 
 // No `url`: raw blob URLs never reach the client. Every read goes through
 // /api/files/[id], which applies the same authorization as the pages.
@@ -156,8 +157,10 @@ async function relayUpload(file: File): Promise<{ url: string }> {
   throw lastErr;
 }
 
-export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [] }: {
+export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [], combineTitle = "", combineLines = [] }: {
   target: WorkTarget; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
+  /** Prefills for the PDF combiner's cover page. */
+  combineTitle?: string; combineLines?: string[];
   // Tasks a file can be filed against as its report. A mandatory test needs one
   // before anything can be signed off, so the picker highlights those.
   evidenceTasks?: { id: number; title: string; required: boolean }[];
@@ -437,6 +440,14 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
           </div>
         );
       })}
+      {canEdit && (
+        <PdfCombiner
+          target={target}
+          pdfs={attachments.filter((a) => /\.pdf$/i.test(a.fileName)).map((a) => ({ id: a.id, fileName: a.fileName, kind: a.kind }))}
+          defaultCover={combineTitle}
+          coverLines={combineLines}
+        />
+      )}
     </div>
   );
 }
