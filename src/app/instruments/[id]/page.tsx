@@ -23,6 +23,7 @@ import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
@@ -127,6 +128,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       : eq(pmSchedules.instrumentId, instId)
   ).orderBy(asc(pmSchedules.nextDue));
   if (!inst) notFound();
+  // Whose storage a file uploaded here would land in - the system's owner, not
+  // whoever happens to be looking at it.
+  const fileQuota = await storeQuota(inst.ownerOrgId ?? null);
 
   // An asset can carry work of its own (recorded on its page, with no system).
   // Count it in the per-asset "open" badge so nothing hides on a subpage.
@@ -346,6 +350,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
               listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))}
+              storage={fileQuota}
               combineTitle={`${inst.externalId} report packet`}
               combineLines={[systemLabel(inst, assetRows), inst.client, `Prepared by ${user.name}`].filter(Boolean)} />
           ) },

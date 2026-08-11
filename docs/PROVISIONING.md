@@ -144,6 +144,15 @@ also the page that organization's own editors get.
 - **Blob URLs** are public-but-unguessable underneath the `/api/files` proxy;
   the app never renders a raw URL. Treat the proxy as the only supported way
   to reach files.
+- **File storage is per organization and metered.** Each org has its own shelf
+  (`/documents`) and its own ceiling (`orgs.storage_limit_mb`, set by the owner
+  in Settings → that organization). A store holds its shelf plus the paperwork
+  on every system and unit it owns, so files follow equipment when it changes
+  hands; one document filed onto several records is stored — and charged —
+  once. `0` means no ceiling, which is what every organization on an upgraded
+  instance keeps until somebody sets a real number; new organizations start at
+  5 GB. Nothing bills anybody yet: the meter and the wall are in place so a
+  plan can be attached to them later without a migration.
 - **Internal posts are private from the operator too.** That is deliberate: it
   is what makes the feature worth anything to a customer. The operator can see
   that an internal note exists (in the audit log) but never its text.

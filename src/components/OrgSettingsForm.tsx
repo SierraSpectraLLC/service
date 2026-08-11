@@ -4,10 +4,12 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   setOrgAppearance, updateEodRecipients, addClientAccess, removeClientAccess,
-  setClientAccessRole, removeOrg, setSheetOrg,
+  setClientAccessRole, removeOrg, setSheetOrg, setOrgStorageLimit,
 } from "@/app/actions";
 import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
+import { STORAGE_TIERS, type Quota } from "@/lib/storage";
+import StorageMeter from "@/components/StorageMeter";
 
 const MAX_LOGO_BYTES = 1024 * 1024; // a header logo, not a tune file
 
@@ -25,6 +27,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
     eodRecipients: string; systems: number; isOperator: boolean; isSheetOrg: boolean;
+    storageLimitMb: number; quota: Quota;
   };
   people: Entry[];
   platformName: string;
@@ -68,6 +71,10 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
       else setLookSaved(true);
     });
   };
+
+  // Storage ceiling
+  const [limitMb, setLimitMb] = useState(org.storageLimitMb);
+  const [limitMsg, setLimitMsg] = useState("");
 
   // Recipients
   const [recipients, setRecipients] = useState(org.eodRecipients);
@@ -218,6 +225,36 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           </div>
           {recipientsMsg && (
             <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
+          )}
+        </div>
+      )}
+
+      {isOwner && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 8 }}>File storage</div>
+          <StorageMeter quota={org.quota} hint={`${org.name}'s own shelf plus the files on every system and unit they own.`} />
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+            <select value={STORAGE_TIERS.some((t) => t.mb === limitMb) ? String(limitMb) : "custom"}
+              aria-label={`File storage limit for ${org.name}`} style={{ width: "auto", fontSize: 12 }}
+              onChange={(e) => { if (e.target.value !== "custom") { setLimitMb(parseInt(e.target.value)); setLimitMsg(""); } }}>
+              {STORAGE_TIERS.map((t) => <option key={t.mb} value={t.mb}>{t.label}</option>)}
+              {!STORAGE_TIERS.some((t) => t.mb === limitMb) && <option value="custom">{limitMb} MB (custom)</option>}
+            </select>
+            <input value={String(limitMb)} inputMode="numeric" aria-label="Limit in megabytes"
+              onChange={(e) => { setLimitMb(Math.max(0, parseInt(e.target.value.replace(/\D/g, "")) || 0)); setLimitMsg(""); }}
+              style={{ width: 90, fontSize: 12 }} />
+            <span className="mut" style={{ fontSize: 11 }}>MB · 0 = no limit</span>
+            <button className="btn sm" disabled={pending || limitMb === org.storageLimitMb}
+              onClick={() => {
+                setLimitMsg("");
+                startTransition(async () => {
+                  const res = await setOrgStorageLimit(org.id, limitMb);
+                  setLimitMsg(res?.error ?? "Saved ✓");
+                });
+              }}>Save</button>
+          </div>
+          {limitMsg && (
+            <div style={{ fontSize: 12, marginTop: 6, color: limitMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{limitMsg}</div>
           )}
         </div>
       )}

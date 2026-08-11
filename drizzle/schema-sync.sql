@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS "parts" (
 );
 CREATE TABLE IF NOT EXISTS "attachments" (
   "id" serial PRIMARY KEY NOT NULL,
+  "org_id" integer,
   "instrument_id" integer NOT NULL,
   "file_name" text NOT NULL,
   "kind" text NOT NULL DEFAULT 'Other',
@@ -649,6 +650,8 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_since" timestamp;
 ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'revoked';
 ALTER TABLE "engagement_records" ADD COLUMN IF NOT EXISTS "superseded_at" timestamp;
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "owner_org_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "org_id" integer;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "storage_limit_mb" integer NOT NULL DEFAULT 5120;
 
 -- ── Indexes ───────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
@@ -845,6 +848,10 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_task_id_tasks_id_fk') THEN
     ALTER TABLE "attachments" ADD CONSTRAINT "attachments_task_id_tasks_id_fk"
       FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_org_id_orgs_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'signoffs_instrument_id_instruments_id_fk') THEN
     ALTER TABLE "signoffs" ADD CONSTRAINT "signoffs_instrument_id_instruments_id_fk"
@@ -1502,5 +1509,24 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','eod','eod-owner-backfill',
             'pinned ' || v_count || ' recorded update(s) to the org that owned the system that day, so a handoff cannot rewrite a past report');
+  END IF;
+END $$;
+
+-- ── File storage: nobody wakes up to a limit they didn't agree to ─────────
+-- storage_limit_mb defaults to 5 GB for organizations created from here on.
+-- Every organization that already exists is set to 0 - no ceiling - because
+-- introducing a quota retroactively would turn a working instance into a
+-- support call, and because the operator has to decide what to sell before
+-- anyone is held to it. Setting a real limit is a deliberate act in Settings.
+DO $$
+DECLARE v_count integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'org' AND "entity_id" = 'storage-unlimited-existing') THEN
+    UPDATE "orgs" SET "storage_limit_mb" = 0;
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','org','storage-unlimited-existing',
+            'left ' || v_count || ' existing organization(s) on unlimited file storage; new ones start at the 5 GB default');
   END IF;
 END $$;

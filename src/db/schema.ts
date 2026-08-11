@@ -66,6 +66,12 @@ export const orgs = pgTable("orgs", {
   // own list and its own send button - one report per client, never a merged
   // one that would show them each other's systems.
   eodRecipients: text("eod_recipients").notNull().default(""),
+  // How much stored file the organization may hold, in megabytes. 0 means no
+  // ceiling, which is what every organization that predates this column was
+  // given - a limit nobody agreed to is not a limit, it's an outage. New
+  // organizations start at the default and the operator moves them from
+  // Settings. See lib/storage for what counts toward it.
+  storageLimitMb: integer("storage_limit_mb").notNull().default(5120),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("org_name_unique").on(t.name)]);
 
@@ -474,6 +480,12 @@ export const attachments = pgTable("attachments", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }), // files for a standalone asset
+  // Whose shelf a HOMELESS file sits on - one with no system and no unit.
+  // Every organization has its own document library, and null is the
+  // operator's. Files that do belong to a record need no stamp: they live in
+  // the store of whoever owns that record, which is why a system joining a
+  // client's roster brings its paperwork along. See lib/storage.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
   fileName: text("file_name").notNull(),
   // Tune report | Test data | Report | Photo | Manual | Other
   kind: text("kind").notNull().default("Other"),

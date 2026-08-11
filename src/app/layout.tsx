@@ -107,12 +107,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     Settings
                   </Link>
                 )}
-                {isStaff && (
+                {isStaff ? (
                   <NavMore items={[
                     { href: "/maintenance", label: "Maintenance" },
                     { href: "/purchasing", label: "Purchasing" },
                     { href: "/pdf", label: "PDF studio" },
-                    { href: "/documents", label: "Document library" },
+                    { href: "/documents", label: "Files" },
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
@@ -121,6 +121,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       // Staff curate the catalog and procedures; the rest of
                       // Settings is the owner's.
                       : [{ href: "/settings/catalog", label: "Catalog & procedures" }]),
+                  ]} />
+                ) : (
+                  // An organization's own tools: its file shelf and the studio.
+                  // Both used to be staff-only, which left a client with nowhere
+                  // to keep a document and no way to assemble a packet.
+                  <NavMore items={[
+                    { href: "/documents", label: "Files" },
+                    { href: "/pdf", label: "PDF studio" },
                   ]} />
                 )}
                 {mayViewAs && !view.persona && <ViewAsBar orgs={orgOptions} active={null} />}

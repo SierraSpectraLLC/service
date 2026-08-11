@@ -27,6 +27,12 @@ export async function mayReadAttachment(file: typeof attachments.$inferSelect): 
   if (file.instrumentId !== null && (await canSeeSystem(user, file.instrumentId))) return true;
   if (file.assetId !== null && (await assetAccess(user, file.assetId)).see) return true;
 
+  // A homeless file belongs to a document library, and each organization's
+  // shelf is its own. Null org_id is the operator's, which no client reads.
+  if (file.instrumentId === null && file.assetId === null) {
+    return user.orgId !== null && file.orgId === user.orgId;
+  }
+
   // A frozen engagement record keeps its files readable for the org that
   // holds it - but only files the record actually captured, so nothing
   // uploaded after the revocation rides along.

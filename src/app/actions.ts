@@ -25,6 +25,8 @@ import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssig
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
+import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
+import { storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
 import { requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner, VIEW_AS_COOKIE, type SessionUser } from "@/lib/authz";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
@@ -1600,6 +1602,11 @@ export async function recordAttachments(
   if (!files.length) return {};
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
+  // Charged to whoever OWNS the record, not to whoever pressed upload: a tune
+  // report on a client's system is the client's paperwork, and the shop filing
+  // it on their behalf shouldn't pay for their storage.
+  const guard = await guardStorage(await storeOwnerForTarget(t0), files.reduce((n, f) => n + (f.size || 0), 0));
+  if (guard) return guard;
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
       ...f, description: f.description.trim(),
@@ -1618,21 +1625,25 @@ export async function recordAttachments(
 }
 
 /**
- * File something in the document library - storage that belongs to no system
- * or unit. Staff-only on both write and read: the download gate shows
- * homeless files to the house alone, so this is the operator's own shelf
- * (blank templates, assembled packets awaiting a destination), never a place
- * a client's record can quietly end up.
+ * File something in the caller's document library - storage that belongs to no
+ * system or unit. Every organization has one: blank templates, SOPs, assembled
+ * packets awaiting a destination. The shelf is private to its organization on
+ * both write and read (see lib/fileAccess), so nothing a client files can be
+ * seen by another client, and the house shelf stays the house's.
  */
 export async function recordLibraryFiles(
   files: { fileName: string; url: string; size: number; description: string }[],
 ): Promise<{ error?: string }> {
-  const u = await requireStaff();
+  // Every organization has a shelf of its own, so this is no longer house-only.
+  // An org's files land on its shelf; the house's land on the operator's.
+  const u = await requireEditor();
   if (!files.length) return {};
+  const guard = await guardStorage(u.orgId, files.reduce((n, f) => n + (f.size || 0), 0));
+  if (guard) return guard;
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
       ...f, description: f.description.trim(), kind: "Report",
-      instrumentId: null, assetId: null, uploadedBy: u.name,
+      instrumentId: null, assetId: null, orgId: u.orgId, uploadedBy: u.name,
     })))
     .returning();
   for (const a of rows) {
@@ -1697,17 +1708,19 @@ async function deleteBlobs(urls: string[]) {
  * upload, so the same calibration certificate can sit on every unit it covers
  * without paying for storage five times. deleteBlobs refcounts accordingly.
  *
- * House-only, because the library itself is house-only - an org editor must not
- * be able to pull the shop's shelf onto a record it happens to be able to edit.
+ * Your own shelf only. A client can file its own SOP onto a system it works,
+ * and the house can file the shop's; neither reaches into the other's library.
  */
 export async function attachLibraryFile(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
-  const u = await requireStaff();
+  const u = await requireEditor();
   const t = await resolveTarget(target);
   if ("error" in t) return t;
   const [src] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
-  // Must actually be a library file. Re-filing one record's attachment onto
-  // another would move evidence between systems by a different name.
+  // Must actually be a library file, and one of yours. Re-filing another
+  // record's attachment would move evidence between systems by a different
+  // name; reaching into another org's shelf would be a leak.
   if (!src || src.instrumentId !== null || src.assetId !== null) return { error: "Not a library file" };
+  if ((src.orgId ?? null) !== u.orgId) return { error: "Not found" };
   const already = await db.select({ id: attachments.id }).from(attachments)
     .where(and(
       eq(attachments.url, src.url),
@@ -1729,31 +1742,66 @@ export async function attachLibraryFile(target: WorkTarget, attachmentId: number
 }
 
 /**
- * The library, for the picker on a record's Files panel. An action rather than
- * a page prop so a record page doesn't query the whole library on every load
- * just in case somebody opens the picker.
+ * The caller's own library, for the picker on a record's Files panel. An action
+ * rather than a page prop so a record page doesn't query the whole library on
+ * every load just in case somebody opens the picker.
  */
 export async function listLibraryFiles(): Promise<{
   files: { id: number; fileName: string; kind: string; description: string; size: number }[];
 }> {
-  await requireStaff();
+  const u = await requireUser();
   const rows = await db.select({
     id: attachments.id, fileName: attachments.fileName, kind: attachments.kind,
     description: attachments.description, size: attachments.size,
   }).from(attachments)
-    .where(and(isNull(attachments.instrumentId), isNull(attachments.assetId)))
+    .where(and(
+      isNull(attachments.instrumentId), isNull(attachments.assetId),
+      u.orgId === null ? isNull(attachments.orgId) : eq(attachments.orgId, u.orgId),
+    ))
     .orderBy(desc(attachments.createdAt))
     .limit(300);
   return { files: rows };
 }
 
+/**
+ * Refuse a write that would overflow the store, naming the shortfall. Returns
+ * an error object to hand straight back, or undefined when there's room. The
+ * upload token route makes the same check earlier, so a 90MB transfer isn't
+ * spent to learn the answer - this is the one that cannot be bypassed.
+ */
+/** Whose store a file on this record lands in - the record's owner. */
+async function storeOwnerForTarget(
+  t: { instrumentId: number | null; asset: typeof assets.$inferSelect | null },
+): Promise<number | null> {
+  if (t.instrumentId !== null) {
+    const [i] = await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, t.instrumentId));
+    return i?.ownerOrgId ?? null;
+  }
+  return t.asset?.ownerOrgId ?? null;
+}
+
+async function guardStorage(orgId: number | null, addBytes: number): Promise<{ error: string } | undefined> {
+  if (addBytes <= 0) return undefined;
+  const q = await storeQuota(orgId);
+  if (fits(q.usedBytes, addBytes, q.limitBytes === null ? 0 : Math.round(q.limitBytes / MB))) return undefined;
+  return { error: overQuotaMessage(q.storeName, q, addBytes) };
+}
+
 export async function deleteAttachment(attachmentId: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireStaff();
+  // An organization must be able to clear its OWN shelf - otherwise a storage
+  // limit is a trap with no way out. Deleting a file off a record stays
+  // staff-only, as it always was: that is somebody's evidence.
+  const u = await requireEditor();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
   if (!a) return {};
-  await assertWorkEditable(u, a);
+  if (a.instrumentId === null && a.assetId === null) {
+    if ((a.orgId ?? null) !== u.orgId) return { error: "Not found" };
+  } else {
+    if (!isHouse(u.role)) return { error: "Staff only" };
+    await assertWorkEditable(u, a);
+  }
   await db.delete(attachments).where(eq(attachments.id, attachmentId));
   await deleteBlobs([a.url]); // remove the actual file from Vercel Blob, not just our record
   await audit({
@@ -2667,6 +2715,35 @@ export async function removePerson(id: number) {
 
 /** Who the EOD "Send to LabZen" button emails. Comma-separated. */
 /** Who receives one organization's daily report. Each client has its own list. */
+/**
+ * Set an organization's file-storage ceiling, in megabytes. 0 removes it.
+ * Owner-only: this is the commercial dial, and lowering it is the one setting
+ * on this page that can stop somebody working - so the refusal below names what
+ * they are already holding rather than silently accepting a limit they've
+ * already blown past.
+ */
+export async function setOrgStorageLimit(orgId: number, limitMb: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const mb = Math.max(0, Math.round(Number(limitMb) || 0));
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  if (mb > 0) {
+    const used = await storeUsedBytes(orgId);
+    if (used > mb * MB) {
+      return { error: `${org.name} is already storing ${fmtBytes(used)}. Set at least that, or have them remove files first.` };
+    }
+  }
+  await db.update(orgs).set({ storageLimitMb: mb }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `${org.name} file storage limit: ${mb === 0 ? "no limit" : `${mb} MB`}`,
+    field: "storageLimitMb", oldValue: String(org.storageLimitMb), newValue: String(mb),
+  });
+  revalidatePath("/settings");
+  revalidatePath("/documents");
+  return {};
+}
+
 export async function updateEodRecipients(orgId: number, value: string): Promise<{ error?: string }> {
   const u = await requireOwner();
   const entries = value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);

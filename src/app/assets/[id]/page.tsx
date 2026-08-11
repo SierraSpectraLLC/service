@@ -23,6 +23,7 @@ import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -68,6 +69,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
   ]);
   if (!asset) notFound();
+  const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
 
   // Checklists and note threads for this asset's tasks (same shape the system page uses).
   const taskIds = taggedTasks.map((t) => t.id);
@@ -251,6 +253,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks}
               canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell}
+              storage={fileQuota}
               combineTitle={`${asset.kind}${asset.model ? ` ${asset.model}` : ""} report packet`}
               combineLines={[asset.serial ? `SN ${asset.serial}` : "", asset.owner, `Prepared by ${user.name}`].filter(Boolean)} />
           ) },

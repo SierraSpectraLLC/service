@@ -56,10 +56,12 @@ let uidCounter = 1;
  * streaming bytes instead of redirecting - there is no studio backend to
  * secure beyond the gates that already exist.
  */
-export default function PdfStudio({ sources, destinations, canUseLibrary }: {
+export default function PdfStudio({ sources, destinations, canUseLibrary, libraryLabel = "Document library" }: {
   sources: SourceListing[];
   destinations: Destination[];
   canUseLibrary: boolean;
+  /** What this person's own shelf is called - the house's is "the library". */
+  libraryLabel?: string;
 }) {
   const [docs, setDocs] = useState<StudioDoc[]>([]);
   const [pages, setPages] = useState<WorkPage[]>([]);
@@ -295,7 +297,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
         if (dest === "library") {
           const res = await recordLibraryFiles([meta]);
           if (res?.error) throw new Error(res.error);
-          setSaved(`${cleanName} filed in the document library`);
+          setSaved(`${cleanName} filed on ${libraryLabel.toLowerCase()}`);
         } else {
           const [kind, idStr] = dest.split(":");
           const target = kind === "i"
@@ -514,7 +516,7 @@ export default function PdfStudio({ sources, destinations, canUseLibrary }: {
               <label>Destination</label>
               <select value={dest} onChange={(e) => setDest(e.target.value)}>
                 <option value="download">Download only</option>
-                {canUseLibrary && <option value="library">Document library</option>}
+                {canUseLibrary && <option value="library">{libraryLabel}</option>}
                 {destinations.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
               </select>
             </div>

@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { appSettings, clientAllowlist, orgs, systemShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
+import { storeQuota } from "@/lib/storeUsage";
 import OrgSettingsForm from "@/components/OrgSettingsForm";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
     getBrand(),
   ]);
   if (!org) notFound();
+  const quota = await storeQuota(orgId);
 
   return (
     <div className="container page">
@@ -52,6 +54,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         org={{
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
           eodRecipients: org.eodRecipients, systems: shareRows.length,
+          storageLimitMb: org.storageLimitMb, quota,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
         people={allowRows.map((r) => ({ id: r.id, entry: r.entry, canEdit: r.canEdit }))}

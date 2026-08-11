@@ -7,6 +7,8 @@ import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, attachLibraryFile, listLibraryFiles, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
+import StorageMeter from "@/components/StorageMeter";
+import type { Quota } from "@/lib/storage";
 import { fmtWhen } from "@/lib/when";
 
 // No `url`: raw blob URLs never reach the client. Every read goes through
@@ -158,8 +160,10 @@ async function relayUpload(file: File): Promise<{ url: string }> {
   throw lastErr;
 }
 
-export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [], combineTitle = "", combineLines = [] }: {
+export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [], combineTitle = "", combineLines = [], storage }: {
   target: WorkTarget; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
+  /** The store these files land in - the record owner's. Surfaced when tight. */
+  storage?: Quota & { storeName: string };
   /** Prefills for the PDF combiner's cover page. */
   combineTitle?: string; combineLines?: string[];
   // Tasks a file can be filed against as its report. A mandatory test needs one
@@ -313,6 +317,15 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
         Tune files, test data, reports, source photos. Stored permanently and attributed.
       </div>
+
+      {/* Whose storage these land in, and how much is left. Shown here because
+          this is where the bytes arrive - a meter only on the library page would
+          be a bill with no itemization. */}
+      {storage && (storage.state === "warn" || storage.state === "full") && (
+        <div style={{ marginBottom: 10 }}>
+          <StorageMeter quota={storage} name={storage.storeName} />
+        </div>
+      )}
 
       {library !== null && (
         <div className="dash-form" style={{ marginBottom: 12 }}>

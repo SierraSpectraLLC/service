@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { and, asc, desc, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, attachments, instruments } from "@/db/schema";
-import { requireEditor } from "@/lib/authz";
+import { requireUser } from "@/lib/authz";
 import { isHouse, scopeFor, visibleAssetIds } from "@/lib/tenancy";
 import { assetAccess } from "@/lib/tenancy";
 import PdfStudio from "@/components/PdfStudio";
@@ -14,27 +14,38 @@ export const dynamic = "force-dynamic";
  * every record they may edit, offered as a destination. The heavy lifting
  * (thumbnails, page edits, assembly) all happens in the browser - this page
  * just draws the map of what they're allowed to touch.
+ *
+ * Open to everyone signed in, including read-only viewers: assembling a packet
+ * out of documents you can already read and downloading it is reading, not
+ * writing. What a viewer doesn't get is a destination - the picker below only
+ * offers records they may edit, and their own shelf only if they may write to
+ * it - so the studio degrades to "build it and download it".
  */
 export default async function PdfStudioPage() {
   let user;
-  try { user = await requireEditor(); } catch { redirect("/"); }
+  try { user = await requireUser(); } catch { redirect("/login"); }
   const house = isHouse(user.role);
+  const canWrite = user.role !== "client_viewer";
 
   const [scope, seeAssets] = await Promise.all([scopeFor(user), visibleAssetIds(user)]);
 
-  // Source material: PDF attachments on anything visible, plus (house) the
-  // library's homeless files. The same rows the download proxy would allow -
-  // scoped here in one query rather than per-file round trips.
+  // Source material: PDF attachments on anything visible, plus this person's own
+  // document library. The same rows the download proxy would allow - scoped here
+  // in one query rather than per-file round trips.
   const pdfRows = await db.select({
     id: attachments.id, fileName: attachments.fileName, kind: attachments.kind,
     size: attachments.size, instrumentId: attachments.instrumentId, assetId: attachments.assetId,
-    createdAt: attachments.createdAt,
+    orgId: attachments.orgId, createdAt: attachments.createdAt,
   }).from(attachments)
     .where(and(
       ilike(attachments.fileName, "%.pdf"),
       house ? undefined : or(
         scope.all ? undefined : scope.ids.length ? inArray(attachments.instrumentId, scope.ids) : sql`false`,
         seeAssets === null ? undefined : seeAssets.length ? inArray(attachments.assetId, seeAssets) : sql`false`,
+        // The org's own shelf: homeless files stamped to it.
+        user.orgId === null ? sql`false` : and(
+          isNull(attachments.instrumentId), isNull(attachments.assetId), eq(attachments.orgId, user.orgId),
+        ),
       ),
     ))
     .orderBy(desc(attachments.createdAt))
@@ -55,11 +66,12 @@ export default async function PdfStudioPage() {
       ? instName.get(r.instrumentId) ?? "a system"
       : r.assetId !== null
         ? assetName.get(r.assetId) ?? "a unit"
-        : "Library",
+        : "Shelf",
   }));
 
-  // Destinations: what this person may attach the result to.
-  const editableSystems = (await db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client })
+  // Destinations: what this person may attach the result to. A read-only viewer
+  // gets none, and the studio says so rather than offering a button that fails.
+  const editableSystems = !canWrite ? [] : (await db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client })
     .from(instruments)
     .where(and(
       sql`${instruments.archived} = false`,
@@ -68,7 +80,7 @@ export default async function PdfStudioPage() {
     .orderBy(asc(instruments.externalId)))
     .filter((s) => scope.all ? user.role !== "client_viewer" : scope.editable.has(s.id));
 
-  const shelf = await db.select({ id: assets.id, kind: assets.kind, model: assets.model, serial: assets.serial })
+  const shelf = !canWrite ? [] : await db.select({ id: assets.id, kind: assets.kind, model: assets.model, serial: assets.serial })
     .from(assets)
     .where(and(
       isNull(assets.instrumentId),
@@ -89,7 +101,9 @@ export default async function PdfStudioPage() {
           ...editableSystems.map((s) => ({ key: `i:${s.id}`, label: `${s.externalId}${s.client ? ` · ${s.client}` : ""}` })),
           ...editableShelf.map((a) => ({ key: `a:${a.id}`, label: `${a.kind}${a.model ? ` ${a.model}` : ""}${a.serial ? ` SN ${a.serial}` : ""} (shelf)` })),
         ]}
-        canUseLibrary={house}
+        // Anyone who may write has a shelf of their own to save to.
+        canUseLibrary={canWrite}
+        libraryLabel={house ? "Document library" : "Our file shelf"}
       />
     </div>
   );
