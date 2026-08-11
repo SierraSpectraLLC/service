@@ -1,10 +1,13 @@
 // How full an organization's file store actually is. Server-only (it touches
 // the database); the arithmetic and the copy live in the pure lib/storage.
-import { eq, sql } from "drizzle-orm";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { attachments, assets, instruments, orgs } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
 import { quotaFor, type Quota } from "@/lib/storage";
+import type { SessionUser } from "@/lib/authz";
+import { isHouse } from "@/lib/houseRole";
+import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 
 /**
  * The operator is reachable two ways - as the house (org null, which is what
@@ -138,6 +141,59 @@ export async function storeQuota(orgId: number | null): Promise<Quota & { storeN
     storeLabel(orgId),
   ]);
   return { ...quotaFor(used, limitMb), storeName };
+}
+
+/**
+ * Files this person can READ that are in somebody else's store.
+ *
+ * This is the other half of the answer to "why does the PDF studio list files my
+ * storage page doesn't?". The studio offers everything you can read; the store
+ * lists what you own. A system shared with you - or one you sold and stayed on as
+ * a viewer - is readable and is NOT yours, so its paperwork appears in one place
+ * and not the other. Both were right and the page said neither, which reads as a
+ * bug. So: list them, plainly marked as not counting.
+ *
+ * House users get nothing here: they can read everything, so "readable but not
+ * mine" would be every other organization's files, which is not a useful page.
+ */
+export async function visibleNotOwnedFiles(user: SessionUser, limit = 200): Promise<StoreFileRow[]> {
+  if (user.orgId === null || isHouse(user.role)) return [];
+  const [sysIds, assetIds] = await Promise.all([visibleSystemIds(user), visibleAssetIds(user)]);
+  const reach = or(
+    sysIds === null ? undefined : sysIds.length ? inArray(attachments.instrumentId, sysIds) : sql`false`,
+    assetIds === null ? undefined : assetIds.length ? inArray(attachments.assetId, assetIds) : sql`false`,
+  );
+  const rows = await db.select({
+    id: attachments.id, fileName: attachments.fileName, url: attachments.url, size: attachments.size,
+    kind: attachments.kind, description: attachments.description, uploadedBy: attachments.uploadedBy,
+    createdAt: attachments.createdAt, orgId: attachments.orgId,
+    instrumentId: attachments.instrumentId, externalId: instruments.externalId,
+    assetId: attachments.assetId,
+    assetKind: assets.kind, assetModel: assets.model, assetSerial: assets.serial,
+    systemOwner: instruments.ownerOrgId, assetOwner: assets.ownerOrgId,
+  }).from(attachments)
+    .leftJoin(instruments, eq(instruments.id, attachments.instrumentId))
+    .leftJoin(assets, eq(assets.id, attachments.assetId))
+    .where(reach)
+    .orderBy(desc(attachments.createdAt))
+    .limit(limit)
+    .catch(() => []);
+
+  return rows
+    // Anything already in their own store belongs to the list above, not here.
+    .filter((r) => {
+      const owner = r.instrumentId !== null ? r.systemOwner : r.assetId !== null ? r.assetOwner : null;
+      return (owner ?? null) !== user.orgId;
+    })
+    .map((r) => ({
+      id: r.id, fileName: r.fileName, url: r.url, size: r.size, kind: r.kind,
+      description: r.description, uploadedBy: r.uploadedBy, createdAt: r.createdAt,
+      instrumentId: r.instrumentId, externalId: r.externalId,
+      assetId: r.assetId,
+      assetLabel: r.assetId === null ? null
+        : [r.assetKind, r.assetModel, r.assetSerial ? `SN ${r.assetSerial}` : ""].filter(Boolean).join(" "),
+      orgId: r.orgId,
+    }));
 }
 
 /** The ceiling in megabytes. 0 = none. */

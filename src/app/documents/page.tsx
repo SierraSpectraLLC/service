@@ -6,7 +6,7 @@ import { orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
-import { storeFiles, storeQuota } from "@/lib/storeUsage";
+import { storeFiles, storeQuota, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
 import StoreFileList from "@/components/StoreFileList";
@@ -44,14 +44,19 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   const viewing = isHouseUser ? wanted : user.orgId;
   const isOwnStore = viewing === user.orgId;
 
-  const [rows, quota, orgRows, brand] = await Promise.all([
+  const [rows, quota, orgRows, brand, guestRows] = await Promise.all([
     storeFiles(viewing, CAP).catch(() => []),
     storeQuota(viewing),
     isHouseUser ? db.select({ id: orgs.id, name: orgs.name }).from(orgs).orderBy(asc(orgs.name)).catch(() => []) : [],
     getBrand(),
+    // Readable, but somebody else's - a system shared with them, or one they
+    // sold and stayed on as a viewer. These are why the PDF studio can offer
+    // PDFs this page used to omit without explaining itself.
+    isOwnStore ? visibleNotOwnedFiles(user).catch(() => []) : [],
   ]);
 
   const files = groupStoredFiles(rows);
+  const guests = groupStoredFiles(guestRows);
   const shown = totalBytes(files);
   const truncated = rows.length >= CAP;
   const canEdit = user.role !== "client_viewer";
@@ -92,7 +97,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
         </div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           {isOwnStore
-            ? "Everything you are storing. Files on the shelf belong to no record - put one on a system or unit from its Files panel, and the shelf keeps its copy."
+            ? "Everything you own and are charged for: your shelf, plus the paperwork on every system and unit that belongs to you. Files on records shared with you are readable but somebody else's - they are listed separately below."
             : `Everything ${quota.storeName} is storing. Their shelf files are theirs; you can see them because you run this instance.`}
         </div>
         {canEdit && isOwnStore && <LibraryUpload full={quota.state === "full"} />}
@@ -115,6 +120,34 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           </div>
         )}
       </div>
+
+      {/* The half that was missing. Files you can open that live in someone
+          else's store - which is exactly the set the PDF studio offers and this
+          page used to leave out without saying why. */}
+      {guests.length > 0 && (
+        <div className="card">
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+            <div className="card-title">Shared with you</div>
+            <span className="mut" style={{ fontSize: 12 }}>
+              {guests.length} file{guests.length === 1 ? "" : "s"} · {fmtBytes(totalBytes(guests))} · not counted against your storage
+            </span>
+          </div>
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            Paperwork on systems and units you can read but don&apos;t own - work shared with you, and
+            anything you handed on but stayed a viewer of. Whoever owns the record stores these, and
+            they are the ones the PDF studio offers as sources alongside your own.
+          </div>
+          <StoreFileList
+            files={guests.map((f) => ({
+              url: f.url, size: f.size, fileName: f.fileName, description: f.description,
+              kind: f.kind, uploadedBy: f.uploadedBy, when: shopTime(f.newest.createdAt),
+              places: f.places, shelfOwnerId: f.newest.orgId,
+            }))}
+            // Not yours to delete. The buttons are simply absent.
+            canRemoveShelf={false} canRemoveRecord={false}
+          />
+        </div>
+      )}
     </div>
   );
 }
