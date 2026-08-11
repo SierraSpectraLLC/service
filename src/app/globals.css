@@ -163,6 +163,51 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
 }
 
+/* ── Header utility cluster (search / messages / alerts / account) ──────────
+   Transparent and on currentColor, so it reads on the platform navy and on an
+   organization's own header colour - which may be light - without a second set
+   of rules. Deliberately NOT .btn: these sit apart from the white nav pills, and
+   that separation is the whole point of moving them right. */
+.nav-utility {
+  display: flex; align-items: center; gap: 2px;
+  margin-left: auto; padding-left: 11px; position: relative;
+}
+/* A hairline between the navigation and the furniture. currentColor so it works
+   on a dark platform header and a light themed one alike. */
+.nav-utility::before {
+  content: ""; position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+  width: 1px; height: 20px; background: currentColor; opacity: 0.25;
+}
+.nav-ico {
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 999px; color: inherit; text-decoration: none;
+  background: none; border: none; cursor: pointer; flex-shrink: 0;
+}
+.nav-ico:hover { background: rgba(255, 255, 255, 0.16); }
+.nav-ico:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+/* An unread count, not a dot: "3 waiting" is actionable, "something" isn't. */
+.nav-badge {
+  position: absolute; top: 3px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px; background: var(--coral); color: #fff;
+  font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
+}
+.nav-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 999px;
+  border: 1.5px solid currentColor; font-size: 11px; font-weight: 800; letter-spacing: 0.2px;
+}
+/* The identity block at the top of the account menu, and the divided sections
+   under it. Plain rows so they don't pick up the hover of a menu link. */
+.menu-head { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.menu-sub { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 4px; }
+.menu-sub > * { padding: 4px 10px; }
+@media (max-width: 560px) {
+  /* Wrapped onto its own line, a leading hairline reads as a stray mark. */
+  .nav-utility { padding-left: 0; }
+  .nav-utility::before { display: none; }
+  .nav-ico { width: 38px; height: 38px; }
+}
+
 /* ── Native disclosure menus (components/Dropdown) ──────────────────────────
    The browser opens these, not our JavaScript. The summary is styled as a
    button; the default triangle marker is removed two ways because the older
@@ -182,7 +227,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
   background: #fff; border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 8px 24px rgba(23, 42, 74, 0.14);
-  padding: 6px; min-width: 170px; display: flex; flex-direction: column;
+  padding: 6px; min-width: 170px; max-width: 290px; display: flex; flex-direction: column;
   color: var(--ink);
 }
 .menu-panel.left { right: auto; left: 0; }

@@ -16,9 +16,12 @@ import { useEffect, useRef } from "react";
  * JavaScript now only does the nicety: close when you click elsewhere or press
  * Escape. If that ever breaks, the menu is left open rather than unusable.
  */
-export default function Dropdown({ label, align = "right", children }: {
-  label: string;
+export default function Dropdown({ label, align = "right", ariaLabel, children }: {
+  /** Text, or a node when the trigger is an icon or an avatar. */
+  label: React.ReactNode;
   align?: "left" | "right";
+  /** Required when `label` isn't words - a summary reading "JH" says nothing. */
+  ariaLabel?: string;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -44,7 +47,9 @@ export default function Dropdown({ label, align = "right", children }: {
 
   return (
     <details className="menu" ref={ref}>
-      <summary className="btn sm">{label} ▾</summary>
+      <summary className={typeof label === "string" ? "btn sm" : "nav-ico"} aria-label={ariaLabel}>
+        {label}{typeof label === "string" ? " ▾" : null}
+      </summary>
       <div className={`menu-panel${align === "left" ? " left" : ""}`}
         // Choosing something is the end of the interaction.
         onClick={() => { if (ref.current) ref.current.open = false; }}>

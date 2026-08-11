@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BellIcon, NavIcon } from "@/components/NavIcons";
 import { useEffect, useRef, useState } from "react";
 import { markNotificationRead } from "@/app/actions";
 import { DESKTOP_KEY } from "@/lib/inbox";
@@ -11,8 +12,8 @@ const POLL_MS = 45_000;
 const TOAST_MS = 9_000;
 
 /**
- * The nav's live inbox: one link with an unread count, and toast popups for new
- * arrivals. Raises OS notifications too when the tab is hidden and the person
+ * The nav's live inbox: the bell in the header's utility cluster, with an unread
+ * count, plus toast popups for new arrivals. Raises OS notifications too when the tab is hidden and the person
  * has opted in on the inbox page - the switch lives there rather than behind a
  * caret in the header, which is a permanent button for a setting nobody
  * changes twice.
@@ -81,9 +82,7 @@ export default function NotificationCenter({ initialUnread }: { initialUnread: n
 
   return (
     <>
-      <Link className="btn sm" href="/inbox" style={{ textDecoration: "none", fontWeight: unread ? 700 : undefined }}>
-        Inbox{unread ? ` (${unread})` : ""}
-      </Link>
+      <NavIcon href="/inbox" label="Notifications" count={unread}><BellIcon /></NavIcon>
 
       {toasts.length > 0 && (
         <div aria-live="polite" style={{

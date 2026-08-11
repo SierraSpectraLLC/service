@@ -18,7 +18,7 @@ import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } f
 import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
 import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
-import { matchesEntry, roleForEmail, emailInClientAllowlist } from "@/auth";
+import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
 import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention } from "@/lib/notify";
@@ -3392,6 +3392,15 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
  * Nothing is impersonated but authorization: writes stay audited under the
  * owner's own email.
  */
+/**
+ * Sign out. An exported action rather than an inline one, because the control
+ * now lives in the account menu - a client component, which cannot declare a
+ * server action inside itself.
+ */
+export async function signOutAction(): Promise<void> {
+  await signOut({ redirectTo: "/login" });
+}
+
 export async function setViewAs(orgId: number | null, mode: "editor" | "viewer" = "editor"): Promise<{ error?: string }> {
   const real = await requireRealOwner();
   const jar = await cookies();

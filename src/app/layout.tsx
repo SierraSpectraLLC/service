@@ -6,12 +6,14 @@ import { orgs, sheetDiffs, notifications, stockrooms, stockroomShares } from "@/
 import { and, asc, isNull, or } from "drizzle-orm";
 import { currentUser, viewContext } from "@/lib/authz";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
-import { signOut } from "@/auth";
 import NavMore from "@/components/NavMore";
+import AccountMenu from "@/components/AccountMenu";
+import { NavIcon, SearchIcon, MessagesIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import NotificationCenter from "@/components/NotificationCenter";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
+import { unreadDiscussions } from "@/lib/discussionUnread";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -21,6 +23,11 @@ export async function generateMetadata(): Promise<Metadata> {
     description: "Instrument refurbishment tracking",
   };
 }
+
+/** What a role is called to the person who has it, not to the schema. */
+const ROLE_LABEL: Record<string, string> = {
+  owner: "owner", staff: "staff", client_editor: "editor", client_viewer: "read-only",
+};
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [user, brand, view, modules] = await Promise.all([currentUser(), getBrand(), viewContext(), getModules()]);
@@ -45,6 +52,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         .catch(() => [])
     : [];
   const unread = unreadRows.length;
+  // Same posture as the parity and inbox counts: a shell that can't count must
+  // still render. Zero hides the badge, which is the honest failure.
+  const unreadTalk = user ? await unreadDiscussions(user).catch(() => 0) : 0;
   // Staff always get the Stock link; an org only gets it once it has a room of
   // its own or one shared with it, so a client without inventory sees no
   // dead end.
@@ -91,22 +101,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </span>
             {user && (
               <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                {/* Left of the divide: where the work is. These change with the
+                    instance's modules and the viewer's role. */}
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
-                <Link className="btn sm" href="/discussions" style={{ textDecoration: "none" }}>Discussion</Link>
-                <Link className="btn sm" href="/search" style={{ textDecoration: "none" }}>Search</Link>
-                {/* Live: polls for new arrivals, toasts them, and (opt-in)
-                    raises OS notifications when the tab is hidden. */}
-                <NotificationCenter initialUnread={unread} />
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
                 {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Stock</Link>}
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
-                {/* An organization's editors configure their own workspace and
-                    people on the same page the owner uses. */}
-                {!isStaff && user.role === "client_editor" && user.orgId !== null && (
-                  <Link className="btn sm" href={`/settings/organizations/${user.orgId}`} style={{ textDecoration: "none" }}>
-                    Settings
-                  </Link>
-                )}
                 {isStaff ? (
                   <NavMore items={[
                     { href: "/maintenance", label: "Maintenance" },
@@ -116,11 +116,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
                     ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
-                    ...(user.role === "owner"
-                      ? [{ href: "/settings", label: "Settings" }]
-                      // Staff curate the catalog and procedures; the rest of
-                      // Settings is the owner's.
-                      : [{ href: "/settings/catalog", label: "Catalog & procedures" }]),
+                    // Settings is in the account menu now, where a person looks
+                    // for their own settings. Staff keep the catalog link here
+                    // because curating it is work, not configuration.
+                    ...(user.role === "owner" ? [] : [{ href: "/settings/catalog", label: "Catalog & procedures" }]),
                   ]} />
                 ) : (
                   // An organization's own tools: its file shelf and the studio.
@@ -131,10 +130,32 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     { href: "/pdf", label: "PDF studio" },
                   ]} />
                 )}
-                {mayViewAs && !view.persona && <ViewAsBar orgs={orgOptions} active={null} />}
-                <form action={async () => { "use server"; await signOut({ redirectTo: "/login" }); }}>
-                  <button className="btn sm" type="submit">Sign out</button>
-                </form>
+
+                {/* Right of the divide: the furniture. Always these four, always
+                    here, small - so the row above can change without the way out
+                    or the way to search moving with it. */}
+                <span className="nav-utility">
+                  <NavIcon href="/search" label="Search"><SearchIcon /></NavIcon>
+                  {/* Its own icon rather than folded into the bell: the bell is
+                      what the system told you, this is where people talk. A
+                      discussion post already raises a notification, so merging
+                      them would make one control both the alert and the room. */}
+                  <NavIcon href="/discussions" label="Discussions" count={unreadTalk}><MessagesIcon /></NavIcon>
+                  {/* Live: polls for new arrivals, toasts them, and (opt-in)
+                      raises OS notifications when the tab is hidden. */}
+                  <NotificationCenter initialUnread={unread} />
+                  <AccountMenu
+                    name={user.name} email={user.email}
+                    orgName={user.orgName} roleLabel={ROLE_LABEL[user.role] ?? user.role}
+                    settingsHref={
+                      user.role === "owner" ? "/settings"
+                        : isStaff ? "/settings/catalog"
+                          : user.role === "client_editor" && user.orgId !== null ? `/settings/organizations/${user.orgId}`
+                            : null
+                    }
+                    viewAs={mayViewAs && !view.persona ? <ViewAsBar orgs={orgOptions} active={null} /> : undefined}
+                  />
+                </span>
               </nav>
             )}
           </div>
