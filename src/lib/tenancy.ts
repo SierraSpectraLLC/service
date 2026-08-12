@@ -1,9 +1,12 @@
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { cache } from "react";
+import { and, asc, eq, inArray, isNull, or, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, assetShares, instruments, orgs, systemShares } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/houseRole";
-import { tenantOf } from "@/lib/tenants";
+import {
+  actingOrgId, houseOfRecord, isPlatformStaff, tenantOf, tenantScope, tenantViewer,
+} from "@/lib/tenants";
 
 // Who can see what. Sierra Spectra staff (owner/staff, from STAFF_EMAILS) are
 // the house and see everything. Everyone else belongs to one organization and
@@ -20,34 +23,53 @@ export type ShareRow = { instrumentId: number; access: string };
 export { isHouse };
 
 /**
- * Pure core, kept separate from the DB so the rules are testable:
- * - the house sees everything (`null` = no restriction)
+ * The pre-tenancy pure core, kept as the shape every read path already speaks:
+ * - no restriction (`all: true`)
  * - an org with no shares sees nothing (empty list, NOT unrestricted)
  * - a client with no org at all sees nothing
+ *
+ * The rules themselves moved to lib/tenants, where they also answer the question
+ * this signature cannot ask - staff of WHICH service company - so this delegates
+ * rather than keeping a second copy that could drift. A viewer with no operator
+ * and no root is the single-house instance, which is what this used to assume.
  */
 export function scopeFilter(
   role: Role,
   orgId: number | null,
   shares: ShareRow[],
 ): { all: true } | { all: false; ids: number[]; editable: Set<number> } {
-  if (isHouse(role)) return { all: true };
-  if (orgId === null) return { all: false, ids: [], editable: new Set() };
-  const ids = [...new Set(shares.map((s) => s.instrumentId))];
-  // A view-level share is read-only however the org's role is set; edit needs
-  // both an edit share and the client-edit toggle (role === client_editor).
-  const editable = new Set(
-    role === "client_editor" ? shares.filter((s) => s.access === "edit").map((s) => s.instrumentId) : []
-  );
-  return { all: false, ids, editable };
+  const s = tenantScope({ role, orgId, operatorOrgId: null, rootOperatorOrgId: null }, shares);
+  return s.all ? { all: true } : { all: false, ids: s.ids, editable: s.editable };
 }
 
-/** The viewer's scope, resolved once per call site. */
+/**
+ * The viewer's scope, resolved once per call site.
+ *
+ * An operator's staff see their own workspace plus anything another operator has
+ * shared with them, so the tenant's systems are listed here and the result stays
+ * the id list every caller already handles. That materialization is deliberate:
+ * it keeps one query and no call-site changes, and it is the same shape a client
+ * org has always had. A tenant with thousands of systems should trade it for a
+ * subquery behind this same function - the callers will not know either way.
+ */
 export async function scopeFor(user: SessionUser) {
-  if (isHouse(user.role)) return scopeFilter(user.role, null, []);
-  const shares = user.orgId === null ? [] : await db
+  const v = tenantViewer(user);
+  const asOrg = actingOrgId(v);
+  const shares = asOrg === null ? [] : await db
     .select({ instrumentId: systemShares.instrumentId, access: systemShares.access })
-    .from(systemShares).where(eq(systemShares.orgId, user.orgId));
-  return scopeFilter(user.role, user.orgId, shares);
+    .from(systemShares).where(eq(systemShares.orgId, asOrg));
+  const scope = tenantScope(v, shares);
+  if (scope.all) return { all: true as const };
+  const own = scope.tenantOrgId === null ? [] : (await db
+    .select({ id: instruments.id }).from(instruments)
+    .where(eq(instruments.tenantOrgId, scope.tenantOrgId))).map((r) => r.id);
+  return {
+    all: false as const,
+    ids: [...new Set([...own, ...scope.ids])],
+    // Their own workspace is theirs to work; a system shared in from another
+    // needs the same edit-level share a provider org needs.
+    editable: new Set([...own, ...scope.editable]),
+  };
 }
 
 /**
@@ -77,11 +99,15 @@ export async function canEditSystem(user: SessionUser, instrumentId: number): Pr
  * the editor role.
  */
 export async function assetAccess(user: SessionUser, assetId: number): Promise<{ see: boolean; edit: boolean }> {
-  const [a] = await db.select({ instrumentId: assets.instrumentId, ownerOrgId: assets.ownerOrgId })
-    .from(assets).where(eq(assets.id, assetId));
+  const [a] = await db.select({
+    instrumentId: assets.instrumentId, ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId,
+  }).from(assets).where(eq(assets.id, assetId));
   if (!a) return { see: false, edit: false };
   const scope = await scopeFor(user);
   if (scope.all) return { see: true, edit: user.role !== "client_viewer" };
+  // Staff of the workspace the unit belongs to: a spare on their own shelf is
+  // theirs whether or not it is installed in anything yet.
+  if (houseOfRecord(user, a.tenantOrgId)) return { see: true, edit: true };
   const [share] = user.orgId === null ? [] : await db.select({ access: assetShares.access })
     .from(assetShares).where(and(eq(assetShares.assetId, assetId), eq(assetShares.orgId, user.orgId)));
   const ownedByViewer = a.ownerOrgId !== null && a.ownerOrgId === user.orgId;
@@ -101,17 +127,71 @@ export async function assetAccess(user: SessionUser, assetId: number): Promise<{
 export async function visibleAssetIds(user: SessionUser): Promise<number[] | null> {
   const scope = await scopeFor(user);
   if (scope.all) return null;
-  const shared = user.orgId === null ? [] : (
-    await db.select({ assetId: assetShares.assetId }).from(assetShares).where(eq(assetShares.orgId, user.orgId))
+  const asOrg = actingOrgId(tenantViewer(user));
+  const shared = asOrg === null ? [] : (
+    await db.select({ assetId: assetShares.assetId }).from(assetShares).where(eq(assetShares.orgId, asOrg))
   ).map((s) => s.assetId);
   const rows = await db.select({ id: assets.id }).from(assets).where(
     or(
       scope.ids.length ? inArray(assets.instrumentId, scope.ids) : undefined,
+      // Their own workspace's units, installed or on the shelf.
+      forTenant(assets.tenantOrgId, readTenant(user)),
       user.orgId === null ? undefined : and(isNull(assets.instrumentId), eq(assets.ownerOrgId, user.orgId)),
       shared.length ? inArray(assets.id, shared) : undefined,
     )
   );
   return rows.map((r) => r.id);
+}
+
+/**
+ * The tenant a staff-facing list is restricted to, or null for no restriction -
+ * which is platform staff, and an instance that has not named an operator.
+ *
+ * Pair with forTenant() in a where clause. Deliberately NOT for records a client
+ * reads: vocabulary, people and prices on a client's own system page follow the
+ * SYSTEM's tenant, not the reader's, or a client of one operator would see an
+ * empty catalog.
+ */
+export const readTenant = (u: SessionUser): number | null =>
+  isPlatformStaff(tenantViewer(u)) ? null : u.operatorOrgId;
+
+/**
+ * The workspace whose shared vocabulary this viewer reads - stage names, catalog
+ * models, the roster. Staff read their own; a client reads their operator's,
+ * because the vocabulary on their system page is the vocabulary of whoever
+ * services it. Null = no restriction (platform staff, or no operator named yet).
+ *
+ * cache() so a page that asks twice pays once.
+ */
+export const viewTenant = cache(async (user: SessionUser): Promise<number | null> => {
+  const v = tenantViewer(user);
+  if (isPlatformStaff(v)) return null;
+  return user.operatorOrgId ?? await tenantOfOrg(user.orgId);
+});
+
+/** `eq(col, tenant)`, or no condition at all when there is nothing to restrict to. */
+export const forTenant = (col: AnyColumn, tenantOrgId: number | null): SQL | undefined =>
+  tenantOrgId === null ? undefined : eq(col, tenantOrgId);
+
+/**
+ * Organizations this viewer may see by name.
+ *
+ * The leak this closes: every page that offered a share picker used to ship the
+ * whole instance's organization list to the browser and filter it there. With one
+ * operator that was untidy; with two it hands a competitor your client list.
+ *
+ * Operators stay visible to everyone, because that is the directory that makes
+ * cross-company work possible - a client bringing in another service company has
+ * to be able to name it. Clients are visible only inside their own tenant.
+ */
+export async function visibleOrgs(user: SessionUser) {
+  const t = readTenant(user);
+  // Full rows: every caller picks its own fields, and one shape means one place
+  // to change when the rule changes.
+  const rows = await db.select().from(orgs).orderBy(asc(orgs.name));
+  if (t === null) return rows;
+  return rows.filter((o) =>
+    o.isOperator || tenantOf(o) === t || o.id === user.orgId);
 }
 
 // ---- assertions for server actions -----------------------------------------

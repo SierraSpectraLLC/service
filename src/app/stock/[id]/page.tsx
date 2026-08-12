@@ -6,7 +6,7 @@ import {
   assets, instruments, orgs, partPrices, stockItems, stockMoves, stockrooms, stockroomShares,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse, scopeFor, visibleAssetIds } from "@/lib/tenancy";
+import { isHouse, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
 import { canSeeCosts } from "@/lib/redact";
 import { shopTime } from "@/lib/shopday";
 import { KIND_LABEL, MOVE_LABEL, reorderLines, stockAccess, stockTotals } from "@/lib/stock";
@@ -28,7 +28,7 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
 
   const [[room], orgRows] = await Promise.all([
     db.select().from(stockrooms).where(eq(stockrooms.id, roomId)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
   ]);
   if (!room) notFound();
 

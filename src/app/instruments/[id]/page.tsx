@@ -8,7 +8,7 @@ import {
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
-import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
+import { assertSystemVisible, canEditSystem, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -64,7 +64,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id)),
     db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(desc(attachments.createdAt)),
     db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
-    getStageDefs(),
+    getStageDefs(await viewTenant(user)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select().from(vocabTerms),
@@ -83,7 +83,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
       .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
       .where(eq(systemShares.instrumentId, instId)).orderBy(asc(orgs.name)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    // Only organizations this viewer may know about: the share picker used to
+    // ship the whole instance's list to the browser (see visibleOrgs).
+    visibleOrgs(user),
   ]);
   // Catalog models for THIS system's type, by asset type: adding a detector to
   // a GC-MS should offer FID and TCD, not every detector the shop knows. A model

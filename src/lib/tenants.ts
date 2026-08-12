@@ -48,6 +48,22 @@ export type TenantViewer = {
 
 export type ShareRow = { instrumentId: number; access: string };
 
+/**
+ * A session user, narrowed to what the rules here need. Defined in this module
+ * rather than beside SessionUser because lib/tenancy and the client bundle both
+ * need it, and this module imports nothing - dragging next-auth into a pure
+ * import graph breaks tests and browser bundles alike.
+ */
+export const tenantViewer = (u: {
+  role: string; orgId: number | null;
+  operatorOrgId: number | null; rootOperatorOrgId: number | null;
+}): TenantViewer => ({
+  role: u.role,
+  operatorOrgId: u.operatorOrgId,
+  orgId: u.orgId,
+  rootOperatorOrgId: u.rootOperatorOrgId,
+});
+
 export const isStaffRole = (role: string) => role === "owner" || role === "staff";
 
 /**

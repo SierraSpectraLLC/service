@@ -6,6 +6,7 @@ import { instruments, orgs, systemShares, assets, accessRequests, engagementReco
 import { currentUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
+import { visibleOrgs } from "@/lib/tenancy";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import SettingsTabs from "@/components/SettingsTabs";
@@ -29,7 +30,7 @@ export default async function AdminSettingsPage() {
 
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.archived), asc(instruments.externalId)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, sortOrder: assets.sortOrder }).from(assets),
     db.select({ instrumentId: systemShares.instrumentId, orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
       .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId)).orderBy(asc(orgs.name)),

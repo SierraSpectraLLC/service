@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { visibleSystemIds } from "@/lib/tenancy";
+import { viewTenant, visibleSystemIds } from "@/lib/tenancy";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopMonthDay } from "@/lib/shopday";
@@ -22,7 +22,7 @@ export default async function ArchivePage() {
     db.select().from(instruments).where(and(eq(instruments.archived, true),
       visible === null ? undefined : visible.length ? inArray(instruments.id, visible) : sql`false`))
       .orderBy(desc(instruments.archivedAt), asc(instruments.externalId)),
-    getStageDefs(),
+    getStageDefs(await viewTenant(user)),
   ]);
   const labels = await getSystemLabels(rows);
   const color = (name: string) => defs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };

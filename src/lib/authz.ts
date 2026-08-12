@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { parsePersona, VIEW_AS_COOKIE, type Persona } from "@/lib/viewAs";
-import { isHouseOf, type TenantViewer } from "@/lib/tenants";
+import { isHouseOf, tenantViewer } from "@/lib/tenants";
 
 export type Role = "owner" | "staff" | "client_viewer" | "client_editor";
 
@@ -97,17 +97,8 @@ export const currentUser = cache(async (): Promise<SessionUser | null> => {
   };
 });
 
-/**
- * The viewer as lib/tenants wants it: role plus which operator they work for and
- * which one runs the instance. Every tenancy rule takes this rather than a
- * SessionUser, so the rules stay pure and testable.
- */
-export const tenantViewer = (u: SessionUser): TenantViewer => ({
-  role: u.role,
-  operatorOrgId: u.operatorOrgId,
-  orgId: u.orgId,
-  rootOperatorOrgId: u.rootOperatorOrgId,
-});
+// The viewer as lib/tenants wants it, re-exported so server code has one import.
+export { tenantViewer };
 
 /**
  * Is this user the house of a record - the service company whose record it is,

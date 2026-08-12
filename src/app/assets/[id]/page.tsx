@@ -8,7 +8,7 @@ import {
   pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
+import { assetAccess, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import SharePanel from "@/components/SharePanel";
 import SalePanel from "@/components/SalePanel";
@@ -102,7 +102,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     db.select({ orgId: assetShares.orgId, access: assetShares.access, name: orgs.name, kind: orgs.kind })
       .from(assetShares).innerJoin(orgs, eq(orgs.id, assetShares.orgId))
       .where(eq(assetShares.assetId, assetId)).orderBy(asc(orgs.name)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
   ]);
   // Costs follow the owner of whatever the part sits on: the home system's
   // owning org while installed, the asset's own org on the shelf.

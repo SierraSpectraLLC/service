@@ -4,6 +4,7 @@ import { asc, inArray, isNotNull, ne, and } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, pmSchedules, tasks } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { forTenant, readTenant } from "@/lib/tenancy";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { cadenceLabel } from "@/lib/pm";
 import { pmGroups } from "@/lib/pmGroups";
@@ -19,11 +20,15 @@ export const dynamic = "force-dynamic";
  * view - each schedule is edited on the page of the thing it maintains.
  */
 export default async function MaintenancePage() {
-  try { await requireStaff(); } catch { redirect("/"); }
+  let user;
+  try { user = await requireStaff(); } catch { redirect("/"); }
   const today = shopToday();
 
   const [schedules, openPm] = await Promise.all([
-    db.select().from(pmSchedules).orderBy(asc(pmSchedules.paused), asc(pmSchedules.nextDue), asc(pmSchedules.id)),
+    // This workspace's schedules. Another operator's PM calendar is not ours to
+    // plan, and the two must never appear on one page.
+    db.select().from(pmSchedules).where(forTenant(pmSchedules.tenantOrgId, readTenant(user)))
+      .orderBy(asc(pmSchedules.paused), asc(pmSchedules.nextDue), asc(pmSchedules.id)),
     db.select({ pmScheduleId: tasks.pmScheduleId }).from(tasks)
       .where(and(isNotNull(tasks.pmScheduleId), ne(tasks.state, "Done"))),
   ]);

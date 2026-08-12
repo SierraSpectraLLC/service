@@ -9,6 +9,7 @@ import { shopTime } from "@/lib/shopday";
 import { storeFiles, storeQuota, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
+import { visibleOrgs } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
 import LibraryUpload from "@/components/LibraryUpload";
 import StorageMeter from "@/components/StorageMeter";
@@ -47,7 +48,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
   const [rows, quota, orgRows, brand, guestRows] = await Promise.all([
     storeFiles(viewing, CAP).catch(() => []),
     storeQuota(viewing),
-    isHouseUser ? db.select({ id: orgs.id, name: orgs.name }).from(orgs).orderBy(asc(orgs.name)).catch(() => []) : [],
+    isHouseUser ? visibleOrgs(user).catch(() => []) : [],
     getBrand(),
     // Readable, but somebody else's - a system shared with them, or one they
     // sold and stayed on as a viewer. These are why the PDF studio can offer

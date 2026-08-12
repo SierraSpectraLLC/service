@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { assets, instruments, partPrices, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
 import PriceBookCard from "@/components/PriceBookCard";
@@ -20,14 +21,18 @@ export default async function CatalogPage() {
   try { user = await requireStaff(); } catch { redirect("/"); }
 
   const [terms, assetRows, systemRows, priceRows] = await Promise.all([
-    db.select().from(vocabTerms).orderBy(asc(vocabTerms.assetType), asc(vocabTerms.name)),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, readTenant(user)))
+      .orderBy(asc(vocabTerms.assetType), asc(vocabTerms.name)),
     // Usage counts, so removing something can say what it would leave behind.
-    db.select({ kind: assets.kind, model: assets.model }).from(assets),
-    db.select({ category: instruments.category }).from(instruments),
+    db.select({ kind: assets.kind, model: assets.model }).from(assets)
+      .where(forTenant(assets.tenantOrgId, readTenant(user))),
+    db.select({ category: instruments.category }).from(instruments)
+      .where(forTenant(instruments.tenantOrgId, readTenant(user))),
     db.select({
       id: partPrices.id, partNumber: partPrices.partNumber, vendor: partPrices.vendor,
       isOem: partPrices.isOem, priceCents: partPrices.priceCents, url: partPrices.url, note: partPrices.note,
-    }).from(partPrices).orderBy(asc(partPrices.partNumber), asc(partPrices.vendor)),
+    }).from(partPrices).where(forTenant(partPrices.tenantOrgId, readTenant(user)))
+      .orderBy(asc(partPrices.partNumber), asc(partPrices.vendor)),
   ]);
 
   const defined = terms.filter((t) => t.kind === "category");

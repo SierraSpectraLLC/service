@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, orgs, remoteDevices } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -7,7 +7,7 @@ import { getModules } from "@/lib/flags";
 import { shopTime } from "@/lib/shopday";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { listGroupDevices, NOT_CONFIGURED, reconcileOrgDevices, remoteConfigured } from "@/lib/remote";
-import { visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import RemoteDevicesPanel from "@/components/RemoteDevicesPanel";
 
 export const dynamic = "force-dynamic";
@@ -35,32 +35,35 @@ export default async function RemotePage() {
   const configured = remoteConfigured();
 
   // Which organizations' machines this person may look at.
-  const orgRows = await db.select({
-    id: orgs.id, name: orgs.name, remoteAccessEnabled: orgs.remoteAccessEnabled, groupId: orgs.remoteGroupId,
-  }).from(orgs).orderBy(asc(orgs.name)).catch(() => []);
-  const visibleOrgs = isHouseUser
+  const orgRows = await visibleOrgs(user).catch(() => []);
+  const orgsInView = isHouseUser
     ? orgRows
     : orgRows.filter((o) => o.id === user.orgId && o.remoteAccessEnabled);
 
-  if (!isHouseUser && visibleOrgs.length === 0) redirect("/");
+  if (!isHouseUser && orgsInView.length === 0) redirect("/");
 
   // Refresh the cache from the engine where we can. A failure here is expected
   // and silent: the cached rows below are what the page actually renders.
   let engineReachable = configured;
   if (configured) {
-    for (const o of visibleOrgs) {
-      if (!o.groupId) continue;
-      const live = await listGroupDevices(o.groupId);
+    for (const o of orgsInView) {
+      if (!o.remoteGroupId) continue;
+      const live = await listGroupDevices(o.remoteGroupId);
       if (live === null) { engineReachable = false; continue; }
       await reconcileOrgDevices(o.id, live).catch(() => {});
     }
   }
 
-  const orgIds = visibleOrgs.map((o) => o.id);
+  const orgIds = orgsInView.map((o) => o.id);
   const deviceRows = await db.select().from(remoteDevices)
     .where(isHouseUser
-      // The house also sees machines that enrolled before anyone assigned them.
-      ? or(orgIds.length ? inArray(remoteDevices.orgId, orgIds) : sql`false`, isNull(remoteDevices.orgId))
+      // The house also sees machines that enrolled before anyone assigned them -
+      // its own, though: an unassigned machine still carries the workspace whose
+      // installer created it.
+      ? and(
+        forTenant(remoteDevices.tenantOrgId, readTenant(user)),
+        or(orgIds.length ? inArray(remoteDevices.orgId, orgIds) : sql`false`, isNull(remoteDevices.orgId)),
+      )
       : orgIds.length ? inArray(remoteDevices.orgId, orgIds) : sql`false`)
     .orderBy(asc(remoteDevices.name), asc(remoteDevices.id))
     .catch(() => []);
@@ -76,7 +79,7 @@ export default async function RemotePage() {
     .orderBy(asc(instruments.externalId))
     .catch(() => []);
   const systemById = new Map(systemRows.map((s) => [s.id, s]));
-  const orgById = new Map(visibleOrgs.map((o) => [o.id, o]));
+  const orgById = new Map(orgsInView.map((o) => [o.id, o]));
 
   const devices = deviceRows.map((d) => {
     const org = d.orgId === null ? null : orgById.get(d.orgId) ?? null;
@@ -138,7 +141,7 @@ export default async function RemotePage() {
       <RemoteDevicesPanel
         devices={devices}
         systems={systemRows.map((s) => ({ id: s.id, label: `${s.externalId}${s.client ? ` · ${s.client}` : ""}` }))}
-        enrollOrgs={isHouseUser ? visibleOrgs.map((o) => ({ id: o.id, name: o.name })) : []}
+        enrollOrgs={isHouseUser ? orgsInView.map((o) => ({ id: o.id, name: o.name })) : []}
         canEnroll={isHouseUser && configured}
         stale={!engineReachable}
       />

@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { appSettings, orgs } from "@/db/schema";
 import { requireOwner } from "@/lib/authz";
 import { getStageDefs } from "@/lib/stageDefs";
+import { viewTenant, visibleOrgs } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import ConfigurationForm from "@/components/ConfigurationForm";
 
@@ -11,11 +12,12 @@ export const dynamic = "force-dynamic";
 
 /** Settings > Configuration: the instance, not the people or the equipment. */
 export default async function SettingsPage() {
-  try { await requireOwner(); } catch { redirect("/"); }
+  let user;
+  try { user = await requireOwner(); } catch { redirect("/"); }
   const [[s], stageDefList, orgRows] = await Promise.all([
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
-    getStageDefs(),
-    db.select().from(orgs).orderBy(asc(orgs.kind), asc(orgs.name)),
+    getStageDefs(await viewTenant(user)),
+    visibleOrgs(user),
   ]);
   return (
     <div className="container page">

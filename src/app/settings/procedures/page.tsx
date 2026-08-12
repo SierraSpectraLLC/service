@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { procedures, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { parseProcParts } from "@/lib/procedures";
+import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 
@@ -20,9 +21,10 @@ export default async function ProceduresPage() {
   try { user = await requireStaff(); } catch { redirect("/"); }
 
   const [rows, terms] = await Promise.all([
-    db.select().from(procedures)
+    db.select().from(procedures).where(forTenant(procedures.tenantOrgId, readTenant(user)))
       .orderBy(asc(procedures.assetType), asc(procedures.position), asc(procedures.id)),
-    db.select().from(vocabTerms).orderBy(asc(vocabTerms.name)),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, readTenant(user)))
+      .orderBy(asc(vocabTerms.name)),
   ]);
 
   const assetTypes = terms.filter((t) => t.kind === "asset_type").map((t) => t.name);
