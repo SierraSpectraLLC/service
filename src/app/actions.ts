@@ -20,7 +20,8 @@ import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts,
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import {
-  agentInstallerLink, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured,
+  agentInstallerLink, applyDeviceConsent, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED,
+  remoteConfigured,
 } from "@/lib/remote";
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
@@ -2799,6 +2800,15 @@ export async function connectRemoteDevice(deviceId: number): Promise<{ error?: s
     .from(instruments).where(eq(instruments.id, device.instrumentId));
   const consent = consentModeFor(device, system ?? null);
 
+  // Tell the engine what the far end should see, before anything is reachable.
+  // A machine that must ask first and can't be told to ask does not get
+  // connected to; one that needn't ask and can't be told so is only left
+  // prompting, which is the harmless direction to fail in.
+  const applied = await applyDeviceConsent(device.nodeId, consent.mode);
+  if (applied.error && consent.mode === "consent") {
+    return { error: `This machine has to ask its user first, and the host couldn't be told to: ${applied.error}` };
+  }
+
   const where = system?.externalId ? ` on ${system.externalId}` : "";
   await audit({
     actor: u.email, instrumentId: device.instrumentId, entityType: "remote", entityId: device.id,
@@ -2807,7 +2817,7 @@ export async function connectRemoteDevice(deviceId: number): Promise<{ error?: s
       + ` (${consent.mode === "consent" ? "consent required" : "unattended"}: ${consent.why})`,
   });
 
-  const url = connectUrl(device.nodeId, { consent: consent.mode === "consent" });
+  const url = connectUrl(device.nodeId);
   if (typeof url !== "string") return url;
   return { url };
 }

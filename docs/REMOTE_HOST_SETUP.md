@@ -128,14 +128,22 @@ whichever one you install:
 ```bash
 sudo mkdir -p /opt/meshcentral
 cd /opt/meshcentral
-sudo npm install meshcentral
+sudo npm install meshcentral@1.2.4
 
-# Record what you actually got, and tell me this number:
+# Confirm what you actually got:
 sudo npm ls meshcentral
 ```
 
-That prints something like `meshcentral@1.1.xx`. **Send me that version string** —
-it's what I need to finish the token minting in `src/lib/remote.ts`.
+**Sierra's host is pinned to `meshcentral@1.2.4`**, and the portal's session-token
+code is written against that build. Two things in it are version-specific:
+
+- the login-cookie key is **80 bytes** (`meshcentral.js` checks the decoded
+  length and warns if it isn't)
+- a login token is `{ u: "user//<name>", a: 3 }`, AES-256-GCM, base64 with `+`
+  and `/` swapped for `@` and `$`
+
+Both have moved between releases. If you install a different version, say so —
+`src/lib/remote.ts` and `tests/remoteCookie.test.ts` are where it lands.
 
 Install it as a service so it survives reboots:
 
@@ -150,54 +158,88 @@ It will be running but not yet configured. That's expected.
 
 ## 7. Configure it
 
-Generate the shared secret the portal will use to mint session links:
+Generate the shared secret the portal will use to mint session links.
+**Exactly 80 bytes — 160 hex characters.** MeshCentral parses this into a buffer
+and checks its length at startup; anything else earns
+`WARNING: Invalid "LoginCookieEncryptionKey"` and it quietly falls back to a key
+of its own, which the portal cannot sign with. The server looks perfectly
+healthy in that state, so this is worth getting right the first time:
 
 ```bash
-openssl rand -hex 48
+openssl rand -hex 80
 ```
 
 Copy that output somewhere safe — you'll paste it into both the config below and
 Vercel later. **This key outranks every other secret in the system**: whoever
 holds it can mint admin sessions on this host.
 
-Now edit the config:
+### First, a warning about pasting into this terminal
+
+The Lightsail browser console mangles pasted text in three ways, all of which
+were hit on the first run through this document:
+
+- it **escapes braces** — a pasted `{` arrives as `\{`, and a leading backslash
+  is invisible in an editor while making the file unparseable at character zero
+- it **doubles newlines**, harmless inside JSON but fatal to any shell command
+  using a `\` line continuation
+- markdown code fences tag along if you copy carelessly
+
+So: **paste single-line commands only**, and do not hand-edit JSON in this
+terminal. Write the file with a generator instead — the structure is then
+produced by a program and nothing you paste can land in it.
 
 ```bash
 sudo systemctl stop meshcentral
-sudo nano /opt/meshcentral/meshcentral-data/config.json
 ```
 
-Replace the contents with this, substituting your domain, your email, and the
-key you just generated:
+```bash
+sudo mkdir -p /opt/meshcentral/meshcentral-data
+```
 
-```json
-{
+Now the config. Edit the two domains and the email below, then paste the whole
+thing as one block — it is a heredoc, so the shell reads down to the closing
+`ENDCFG` and reinterprets nothing in between. It mints the key itself, at the
+right length, and prints it:
+
+```bash
+sudo python3 - <<'ENDCFG'
+import json, pathlib, secrets
+key = secrets.token_hex(80)          # 80 bytes / 160 hex chars - what v1.2.4 wants
+cfg = {
   "settings": {
     "cert": "remote.yourportal.com",
     "port": 443,
     "redirPort": 80,
-    "WANonly": true,
-    "loginCookieEncryptionKey": "PASTE_THE_OPENSSL_OUTPUT_HERE",
-    "plugins": { "enabled": false }
+    "WANonly": True,
+    "loginCookieEncryptionKey": key,
+    "plugins": {"enabled": False},
   },
-  "domains": {
-    "": {
-      "title": "Baseline Support",
-      "newAccounts": true,
-      "sessionRecording": {
-        "onlySelectedDeviceGroups": false,
-        "filepath": "/opt/meshcentral/meshcentral-recordings",
-        "index": true
-      }
-    }
-  },
+  "domains": {"": {
+    "title": "Baseline Support",
+    "newAccounts": True,
+    "sessionRecording": {
+      "onlySelectedDeviceGroups": False,
+      "filepath": "/opt/meshcentral/meshcentral-recordings",
+      "index": True,
+    },
+  }},
   "letsencrypt": {
     "email": "you@yourcompany.com",
     "names": "remote.yourportal.com",
-    "production": true
-  }
+    "production": True,
+  },
 }
+p = pathlib.Path("/opt/meshcentral/meshcentral-data/config.json")
+p.write_text(json.dumps(cfg, indent=2) + "\n")
+print("wrote " + str(p))
+print("\nREMOTE_LOGIN_KEY (save this for Vercel):\n" + key)
+ENDCFG
 ```
+
+**Copy the printed key before you clear the terminal.** Nothing else in this
+process will show it to you again.
+
+For reference, this is what each setting is doing:
 
 What each part is doing:
 
@@ -210,16 +252,47 @@ What each part is doing:
 | `letsencrypt` | Free TLS certificate, renewed automatically |
 | `plugins: false` | Nothing third-party executing on this box |
 
-Save (`Ctrl+O`, Enter, `Ctrl+X`), then start it:
+### Validate before starting the service
+
+The engine reads this file once at startup and, if it can't parse it, dies
+without telling you which character offended it. Check it while you still have
+the context to fix it:
+
+```bash
+sudo python3 -m json.tool < /opt/meshcentral/meshcentral-data/config.json > /dev/null && echo "config parses"
+```
+
+If that prints anything other than `config parses`, see the first two
+troubleshooting rows at the end of this document before going further.
+
+Then start it and watch:
 
 ```bash
 sudo systemctl start meshcentral
 sudo journalctl -u meshcentral -f
 ```
 
-Watch the log. You're looking for the certificate being obtained and a line
-saying the server is running. **`Ctrl+C` stops watching** (it doesn't stop the
-server).
+**`Ctrl+C` stops watching** (it doesn't stop the server).
+
+Three lines say it worked:
+
+```
+MeshCentral v1.2.4
+Generating certificates, may take a few minutes...
+Server has no users, next new account will be site administrator.
+```
+
+plus something about updating certificates from Let's Encrypt. One line says it
+didn't, even though everything above it looks fine:
+
+```
+WARNING: Invalid "LoginCookieEncryptionKey" in config.json.
+```
+
+That means the key isn't the length this build wants, so the engine substituted
+one of its own and the portal's Connect links will be rejected by a server that
+otherwise looks perfectly healthy. Fix it with the row in Troubleshooting; don't
+carry on past it.
 
 If the certificate fails, it's almost always one of two things: DNS isn't
 resolving yet (redo the `dig` check in step 4) or port 80 is closed (redo
@@ -246,11 +319,11 @@ step 3).
 
 ## 9. Close the door behind you
 
-```bash
-sudo nano /opt/meshcentral/meshcentral-data/config.json
-```
+One line, so nothing has to be pasted into an editor:
 
-Change `"newAccounts": true` to `"newAccounts": false`, then:
+```bash
+sudo python3 -c "import json,pathlib;p=pathlib.Path('/opt/meshcentral/meshcentral-data/config.json');c=json.loads(p.read_text());c['domains']['']['newAccounts']=False;p.write_text(json.dumps(c,indent=2)+chr(10));print('self-registration off')"
+```
 
 ```bash
 sudo systemctl restart meshcentral
@@ -283,24 +356,28 @@ In **Vercel → your project → Settings → Environment Variables**, add three
 | Variable | Value |
 | --- | --- |
 | `REMOTE_URL` | `https://remote.yourportal.com` |
-| `REMOTE_LOGIN_KEY` | The `openssl rand -hex 48` output from step 7 |
+| `REMOTE_LOGIN_KEY` | The 160-character key printed in step 7 |
 | `REMOTE_ADMIN_USER` | `portal-admin` |
+
+The portal checks that key's length before it uses it, so a truncated paste says
+so plainly instead of producing links the host silently refuses.
 
 Redeploy. Then in the portal: **Settings → Configuration → Modules → Remote
 support** on.
 
-`/remote` will now appear in the staff menu. It will still say the session token
-isn't wired up — that's mine to finish, and it's why I need the version string
-from step 6.
+`/remote` now appears in the staff menu, and Connect will open a real session.
 
 ---
 
 ## 12. What's left, and who does it
 
-**Me, once you send the version string:** implement the session-token format
-against that exact build, with a round-trip test. It's deliberately unimplemented
-rather than guessed at — a plausible-looking implementation of somebody else's
-crypto format typechecks, ships, and fails at the only moment that matters.
+**Done:** the session-token format, written against 1.2.4's own
+`encodeCookie`/`decodeCookieAESGCM` and covered by `tests/remoteCookie.test.ts`,
+including a check that the engine's own decoder accepts what we mint. The three
+admin calls the module needs — list a group's devices, create a group, generate
+an installer link — speak the engine's WebSocket protocol, and the consent
+setting is pushed to the machine before a session opens rather than being carried
+in the URL, because the engine holds it per device.
 
 **Then, together — the gate.** None of this is trusted until all seven pass:
 
@@ -322,8 +399,15 @@ time.
 
 ## Troubleshooting
 
+These are the failures actually hit standing this up the first time, in the order
+they happened.
+
 | Symptom | Cause and fix |
 | --- | --- |
+| `ERROR: Unable to parse /opt/.../config.json` | The Lightsail console escaped a pasted `{` into `\{`, which is invisible in an editor. Confirm with `sudo head -c 40 /opt/meshcentral/meshcentral-data/config.json \| cat -A` — a leading `\{` shows as `\\{`. Fix with `sudo sed -i '1s/^\\\\//' /opt/meshcentral/meshcentral-data/config.json`, or just re-run the generator in step 7, which is why it's a generator |
+| `WARNING: Invalid "LoginCookieEncryptionKey"` | The key isn't 160 hex characters, so the engine substituted its own and **the server keeps running and looks fine** while refusing every link the portal mints. Check the length: `sudo python3 -c "import json;print(len(json.load(open('/opt/meshcentral/meshcentral-data/config.json'))['settings']['loginCookieEncryptionKey']))"`. Replace it with `openssl rand -hex 80`, restart, and put the new value in Vercel — the two must match |
+| `-bash: syntax error near unexpected token '&&'` | The browser console doubles newlines, which breaks any command using a `\` line continuation. Paste single-line commands only |
+| Warnings still in the log after fixing them | `journalctl -n 40` shows the last 40 lines, not the last start. Use `sudo journalctl -u meshcentral --since "-1 min" --no-pager` after restarting |
 | Certificate warning in the browser | ACME didn't complete. `sudo journalctl -u meshcentral -n 100 --no-pager`. Usually DNS or port 80 |
 | `dig` returns nothing | DNS hasn't propagated, or the record name is wrong (`remote`, not `remote.yourportal.com`, in most DNS UIs) |
 | Service won't start | `sudo journalctl -u meshcentral -n 50 --no-pager` — nearly always a JSON syntax error in `config.json`. Check with `python3 -m json.tool < /opt/meshcentral/meshcentral-data/config.json` |

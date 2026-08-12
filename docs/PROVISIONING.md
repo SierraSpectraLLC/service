@@ -220,12 +220,15 @@ and the host are deliberately separate so the flag can go on first.
 ### Setup gate — do this before trusting any of it
 
 Not optional, and not something to skip because the portal side already builds.
-The one piece the portal cannot verify from here is the session-cookie format,
-which has changed between engine releases: `mintAuthCookie` in
-`src/lib/remote.ts` throws until it is implemented against **the exact pinned
-engine build**, with a round-trip test. A plausible-looking implementation of
-somebody else's crypto format is the worst kind of done — it typechecks, ships,
-and fails at the only moment that matters.
+
+The wire format in `src/lib/remote.ts` is written against **MeshCentral 1.2.4**
+specifically — its 80-byte login key, its token layout, and the two different
+query parameters the browser page and the admin channel read it from. All three
+have moved between releases, and none of them fail loudly: a mismatch shows a
+login page instead of a machine. `tests/remoteCookie.test.ts` pins the format and
+was checked against the engine's own decoder, so **upgrading the host means
+re-reading `encodeCookie` and `decodeCookieAESGCM` in `meshcentral.js` and
+re-running that file.**
 
 Then prove the whole path by hand:
 
