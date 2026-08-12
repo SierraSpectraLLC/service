@@ -232,7 +232,7 @@ re-running that file.**
 
 Then prove the whole path by hand:
 
-1. Enrol a real Windows PC from the installer link on `/remote`.
+1. Enroll a real Windows PC from the installer link on `/remote`.
 2. Reboot it. It must come back on its own — that is what "unattended" means.
 3. Connect from a browser. Control the desktop.
 4. Confirm a session recording exists.
@@ -270,7 +270,7 @@ identity, not a lens.
 
 Do not uninstall TeamViewer on day one. When remote access fails an engineer
 cannot do their job, and a new agent will not be as battle-hardened as software
-that has spent fifteen years fighting corporate firewalls. Enrol one bench PC,
+that has spent fifteen years fighting corporate firewalls. Enroll one bench PC,
 run both side by side, and pull TV per-machine once ours has earned it.
 
 Removing a device row **does not remove access** — the agent keeps checking in

@@ -118,7 +118,7 @@ export function remoteAbility(
   }
 
   // A client organization's editors, on their own machines, when the tier is on.
-  // Enrolment and removal stay with the house: an installer is a capability to
+  // Enrollment and removal stay with the house: an installer is a capability to
   // join an organization's device group, and handing that out is our act.
   if (viewer.role === "client_editor" && viewer.orgId !== null && viewer.orgId === device.orgId) {
     if (!org.remoteAccessEnabled) return DENIED;
@@ -130,7 +130,7 @@ export function remoteAbility(
 
 /**
  * May this person generate an installer for `orgId` at all? Separate from
- * `remoteAbility` because enrolment happens before any device exists, so there
+ * `remoteAbility` because enrollment happens before any device exists, so there
  * is nothing to pass as the device.
  */
 export function mayEnroll(viewer: Viewer, ctx: { moduleOn: boolean }): boolean {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  bareNodeId, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId, mintEngineToken,
+  bareEngineId, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId, mintEngineToken,
   pickExistingGroup,
 } from "@/lib/remote";
 
@@ -82,7 +82,7 @@ describe("token lifetime", () => {
     expect(decodeEngineCookie(c, KEY, NOW + 121_000)).toBeNull();
   });
 
-  it("mints a login token the engine will recognise as one", () => {
+  it("mints a login token the engine will recognize as one", () => {
     const cfg = { url: "https://remote.example.com", loginKey: KEY, adminUser: "Portal-Admin" };
     const decoded = decodeEngineCookie(mintEngineToken(cfg, 120, NOW), KEY, NOW);
     // a: 3 is what marks it a login rather than one of the engine's other cookies,
@@ -123,10 +123,11 @@ describe("naming things the way the engine names them", () => {
     expect(engineUserId("user//someone")).toBe("user//someone");
   });
 
-  it("hands the page a bare node id, since it prefixes the domain itself", () => {
-    expect(bareNodeId("node//abc123")).toBe("abc123");
-    expect(bareNodeId("node/sierra/abc123")).toBe("abc123");
-    expect(bareNodeId("abc123")).toBe("abc123");
+  it("strips the domain from a node or group id, since the engine re-adds it", () => {
+    expect(bareEngineId("node//abc123")).toBe("abc123");
+    expect(bareEngineId("node/sierra/abc123")).toBe("abc123");
+    expect(bareEngineId("abc123")).toBe("abc123");
+    expect(bareEngineId("mesh//grp789")).toBe("grp789");
   });
 });
 

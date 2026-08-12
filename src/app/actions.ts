@@ -2754,10 +2754,12 @@ export async function setOrgRemoteAccess(orgId: number, on: boolean): Promise<{ 
 
 /**
  * An installer link that joins one organization's device group. Staff-only: this
- * is a capability to enrol a machine, and handing it out is our act, not a
+ * is a capability to enroll a machine, and handing it out is our act, not a
  * client's. Short-lived by construction on the engine side.
  */
-export async function enrollRemoteDevice(orgId: number): Promise<{ error?: string; url?: string }> {
+export async function enrollRemoteDevice(
+  orgId: number,
+): Promise<{ error?: string; url?: string; orgName?: string }> {
   const u = await requireStaff();
   if (!mayEnroll(u, { moduleOn: (await getModules()).remote })) return { error: "Remote support is off" };
   if (!remoteConfigured()) return { error: NOT_CONFIGURED };
@@ -2765,13 +2767,19 @@ export async function enrollRemoteDevice(orgId: number): Promise<{ error?: strin
   if (!org) return { error: "Not found" };
   const group = await ensureOrgGroup(orgId);
   if ("error" in group) return group;
-  const url = await agentInstallerLink(group.groupId);
-  if (!url) return { error: "Couldn't reach the remote-support host to build an installer." };
+  const made = await agentInstallerLink(group.groupId);
+  if (!made) return { error: "Couldn't reach the remote-support host to build an installer." };
+  // An installer joins exactly one client's roster. If the host built one for a
+  // different group than we asked for, that is a machine filed under the wrong
+  // client, so refuse rather than hand over a link that looks fine.
+  if (made.groupId && made.groupId !== group.groupId) {
+    return { error: `The host built an installer for the wrong group; nothing was handed out. Tell whoever runs the portal.` };
+  }
   await audit({
     actor: u.email, entityType: "remote", entityId: orgId,
     action: `generated a remote-support installer for ${org.name}`,
   });
-  return { url };
+  return { url: made.url, orgName: org.name };
 }
 
 /**

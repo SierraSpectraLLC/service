@@ -1051,7 +1051,7 @@ export const appSettings = pgTable("app_settings", {
  * connected. Here identity comes from the portal session, and every connection
  * writes an audit row naming a person.
  *
- * `orgId` is stamped at enrolment and is whose machine it is. It is deliberately
+ * `orgId` is stamped at enrollment and is whose machine it is. It is deliberately
  * NOT re-derived from the linked system, because comparing the two is what tells
  * us the system has changed hands since the PC was enrolled - see
  * lib/remoteAccess, which turns that into a consent prompt.
