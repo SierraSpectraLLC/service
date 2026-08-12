@@ -313,7 +313,16 @@ step 3).
    acts as; nobody logs in with it interactively. Give it a long random password
    you don't need to remember.
 5. Make `portal-admin` a site administrator too (**My Account → ... → Users →
-   portal-admin → Site rights**), because it needs to create device groups.
+   portal-admin → Site rights**).
+
+   Not because it can't otherwise work — an ordinary account *can* create device
+   groups, and one created by `portal-admin` is still visible to you, since a
+   site administrator sees every group. The reason is a trap in the engine: the
+   moment a mail server is configured on this host, creating a device group
+   starts requiring a **verified** email address from anyone who isn't a site
+   administrator. `portal-admin` has no mailbox to verify, so adding SMTP later
+   would break enrolment with an error that has nothing to do with what you
+   changed. Site rights make it immune to that check.
 
 ---
 
@@ -379,7 +388,20 @@ an installer link — speak the engine's WebSocket protocol, and the consent
 setting is pushed to the machine before a session opens rather than being carried
 in the URL, because the engine holds it per device.
 
-**Then, together — the gate.** None of this is trusted until all seven pass:
+**Verified against the live host** (`remote.sierraspectra.com`, 1.2.4): the
+certificate validates, a token minted by the portal's own code is accepted on the
+admin channel as `portal-admin`, and the read-only calls answer — an empty device
+list and an empty group list, which is correct for a host with nothing enrolled
+yet. That was the fragile joint in this whole design, and it holds.
+
+The three calls that *write* — create a group, generate an installer link, set a
+machine's consent flag — are exercised the first time somebody presses **Enroll**
+on `/remote`. If that button reports an error, the message comes straight from the
+engine and the Troubleshooting table below covers what it means.
+
+**Then — the gate.** None of this is trusted until all seven pass, and every one
+of them needs a real Windows PC, so this part can't be done from a keyboard
+anywhere else:
 
 1. Enrol a real Windows PC from the installer link on `/remote`.
 2. Reboot it. It comes back on its own — that's what "unattended" means.
