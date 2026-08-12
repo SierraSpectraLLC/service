@@ -3,7 +3,9 @@
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import type { WorkTarget } from "@/app/actions";
-import { addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart } from "@/app/actions";
+import {
+  addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
+} from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
 
 export type PmRow = {
@@ -142,7 +144,24 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
               {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
               {canEdit && (
-                <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  {/* A schedule was only a promise without this: the first cycle
+                      lands a full cadence out, the generator only fires on what is
+                      due, so a yearly job had nothing to work on for a year. An
+                      engineer standing at the instrument is the reason it exists. */}
+                  {!s.paused && s.openTaskId === null && (
+                    <button className="btn sm" disabled={pending}
+                      onClick={() => {
+                        setError("");
+                        startTransition(async () => {
+                          const res = await runPmNow(s.id);
+                          setError(res?.error ?? "");
+                        });
+                      }}>{overdue || dueToday ? "Start" : "Do it now"}</button>
+                  )}
+                  {s.openTaskId !== null && (
+                    <span className="mut" style={{ fontSize: 11 }}>in Tasks</span>
+                  )}
                   <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                     onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({
                       ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue },
