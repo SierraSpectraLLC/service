@@ -289,6 +289,33 @@ export async function notifyIssueRaised(opts: {
   }
 }
 
+/**
+ * A client asking for maintenance. Quieter than a fault by design - nothing is
+ * broken - but it carries the two facts that decide what to do: the horizon they
+ * asked for, and what the calendar already says.
+ */
+export async function notifyPmRequested(opts: {
+  to: string[]; externalId: string; instrumentId: number; orgName: string;
+  windowLabel: string; note: string; calendar: string; requester: string; dueDate: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "pm_request", href: `/instruments/${opts.instrumentId}`,
+      title: `${opts.orgName} asked for maintenance on ${opts.externalId} - ${opts.windowLabel.toLowerCase()}`,
+      subject: `Maintenance requested - ${opts.externalId} (${opts.windowLabel.toLowerCase()})`,
+      html: await wrap(`<b>${esc(opts.orgName)}</b> asked for maintenance on
+        <b>${esc(opts.externalId)}</b>, ${esc(opts.windowLabel.toLowerCase())}.
+        ${opts.note ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.note)}</div>` : ""}
+        <div style="margin-top:8px;">Requested by ${esc(opts.requester)}. There's a task on the system dated
+        ${esc(opts.dueDate)}, and it's in your queue.${opts.calendar ? ` ${esc(opts.calendar)}` : ""}</div>
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] pm request email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyQueueKick(opts: {
   to: string[]; externalId: string; instrumentId: number;
   fromName: string; toName: string; reason: string; stages: string[];

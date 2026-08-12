@@ -28,7 +28,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -52,6 +52,7 @@ import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
+import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
@@ -2936,6 +2937,49 @@ export async function connectRemoteDevice(
 }
 
 /**
+ * Put a system in the queue of whoever services it because the client just asked
+ * for something. The rules are the ones the daily generator uses (lib/pmQueue)
+ * and the same event and audit rows get written, so the move reads like any other
+ * in the system's history rather than like something that happened to it.
+ */
+async function handOffForClientAsk(
+  inst: { id: number; externalId: string; queueOrgId: number | null; archived: boolean },
+  why: string, actor: string,
+): Promise<void> {
+  const shares = await db.select({ orgId: orgs.id, kind: orgs.kind })
+    .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
+    .where(eq(systemShares.instrumentId, inst.id));
+  const [cfg] = await db.select({ operatorOrgId: appSettings.operatorOrgId })
+    .from(appSettings).where(eq(appSettings.id, 1));
+  const decision = pmHandoff({
+    queueOrgId: inst.queueOrgId, operatorOrgId: cfg?.operatorOrgId ?? null,
+    shares, archived: inst.archived,
+  });
+  if (!decision.move) return;
+
+  const brand = await getBrand();
+  const named = async (orgId: number | null) => {
+    if (orgId === null) return brand.operatorName;
+    const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
+    return o?.name ?? "another organization";
+  };
+  const fromName = await named(inst.queueOrgId);
+  const toName = await named(decision.toOrgId);
+  await db.update(instruments)
+    .set({ queueOrgId: decision.toOrgId, queueReason: why, queueSince: new Date() })
+    .where(eq(instruments.id, inst.id));
+  await db.insert(queueEvents).values({
+    instrumentId: inst.id, fromOrgId: inst.queueOrgId, toOrgId: decision.toOrgId,
+    fromName, toName, reason: why, actor,
+  });
+  await audit({
+    actor, instrumentId: inst.id, entityType: "queue", entityId: inst.externalId,
+    action: `moved ${inst.externalId} from ${fromName}'s queue to ${toName}'s - ${why}`,
+    field: "queue", oldValue: fromName, newValue: toName,
+  });
+}
+
+/**
  * A client says something is wrong with their system.
  *
  * One press, and everything that should follow follows: the system is marked as
@@ -3001,33 +3045,7 @@ export async function reportIssue(instrumentId: number, data: {
   });
 
   // Into the queue of whoever services it, by the same rules due maintenance uses.
-  const shares = await db.select({ orgId: orgs.id, kind: orgs.kind })
-    .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
-    .where(eq(systemShares.instrumentId, instrumentId));
-  const [cfg] = await db.select({ operatorOrgId: appSettings.operatorOrgId })
-    .from(appSettings).where(eq(appSettings.id, 1));
-  const handoff = pmHandoff({
-    queueOrgId: inst.queueOrgId, operatorOrgId: cfg?.operatorOrgId ?? null,
-    shares, archived: inst.archived,
-  });
-  if (handoff.move) {
-    const brand = await getBrand();
-    const nameOf = async (orgId: number | null) => {
-      if (orgId === null) return brand.operatorName;
-      const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
-      return o?.name ?? "another organization";
-    };
-    const fromName = await nameOf(inst.queueOrgId);
-    const toName = await nameOf(handoff.toOrgId);
-    const why = `${severity.toLowerCase()} reported: ${summary}`;
-    await db.update(instruments)
-      .set({ queueOrgId: handoff.toOrgId, queueReason: why, queueSince: new Date() })
-      .where(eq(instruments.id, instrumentId));
-    await db.insert(queueEvents).values({
-      instrumentId, fromOrgId: inst.queueOrgId, toOrgId: handoff.toOrgId,
-      fromName, toName, reason: why, actor: u.email,
-    });
-  }
+  await handOffForClientAsk(inst, `${severity.toLowerCase()} reported: ${summary}`, u.email);
 
   await audit({
     actor: u.email, instrumentId, entityType: "issue", entityId: inst.externalId,
@@ -3041,6 +3059,96 @@ export async function reportIssue(instrumentId: number, data: {
   });
 
   rev(instrumentId);
+  return { taskId: task.id };
+}
+
+/**
+ * A client asks for maintenance. The other half of the same button: nothing is
+ * broken, they want the PM done.
+ *
+ * Deliberately not the same thing as an engineer pressing "Do it now" on a
+ * schedule. That advances the cadence on completion; this does not touch any
+ * schedule at all, because a client should not be able to move a contract's
+ * maintenance calendar by asking. The request becomes work dated by the horizon
+ * they asked for, in our queue, with what the calendar already says written on it
+ * - so pulling the real schedule forward stays a decision somebody makes.
+ *
+ * Asking twice doesn't file twice: the second ask lands on the discussion of the
+ * open one, which is where a "any update?" belongs.
+ */
+export async function requestPm(instrumentId: number, data: { window: string; note: string }):
+Promise<{ error?: string; taskId?: number; already?: boolean }> {
+  const u = await requireUser();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  // Same rule as reporting a fault: anybody who can see the system may ask for
+  // its upkeep. Asking is not editing.
+  if (!(await canSeeSystemSafe(u, instrumentId))) return { error: "Not found" };
+  if (inst.archived) return { error: "That system is archived" };
+
+  const w = pmWindow(data.window);
+  const note = data.note.trim().slice(0, 2000);
+  const today = shopToday();
+  const orgName = u.orgId === null ? (await getBrand()).operatorName : u.orgName || "a client";
+  const who = u.name || u.email;
+
+  const post = (body: string) => db.insert(discussionPosts).values({
+    instrumentId, body, author: who, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
+  });
+
+  // One open request per system. A second ask is a message about the first, not a
+  // second job for two people to each do once.
+  const [openReq] = await db.select({ id: tasks.id, dueDate: tasks.dueDate }).from(tasks)
+    .where(and(eq(tasks.instrumentId, instrumentId), eq(tasks.origin, "pm_request"), ne(tasks.state, "Done")))
+    .limit(1);
+  if (openReq) {
+    await post([`Maintenance requested again - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
+    await audit({
+      actor: u.email, instrumentId, entityType: "task", entityId: openReq.id,
+      action: `${orgName} followed up on the maintenance request for ${inst.externalId} (open, due ${openReq.dueDate})`,
+    });
+    rev(instrumentId);
+    return { taskId: openReq.id, already: true };
+  }
+
+  // What the calendar already says, read across the system's own schedules and
+  // those living on the units installed in it - the same set the page shows.
+  const assetIds = (await db.select({ id: assets.id }).from(assets)
+    .where(eq(assets.instrumentId, instrumentId))).map((a) => a.id);
+  const scheds = await db.select({ title: pmSchedules.title, nextDue: pmSchedules.nextDue, paused: pmSchedules.paused })
+    .from(pmSchedules).where(assetIds.length
+      ? or(eq(pmSchedules.instrumentId, instrumentId), inArray(pmSchedules.assetId, assetIds))
+      : eq(pmSchedules.instrumentId, instrumentId));
+  const calendar = scheduleLine(scheds, today);
+
+  // Upkeep is owed, and the dashboard should say so - without disturbing where
+  // the system is in its build.
+  if (!inst.stages.includes("Maintenance due")) {
+    await db.update(instruments).set({ stages: [...inst.stages, "Maintenance due"] }).where(eq(instruments.id, instrumentId));
+    await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
+  }
+
+  const dueDate = pmRequestDue(today, w.key);
+  const [task] = await db.insert(tasks).values({
+    instrumentId, assetId: null,
+    title: pmRequestTitle(note),
+    body: [note, `Requested by ${who} at ${orgName} - ${w.label.toLowerCase()}.`, calendar].filter(Boolean).join("\n\n"),
+    dueDate, origin: "pm_request",
+  }).returning();
+
+  await post([`Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
+  await handOffForClientAsk(inst, `maintenance requested: ${w.label.toLowerCase()}`, u.email);
+  await audit({
+    actor: u.email, instrumentId, entityType: "task", entityId: task.id,
+    action: `${orgName} asked for maintenance on ${inst.externalId} - ${w.label.toLowerCase()}, due ${dueDate}`,
+  });
+  await notifyPmRequested({
+    to: await houseEmails(), externalId: inst.externalId, instrumentId, orgName,
+    windowLabel: w.label, note, calendar, requester: who, dueDate,
+  });
+
+  rev(instrumentId);
+  revalidatePath("/maintenance");
   return { taskId: task.id };
 }
 

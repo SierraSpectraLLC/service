@@ -12,6 +12,7 @@ import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tena
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
+import { scheduleLine } from "@/lib/pmRequest";
 import { getBrand } from "@/lib/brand";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
@@ -32,7 +33,7 @@ import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
-import ReportIssueButton from "@/components/ReportIssueButton";
+import ClientRequest from "@/components/ClientRequest";
 import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
@@ -242,10 +243,17 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         </Link>
         <span style={{ marginLeft: "auto" }} />
 
-        {/* Anybody who can see the system can say something is wrong with it -
-            including a read-only account watching an instrument fail, who should
-            not have to find somebody with more rights first. */}
-        {!inst.archived && <ReportIssueButton instrumentId={inst.id} externalId={inst.externalId} />}
+        {/* Anybody who can see the system can say something is wrong with it, or
+            ask for its upkeep - including a read-only account watching an
+            instrument fail, who should not have to find somebody with more
+            rights first. */}
+        {!inst.archived && (
+          <>
+            <ClientRequest kind="issue" instrumentId={inst.id} externalId={inst.externalId} />
+            <ClientRequest kind="pm" instrumentId={inst.id} externalId={inst.externalId}
+              nextPm={scheduleLine(pmRows, shopToday())} />
+          </>
+        )}
 
         {/* The instrument's own PC. Sits with the other actions on the system
             rather than on a list somewhere else, because it is used in the

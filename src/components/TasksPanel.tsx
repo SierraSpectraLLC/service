@@ -158,6 +158,13 @@ export default function TasksPanel({ target, tasks, people, systemAssets, today,
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {t.checklist.length > 0 && <span className="mut" style={{ fontSize: 11 }}>{done}/{t.checklist.length}</span>}
           {assetLabel(t.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(t.assetId)}</span>}
+          {/* Work the client asked for, rather than work we found. Reads differently
+              in a list of twenty, and answers "who is waiting on this". */}
+          {(t.origin === "issue" || t.origin === "pm_request") && (
+            <span className="pill" style={{ background: "#FDF0E7", color: "#9A5B12" }}>
+              {t.origin === "issue" ? "reported" : "requested"}
+            </span>
+          )}
           <DueChip due={t.dueDate} done={isDone} today={today} />
           <span style={{ fontSize: 12, fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
           <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>

@@ -394,7 +394,9 @@ export const tasks = pgTable("tasks", {
   assignee: text("assignee").notNull().default(""),
   dueDate: text("due_date").notNull().default(""), // YYYY-MM-DD in shop time, blank = no date
   // '' = hand-made | 'checkout' = auto-generated test | 'pm' = from a maintenance
-  // schedule | 'issue' = raised by whoever owns the system saying it is broken
+  // schedule | 'issue' = raised by whoever owns the system saying it is broken |
+  // 'pm_request' = the client asking for upkeep (no schedule attached on purpose:
+  // completing it must not move a contract's calendar - see lib/pmRequest)
   origin: text("origin").notNull().default(""),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset this is about
   // Which schedule generated this task; completing it advances that schedule.
