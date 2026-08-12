@@ -29,6 +29,31 @@ import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
 import { parseProcParts, partLabel, schedulePartsOf, serializeProcParts } from "@/lib/procedures";
 
+/**
+ * The task a schedule turns into. Shared by the daily generator and by doing a
+ * job early on purpose, so the two cannot drift: an engineer starting a PM by
+ * hand gets the same title, the same body, the same parts list and the same
+ * pmScheduleId link that completion needs in order to advance the cadence.
+ */
+export async function createPmTask(
+  s: typeof pmSchedules.$inferSelect, onSystem: number | null, dueDate: string, actor: string, action: string,
+) {
+  // The parts travel on the task, so whoever picks it up has the numbers in
+  // front of them instead of in a binder.
+  const parts = schedulePartsOf(s);
+  const partLine = parts.length ? `Part${parts.length === 1 ? "" : "s"}: ${parts.map(partLabel).join(", ")}` : "";
+  const [t] = await db.insert(tasks).values({
+    instrumentId: onSystem, assetId: s.assetId,
+    title: s.title, body: [s.body, partLine].filter(Boolean).join("\n"),
+    assignee: s.assignee,
+    dueDate, origin: "pm", pmScheduleId: s.id,
+  }).returning();
+  await audit({
+    actor, instrumentId: onSystem, assetId: s.assetId, entityType: "task", entityId: t.id, action,
+  });
+  return t;
+}
+
 export async function generateDuePmTasks(today: string, actor: string): Promise<{ created: number }> {
   const due = await db.select().from(pmSchedules)
     .where(and(eq(pmSchedules.paused, false), lte(pmSchedules.nextDue, today)));
@@ -78,21 +103,9 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     const onSystem = s.instrumentId ?? assetRows.find((r) => r.id === s.assetId)?.instrumentId ?? null;
     // The parts travel on the task, so whoever picks it up has the numbers in
     // front of them instead of in a binder.
-    const parts = schedulePartsOf(s);
-    const partLine = parts.length ? `Part${parts.length === 1 ? "" : "s"}: ${parts.map(partLabel).join(", ")}` : "";
-    const [t] = await db.insert(tasks).values({
-      instrumentId: onSystem, assetId: s.assetId,
-      title: s.title, body: [s.body, partLine].filter(Boolean).join("\n"),
-      assignee: s.assignee,
-      // The task is due the day the schedule fell due, so a late generation
-      // (paused cron, created-overdue schedule) shows up already overdue.
-      dueDate: s.nextDue, origin: "pm", pmScheduleId: s.id,
-    }).returning();
+    const t = await createPmTask(s, onSystem, s.nextDue, actor,
+      `scheduled maintenance came due: '${s.title}'${s.assignee ? ` (assigned ${s.assignee})` : ""} - due ${s.nextDue}`);
     created++;
-    await audit({
-      actor, instrumentId: onSystem, assetId: s.assetId, entityType: "task", entityId: t.id,
-      action: `scheduled maintenance came due: '${s.title}'${s.assignee ? ` (assigned ${s.assignee})` : ""} - due ${s.nextDue}`,
-    });
     if (s.assignee) {
       await notifyTaskAssigned({
         actorEmail: actor, actorName: "Maintenance schedule", assignee: s.assignee,

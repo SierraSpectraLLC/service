@@ -15,7 +15,9 @@ import {
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
-import { applyProcedures, applySystemProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
+import {
+  applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
+} from "@/lib/pmGenerate";
 import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -1168,6 +1170,46 @@ export async function updatePmSchedule(
   await generateDuePmTasks(shopToday(), u.email);
   revWork(s);
   return {};
+}
+
+/**
+ * Do a scheduled job now, before it falls due.
+ *
+ * Without this a schedule was only ever a promise: procedures stamp the first
+ * cycle a full cadence out, the generator only fires on what is due, and so a
+ * newly defined yearly PM had nothing to work on for a year and nothing to
+ * complete. An engineer standing at the instrument is the reason a PM exists;
+ * the calendar is only a reminder.
+ *
+ * Completing the task it creates advances the cadence from today, exactly as it
+ * does for a task the cron made - the schedule does not need touching by hand.
+ */
+export async function runPmNow(scheduleId: number): Promise<{ error?: string; taskId?: number }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s) return { error: "Not found" };
+
+  // Same visibility rule as the work it produces.
+  const onSystem = s.instrumentId ?? (s.assetId === null
+    ? null
+    : (await db.select({ instrumentId: assets.instrumentId }).from(assets).where(eq(assets.id, s.assetId)))[0]?.instrumentId ?? null);
+  if (onSystem !== null) {
+    try { await assertSystemEditable(u, onSystem); } catch { return { error: "Not found" } as { error: string }; }
+  }
+
+  // One open task per schedule, here as much as in the generator: a second copy
+  // of the same job is how two people do it once each.
+  const [open] = await db.select({ id: tasks.id }).from(tasks)
+    .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done")))
+    .limit(1);
+  if (open) return { taskId: open.id };
+
+  const t = await createPmTask(s, onSystem, shopToday(), u.email,
+    `started scheduled maintenance early: '${s.title}' (was due ${s.nextDue})`);
+  if (s.instrumentId !== null) rev(s.instrumentId);
+  else if (s.assetId !== null) revalidatePath(`/assets/${s.assetId}`);
+  revalidatePath("/maintenance");
+  return { taskId: t.id };
 }
 
 export async function setPmPaused(id: number, paused: boolean): Promise<{ error?: string }> {
