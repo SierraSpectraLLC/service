@@ -229,8 +229,16 @@ export function connectUrl(nodeId: string, opts: { embedded?: boolean } = {}): s
   return `${cfg.url}/?${q.toString()}`;
 }
 
-/** The engine's own chrome, summed: 1 banner, 2 tab strip, 4 footer, 8 panel headings. */
-const HIDE_ENGINE_CHROME = 1 | 2 | 4 | 8;
+/**
+ * The engine's own chrome, summed: 1 banner, 2 tab strip, 4 footer, 8 panel
+ * headings, 16 the left icon rail.
+ *
+ * 16 only lands when its page is in the layout it calls full screen, which is
+ * its default - but that choice is remembered per browser, so a browser where
+ * somebody once picked one of the other layouts keeps the rail. Theirs to unset,
+ * not something we can send in a URL.
+ */
+const HIDE_ENGINE_CHROME = 1 | 2 | 4 | 8 | 16;
 
 export const NOT_CONFIGURED =
   "Remote support has no host configured yet - set REMOTE_URL, REMOTE_LOGIN_KEY and REMOTE_ADMIN_USER.";
