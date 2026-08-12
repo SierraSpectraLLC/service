@@ -73,28 +73,17 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
       {downloads.length > 0 && (
         <>
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 4 }}>Run it on the machine</div>
-            <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
+            <div className="card-title" style={{ marginBottom: 4 }}>Install on the machine</div>
+            <div className="mut" style={{ fontSize: 12, marginBottom: 14 }}>
               Anything installed from this page joins <b>{org.name}</b>&apos;s machines and nobody else&apos;s.
-              Download on the instrument PC itself, or download here and carry it over.
             </div>
 
-            <ol style={{ fontSize: 13, margin: 0, paddingLeft: 20, lineHeight: 1.7 }}>
-              <li>Download the installer below and run it on the PC.</li>
-              <li>
-                Press <b>Install</b>, not Connect. Install registers a Windows service, so the machine comes back
-                on its own after a reboot; Connect lasts only until that window closes.
-              </li>
-              <li>
-                Windows will say the publisher is unrecognized. Choose <b>More info → Run anyway</b>. That warning
-                is about the file not being code-signed yet, not about anything being wrong with it.
-              </li>
-              <li>Close the dialog. The machine appears on the Machines page within a few seconds.</li>
+            <ol style={{ fontSize: 13.5, margin: "0 0 16px", paddingLeft: 20, lineHeight: 1.7 }}>
+              <li>Download below and run it on the PC.</li>
+              <li>Press <b>Install</b>, not Connect — Connect lasts only until the window closes.</li>
+              <li>At the publisher warning, choose <b>More info → Run anyway</b>.</li>
             </ol>
-          </div>
 
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 8 }}>Installers</div>
             {downloads.map((d) => (
               <div key={d.url} style={{
                 display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap",
@@ -105,28 +94,20 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 <span className="mut" style={{ fontSize: 11.5 }}>{d.note}</span>
               </div>
             ))}
-            <div className="mut" style={{ fontSize: 11, marginTop: 10 }}>
-              Each download is built for {org.name} at the moment you click it, so these are not files to keep
-              around or forward to another client.
+
+            <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
+              Outbound 443 only, nothing listening — a site that filters by destination needs one entry for{" "}
+              <span className="mono">{(process.env.REMOTE_URL ?? "").replace(/^https?:\/\//, "")}</span>.
             </div>
           </div>
 
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 4 }}>Or have someone else run it</div>
+            <div className="card-title" style={{ marginBottom: 4 }}>Send it to someone else</div>
             <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-              A link the client&apos;s own IT can open without a {brand.name} account. It expires in 24 hours and
-              carries the same rights as the downloads above, so treat it like a password.
+              For a client&apos;s own IT, with no {brand.name} account. Expires in 24 hours and carries the same
+              rights as the downloads above.
             </div>
             <RemoteInviteLink orgId={id} orgName={org.name} />
-          </div>
-
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 4 }}>If the machine is behind a corporate firewall</div>
-            <div className="mut" style={{ fontSize: 12 }}>
-              The agent only makes outbound connections on 443 and never listens for anything, so it needs no port
-              forwarding and no inbound rule. A site that filters by destination needs one entry allowing outbound
-              443 to <span className="mono">{(process.env.REMOTE_URL ?? "").replace(/^https?:\/\//, "")}</span>.
-            </div>
           </div>
         </>
       )}

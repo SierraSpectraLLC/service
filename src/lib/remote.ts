@@ -302,6 +302,28 @@ export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): 
   }
 }
 
+/**
+ * The machine that drives one system, if a machine has been pointed at it. Read
+ * by the system page so reaching the instrument's PC is a control on the
+ * instrument, not a trip to a separate list to find it again.
+ */
+export async function linkedDevice(instrumentId: number) {
+  const [row] = await db.select({
+    id: remoteDevices.id,
+    name: remoteDevices.name,
+    orgId: remoteDevices.orgId,
+    lastSeenAt: remoteDevices.lastSeenAt,
+    consentOverride: remoteDevices.consentOverride,
+    instrumentId: remoteDevices.instrumentId,
+    orgRemote: orgs.remoteAccessEnabled,
+  }).from(remoteDevices)
+    .leftJoin(orgs, eq(orgs.id, remoteDevices.orgId))
+    .where(eq(remoteDevices.instrumentId, instrumentId))
+    .limit(1)
+    .catch(() => []);
+  return row ?? null;
+}
+
 /** Devices with no organization yet - a machine enrolled before it was assigned. */
 export async function orphanDevices() {
   return db.select().from(remoteDevices).where(isNull(remoteDevices.orgId));

@@ -53,11 +53,6 @@ export default function HoursPanel({ target, entries, people, defaultPerson, tod
         <div className="card-title">Hours</div>
         {total > 0 && <span className="mut" style={{ fontSize: 12 }}>{formatHours(total)} logged</span>}
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-        Labor on this {target.instrumentId !== null ? "system" : "unit"}. This is what turnaround and
-        per-client effort reports are built from - unlogged work is invisible to them.
-      </div>
-
       {canEdit && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: entries.length ? 10 : 0 }}>
           <input value={draft.hours} onChange={(e) => setDraft({ ...draft, hours: e.target.value })}

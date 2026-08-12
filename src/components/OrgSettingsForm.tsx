@@ -240,11 +240,10 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
         <div className="card">
           <div className="card-title" style={{ marginBottom: 4 }}>Remote support</div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            We can always reach {org.name}&apos;s machines - that is the service. This switch is about
-            <b> their</b> side: with it on, {org.name}&apos;s own editors can connect to their own lab PCs from
-            the portal. {org.remoteDevices > 0
+            Lets {org.name}&apos;s own editors connect to their machines. Ours is unaffected.{" "}
+            {org.remoteDevices > 0
               ? `${org.remoteDevices} machine${org.remoteDevices === 1 ? "" : "s"} enrolled.`
-              : "No machines enrolled yet."}
+              : "No machines enrolled."}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className={`btn sm${remoteOn ? "" : " accent"}`} disabled={pending}

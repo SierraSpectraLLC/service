@@ -97,8 +97,8 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
         </div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           {isOwnStore
-            ? "Everything you own and are charged for: your shelf, plus the paperwork on every system and unit that belongs to you. Files on records shared with you are readable but somebody else's - they are listed separately below."
-            : `Everything ${quota.storeName} is storing. Their shelf files are theirs; you can see them because you run this instance.`}
+            ? "Your shelf, plus the paperwork on every system and unit you own."
+            : `Everything ${quota.storeName} is storing.`}
         </div>
         {canEdit && isOwnStore && <LibraryUpload full={quota.state === "full"} />}
         <StoreFileList
@@ -131,11 +131,6 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
             <span className="mut" style={{ fontSize: 12 }}>
               {guests.length} file{guests.length === 1 ? "" : "s"} · {fmtBytes(totalBytes(guests))} · not counted against your storage
             </span>
-          </div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Paperwork on systems and units you can read but don&apos;t own - work shared with you, and
-            anything you handed on but stayed a viewer of. Whoever owns the record stores these, and
-            they are the ones the PDF studio offers as sources alongside your own.
           </div>
           <StoreFileList
             files={guests.map((f) => ({

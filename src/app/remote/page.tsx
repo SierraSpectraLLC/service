@@ -3,7 +3,6 @@ import { asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, orgs, remoteDevices } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
-import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { shopTime } from "@/lib/shopday";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
@@ -78,7 +77,6 @@ export default async function RemotePage() {
     .catch(() => []);
   const systemById = new Map(systemRows.map((s) => [s.id, s]));
   const orgById = new Map(visibleOrgs.map((o) => [o.id, o]));
-  const brand = await getBrand();
 
   const devices = deviceRows.map((d) => {
     const org = d.orgId === null ? null : orgById.get(d.orgId) ?? null;
@@ -110,19 +108,12 @@ export default async function RemotePage() {
 
   return (
     <div className="container page">
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-          <div className="card-title">Remote support</div>
-          <span className="mut" style={{ fontSize: 12 }}>
-            {devices.length === 0 ? "no machines enrolled yet"
-              : `${devices.length} machine${devices.length === 1 ? "" : "s"}`}
-          </span>
-        </div>
-        <div className="mut" style={{ fontSize: 12 }}>
-          {isHouseUser
-            ? `Lab PCs running the ${brand.operatorName || brand.name} support agent. Every session is opened as you and written to the audit trail - nobody connects with a shared machine password.`
-            : "Your lab PCs. Every session is opened as you and recorded, so you can always see who reached which machine and when."}
-        </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <h1 style={{ fontSize: 20, margin: 0 }}>Remote support</h1>
+        <span className="mut" style={{ fontSize: 12 }}>
+          {devices.length === 0 ? "no machines enrolled"
+            : `${devices.length} machine${devices.length === 1 ? "" : "s"}`}
+        </span>
       </div>
 
       {!configured && (
@@ -130,7 +121,7 @@ export default async function RemotePage() {
           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
             No support host configured yet
           </div>
-          <div className="mut" style={{ fontSize: 12 }}>{NOT_CONFIGURED} Until then this page lists machines but cannot open a session.</div>
+          <div className="mut" style={{ fontSize: 12 }}>{NOT_CONFIGURED}</div>
         </div>
       )}
       {configured && !engineReachable && (
@@ -139,8 +130,7 @@ export default async function RemotePage() {
             Can&apos;t reach the support host
           </div>
           <div className="mut" style={{ fontSize: 12 }}>
-            Showing the last known state of each machine. Connecting may still work - the session doesn&apos;t
-            go through the part that&apos;s unreachable.
+            Showing the last known state. Connecting may still work.
           </div>
         </div>
       )}
