@@ -18,8 +18,12 @@
 // not three copies of it.
 import { and, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, instruments, pmSchedules, procedures, tasks } from "@/db/schema";
+import {
+  appSettings, assets, instruments, orgs, pmSchedules, procedures, queueEvents, systemShares, tasks,
+} from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { getBrand } from "@/lib/brand";
+import { pmHandoff } from "@/lib/pmQueue";
 import { notifyTaskAssigned } from "@/lib/notify";
 import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
@@ -46,8 +50,22 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     ...assetRows.flatMap((a) => (a.instrumentId !== null ? [a.instrumentId] : [])),
   ])];
   const instRows = instIds.length
-    ? await db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments).where(inArray(instruments.id, instIds))
+    ? await db.select({
+        id: instruments.id, externalId: instruments.externalId,
+        queueOrgId: instruments.queueOrgId, archived: instruments.archived,
+      }).from(instruments).where(inArray(instruments.id, instIds))
     : [];
+  // Who could take the next move on each of these systems. Read once for the
+  // whole run rather than per schedule - a fleet of due filters is one query.
+  const shareRows = instIds.length
+    ? await db.select({ instrumentId: systemShares.instrumentId, orgId: orgs.id, kind: orgs.kind })
+        .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
+        .where(inArray(systemShares.instrumentId, instIds))
+    : [];
+  const [settings] = instIds.length
+    ? await db.select({ operatorOrgId: appSettings.operatorOrgId }).from(appSettings).where(eq(appSettings.id, 1))
+    : [];
+  const handedOff = new Set<number>();
   const labelFor = (s: typeof due[number]) => {
     if (s.instrumentId !== null) return instRows.find((i) => i.id === s.instrumentId)?.externalId ?? "";
     const a = assetRows.find((r) => r.id === s.assetId);
@@ -82,8 +100,62 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
         assetId: s.assetId ?? undefined, externalId: labelFor(s),
       });
     }
+    // Due maintenance makes the next move ours, so the queue says so. Once per
+    // system per run: three due filters are one handoff, not three.
+    if (onSystem !== null && !handedOff.has(onSystem)) {
+      handedOff.add(onSystem);
+      await handOffForMaintenance(onSystem, s.title, actor, instRows, shareRows, settings?.operatorOrgId ?? null);
+    }
   }
   return { created };
+}
+
+/**
+ * Move one system into a provider's queue because maintenance came due.
+ *
+ * Written here rather than through the queue action because there is no user
+ * pressing anything: the rules live in lib/pmQueue, and the same event row and
+ * audit line get written so the move reads like any other in the system's
+ * history rather than like something that happened to it.
+ */
+async function handOffForMaintenance(
+  instrumentId: number, title: string, actor: string,
+  instRows: { id: number; externalId: string; queueOrgId: number | null; archived: boolean }[],
+  shareRows: { instrumentId: number; orgId: number; kind: string }[],
+  operatorOrgId: number | null,
+): Promise<void> {
+  const inst = instRows.find((i) => i.id === instrumentId);
+  if (!inst) return;
+  const decision = pmHandoff({
+    queueOrgId: inst.queueOrgId,
+    operatorOrgId,
+    shares: shareRows.filter((s) => s.instrumentId === instrumentId).map((s) => ({ orgId: s.orgId, kind: s.kind })),
+    archived: inst.archived,
+  });
+  if (!decision.move) return;
+
+  const brand = await getBrand();
+  const named = async (orgId: number | null) => {
+    if (orgId === null) return brand.operatorName;
+    const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
+    return o?.name ?? "another organization";
+  };
+  const fromName = await named(inst.queueOrgId);
+  const toName = await named(decision.toOrgId);
+  const why = `maintenance due: ${title}`;
+
+  await db.update(instruments)
+    .set({ queueOrgId: decision.toOrgId, queueReason: why, queueSince: new Date() })
+    .where(eq(instruments.id, instrumentId));
+  await db.insert(queueEvents).values({
+    instrumentId, fromOrgId: inst.queueOrgId, toOrgId: decision.toOrgId,
+    fromName, toName, reason: why, actor,
+  });
+  await audit({
+    actor, instrumentId, entityType: "queue", entityId: inst.externalId,
+    action: `moved ${inst.externalId} from ${fromName}'s queue to ${toName}'s - ${why}`,
+    field: "queue", oldValue: fromName, newValue: toName,
+  });
 }
 
 /**
