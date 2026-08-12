@@ -7,6 +7,7 @@ import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
 } from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
+import { pmGroups } from "@/lib/pmGroups";
 
 export type PmRow = {
   id: number; title: string; body: string; assignee: string;
@@ -43,9 +44,16 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const [requested, setRequested] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string }>>({});
   const [error, setError] = useState("");
+  const [showLater, setShowLater] = useState(false);
   const [pending, startTransition] = useTransition();
 
   if (!canEdit && schedules.length === 0) return null;
+
+  // What's owed stays on screen; the rest folds into the month it falls in. A
+  // system whose upkeep is all done reads as one line and the month it's next
+  // due, rather than as a screenful of work nobody has to do yet.
+  const { active, months, paused, next, allClear } = pmGroups(schedules, today);
+  const laterCount = months.reduce((n, m) => n + m.rows.length, 0) + paused.length;
 
   const submit = () => {
     if (!draft.title.trim()) return;
@@ -66,6 +74,118 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       if (res?.error) setError(res.error);
       else setEditing((m) => { const n = { ...m }; delete n[id]; return n; });
     });
+  };
+
+  /**
+   * One schedule, wherever it appears - owed now, folded into a month, or paused.
+   * Same row either way: what is folded is which rows are on screen, not how much
+   * of them, so opening a month gives the full controls rather than a summary.
+   */
+  const renderRow = (s: PmRow) => {
+    const e = editing[s.id];
+    const overdue = !s.paused && s.nextDue < today;
+    const dueToday = !s.paused && s.nextDue === today;
+    return (
+      <div key={s.id} style={{ padding: "7px 0", borderTop: "1px solid var(--line)", opacity: s.paused ? 0.6 : 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>{s.title}</span>
+          <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{cadenceLabel(s.everyDays)}</span>
+          {s.paused ? (
+            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
+          ) : s.openTaskId !== null ? (
+            <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
+          ) : (
+            <span className="pill" style={{
+              background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
+              color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
+            }}>
+              {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
+            </span>
+          )}
+          {s.onAsset && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
+          {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
+          {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
+          {canEdit && (
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              {/* A schedule was only a promise without this: the first cycle
+                  lands a full cadence out, the generator only fires on what is
+                  due, so a yearly job had nothing to work on for a year. An
+                  engineer standing at the instrument is the reason it exists. */}
+              {!s.paused && s.openTaskId === null && (
+                <button className="btn sm" disabled={pending}
+                  onClick={() => {
+                    setError("");
+                    startTransition(async () => {
+                      const res = await runPmNow(s.id);
+                      setError(res?.error ?? "");
+                    });
+                  }}>{overdue || dueToday ? "Start" : "Do it now"}</button>
+              )}
+              {s.openTaskId !== null && (
+                <span className="mut" style={{ fontSize: 11 }}>in Tasks</span>
+              )}
+              <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({
+                  ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue },
+                }))}>{e ? "cancel" : "edit"}</button>
+              <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const res = await setPmPaused(s.id, !s.paused);
+                  if (res?.error) setError(res.error);
+                })}>{s.paused ? "resume" : "pause"}</button>
+              <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+                onClick={() => {
+                  const reason = promptReason(`Stop scheduling "${s.title}"? Tasks already created stay.`);
+                  if (!reason) return;
+                  startTransition(async () => {
+                    const res = await removePmSchedule(s.id, reason);
+                    if (res?.error) setError(res.error);
+                  });
+                }}>remove</button>
+            </span>
+          )}
+        </div>
+        {s.body && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
+        {s.parts.filter((pt) => pt.number).map((pt) => {
+          const key = `${s.id}:${pt.number}`;
+          return (
+            <div key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
+              <span className="mono mut" style={{ fontSize: 11 }}>
+                {pt.name ? `${pt.name} · ` : ""}PN {pt.number}
+              </span>
+              {canEdit && (requested[key]
+                ? <span style={{ fontSize: 11, color: requested[key] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
+                    {requested[key] === "ok" ? "Requested - see Parts" : requested[key]}
+                  </span>
+                : <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                    onClick={() => startTransition(async () => {
+                      const res = await requestPmPart(s.id, pt.number);
+                      setRequested((m) => ({ ...m, [key]: res?.error ?? "ok" }));
+                    })}>request part</button>
+              )}
+            </div>
+          );
+        })}
+        {e && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+            <span className="mut" style={{ fontSize: 11 }}>every</span>
+            <input type="number" min={1} max={3650} value={e.everyDays}
+              onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, everyDays: ev.target.value } }))}
+              aria-label="Cadence in days" style={{ width: 70, fontSize: 12 }} />
+            <span className="mut" style={{ fontSize: 11 }}>days · next due</span>
+            <input type="date" value={e.nextDue}
+              onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, nextDue: ev.target.value } }))}
+              style={{ width: "auto", fontSize: 12 }} />
+            <select value={e.assignee} onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, assignee: ev.target.value } }))}
+              style={{ width: "auto", fontSize: 12 }}>
+              <option value="">unassigned</option>
+              {people.map((p) => <option key={p}>{p}</option>)}
+            </select>
+            <button className="btn sm accent" onClick={() => saveEdit(s.id)} disabled={pending}>Save</button>
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -119,112 +239,36 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         </div>
       )}
 
-      {schedules.map((s) => {
-        const e = editing[s.id];
-        const overdue = !s.paused && s.nextDue < today;
-        const dueToday = !s.paused && s.nextDue === today;
-        return (
-          <div key={s.id} style={{ padding: "7px 0", borderTop: "1px solid var(--line)", opacity: s.paused ? 0.6 : 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 700 }}>{s.title}</span>
-              <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{cadenceLabel(s.everyDays)}</span>
-              {s.paused ? (
-                <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
-              ) : s.openTaskId !== null ? (
-                <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
-              ) : (
-                <span className="pill" style={{
-                  background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
-                  color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
-                }}>
-                  {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
-                </span>
-              )}
-              {s.onAsset && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
-              {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
-              {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
-              {canEdit && (
-                <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-                  {/* A schedule was only a promise without this: the first cycle
-                      lands a full cadence out, the generator only fires on what is
-                      due, so a yearly job had nothing to work on for a year. An
-                      engineer standing at the instrument is the reason it exists. */}
-                  {!s.paused && s.openTaskId === null && (
-                    <button className="btn sm" disabled={pending}
-                      onClick={() => {
-                        setError("");
-                        startTransition(async () => {
-                          const res = await runPmNow(s.id);
-                          setError(res?.error ?? "");
-                        });
-                      }}>{overdue || dueToday ? "Start" : "Do it now"}</button>
-                  )}
-                  {s.openTaskId !== null && (
-                    <span className="mut" style={{ fontSize: 11 }}>in Tasks</span>
-                  )}
-                  <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                    onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({
-                      ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue },
-                    }))}>{e ? "cancel" : "edit"}</button>
-                  <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                    onClick={() => startTransition(async () => {
-                      const res = await setPmPaused(s.id, !s.paused);
-                      if (res?.error) setError(res.error);
-                    })}>{s.paused ? "resume" : "pause"}</button>
-                  <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
-                    onClick={() => {
-                      const reason = promptReason(`Stop scheduling "${s.title}"? Tasks already created stay.`);
-                      if (!reason) return;
-                      startTransition(async () => {
-                        const res = await removePmSchedule(s.id, reason);
-                        if (res?.error) setError(res.error);
-                      });
-                    }}>remove</button>
-                </span>
-              )}
-            </div>
-            {s.body && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
-            {s.parts.filter((pt) => pt.number).map((pt) => {
-              const key = `${s.id}:${pt.number}`;
-              return (
-                <div key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
-                  <span className="mono mut" style={{ fontSize: 11 }}>
-                    {pt.name ? `${pt.name} · ` : ""}PN {pt.number}
-                  </span>
-                  {canEdit && (requested[key]
-                    ? <span style={{ fontSize: 11, color: requested[key] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
-                        {requested[key] === "ok" ? "Requested - see Parts" : requested[key]}
-                      </span>
-                    : <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                        onClick={() => startTransition(async () => {
-                          const res = await requestPmPart(s.id, pt.number);
-                          setRequested((m) => ({ ...m, [key]: res?.error ?? "ok" }));
-                        })}>request part</button>
-                  )}
-                </div>
-              );
-            })}
-            {e && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-                <span className="mut" style={{ fontSize: 11 }}>every</span>
-                <input type="number" min={1} max={3650} value={e.everyDays}
-                  onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, everyDays: ev.target.value } }))}
-                  aria-label="Cadence in days" style={{ width: 70, fontSize: 12 }} />
-                <span className="mut" style={{ fontSize: 11 }}>days · next due</span>
-                <input type="date" value={e.nextDue}
-                  onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, nextDue: ev.target.value } }))}
-                  style={{ width: "auto", fontSize: 12 }} />
-                <select value={e.assignee} onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, assignee: ev.target.value } }))}
-                  style={{ width: "auto", fontSize: 12 }}>
-                  <option value="">unassigned</option>
-                  {people.map((p) => <option key={p}>{p}</option>)}
-                </select>
-                <button className="btn sm accent" onClick={() => saveEdit(s.id)} disabled={pending}>Save</button>
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {active.map(renderRow)}
+
+      {/* The fold. One line when nothing is owed - which is what a system looks
+          like most of the time - and the month it comes back around. */}
+      {laterCount > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, fontWeight: allClear ? 700 : 400 }}>
+            {allClear ? "All maintenance done" : `${laterCount} not due yet`}
+          </span>
+          {next && (
+            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>next due {next.label}</span>
+          )}
+          <button className="btn link" style={{ marginLeft: "auto", fontSize: 11 }}
+            onClick={() => setShowLater((v) => !v)}>{showLater ? "hide" : "show"}</button>
+        </div>
+      )}
+
+      {showLater && months.map((m) => (
+        <div key={m.key}>
+          <div className="eyebrow" style={{ marginTop: 6 }}>{m.label}</div>
+          {m.rows.map(renderRow)}
+        </div>
+      ))}
+      {showLater && paused.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginTop: 6 }}>Paused</div>
+          {paused.map(renderRow)}
+        </div>
+      )}
+
       {schedules.length === 0 && !open && (
         <div className="mut" style={{ fontSize: 12 }}>Nothing scheduled yet.</div>
       )}

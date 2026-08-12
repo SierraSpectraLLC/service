@@ -6,15 +6,17 @@ import { assets, instruments, pmSchedules, tasks } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { cadenceLabel } from "@/lib/pm";
+import { pmGroups } from "@/lib/pmGroups";
 import { shopToday } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The shop's maintenance calendar: every schedule on every system and asset,
- * soonest first, so the week's PM is planned from one page instead of by
- * opening systems one at a time. Staff view - each schedule is edited on the
- * page of the thing it maintains.
+ * The shop's maintenance calendar: every schedule on every system and asset, so
+ * the week's PM is planned from one page instead of by opening systems one at a
+ * time. What's owed is listed; the rest folds into the month it falls in, so a
+ * shop that is up to date reads as one line and a date (see lib/pmGroups). Staff
+ * view - each schedule is edited on the page of the thing it maintains.
  */
 export default async function MaintenancePage() {
   try { await requireStaff(); } catch { redirect("/"); }
@@ -47,42 +49,73 @@ export default async function MaintenancePage() {
 
   const mdy = (iso: string) => { const [y, m, d] = iso.split("-"); return `${parseInt(m)}/${parseInt(d)}/${y.slice(2)}`; };
 
+  // Owed now, then everything else folded into the month it falls in. Planning the
+  // week means reading the top of this page, not scrolling past two years of
+  // yearly PMs that are all in hand.
+  const rows = schedules.map((s) => ({ ...s, openTaskId: inFlight.has(s.id) ? s.id : null }));
+  const { active, months, paused, next, allClear } = pmGroups(rows, today);
+  const count = (n: number) => `${n} schedule${n === 1 ? "" : "s"}`;
+
+  const row = (s: typeof rows[number]) => {
+    const place = placeOf(s);
+    const overdue = !s.paused && s.nextDue < today;
+    const dueToday = !s.paused && s.nextDue === today;
+    return (
+      <Link key={s.id} href={place.href} className="row-hover"
+        style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", opacity: s.paused ? 0.55 : 1 }}>
+        <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{place.label}</span>
+        <span style={{ fontSize: 13 }}>{s.title}</span>
+        <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{cadenceLabel(s.everyDays)}</span>
+        {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
+        <span style={{ marginLeft: "auto" }}>
+          {s.paused ? (
+            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
+          ) : s.openTaskId !== null ? (
+            <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
+          ) : (
+            <span className="pill" style={{
+              background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
+              color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
+            }}>
+              {overdue ? `overdue - was due ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
+            </span>
+          )}
+        </span>
+      </Link>
+    );
+  };
+
   return (
     <div className="container page">
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Maintenance calendar</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Every recurring schedule in the shop, soonest first. Due ones become tasks automatically each
-          morning; add or change a schedule on its system&apos;s or asset&apos;s page.
-        </div>
-        {schedules.map((s) => {
-          const place = placeOf(s);
-          const overdue = !s.paused && s.nextDue < today;
-          const dueToday = !s.paused && s.nextDue === today;
-          return (
-            <Link key={s.id} href={place.href} className="row-hover"
-              style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", opacity: s.paused ? 0.55 : 1 }}>
-              <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{place.label}</span>
-              <span style={{ fontSize: 13 }}>{s.title}</span>
-              <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{cadenceLabel(s.everyDays)}</span>
-              {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
-              <span style={{ marginLeft: "auto" }}>
-                {s.paused ? (
-                  <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
-                ) : inFlight.has(s.id) ? (
-                  <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
-                ) : (
-                  <span className="pill" style={{
-                    background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
-                    color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
-                  }}>
-                    {overdue ? `overdue - was due ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
-                  </span>
-                )}
-              </span>
-            </Link>
-          );
-        })}
+        {active.map(row)}
+
+        {/* Nothing owed: the whole shop's upkeep in one line, and when it's back. */}
+        {allClear && next && schedules.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 4px", borderTop: "1px solid var(--line)" }}>
+            <span style={{ fontSize: 13, fontWeight: 700 }}>Nothing due</span>
+            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>next due {next.label}</span>
+          </div>
+        )}
+
+        {months.map((m) => (
+          <details key={m.key} style={{ borderTop: "1px solid var(--line)" }}>
+            <summary style={{ cursor: "pointer", padding: "8px 4px", fontSize: 12.5 }}>
+              <b>{m.label}</b> <span className="mut">· {count(m.rows.length)}</span>
+            </summary>
+            {m.rows.map(row)}
+          </details>
+        ))}
+        {paused.length > 0 && (
+          <details style={{ borderTop: "1px solid var(--line)" }}>
+            <summary style={{ cursor: "pointer", padding: "8px 4px", fontSize: 12.5 }}>
+              <b>Paused</b> <span className="mut">· {count(paused.length)}</span>
+            </summary>
+            {paused.map(row)}
+          </details>
+        )}
+
         {schedules.length === 0 && (
           <div className="mut" style={{ fontSize: 13 }}>
             Nothing scheduled yet. Define a template below to cover a whole model, or open a system or asset
