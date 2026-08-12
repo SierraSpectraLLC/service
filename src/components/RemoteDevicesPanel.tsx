@@ -42,7 +42,10 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
-  const [installer, setInstaller] = useState("");
+  // The link and the organization it belongs to travel together, because a link
+  // sitting under a changed dropdown is how a machine ends up on the wrong
+  // client's roster. Changing the selection throws the old one away.
+  const [installer, setInstaller] = useState<{ url: string; orgName: string } | null>(null);
   const [enrollOrg, setEnrollOrg] = useState(String(enrollOrgs[0]?.id ?? ""));
 
   return (
@@ -55,28 +58,30 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
             Windows service, so it survives a reboot and nobody has to be sitting there afterwards.
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <select value={enrollOrg} onChange={(e) => setEnrollOrg(e.target.value)}
+            <select value={enrollOrg}
+              onChange={(e) => { setEnrollOrg(e.target.value); setInstaller(null); setError(""); }}
               aria-label="Organization to enrol the machine for" style={{ width: "auto", fontSize: 12 }}>
               {enrollOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
             <button className="btn sm accent" disabled={pending || !enrollOrg}
               onClick={() => {
-                setError(""); setInstaller("");
+                setError(""); setInstaller(null);
                 startTransition(async () => {
                   const res = await enrollRemoteDevice(parseInt(enrollOrg));
                   if (res?.error) setError(res.error);
-                  else if (res?.url) setInstaller(res.url);
+                  else if (res?.url) setInstaller({ url: res.url, orgName: res.orgName ?? "" });
                 });
               }}>Get installer link</button>
           </div>
           {installer && (
             <div style={{ marginTop: 10, fontSize: 12 }}>
-              <a href={installer} target="_blank" rel="noreferrer" className="mono" style={{ overflowWrap: "anywhere" }}>{installer}</a>
-              <div className="mut" style={{ marginTop: 6, fontSize: 11 }}>
-                Expires in 24 hours; treat it like a password. Windows will warn that the installer is
-                unrecognised - that is expected until the agent is code-signed, and the two-click bypass is safe
-                because you are the one running it.
+              {/* Names the organization the link enrols into. Short, but the one
+                  thing worth reading before handing it to somebody. */}
+              <div className="mut" style={{ fontSize: 11, marginBottom: 3 }}>
+                enrols into {installer.orgName || "the selected organization"} · expires in 24 hours
               </div>
+              <a href={installer.url} target="_blank" rel="noreferrer" className="mono"
+                style={{ overflowWrap: "anywhere" }}>{installer.url}</a>
             </div>
           )}
         </div>

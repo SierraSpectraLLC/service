@@ -530,6 +530,58 @@ put the canvas directly in our page — no frame, no third-party cookie, no
 borrowed chrome at all — at the cost of owning a copy of their viewer and
 re-checking it on upgrades. Worth doing when the module is earning; not before.
 
+### The executable itself, and the SmartScreen warning
+
+`agentCustomization` above changes the dialog's words and picture. What Windows
+itself shows — the file's icon, its properties, and the publisher line in the
+"unrecognised app" warning — comes from the binary's own resources, set by
+`agentFileInfo` in the same `domains[""]` object: `icon` (an `.ico` in
+`meshcentral-data`), `logo` (the dialog bitmap), `fileVersion`,
+`fileVersionNumber`, `productVersionNumber`.
+
+**Code signing is a real fix and a real snag.** The engine will sign every agent
+it serves if it finds `meshcentral-data/agentsigningcert.pem` (certificate and
+private key in one PEM), and it timestamps through Comodo's authenticode
+timestamp server by default. Wire that up and the warning changes from
+"unrecognised publisher" to your name.
+
+The snag is where the key lives. Since June 2023 the CA/Browser Forum requires
+publicly-trusted code-signing keys to sit on FIPS-certified hardware — a USB
+token or a cloud HSM — so a modern OV or EV certificate does **not** come as a
+PEM file you can copy onto a server. That rules out the drop-in path with a
+current certificate. What is left:
+
+| Route | What it costs | What it gets you |
+| --- | --- | --- |
+| Do nothing | free | Two-click bypass, every install, forever |
+| Self-signed (the engine will generate one) | free | Binary is "signed" but by nobody trusted; SmartScreen still warns |
+| Cloud-HSM signing (Azure Trusted Signing ~$120/yr, DigiCert KeyLocker, SSL.com eSigner) | ~$120–500/yr plus a build step | Genuinely signed; needs signing to happen **outside** the engine, on a binary the engine then serves without modifying — which conflicts with per-group personalisation, so it wants thinking through before buying anything |
+| EV certificate on a token | ~$400–700/yr, manual | Immediate SmartScreen reputation, but somebody has to plug in a token to sign, so not automatic |
+
+Worth knowing regardless: even a correctly signed binary from a new publisher can
+warn until it accrues reputation, unless the certificate is EV. So signing is not
+a switch that makes the warning vanish the day it is bought — which is a good
+reason to leave this until client IT actually asks.
+
+### That download page
+
+The page a client lands on from an installer link — masthead, tab strip for
+eleven operating systems, stock screenshot — is the engine's `agentinvite` view.
+Two ways to deal with it:
+
+**Override the view.** Copy `views/agentinvite.handlebars` out of
+`node_modules/meshcentral` into `/opt/meshcentral/meshcentral-web/views/` and
+edit it. Per-file override, same as the stylesheets. Cost is that the copy stops
+receiving upstream fixes.
+
+**Or don't use their page at all.** The agent download endpoint needs no session
+of its own — the invite page is only a wrapper around links to it. So the portal
+can host the instructions itself: our copy, our branding, the two operating
+systems that actually exist in a lab rather than eleven, and a download button
+that fetches the group-personalised installer straight from the host. That
+retires their page from the client experience instead of restyling it, and it is
+the better answer if this is going in front of a client's IT.
+
 ### Branding the console
 
 Config-level, in the same `domains[""]` object — `title`, `title2`,

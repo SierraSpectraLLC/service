@@ -171,12 +171,18 @@ export async function ensureOrgGroup(orgId: number): Promise<{ groupId: string }
  * Treat it like a password in transit - it is a capability to join that group,
  * which is why only staff can generate one (lib/remoteAccess.mayEnroll).
  */
-export async function agentInstallerLink(remoteGroupId: string, hours = 24): Promise<string | null> {
+export async function agentInstallerLink(
+  remoteGroupId: string, hours = 24,
+): Promise<{ url: string; groupId: string } | null> {
   const cfg = remoteConfig();
   if (!cfg || !remoteGroupId) return null;
   try {
     const reply = await engineCall(cfg, "createInviteLink", { meshid: remoteGroupId, expire: hours, flags: 0 });
-    return typeof reply.url === "string" ? reply.url : null;
+    if (typeof reply.url !== "string") return null;
+    // The engine names the group the link actually joins. The caller compares it
+    // with the group it asked for, because this link decides which client's
+    // roster a machine lands in and nothing downstream would notice a mismatch.
+    return { url: reply.url, groupId: typeof reply.meshid === "string" ? reply.meshid : "" };
   } catch {
     return null;
   }
