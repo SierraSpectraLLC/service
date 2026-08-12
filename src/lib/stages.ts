@@ -13,6 +13,12 @@ export const STAGES = [
   "Waiting / blocked",
   "Waiting to ship",
   "Shipped",
+  // Past the refurbishment pipeline: a client's own instrument, working on their
+  // bench, which we keep under contract. It is a resting state rather than a step
+  // - a system sits in "In service" for years and steps out only when
+  // maintenance falls due, which is what "Maintenance due" is for.
+  "In service",
+  "Maintenance due",
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
@@ -99,6 +105,8 @@ export const STAGE_COLOR: Record<string, { bg: string; fg: string }> = {
   "Waiting / blocked": { bg: "#F4CCCC", fg: "#B42318" },
   "Waiting to ship": { bg: "#D9D2E9", fg: "#674EA7" },
   Shipped: { bg: "#38761D", fg: "#D9EAD3" },
+  "In service": { bg: "#E4F0E4", fg: "#2E6B2E" },
+  "Maintenance due": { bg: "#FAF0DC", fg: "#8A5410" },
 };
 export const TASK_COLOR: Record<string, { bg: string; fg: string }> = {
   Open: { bg: "#EEF1F5", fg: "#475569" },
