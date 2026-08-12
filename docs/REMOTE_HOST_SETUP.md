@@ -523,12 +523,26 @@ third-party-cookie change can break the frame, at which point the **open in a ne
 window** link on the session page is the fallback, and the durable fix is to stop
 depending on the engine's page at all (below).
 
-**The version without an iframe.** The desktop protocol runs over the host's
-relay, and the browser-side viewer is a plain script in the engine's own public
-directory under Apache-2.0. Vendoring it and driving the relay ourselves would
-put the canvas directly in our page — no frame, no third-party cookie, no
-borrowed chrome at all — at the cost of owning a copy of their viewer and
-re-checking it on upgrades. Worth doing when the module is earning; not before.
+**The version without an iframe — built, then removed.** Commit `d8f2629` put the
+desktop on our own canvas by vendoring the engine's decoder and relay transport.
+It was taken back out one commit later: the framed path was working and a demo
+should not rest on the newer of two paths. Reviving it is `git show d8f2629`
+rather than research, and the findings that cost the time are worth keeping:
+
+- **The relay credential is ours to mint.** The engine builds it as
+  `encodeCookie({ userid, domainid, ip }, loginCookieEncryptionKey)` — the same
+  key the portal already holds. So a viewer needs no admin round trip and no
+  session cookie of the engine's, which also means `sessionSameSite` could go back
+  to `lax` if the frame ever stops being used.
+- **Omit `ip`.** The engine binds a cookie to an address only when that field is
+  present, and the only address the portal could stamp belongs to a serverless
+  function rather than to the engineer's browser.
+- **One patch is needed in their transport**: `obj.Start` derives the relay socket
+  address from `window.location`, which is wrong when the page is ours.
+- **The unverified joint** was whether the agent joins the relay without the
+  second `rauth` cookie that the console passes and the code treats as optional.
+  That is the first thing to check if a revived viewer sits at "waiting for the
+  machine to answer".
 
 ### The executable itself, and the SmartScreen warning
 

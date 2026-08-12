@@ -302,6 +302,28 @@ export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): 
   }
 }
 
+/**
+ * The machine that drives one system, if a machine has been pointed at it. Read
+ * by the system page so reaching the instrument's PC is a control on the
+ * instrument, not a trip to a separate list to find it again.
+ */
+export async function linkedDevice(instrumentId: number) {
+  const [row] = await db.select({
+    id: remoteDevices.id,
+    name: remoteDevices.name,
+    orgId: remoteDevices.orgId,
+    lastSeenAt: remoteDevices.lastSeenAt,
+    consentOverride: remoteDevices.consentOverride,
+    instrumentId: remoteDevices.instrumentId,
+    orgRemote: orgs.remoteAccessEnabled,
+  }).from(remoteDevices)
+    .leftJoin(orgs, eq(orgs.id, remoteDevices.orgId))
+    .where(eq(remoteDevices.instrumentId, instrumentId))
+    .limit(1)
+    .catch(() => []);
+  return row ?? null;
+}
+
 /** Devices with no organization yet - a machine enrolled before it was assigned. */
 export async function orphanDevices() {
   return db.select().from(remoteDevices).where(isNull(remoteDevices.orgId));
@@ -393,45 +415,6 @@ export function decodeEngineCookie(
     return o;
   } catch {
     return null;
-  }
-}
-
-/**
- * What the in-portal viewer needs to talk to the relay directly: where the host
- * is, a token for its control channel, and the cookie the relay itself checks.
- *
- * Two different payloads because the engine reads two different shapes - `{u, a}`
- * for a login, `{userid, domainid}` for a relay - and both are keyed on the same
- * secret we already hold. That is what makes the viewer possible without an admin
- * round trip: we mint both here, the browser presents them, and no session cookie
- * of the engine's is involved at all.
- *
- * `ip` is deliberately omitted from the relay cookie. The engine binds a cookie to
- * an address only when the field is present, and the address we could stamp is a
- * serverless function's, not the engineer's browser's.
- */
-export function viewerCredentials(nodeId: string): {
-  relayBase: string; controlUrl: string; relayAuth: string; nodeId: string;
-} | { error: string } {
-  const cfg = remoteConfig();
-  if (!cfg) return { error: NOT_CONFIGURED };
-  try {
-    const ws = cfg.url.replace(/^http/, "ws");
-    const control = mintEngineToken(cfg, CONNECT_TTL_SECONDS);
-    const relayAuth = encodeEngineCookie(
-      { userid: engineUserId(cfg.adminUser), domainid: "", expire: 2 }, cfg.loginKey,
-    );
-    return {
-      relayBase: ws,
-      controlUrl: `${ws}/control.ashx?auth=${encodeURIComponent(control)}`,
-      relayAuth,
-      // Full id here, unlike the page URL: the relay and the tunnel request both
-      // name the machine as `node/<domain>/<hash>`, and only the console's own
-      // page prefixes a bare one.
-      nodeId,
-    };
-  } catch (e) {
-    return { error: (e as Error).message };
   }
 }
 

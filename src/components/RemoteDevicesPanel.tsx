@@ -46,33 +46,28 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 
   return (
     <>
-      {canEnroll && (
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 4 }}>Enroll a machine</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Pick whose machine it is. The installer registers a Windows service, so the PC comes back on its own
-            after a reboot and nobody has to be sitting there afterwards.
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <select value={enrollOrg} onChange={(e) => setEnrollOrg(e.target.value)}
-              aria-label="Organization to enroll the machine for" style={{ width: "auto", fontSize: 12 }}>
-              {enrollOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-            {/* A link, not a generated blob shown in place: the instructions and
-                the downloads live on their own page, addressed by organization, so
-                what you are looking at can never belong to a different client
-                than the one named on it. */}
-            <Link href={enrollOrg ? `/remote/enroll/${enrollOrg}` : "/remote"}
-              className="btn sm accent" style={{ textDecoration: "none" }}>Installer and instructions</Link>
-          </div>
-        </div>
-      )}
-
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 8 }}>Machines</div>
+        {/* Adding a machine belongs in this card's header, not in a card of its
+            own above it: it was one dropdown and one button describing itself at
+            length. The instructions live on their own page, addressed by
+            organization, so what you are reading can never belong to a different
+            client than the one named on it. */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <div className="card-title">Machines</div>
+          {canEnroll && (
+            <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <select value={enrollOrg} onChange={(e) => setEnrollOrg(e.target.value)}
+                aria-label="Organization to enroll a machine for" style={{ width: "auto", fontSize: 12 }}>
+                {enrollOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              <Link href={enrollOrg ? `/remote/enroll/${enrollOrg}` : "/remote"}
+                className="btn sm accent" style={{ textDecoration: "none" }}>Enroll a machine</Link>
+            </span>
+          )}
+        </div>
         {devices.length === 0 && (
           <div className="mut" style={{ fontSize: 13 }}>
-            Nothing enrolled yet. {canEnroll ? "Run the installer on a lab PC and it will appear here." : "Ask us to enroll a machine."}
+            No machines yet.{canEnroll ? "" : " Ask us to enroll one."}
           </div>
         )}
 

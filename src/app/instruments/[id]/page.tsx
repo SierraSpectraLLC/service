@@ -7,12 +7,14 @@ import {
   discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
-import { requireUser } from "@/lib/authz";
+import { requireUser, viewContext } from "@/lib/authz";
 import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
 import { getBrand } from "@/lib/brand";
+import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
+import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -173,6 +175,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const canEdit = await canEditSystem(user, instId);
   const isStaff = user.role === "owner" || user.role === "staff";
   const modules = await getModules();
+  const { persona } = await viewContext();
   // Today's client-facing update, written here and picked up by the EOD page.
   const ownerIsViewer = inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId;
   const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
@@ -186,6 +189,23 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // included. Names come from the orgs table so a multi-party thread reads as a
   // conversation between companies rather than a wall of first names.
   const brand = await getBrand();
+
+  // The PC that drives this instrument, if one is enrolled against it. Reaching
+  // it belongs on the instrument's own page: an engineer who has just read what
+  // is wrong with a system should not have to go and find its machine in a list.
+  const pc = modules.remote ? await linkedDevice(inst.id) : null;
+  const pcAbility = pc
+    ? remoteAbility(user, { moduleOn: true, personaActive: persona !== null },
+      { orgId: pc.orgId }, { remoteAccessEnabled: pc.orgRemote ?? false })
+    : null;
+  const pcConsent = pc
+    ? consentModeFor(
+      { orgId: pc.orgId, consentOverride: pc.consentOverride },
+      { ownerOrgId: inst.ownerOrgId, stages: inst.stages },
+    )
+    : null;
+  const pcOnline = pc?.lastSeenAt != null && Date.now() - pc.lastSeenAt.getTime() < 10 * 60_000;
+
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const partyName = (orgId: number | null) => (orgId === null ? brand.operatorName : orgName.get(orgId) ?? "a former organization");
   const viewer = { isHouse: isStaff, orgId: user.orgId };
@@ -219,9 +239,31 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← All instruments
         </Link>
+        <span style={{ marginLeft: "auto" }} />
+
+        {/* The instrument's own PC. Sits with the other actions on the system
+            rather than on a list somewhere else, because it is used in the
+            middle of reading this page, not instead of reading it. Last-seen is
+            shown rather than an online claim: the cache only refreshes when
+            somebody opens the machine list, so "offline" would often be a lie. */}
+        {pc && pcAbility?.see && (
+          pcAbility.connect ? (
+            <Link href={`/remote/${pc.id}`} className="btn sm"
+              title={`${pc.name || "The linked PC"} · ${pcOnline ? "online" : pc.lastSeenAt ? `last seen ${shopTime(pc.lastSeenAt)}` : "not seen yet"}`}
+              style={{ textDecoration: "none", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span aria-hidden style={{
+                width: 7, height: 7, borderRadius: 999,
+                background: pcOnline ? "#2E6B2E" : "#94A3B8",
+              }} />
+              {pcConsent?.mode === "consent" ? "Request session" : "Connect"}
+            </Link>
+          ) : pcAbility.refusal ? (
+            <span className="mut" style={{ fontSize: 11, flexShrink: 0 }}>{pcAbility.refusal}</span>
+          ) : null
+        )}
+
         {isStaff && (
           <>
-            <span style={{ marginLeft: "auto" }} />
             {modules.sheetSync && <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />}
             <Link href={`/instruments/${inst.id}/label`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
               Label
