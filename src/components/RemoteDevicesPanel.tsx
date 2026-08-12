@@ -1,10 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
-import {
-  connectRemoteDevice, enrollRemoteDevice, linkRemoteDevice, removeRemoteDevice, setRemoteConsent,
-} from "@/app/actions";
+import { enrollRemoteDevice, linkRemoteDevice, removeRemoteDevice, setRemoteConsent } from "@/app/actions";
 
 export type RemoteDevice = {
   id: number;
@@ -24,12 +23,11 @@ export type RemoteDevice = {
 };
 
 /**
- * The machine list and the button. Two things it is careful about:
+ * The machine list and the button.
  *
- * Connect opens a new tab, and the tab has to be opened inside the click's own
- * transition or a popup blocker eats it - so the URL comes back from the action
- * and is opened immediately, never after an await the browser can't attribute
- * to the click.
+ * Connect is a link to a page of ours, not a call that opens somebody else's
+ * site in a new tab. That page mints the token and holds the session, which also
+ * disposes of the popup-blocker dance this used to need.
  *
  * A machine that needs consent says so BEFORE you press anything, with the
  * reason. Discovering that somebody has to be at the far end after clicking is
@@ -44,22 +42,8 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState<number | null>(null);
   const [installer, setInstaller] = useState("");
   const [enrollOrg, setEnrollOrg] = useState(String(enrollOrgs[0]?.id ?? ""));
-
-  const connect = async (d: RemoteDevice) => {
-    setError(""); setBusy(d.id);
-    try {
-      const res = await connectRemoteDevice(d.id);
-      if (res?.error) { setError(res.error); return; }
-      if (res?.url) window.open(res.url, "_blank", "noopener");
-    } catch (e) {
-      setError((e as Error).message || "Couldn't open a session.");
-    } finally {
-      setBusy(null);
-    }
-  };
 
   return (
     <>
@@ -125,9 +109,9 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               )}
               <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
                 {d.canConnect ? (
-                  <button className="btn sm accent" disabled={busy !== null} onClick={() => void connect(d)}>
-                    {busy === d.id ? "Opening..." : d.consentMode === "consent" ? "Request session" : "Connect"}
-                  </button>
+                  <Link href={`/remote/${d.id}`} className="btn sm accent" style={{ textDecoration: "none" }}>
+                    {d.consentMode === "consent" ? "Request session" : "Connect"}
+                  </Link>
                 ) : d.refusal ? (
                   <span className="mut" style={{ fontSize: 11, maxWidth: 220 }}>{d.refusal}</span>
                 ) : null}

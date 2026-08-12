@@ -2778,8 +2778,14 @@ export async function enrollRemoteDevice(orgId: number): Promise<{ error?: strin
  * Open a session. The order here is the point: decide, then WRITE IT DOWN, then
  * mint. An unused token is a non-event; an unaudited connection to a customer's
  * instrument PC is the thing this module exists to make impossible.
+ *
+ * Called by the session page rather than from a browser, so the whole pipeline -
+ * permission, consent, audit, token - runs once per session in one place, and the
+ * page renders the result. `embedded` asks for a URL suited to our own frame.
  */
-export async function connectRemoteDevice(deviceId: number): Promise<{ error?: string; url?: string }> {
+export async function connectRemoteDevice(
+  deviceId: number, opts: { embedded?: boolean } = {},
+): Promise<{ error?: string; url?: string }> {
   const u = await requireUser();
   const { remote: moduleOn } = await getModules();
   const row = await deviceWithOrg(deviceId);
@@ -2817,7 +2823,7 @@ export async function connectRemoteDevice(deviceId: number): Promise<{ error?: s
       + ` (${consent.mode === "consent" ? "consent required" : "unattended"}: ${consent.why})`,
   });
 
-  const url = connectUrl(device.nodeId);
+  const url = connectUrl(device.nodeId, { embedded: opts.embedded === true });
   if (typeof url !== "string") return url;
   return { url };
 }

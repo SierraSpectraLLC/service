@@ -209,7 +209,7 @@ export async function applyDeviceConsent(nodeId: string, mode: "consent" | "unat
  * locally from the shared key. Pressing Connect must not depend on the flakiest
  * part of the integration.
  */
-export function connectUrl(nodeId: string): string | { error: string } {
+export function connectUrl(nodeId: string, opts: { embedded?: boolean } = {}): string | { error: string } {
   const cfg = remoteConfig();
   if (!cfg) return { error: NOT_CONFIGURED };
   let login: string;
@@ -223,8 +223,14 @@ export function connectUrl(nodeId: string): string | { error: string } {
     node: bareNodeId(nodeId),              // the page prefixes the domain itself
     viewmode: "11",                        // straight to the desktop tab
   });
+  // Inside our own page, strip the engine's furniture: its banner, its tab strip,
+  // its footer and its panel headings, all of which duplicate or contradict ours.
+  if (opts.embedded) q.set("hide", String(HIDE_ENGINE_CHROME));
   return `${cfg.url}/?${q.toString()}`;
 }
+
+/** The engine's own chrome, summed: 1 banner, 2 tab strip, 4 footer, 8 panel headings. */
+const HIDE_ENGINE_CHROME = 1 | 2 | 4 | 8;
 
 export const NOT_CONFIGURED =
   "Remote support has no host configured yet - set REMOTE_URL, REMOTE_LOGIN_KEY and REMOTE_ADMIN_USER.";

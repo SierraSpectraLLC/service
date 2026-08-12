@@ -484,6 +484,52 @@ the device group's **Add Agent** panel, or from `/?meshaction=winassistant` whil
 signed in. Note it ships as an x64 binary only: native on lab PCs, emulated on an
 ARM laptop.
 
+### Keeping the session inside the portal
+
+`/remote/<device>` renders the desktop in a frame on one of our own pages, with
+the engine's banner, tab strip, footer and panel headings switched off — so
+pressing Connect stays inside the product instead of landing on the support
+host's console. The session still runs browser-to-relay; only the surround
+changes.
+
+Two host settings make it work, and the frame will show a sign-in box until both
+are set:
+
+```bash
+sudo python3 - <<'ENDFRAME'
+import json, pathlib
+p = pathlib.Path("/opt/meshcentral/meshcentral-data/config.json")
+c = json.loads(p.read_text())
+s = c["settings"]
+s["allowedFramingOrigins"] = ["https://service.sierraspectra.com"]   # the portal, and nothing else
+s["sessionSameSite"] = "none"                                        # or the session cookie won't be sent
+p.write_text(json.dumps(c, indent=2) + chr(10))
+print("framing allowed for", s["allowedFramingOrigins"])
+ENDFRAME
+```
+
+`allowedFramingOrigins` names the portal specifically, which emits a
+`frame-ancestors` policy listing it and drops the `X-Frame-Options` header.
+Prefer it to `allowFraming: true`, which lets **any** site frame the console and
+is the version of this setting people regret.
+
+`sessionSameSite: "none"` is the real trade-off. Inside our frame the engine's
+session cookie is third-party, and the browser won't send a `Lax` cookie there —
+but loosening it removes a browser-level cross-site protection from the console
+itself. Acceptable here because the console has two human users and the portal is
+the surface that matters; worth revisiting if that changes. It is also the part
+most exposed to browser policy: strict tracking protection or a future
+third-party-cookie change can break the frame, at which point the **open in a new
+window** link on the session page is the fallback, and the durable fix is to stop
+depending on the engine's page at all (below).
+
+**The version without an iframe.** The desktop protocol runs over the host's
+relay, and the browser-side viewer is a plain script in the engine's own public
+directory under Apache-2.0. Vendoring it and driving the relay ourselves would
+put the canvas directly in our page — no frame, no third-party cookie, no
+borrowed chrome at all — at the cost of owning a copy of their viewer and
+re-checking it on upgrades. Worth doing when the module is earning; not before.
+
 ### Branding the console
 
 Config-level, in the same `domains[""]` object — `title`, `title2`,
