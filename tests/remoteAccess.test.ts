@@ -42,7 +42,7 @@ describe("remoteAbility", () => {
     expect(remoteAbility(editor, on, labzen, tierOff).see).toBe(false);
   });
 
-  it("never lets a client enrol or unlink - an installer is the house's to hand out", () => {
+  it("never lets a client enroll or unlink - an installer is the house's to hand out", () => {
     const a = remoteAbility(editor, on, labzen, tierOn);
     expect(a.enroll).toBe(false);
     expect(a.unlink).toBe(false);

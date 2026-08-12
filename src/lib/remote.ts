@@ -132,7 +132,7 @@ export function pickExistingGroup(meshes: unknown[], orgName: string): string | 
 }
 
 /**
- * The device group for an organization, created on first enrolment. One group per
+ * The device group for an organization, created on first enrollment. One group per
  * org is the whole tenancy story: it is what keeps one client's machines
  * invisible to another, and it is why the group id is cached on `orgs`.
  */
@@ -188,6 +188,34 @@ export async function agentInstallerLink(
   }
 }
 
+export type AgentDownload = { label: string; note: string; url: string; primary: boolean };
+
+/**
+ * Direct links to the installer for one organization's group, so the enrollment
+ * instructions can be ours instead of the engine's page - which greets a client
+ * with someone else's name, a stock screenshot and tabs for eleven operating
+ * systems, nine of which no instrument controller has ever run.
+ *
+ * These need no session of their own: the engine personalizes the binary from the
+ * group in the URL. That makes each link a capability to join that group, exactly
+ * like an installer link, which is why the page holding them is staff-only.
+ *
+ * Agent numbers are the engine's own (4 = Windows x64, 43 = Windows on ARM,
+ * 3 = 32-bit, 10006 = the tray-side Assistant).
+ */
+export function agentDownloads(remoteGroupId: string): AgentDownload[] {
+  const cfg = remoteConfig();
+  if (!cfg || !remoteGroupId) return [];
+  const group = encodeURIComponent(bareEngineId(remoteGroupId));
+  const at = (id: number) => `${cfg.url}/meshagents?id=${id}&meshid=${group}`;
+  return [
+    { label: "Windows 64-bit", note: "almost every instrument PC", url: at(4), primary: true },
+    { label: "Windows on ARM", note: "Surface and other ARM laptops", url: at(43), primary: false },
+    { label: "Windows 32-bit", note: "older controllers still on 32-bit Windows", url: at(3), primary: false },
+    { label: "Assistant (optional)", note: "tray app so whoever is at the machine can see us", url: at(10006), primary: false },
+  ];
+}
+
 /**
  * Set what the far end sees before a session opens: a notification, or a prompt
  * it has to accept. The engine holds this per machine and applies it when the
@@ -226,7 +254,7 @@ export function connectUrl(nodeId: string, opts: { embedded?: boolean } = {}): s
   }
   const q = new URLSearchParams({
     login,                                 // the page's parameter; the admin channel uses ?auth=
-    node: bareNodeId(nodeId),              // the page prefixes the domain itself
+    node: bareEngineId(nodeId),            // the page prefixes the domain itself
     viewmode: "11",                        // straight to the desktop tab
   });
   // Inside our own page, strip the engine's furniture: its banner, its tab strip,
@@ -251,7 +279,7 @@ export const NOT_CONFIGURED =
 
 /**
  * Cache refresh: fold whatever the engine currently reports into `remote_devices`
- * so the list renders without it next time. Enrolment completes here rather than
+ * so the list renders without it next time. Enrollment completes here rather than
  * through a webhook, which is why no route needs adding to the middleware
  * matcher: a machine that installed its agent appears the next time somebody
  * opens the page.
@@ -309,10 +337,14 @@ export function engineUserId(name: string, domainId = ""): string {
   return name.includes("/") ? name : `user/${domainId}/${name.toLowerCase()}`;
 }
 
-/** The engine prefixes the domain onto the node id in a page URL, so hand it the bare part. */
-export function bareNodeId(nodeId: string): string {
-  const parts = nodeId.split("/");
-  return parts.length === 3 ? parts[2] : nodeId;
+/**
+ * Ids on the engine read `node/<domain>/<hash>` and `mesh/<domain>/<hash>`, but
+ * its URLs want the hash alone and prefix the rest themselves. Same shape for
+ * both kinds, so one function.
+ */
+export function bareEngineId(id: string): string {
+  const parts = id.split("/");
+  return parts.length === 3 ? parts[2] : id;
 }
 
 /**

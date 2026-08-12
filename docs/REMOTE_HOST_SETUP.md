@@ -31,7 +31,7 @@ selector, and note new instances often come with a free first month.
    use the browser terminal in step 5.
 7. **Instance plan**: the **2 GB RAM / 2 vCPU** plan. Do not pick 512 MB — Node
    plus the engine will thrash on it.
-8. **Name**: something you'll recognise in a year, e.g. `baseline-remote`.
+8. **Name**: something you'll recognize in a year, e.g. `baseline-remote`.
 9. **Create instance**, then wait until the state reads **Running** (1–2 min).
 
 ---
@@ -321,7 +321,7 @@ step 3).
    moment a mail server is configured on this host, creating a device group
    starts requiring a **verified** email address from anyone who isn't a site
    administrator. `portal-admin` has no mailbox to verify, so adding SMTP later
-   would break enrolment with an error that has nothing to do with what you
+   would break enrollment with an error that has nothing to do with what you
    changed. Site rights make it immune to that check.
 
 ---
@@ -403,7 +403,7 @@ engine and the Troubleshooting table below covers what it means.
 of them needs a real Windows PC, so this part can't be done from a keyboard
 anywhere else:
 
-1. Enrol a real Windows PC from the installer link on `/remote`.
+1. Enroll a real Windows PC from the installer link on `/remote`.
 2. Reboot it. It comes back on its own — that's what "unattended" means.
 3. Connect from a browser and control the desktop.
 4. A session recording file exists on the host.
@@ -534,7 +534,7 @@ re-checking it on upgrades. Worth doing when the module is earning; not before.
 
 `agentCustomization` above changes the dialog's words and picture. What Windows
 itself shows — the file's icon, its properties, and the publisher line in the
-"unrecognised app" warning — comes from the binary's own resources, set by
+"unrecognized app" warning — comes from the binary's own resources, set by
 `agentFileInfo` in the same `domains[""]` object: `icon` (an `.ico` in
 `meshcentral-data`), `logo` (the dialog bitmap), `fileVersion`,
 `fileVersionNumber`, `productVersionNumber`.
@@ -543,7 +543,7 @@ itself shows — the file's icon, its properties, and the publisher line in the
 it serves if it finds `meshcentral-data/agentsigningcert.pem` (certificate and
 private key in one PEM), and it timestamps through Comodo's authenticode
 timestamp server by default. Wire that up and the warning changes from
-"unrecognised publisher" to your name.
+"unrecognized publisher" to your name.
 
 The snag is where the key lives. Since June 2023 the CA/Browser Forum requires
 publicly-trusted code-signing keys to sit on FIPS-certified hardware — a USB
@@ -565,22 +565,22 @@ reason to leave this until client IT actually asks.
 
 ### That download page
 
-The page a client lands on from an installer link — masthead, tab strip for
-eleven operating systems, stock screenshot — is the engine's `agentinvite` view.
-Two ways to deal with it:
+**Done — the portal hosts it now.** `/remote/enroll/<org>` carries the
+instructions in our words, with download buttons for the Windows builds that
+actually exist in a lab, and hands the file straight from the host. The engine's
+`agentinvite` view no longer appears in the normal path, so there is nothing to
+restyle.
 
-**Override the view.** Copy `views/agentinvite.handlebars` out of
-`node_modules/meshcentral` into `/opt/meshcentral/meshcentral-web/views/` and
-edit it. Per-file override, same as the stylesheets. Cost is that the copy stops
-receiving upstream fixes.
+The one thing it is still used for is a client who has to run the installer
+themselves and has no account here: the **Build a 24-hour link** button on that
+page produces one. If that becomes a common route rather than an exception, the
+next step is a public, token-addressed version of our own page, at which point
+the engine's view is gone entirely.
 
-**Or don't use their page at all.** The agent download endpoint needs no session
-of its own — the invite page is only a wrapper around links to it. So the portal
-can host the instructions itself: our copy, our branding, the two operating
-systems that actually exist in a lab rather than eleven, and a download button
-that fetches the group-personalised installer straight from the host. That
-retires their page from the client experience instead of restyling it, and it is
-the better answer if this is going in front of a client's IT.
+For reference, if you ever do want to restyle theirs: copy
+`views/agentinvite.handlebars` out of `node_modules/meshcentral` into
+`/opt/meshcentral/meshcentral-web/views/` and edit it — per-file override, same
+as the stylesheets, same cost of no longer receiving upstream fixes.
 
 ### Branding the console
 
@@ -616,7 +616,7 @@ they happened.
 | Site unreachable, service running | Port 443 missing from the Lightsail firewall (step 3) |
 | Locked out of SSH | You enabled `ufw`. Use the Lightsail browser terminal to `sudo ufw disable` |
 | Agent won't connect from a lab | The lab's firewall blocks outbound 443 to an unfamiliar host. Ask their IT to allow `remote.yourportal.com` |
-| Windows says the installer is unrecognised | Expected until the agent is code-signed. Two-click bypass is safe — you're the one running it. A signing certificate (~$250–450/yr) is the later fix |
+| Windows says the installer is unrecognized | Expected until the agent is code-signed. Two-click bypass is safe — you're the one running it. A signing certificate (~$250–450/yr) is the later fix |
 
 ## Upgrading the engine later
 

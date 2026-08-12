@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
-import { enrollRemoteDevice, linkRemoteDevice, removeRemoteDevice, setRemoteConsent } from "@/app/actions";
+import { linkRemoteDevice, removeRemoteDevice, setRemoteConsent } from "@/app/actions";
 
 export type RemoteDevice = {
   id: number;
@@ -42,48 +42,29 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
-  // The link and the organization it belongs to travel together, because a link
-  // sitting under a changed dropdown is how a machine ends up on the wrong
-  // client's roster. Changing the selection throws the old one away.
-  const [installer, setInstaller] = useState<{ url: string; orgName: string } | null>(null);
   const [enrollOrg, setEnrollOrg] = useState(String(enrollOrgs[0]?.id ?? ""));
 
   return (
     <>
       {canEnroll && (
         <div className="card">
-          <div className="card-title" style={{ marginBottom: 4 }}>Enrol a machine</div>
+          <div className="card-title" style={{ marginBottom: 4 }}>Enroll a machine</div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Generates a one-time installer for that organization. Run it once on the lab PC - it installs as a
-            Windows service, so it survives a reboot and nobody has to be sitting there afterwards.
+            Pick whose machine it is. The installer registers a Windows service, so the PC comes back on its own
+            after a reboot and nobody has to be sitting there afterwards.
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <select value={enrollOrg}
-              onChange={(e) => { setEnrollOrg(e.target.value); setInstaller(null); setError(""); }}
-              aria-label="Organization to enrol the machine for" style={{ width: "auto", fontSize: 12 }}>
+            <select value={enrollOrg} onChange={(e) => setEnrollOrg(e.target.value)}
+              aria-label="Organization to enroll the machine for" style={{ width: "auto", fontSize: 12 }}>
               {enrollOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
-            <button className="btn sm accent" disabled={pending || !enrollOrg}
-              onClick={() => {
-                setError(""); setInstaller(null);
-                startTransition(async () => {
-                  const res = await enrollRemoteDevice(parseInt(enrollOrg));
-                  if (res?.error) setError(res.error);
-                  else if (res?.url) setInstaller({ url: res.url, orgName: res.orgName ?? "" });
-                });
-              }}>Get installer link</button>
+            {/* A link, not a generated blob shown in place: the instructions and
+                the downloads live on their own page, addressed by organization, so
+                what you are looking at can never belong to a different client
+                than the one named on it. */}
+            <Link href={enrollOrg ? `/remote/enroll/${enrollOrg}` : "/remote"}
+              className="btn sm accent" style={{ textDecoration: "none" }}>Installer and instructions</Link>
           </div>
-          {installer && (
-            <div style={{ marginTop: 10, fontSize: 12 }}>
-              {/* Names the organization the link enrols into. Short, but the one
-                  thing worth reading before handing it to somebody. */}
-              <div className="mut" style={{ fontSize: 11, marginBottom: 3 }}>
-                enrols into {installer.orgName || "the selected organization"} · expires in 24 hours
-              </div>
-              <a href={installer.url} target="_blank" rel="noreferrer" className="mono"
-                style={{ overflowWrap: "anywhere" }}>{installer.url}</a>
-            </div>
-          )}
         </div>
       )}
 
@@ -91,7 +72,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
         <div className="card-title" style={{ marginBottom: 8 }}>Machines</div>
         {devices.length === 0 && (
           <div className="mut" style={{ fontSize: 13 }}>
-            Nothing enrolled yet. {canEnroll ? "Use the installer above on a lab PC and it will appear here." : "Ask us to enrol a machine."}
+            Nothing enrolled yet. {canEnroll ? "Run the installer on a lab PC and it will appear here." : "Ask us to enroll a machine."}
           </div>
         )}
 

@@ -2754,7 +2754,7 @@ export async function setOrgRemoteAccess(orgId: number, on: boolean): Promise<{ 
 
 /**
  * An installer link that joins one organization's device group. Staff-only: this
- * is a capability to enrol a machine, and handing it out is our act, not a
+ * is a capability to enroll a machine, and handing it out is our act, not a
  * client's. Short-lived by construction on the engine side.
  */
 export async function enrollRemoteDevice(
