@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bareNodeId, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId, mintEngineToken,
+  pickExistingGroup,
 } from "@/lib/remote";
 
 // The remote-support host authenticates the portal by a token it encrypts with a
@@ -126,5 +127,33 @@ describe("naming things the way the engine names them", () => {
     expect(bareNodeId("node//abc123")).toBe("abc123");
     expect(bareNodeId("node/sierra/abc123")).toBe("abc123");
     expect(bareNodeId("abc123")).toBe("abc123");
+  });
+});
+
+describe("adopting a device group that already exists", () => {
+  const G = (name: string, _id: string, mtype = 2) => ({ _id, name, mtype });
+
+  it("adopts the one group wearing the org's name", () => {
+    expect(pickExistingGroup([G("LabZen", "mesh//aaa"), G("Other", "mesh//bbb")], "LabZen"))
+      .toBe("mesh//aaa");
+  });
+
+  it("ignores case and stray whitespace, since a human typed one of the two", () => {
+    expect(pickExistingGroup([G("labzen ", "mesh//aaa")], " LabZen")).toBe("mesh//aaa");
+  });
+
+  it("refuses to choose between two groups of the same name", () => {
+    // Guessing here would file a client's machine where another client can see it.
+    expect(pickExistingGroup([G("LabZen", "mesh//aaa"), G("LabZen", "mesh//bbb")], "LabZen")).toBeNull();
+  });
+
+  it("passes over groups that are not the agent-managed kind", () => {
+    expect(pickExistingGroup([G("LabZen", "mesh//aaa", 1)], "LabZen")).toBeNull();
+  });
+
+  it("returns null on nothing, junk, or a name that matches no group", () => {
+    expect(pickExistingGroup([], "LabZen")).toBeNull();
+    expect(pickExistingGroup([null, 7, {}, { name: "LabZen" }], "LabZen")).toBeNull();
+    expect(pickExistingGroup([G("LabZen", "mesh//aaa")], "GMI")).toBeNull();
   });
 });

@@ -113,6 +113,25 @@ export async function listGroupDevices(remoteGroupId: string): Promise<EngineDev
 type EngineNode = { _id?: string; name?: string; rname?: string; conn?: number; osdesc?: string };
 
 /**
+ * The group already named for an organization, if there is exactly one. Exactly
+ * one on purpose: two groups wearing the same name is an ambiguity a machine
+ * should not resolve by picking, because the wrong guess files a client's PC
+ * where another client can see it. Pure so the rule is testable without a host.
+ *
+ * `mtype` 2 is the agent-managed kind; the engine's other group types can share a
+ * name without meaning the same thing.
+ */
+export function pickExistingGroup(meshes: unknown[], orgName: string): string | null {
+  const named = meshes.filter((m): m is { _id: string; name: string; mtype?: number } => {
+    const g = m as { _id?: unknown; name?: unknown; mtype?: unknown };
+    return typeof g?._id === "string" && g._id !== "" && typeof g?.name === "string"
+      && g.name.trim().toLowerCase() === orgName.trim().toLowerCase()
+      && (g.mtype === undefined || g.mtype === 2);
+  });
+  return named.length === 1 ? named[0]._id : null;
+}
+
+/**
  * The device group for an organization, created on first enrolment. One group per
  * org is the whole tenancy story: it is what keeps one client's machines
  * invisible to another, and it is why the group id is cached on `orgs`.
@@ -124,6 +143,17 @@ export async function ensureOrgGroup(orgId: number): Promise<{ groupId: string }
   if (!org) return { error: "Not found" };
   if (org.groupId) return { groupId: org.groupId };
   try {
+    // Adopt a group already carrying this organization's name before making a
+    // second one. Two ways to arrive here with one sitting there: somebody made
+    // it by hand in the engine's own console, or a previous createmesh succeeded
+    // and the write of its id didn't - and that second one would otherwise leave
+    // a group per attempt, each holding machines the portal can't see.
+    const seen = await engineCall(cfg, "meshes", {});
+    const adopted = pickExistingGroup(Array.isArray(seen.meshes) ? seen.meshes : [], org.name);
+    if (adopted) {
+      await db.update(orgs).set({ remoteGroupId: adopted }).where(eq(orgs.id, orgId));
+      return { groupId: adopted };
+    }
     // meshtype 2 is a group of agent-managed machines, as opposed to Intel AMT
     // or agentless ones - the only kind this module deals in.
     const reply = await engineCall(cfg, "createmesh", { meshname: org.name, meshtype: 2 });

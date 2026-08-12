@@ -419,6 +419,88 @@ time.
 
 ---
 
+## 13. Making it yours
+
+Three surfaces carry someone else's branding out of the box, and they are worth
+very different amounts of effort.
+
+**The installer dialog and the tray app matter most.** A client's staff sees
+those, at the moment they are deciding whether this software is legitimate. A
+window headed "MeshCentral Agent" showing a stock globe is the single most
+expensive piece of borrowed branding in the whole system.
+
+**The web console matters least.** Engineers reach a machine from the portal,
+which deep-links straight to its desktop tab — nobody navigates the console but
+you. Style it enough that a stray visit isn't jarring, then stop.
+
+### Branding the installer and the tray app
+
+Put the artwork in `meshcentral-data` first — PNG for the agent, JPEG for the
+assistant, which is what each one is served as:
+
+```bash
+sudo curl -fsSL -o /opt/meshcentral/meshcentral-data/agent-logo.png "<url of a ~200x200 PNG>"
+```
+
+Then the settings, as a generator rather than an edit, for the paste reasons in
+section 7. Change the strings and run it as one block:
+
+```bash
+sudo python3 - <<'ENDBRAND'
+import json, pathlib
+p = pathlib.Path("/opt/meshcentral/meshcentral-data/config.json")
+c = json.loads(p.read_text())
+d = c["domains"][""]
+d["agentCustomization"] = {
+  "displayName": "Sierra Spectra Support",
+  "description": "Remote support for instrument systems serviced by Sierra Spectra.",
+  "companyName": "Sierra Spectra LLC",
+  "serviceName": "SierraSpectraSupport",       # Windows service name: no spaces or quotes
+  "installText": "Installing this lets a Sierra Spectra engineer work on this instrument PC.",
+  "image": "agent-logo.png",                   # PNG in meshcentral-data
+  "fileName": "SierraSpectraSupport",          # the downloaded .exe is named this
+}
+d["assistantCustomization"] = {
+  "title": "Sierra Spectra Support",
+  "image": "assistant-logo.jpg",               # JPEG in meshcentral-data
+  "fileName": "SierraSpectraAssistant",
+}
+p.write_text(json.dumps(c, indent=2) + chr(10))
+print("branding written")
+ENDBRAND
+```
+
+Restart, then **download a fresh installer** — these settings are baked into the
+executable when it is served, so machines already carrying an agent keep the old
+name and picture until they are reinstalled. `serviceName` in particular is only
+read at install time.
+
+**The tray icon is a separate program: MeshCentral Assistant.** The agent is a
+background service with no interface by design; the Assistant is the user-facing
+half — it sits in the notification area, shows when somebody is connected, and
+gives whoever is at the machine a way to ask for help. Install it alongside the
+agent on any PC where a human should be able to see us coming. It downloads from
+the device group's **Add Agent** panel, or from `/?meshaction=winassistant` while
+signed in. Note it ships as an x64 binary only: native on lab PCs, emulated on an
+ARM laptop.
+
+### Branding the console
+
+Config-level, in the same `domains[""]` object — `title`, `title2`,
+`titlePicture` (a file in `meshcentral-data`, replaces the text heading),
+`loginPicture`, `welcomeText`, `footer` (HTML), `siteStyle` (3 is the newer
+look), `nightMode`.
+
+Below that, the engine looks for `/opt/meshcentral/meshcentral-web/public/…` and
+`…/views/…` before its own copies, **per file** — so dropping in just
+`public/styles/style.css` overrides the stylesheet and everything else still
+comes from the package. Override as few files as you can live with: each one you
+copy is a file that stops receiving upstream fixes, silently, until you diff it
+after an upgrade. Stylesheets and images are usually worth it; the handlebars
+views rarely are.
+
+---
+
 ## Troubleshooting
 
 These are the failures actually hit standing this up the first time, in the order
