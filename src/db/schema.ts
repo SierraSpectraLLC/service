@@ -4,6 +4,7 @@
 // forgotten mirror is caught loudly - never shipped silently.
 import {
   pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique, numeric, jsonb,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
 
@@ -58,6 +59,16 @@ export const orgs = pgTable("orgs", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   kind: text("kind").notNull().default("client"), // client | provider
+  // Does this organization run a workspace of its own - staff, documents it
+  // signs, clients it creates? That is what makes it a TENANT, and it is the
+  // difference between the company selling the service and the companies buying
+  // it. One operator is the root (app_settings.operator_org_id): the company
+  // running the instance, whose staff support every tenant. See lib/tenants.
+  isOperator: boolean("is_operator").notNull().default(false),
+  // The operator this organization belongs to. Null for operators themselves.
+  // Cascade because a tenant's clients are part of that tenant: offboarding the
+  // operator takes its client list, their logins and their shares with it.
+  parentOrgId: integer("parent_org_id").references((): AnyPgColumn => orgs.id, { onDelete: "cascade" }),
   // Workspace appearance, set by the org's own editors: header color (hex)
   // and a logo shown beside the wordmark. Blank = the platform default look.
   themeColor: text("theme_color").notNull().default(""),
@@ -82,6 +93,25 @@ export const orgs = pgTable("orgs", {
   remoteGroupId: text("remote_group_id").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("org_name_unique").on(t.name)]);
+
+/**
+ * The tenant stamp.
+ *
+ * Every top-level record carries the operator whose workspace it belongs to, set
+ * once at creation and never derived: a system, a spare, a procedure, a
+ * stockroom. Staff see their own tenant's records plus whatever another operator
+ * has shared with them (see lib/tenants).
+ *
+ * Deliberately nullable, and NULL means "no tenant" rather than "every tenant".
+ * A record created without a stamp disappears from its own workspace - loud, and
+ * caught in testing - instead of appearing in everybody else's. Reads fail
+ * closed; only platform staff, who see every tenant anyway, can find one.
+ *
+ * ON DELETE CASCADE: offboarding an operator takes its work with it. The audit
+ * log is the one exception (set null), because history should outlive the
+ * account it describes.
+ */
+const tenantStamp = () => integer("tenant_org_id").references(() => orgs.id, { onDelete: "cascade" });
 
 // The visibility rule, one row per (system, org): an org sees exactly the
 // systems shared with it. `access` 'view' is read-only however the org's role
@@ -118,6 +148,7 @@ export const assetShares = pgTable("asset_shares", {
 // Stage vocabulary lives in src/lib/stages.ts; stored here as a text array.
 export const instruments = pgTable("instruments", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   externalId: text("external_id").unique().notNull(), // e.g. T-003, CASA-001
   client: text("client").notNull(),                   // Testen, GMI, Utah, Casablanca
   // Shop-defined grouping, e.g. "LC-MS", "GC", "N2 generator". Added on the fly
@@ -222,6 +253,13 @@ export const engagementRecords = pgTable("engagement_records", {
 export const houseMembers = pgTable("house_members", {
   id: serial("id").primaryKey(),
   email: text("email").notNull(),
+  // Which operator this person is staff of - the workspace they run, and the
+  // only tenant they are the house of. Null is a staff row with no company,
+  // which lib/tenants resolves to seeing nothing rather than seeing everything.
+  //
+  // The email unique index below is deliberately kept: a person is staff of one
+  // service company. An engineer who moves companies is moved, not duplicated.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("staff"), // owner | staff | none
   name: text("name").notNull().default(""),      // display only
   addedBy: text("added_by").notNull().default(""),
@@ -316,6 +354,7 @@ export const accessRequests = pgTable("access_requests", {
 // an inventory entity a catalog could join.
 export const procedures = pgTable("procedures", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   assetType: text("asset_type").notNull(),          // catalog module type or "system"
   kind: text("kind").notNull().default("task"),     // 'task' | 'test'
   name: text("name").notNull(),
@@ -357,6 +396,7 @@ export const pmTemplates = pgTable("pm_templates", {
 
 export const pmSchedules = pgTable("pm_schedules", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
@@ -386,6 +426,7 @@ export const pmSchedules = pgTable("pm_schedules", {
 // to both (system work tagged to the unit it happened on). At least one is set.
 export const tasks = pgTable("tasks", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   body: text("body").notNull().default(""),
@@ -490,6 +531,7 @@ export const parts = pgTable("parts", {
 
 export const attachments = pgTable("attachments", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }), // files for a standalone asset
   // Whose shelf a HOMELESS file sits on - one with no system and no unit.
@@ -550,6 +592,7 @@ export const signoffs = pgTable("signoffs", {
 // off either target. Exactly one of instrument_id / asset_id is set.
 export const eodUpdates = pgTable("eod_updates", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
   date: text("date").notNull(), // YYYY-MM-DD in shop time
@@ -574,6 +617,9 @@ export const eodUpdates = pgTable("eod_updates", {
 // Append-only. No update or delete paths exist in the app code, by design.
 export const auditLog = pgTable("audit_log", {
   id: serial("id").primaryKey(),
+  // History outlives the account it describes, so this one is set null on
+  // delete rather than cascade - see tenantStamp.
+  tenantOrgId: integer("tenant_org_id").references(() => orgs.id, { onDelete: "set null" }),
   actor: text("actor").notNull(),          // email or "sheet-sync"
   instrumentId: integer("instrument_id"),  // nullable: settings changes etc.
   // Set whenever the change concerns an asset, so the asset page can show the
@@ -604,6 +650,7 @@ export const sheetDiffs = pgTable("sheet_diffs", {
 // Feeds the per-system total and, with parts cost, the true cost of a refurb.
 export const timeEntries = pgTable("time_entries", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   // System, standalone asset, or both - at least one set, enforced by
   // resolveTarget like every other work row.
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
@@ -624,6 +671,7 @@ export const timeEntries = pgTable("time_entries", {
 // lifecycle rows in asset_events.
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }), // null = unattached
   kind: text("kind").notNull().default("Other"), // Pump, Autosampler, ... (vocabulary in lib/stages.ts)
   model: text("model").notNull().default(""),
@@ -700,6 +748,7 @@ export const discussionReads = pgTable("discussion_reads", {
 // Email optional - blank falls back to the STAFF_EMAILS heuristic in notify.ts.
 export const people = pgTable("people", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   name: text("name").notNull(),
   email: text("email").notNull().default(""),
   org: text("org").notNull().default("sierra"), // sierra | labzen
@@ -736,6 +785,7 @@ export const stageEvents = pgTable("stage_events", {
 // right answer for genuinely universal kit like a control PC.
 export const vocabTerms = pgTable("vocab_terms", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   kind: text("kind").notNull(),                        // 'category' | 'asset_type' | 'model'
   assetType: text("asset_type").notNull().default(""), // models only: which asset type
   name: text("name").notNull(),
@@ -802,6 +852,7 @@ export const notificationPrefs = pgTable("notification_prefs", {
 // client see the spares held on their behalf (see stockroomShares).
 export const stockrooms = pgTable("stockrooms", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   name: text("name").notNull(),
   kind: text("kind").notNull().default("shop"), // shop | client | mobile
   // Whose stock this is. Null = the house's own.
@@ -878,6 +929,7 @@ export const stockMoves = pgTable("stock_moves", {
 // so the count and the paperwork can't disagree.
 export const purchaseOrders = pgTable("purchase_orders", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   // Human-facing number, assigned at creation and never reused.
   number: text("number").notNull(),
   vendor: text("vendor").notNull(),
@@ -921,6 +973,7 @@ export const poLines = pgTable("po_lines", {
 // can't declare lower() indexes, so the mirror carries it alone.
 export const partPrices = pgTable("part_prices", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   partNumber: text("part_number").notNull(),
   vendor: text("vendor").notNull(),
   // The maker's own listing vs a third party. Breaks price ties in the OEM's
@@ -986,6 +1039,7 @@ export const templateItems = pgTable("template_items", {
 // referenced by sync, dashboard counts, and the EOD report.
 export const stageDefs = pgTable("stage_defs", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   name: text("name").notNull(),
   bg: text("bg").notNull(),
   fg: text("fg").notNull(),
@@ -1066,6 +1120,7 @@ export const appSettings = pgTable("app_settings", {
  */
 export const remoteDevices = pgTable("remote_devices", {
   id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
   // The system this PC drives, when it drives one. A pointer, so the device
   // survives the system being detached or deleted.
