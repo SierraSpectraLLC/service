@@ -28,7 +28,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention } from "@/lib/notify";
+import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -51,6 +51,7 @@ import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfter
 import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
+import { pmHandoff } from "@/lib/pmQueue";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
@@ -2932,6 +2933,115 @@ export async function connectRemoteDevice(
   const url = connectUrl(device.nodeId, { embedded: opts.embedded === true });
   if (typeof url !== "string") return url;
   return { url };
+}
+
+/**
+ * A client says something is wrong with their system.
+ *
+ * One press, and everything that should follow follows: the system is marked as
+ * needing maintenance, it lands in whoever services it's queue, a task exists to
+ * work from, the words are on the record as a post the client can add to, and the
+ * people who fix things are told. Attachments are uploaded first and passed in, so
+ * a photo of an error dialog arrives with the report rather than after it.
+ *
+ * The alternative was an email to somebody's inbox, which is where the last
+ * decade of these went.
+ */
+export async function reportIssue(instrumentId: number, data: {
+  severity: string; summary: string; details: string;
+  files?: { fileName: string; url: string; size: number; kind: string }[];
+}): Promise<{ error?: string; taskId?: number }> {
+  const u = await requireUser();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  // Anybody who can see the system may say something is wrong with it - reporting
+  // a fault is not editing a record, and a read-only account watching an
+  // instrument fail should not have to find somebody with more rights.
+  if (!(await canSeeSystemSafe(u, instrumentId))) return { error: "Not found" };
+  if (inst.archived) return { error: "That system is archived" };
+
+  const severity = ["Down", "Degraded", "Question"].includes(data.severity) ? data.severity : "Degraded";
+  const summary = data.summary.trim().slice(0, 160);
+  if (!summary) return { error: "Say briefly what is wrong" };
+  const details = data.details.trim().slice(0, 4000);
+  const files = (data.files ?? []).slice(0, 10);
+
+  const orgName = u.orgId === null ? (await getBrand()).operatorName : u.orgName || "a client";
+
+  // Marked as needing maintenance, without disturbing where it is in its build.
+  const stages = inst.stages.includes("Maintenance due") ? inst.stages : [...inst.stages, "Maintenance due"];
+  if (stages !== inst.stages) {
+    await db.update(instruments).set({ stages }).where(eq(instruments.id, instrumentId));
+    await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
+  }
+
+  // Something to work from, dated today, so it shows up as work rather than as a
+  // message somebody has to remember to act on.
+  const [task] = await db.insert(tasks).values({
+    instrumentId, assetId: null,
+    title: `${severity}: ${summary}`,
+    body: [details, `Reported by ${u.name || u.email} at ${orgName}.`].filter(Boolean).join("\n\n"),
+    dueDate: shopToday(), origin: "issue",
+  }).returning();
+
+  // The files, attached to the task so they read as evidence for it.
+  for (const f of files) {
+    await db.insert(attachments).values({
+      instrumentId, taskId: task.id, fileName: f.fileName.slice(0, 200), url: f.url,
+      size: f.size, kind: f.kind || "Other", uploadedBy: u.email,
+      description: `Reported with "${summary}"`, orgId: u.orgId,
+    });
+  }
+
+  // On the record as a conversation, which is the half they asked for: they can
+  // add to it, and so can we, without either side leaving the system.
+  await db.insert(discussionPosts).values({
+    instrumentId, body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
+    author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
+  });
+
+  // Into the queue of whoever services it, by the same rules due maintenance uses.
+  const shares = await db.select({ orgId: orgs.id, kind: orgs.kind })
+    .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
+    .where(eq(systemShares.instrumentId, instrumentId));
+  const [cfg] = await db.select({ operatorOrgId: appSettings.operatorOrgId })
+    .from(appSettings).where(eq(appSettings.id, 1));
+  const handoff = pmHandoff({
+    queueOrgId: inst.queueOrgId, operatorOrgId: cfg?.operatorOrgId ?? null,
+    shares, archived: inst.archived,
+  });
+  if (handoff.move) {
+    const brand = await getBrand();
+    const nameOf = async (orgId: number | null) => {
+      if (orgId === null) return brand.operatorName;
+      const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
+      return o?.name ?? "another organization";
+    };
+    const fromName = await nameOf(inst.queueOrgId);
+    const toName = await nameOf(handoff.toOrgId);
+    const why = `${severity.toLowerCase()} reported: ${summary}`;
+    await db.update(instruments)
+      .set({ queueOrgId: handoff.toOrgId, queueReason: why, queueSince: new Date() })
+      .where(eq(instruments.id, instrumentId));
+    await db.insert(queueEvents).values({
+      instrumentId, fromOrgId: inst.queueOrgId, toOrgId: handoff.toOrgId,
+      fromName, toName, reason: why, actor: u.email,
+    });
+  }
+
+  await audit({
+    actor: u.email, instrumentId, entityType: "issue", entityId: inst.externalId,
+    action: `${orgName} reported ${severity.toLowerCase()} on ${inst.externalId}: ${summary}`
+      + `${files.length ? ` (${files.length} file${files.length === 1 ? "" : "s"})` : ""}`,
+  });
+
+  await notifyIssueRaised({
+    to: await houseEmails(), externalId: inst.externalId, instrumentId, orgName,
+    severity, summary, details, reporter: u.name || u.email, files: files.length,
+  });
+
+  rev(instrumentId);
+  return { taskId: task.id };
 }
 
 /** Point a device at the system it drives, or clear the link. Staff only. */
