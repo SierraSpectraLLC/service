@@ -15,7 +15,7 @@ import {
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
 } from "@/db/schema";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
-import { applyProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
+import { applyProcedures, applySystemProcedures, backfillProcedure, generateDuePmTasks } from "@/lib/pmGenerate";
 import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -389,6 +389,8 @@ export async function createInstrument(
     });
   }
   await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email);
+  // Recurring upkeep that belongs to the instrument rather than to a unit in it.
+  await applySystemProcedures(row.id, shopToday(), u.email);
   rev(row.id);
   return row.id;
 }

@@ -204,10 +204,68 @@ export async function applyProcedures(assetId: number, today: string, actor: str
   return { created };
 }
 
-/** Backfill one recurring procedure across every unit of its type. */
+/**
+ * Stamp every recurring system-level procedure onto one system.
+ *
+ * The counterpart to applyProcedures, for upkeep that belongs to the instrument
+ * as a whole rather than to a unit inside it - an annual full-system PM, a
+ * quarterly calibration check. Called when a system is created, including when a
+ * lone unit is promoted to one.
+ *
+ * Deduped by procedure and by title, the same way the per-unit version is, so a
+ * hand-written schedule blocks the catalog's copy instead of doubling it.
+ */
+export async function applySystemProcedures(
+  instrumentId: number, today: string, actor: string,
+): Promise<{ created: number }> {
+  const [inst] = await db.select({ id: instruments.id, externalId: instruments.externalId })
+    .from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { created: 0 };
+  const rows = await db.select().from(procedures)
+    .where(and(eq(procedures.assetType, "system"), isNotNull(procedures.intervalDays)));
+  if (!rows.length) return { created: 0 };
+
+  const existing = await db.select().from(pmSchedules).where(eq(pmSchedules.instrumentId, instrumentId));
+  const titles = new Set(existing.map((s) => s.title.toLowerCase()));
+  const stamped = new Set(existing.flatMap((s) => (s.procedureId !== null ? [s.procedureId] : [])));
+
+  let created = 0;
+  for (const p of rows) {
+    if (stamped.has(p.id) || titles.has(p.name.toLowerCase())) continue;
+    const body = [p.kind === "test" ? summarizeItem(p) : "", p.notes].filter(Boolean).join("\n");
+    await db.insert(pmSchedules).values({
+      instrumentId, assetId: null,
+      title: p.name, body, everyDays: p.intervalDays!,
+      // A cadence out, not day one: a system being set up was just gone over.
+      nextDue: addDays(today, p.intervalDays!),
+      parts: serializeProcParts(parseProcParts(p.parts)),
+      procedureId: p.id, createdBy: actor,
+    });
+    created++;
+  }
+  if (created) {
+    await audit({
+      actor, instrumentId, entityType: "pm", entityId: inst.externalId,
+      action: `applied ${created} recurring system procedure${created === 1 ? "" : "s"} to ${inst.externalId}`,
+    });
+  }
+  return { created };
+}
+
+/**
+ * Backfill one recurring procedure across everything it applies to: every unit
+ * of its type, or every system when the procedure is system-level. Without the
+ * second half, adding an annual system PM would report that it reached nothing
+ * and quietly apply only to systems created afterwards.
+ */
 export async function backfillProcedure(assetType: string, today: string, actor: string): Promise<number> {
-  const fleet = await db.select({ id: assets.id }).from(assets).where(eq(assets.kind, assetType));
   let applied = 0;
+  if (assetType === "system") {
+    const fleet = await db.select({ id: instruments.id }).from(instruments).where(eq(instruments.archived, false));
+    for (const i of fleet) applied += (await applySystemProcedures(i.id, today, actor)).created;
+    return applied;
+  }
+  const fleet = await db.select({ id: assets.id }).from(assets).where(eq(assets.kind, assetType));
   for (const a of fleet) applied += (await applyProcedures(a.id, today, actor)).created;
   return applied;
 }

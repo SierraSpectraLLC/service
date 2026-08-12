@@ -103,12 +103,15 @@ function ScopeField({ scope, options, onChange }: {
  * row's badges say everything - kind, when it fires, scope, parts - and every
  * badge maps to a control in the one sheet that both adds and edits.
  */
-export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
+export default function ProceduresPanel({ items, assetTypes, modelOptions, categories, categoriesByType }: {
   items: ProcedureRow[];
   assetTypes: string[]; // from Settings > Catalog
   modelOptions: Record<string, string[]>;
+  categories: string[];                            // system categories, from the catalog
+  categoriesByType: Record<string, string[]>;      // which categories each module type serves
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [openBand, setOpenBand] = useState<string | null>("system");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -134,6 +137,27 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
       .filter((t) => t && t !== "system")
       .map((k) => ({ type: k, label: k })),
   ];
+
+  // The Catalog tab's own shape: category, then module type. A type that serves
+  // more than one category appears under each, exactly as a model does there -
+  // it is the same underlying list either way, so an edit or a reorder in one
+  // place is an edit in both.
+  const BANDS = useMemo(() => {
+    const typesOf = (cat: string) =>
+      GROUPS.filter((g) => g.type !== "system" && (categoriesByType[g.type] ?? []).includes(cat))
+        .map((g) => g.type);
+    const spoken = new Set(categories.flatMap(typesOf));
+    const orphans = GROUPS.filter((g) => g.type !== "system" && !spoken.has(g.type)).map((g) => g.type);
+    return [
+      { key: "system", label: "System", types: ["system"], subtitle: "Runs once per instrument, not per asset." },
+      ...categories.map((c) => ({ key: c, label: c, types: typesOf(c), subtitle: "" }))
+        .filter((b) => b.types.length),
+      ...(orphans.length
+        ? [{ key: "__loose", label: "Not tied to a category", types: orphans, subtitle: "Module types no catalog model places yet." }]
+        : []),
+    ];
+  // GROUPS is derived from the same inputs, so recomputing on those is enough.
+  }, [categories, categoriesByType, assetTypes, items]);
 
   const grouped = useMemo(() => {
     const by = new Map<string, ProcedureRow[]>();
@@ -198,7 +222,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
   };
 
   const isSystem = sheet?.assetType === "system";
-  const effectiveInterval = draft.repeats && !isSystem ? parseInt(draft.intervalDays) || null : null;
+  const effectiveInterval = draft.repeats ? parseInt(draft.intervalDays) || null : null;
   const timingValid = draft.runsAtIntake || effectiveInterval !== null;
 
   // Which timing change is in flight, for the edit-time notice. Only shown
@@ -219,7 +243,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
       resultType: draft.resultType, target: draft.target, tolerancePct: draft.tolerancePct,
       requiresNote: draft.requiresNote, consumesPart: draft.consumesPart,
       runsAtIntake: draft.runsAtIntake, required: draft.required,
-      intervalDays: draft.repeats && !isSystem ? draft.intervalDays : null,
+      intervalDays: draft.repeats ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
     };
     startTransition(async () => {
@@ -362,11 +386,29 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
       </div>
       {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
-      {GROUPS.map((g) => {
+      {BANDS.map((band) => {
+        const bandRows = band.types.flatMap((ty) => grouped.get(ty) ?? []);
+        const bandOpen = openBand === band.key;
+        const bandRecur = bandRows.filter((i) => i.intervalDays !== null).length;
+        return (
+        <div key={band.key} style={{ marginBottom: 10 }}>
+          <div className="row-hover" onClick={() => setOpenBand(bandOpen ? null : band.key)}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", cursor: "pointer", borderBottom: "1px solid var(--line)" }}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>{band.label}</span>
+            <span className="mut" style={{ fontSize: 11 }}>
+              {bandRows.length
+                ? `${bandRows.length} procedure${bandRows.length === 1 ? "" : "s"}${bandRecur ? ` · ${bandRecur} recurring` : ""} · ${band.types.length} type${band.types.length === 1 ? "" : "s"}`
+                : `no procedures yet · ${band.types.length} type${band.types.length === 1 ? "" : "s"}`}
+            </span>
+            <span className="mut" style={{ marginLeft: "auto", fontSize: 12 }}>{bandOpen ? "▴" : "▾"}</span>
+          </div>
+          {bandOpen && <div style={{ padding: "10px 0 2px" }}>{band.types.map((bandType) => {
+        const g = GROUPS.find((x) => x.type === bandType) ?? { type: bandType, label: bandType, subtitle: undefined };
+        const sectionKey = `${band.key}::${g.type}`;
         const all = grouped.get(g.type) ?? [];
         const list = all.filter((i) => passesFilter(i, filter));
         const hidden = all.length - list.length;
-        const open = expanded === g.type;
+        const open = expanded === sectionKey;
         const intakeN = all.filter((i) => i.runsAtIntake).length;
         const recurN = all.filter((i) => i.intervalDays !== null).length;
         const counts = all.length
@@ -374,7 +416,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
           : "none yet";
         return (
           <div key={g.type} style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
-            <div className="row-hover" onClick={() => setExpanded(open ? null : g.type)}
+            <div className="row-hover" onClick={() => setExpanded(open ? null : sectionKey)}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: "pointer" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ fontSize: 13, fontWeight: 700 }}>{g.label}</span>
@@ -409,6 +451,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
               </div>
             )}
           </div>
+        );
+          })}</div>}
+        </div>
         );
       })}
 
@@ -494,12 +539,11 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
                   onChange={(e) => setDraft({ ...draft, runsAtIntake: e.target.checked })} />
                 At intake - created once when a {isSystem ? "system" : "unit of this type"} is added
               </label>
-              {!isSystem ? (
-                <>
+              <>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "8px 0 0" }}>
                     <input type="checkbox" checked={draft.repeats} style={{ width: 15, height: 15 }}
                       onChange={(e) => setDraft({ ...draft, repeats: e.target.checked })} />
-                    Repeats - scheduled on every unit, existing and new
+                    Repeats - scheduled on every {isSystem ? "system" : "unit"}, existing and new
                   </label>
                   {draft.repeats && (
                     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8, paddingLeft: 21 }}>
@@ -517,11 +561,6 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions }: {
                     </div>
                   )}
                 </>
-              ) : (
-                <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
-                  Recurring work is scheduled per module - define it on the module types.
-                </div>
-              )}
             </div>
 
             <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "0 0 10px", fontWeight: 400, color: "var(--ink)" }}>

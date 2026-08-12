@@ -27,10 +27,19 @@ export default async function ProceduresPage() {
 
   const assetTypes = terms.filter((t) => t.kind === "asset_type").map((t) => t.name);
   const modelOptions: Record<string, string[]> = {};
+  // Which system categories each module type turns up in, taken from the models
+  // in the catalog - the same derivation the Catalog tab makes, so both pages
+  // group equipment the same way instead of two orders of the same fleet.
+  const categoriesByType: Record<string, string[]> = {};
   for (const t of terms) {
     if (t.kind !== "model" || !t.assetType) continue;
     (modelOptions[t.assetType] ??= []).push(t.name);
+    for (const c of t.categories) {
+      const seen = (categoriesByType[t.assetType] ??= []);
+      if (!seen.includes(c)) seen.push(c);
+    }
   }
+  const categories = terms.filter((t) => t.kind === "category").map((t) => t.name);
 
   return (
     <div className="container page">
@@ -38,6 +47,8 @@ export default async function ProceduresPage() {
       <ProceduresPanel
         assetTypes={assetTypes}
         modelOptions={modelOptions}
+        categories={categories}
+        categoriesByType={categoriesByType}
         items={rows.map((r) => ({
           id: r.id, assetType: r.assetType, kind: r.kind, name: r.name, notes: r.notes, position: r.position,
           resultType: r.resultType, target: r.target, tolerancePct: r.tolerancePct,
