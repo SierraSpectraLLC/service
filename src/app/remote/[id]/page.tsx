@@ -5,9 +5,8 @@ import { db } from "@/db";
 import { instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
-import { deviceWithOrg, viewerCredentials } from "@/lib/remote";
+import { deviceWithOrg } from "@/lib/remote";
 import { connectRemoteDevice } from "@/app/actions";
-import RemoteDesktop from "@/components/RemoteDesktop";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +24,7 @@ export const dynamic = "force-dynamic";
  * hidden. Everything that decides whether this is allowed still happens in
  * connectRemoteDevice, once, server-side, before the frame has a URL to load.
  */
-export default async function RemoteSessionPage(
-  { params, searchParams }: {
-    params: Promise<{ id: string }>;
-    searchParams: Promise<{ classic?: string }>;
-  },
-) {
+export default async function RemoteSessionPage({ params }: { params: Promise<{ id: string }> }) {
   try { await requireUser(); } catch { redirect("/login"); }
   const { remote: moduleOn } = await getModules();
   if (!moduleOn) redirect("/");
@@ -52,13 +46,6 @@ export default async function RemoteSessionPage(
   // empty frame and leaves somebody guessing.
   const opened = await connectRemoteDevice(deviceId, { embedded: true });
 
-  // Our own viewer by default. `?classic=1` falls back to the engine's page in a
-  // frame - kept because the viewer is the newer of the two paths and a demo
-  // should never hinge on the newer of two paths.
-  const classic = (await searchParams).classic === "1";
-  const creds = classic || opened.error ? null : viewerCredentials(device.nodeId);
-  const viewer = creds && !("error" in creds) ? creds : null;
-
   return (
     <div className="container page">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
@@ -72,26 +59,19 @@ export default async function RemoteSessionPage(
             on {system.externalId}
           </Link>
         )}
-        <span style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "baseline" }}>
-          <Link href={viewer ? `/remote/${deviceId}?classic=1` : `/remote/${deviceId}`}
-            className="mut" style={{ fontSize: 11 }}>
-            {viewer ? "classic view" : "back to the new viewer"}
-          </Link>
-          {opened.url && (
-            <a href={opened.url} target="_blank" rel="noreferrer" className="mut" style={{ fontSize: 11 }}>
-              open in a new window
-            </a>
-          )}
-        </span>
+        {opened.url && (
+          <a href={opened.url} target="_blank" rel="noreferrer" className="mut"
+            style={{ marginLeft: "auto", fontSize: 11 }}>
+            open in a new window
+          </a>
+        )}
       </div>
 
       {opened.error && (
         <div className="card" style={{ fontSize: 13, color: "#A32D2D" }}>{opened.error}</div>
       )}
 
-      {viewer && <RemoteDesktop creds={viewer} machineName={device.name || "this machine"} />}
-
-      {!viewer && opened.url && (
+      {opened.url && (
         <iframe
           src={opened.url}
           title={`Remote desktop for ${device.name || "this machine"}`}

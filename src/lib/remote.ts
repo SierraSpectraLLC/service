@@ -396,45 +396,6 @@ export function decodeEngineCookie(
   }
 }
 
-/**
- * What the in-portal viewer needs to talk to the relay directly: where the host
- * is, a token for its control channel, and the cookie the relay itself checks.
- *
- * Two different payloads because the engine reads two different shapes - `{u, a}`
- * for a login, `{userid, domainid}` for a relay - and both are keyed on the same
- * secret we already hold. That is what makes the viewer possible without an admin
- * round trip: we mint both here, the browser presents them, and no session cookie
- * of the engine's is involved at all.
- *
- * `ip` is deliberately omitted from the relay cookie. The engine binds a cookie to
- * an address only when the field is present, and the address we could stamp is a
- * serverless function's, not the engineer's browser's.
- */
-export function viewerCredentials(nodeId: string): {
-  relayBase: string; controlUrl: string; relayAuth: string; nodeId: string;
-} | { error: string } {
-  const cfg = remoteConfig();
-  if (!cfg) return { error: NOT_CONFIGURED };
-  try {
-    const ws = cfg.url.replace(/^http/, "ws");
-    const control = mintEngineToken(cfg, CONNECT_TTL_SECONDS);
-    const relayAuth = encodeEngineCookie(
-      { userid: engineUserId(cfg.adminUser), domainid: "", expire: 2 }, cfg.loginKey,
-    );
-    return {
-      relayBase: ws,
-      controlUrl: `${ws}/control.ashx?auth=${encodeURIComponent(control)}`,
-      relayAuth,
-      // Full id here, unlike the page URL: the relay and the tunnel request both
-      // name the machine as `node/<domain>/<hash>`, and only the console's own
-      // page prefixes a bare one.
-      nodeId,
-    };
-  } catch (e) {
-    return { error: (e as Error).message };
-  }
-}
-
 /** A login token for the portal's service identity, good for `ttlSeconds`. */
 export function mintEngineToken(cfg: RemoteConfig, ttlSeconds: number, nowMs: number = Date.now()): string {
   return encodeEngineCookie({
