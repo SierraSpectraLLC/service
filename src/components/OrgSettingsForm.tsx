@@ -303,14 +303,32 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               ? `${org.name} operates this instance, so it is named on sign-off packets and reports.`
               : `${org.name} is one of the organizations on this instance.`}
           </div>
-          {showSheetSync && org.kind === "client" && (
+          {/* Offered to clients, and always to whoever is currently syncing: an
+              organization switched from client to provider while named here would
+              otherwise take the only control with it. */}
+          {showSheetSync && (org.kind === "client" || org.isSheetOrg) && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
               <span style={{ fontSize: 13 }}>Google Sheet tracker</span>
               {org.isSheetOrg ? (
-                <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>syncing with {org.name}</span>
+                <>
+                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>syncing with {org.name}</span>
+                  {/* The way back out. Setting the tracker was reversible in the
+                      action all along; there was simply no control for it, so the
+                      first organization named here became permanent. */}
+                  <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
+                    onClick={() => {
+                      if (!window.confirm(
+                        `Stop syncing the tracker sheet with ${org.name}? Their systems stay exactly as they are `
+                        + "- only the sheet stops being read and written.",
+                      )) return;
+                      startTransition(async () => { await setSheetOrg(null); });
+                    }}>stop syncing</button>
+                </>
               ) : (
                 <button className="btn sm" disabled={pending}
-                  onClick={() => startTransition(() => setSheetOrg(org.id))}>use {org.name}&apos;s sheet</button>
+                  onClick={() => startTransition(async () => { await setSheetOrg(org.id); })}>
+                  use {org.name}&apos;s sheet
+                </button>
               )}
             </div>
           )}
