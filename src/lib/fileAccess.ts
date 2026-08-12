@@ -5,7 +5,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { attachments, instruments, assets, engagementRecords } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
-import { isHouse, canSeeSystem, assetAccess } from "@/lib/tenancy";
+import { canSeeSystem, assetAccess } from "@/lib/tenancy";
+import { houseOfRecord } from "@/lib/tenants";
 import type { SystemDossier } from "@/lib/dossier";
 
 export async function mayReadAttachment(file: typeof attachments.$inferSelect): Promise<boolean> {
@@ -22,7 +23,10 @@ export async function mayReadAttachment(file: typeof attachments.$inferSelect): 
 
   const user = await currentUser();
   if (!user) return false;
-  if (isHouse(user.role)) return true;
+  // Staff of the workspace the file belongs to. Being staff somewhere else is
+  // not a key to this file: on a shared instance an id would otherwise be
+  // enough to read another service company's documents.
+  if (houseOfRecord(user, file.tenantOrgId)) return true;
 
   if (file.instrumentId !== null && (await canSeeSystem(user, file.instrumentId))) return true;
   if (file.assetId !== null && (await assetAccess(user, file.assetId)).see) return true;

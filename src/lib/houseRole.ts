@@ -17,7 +17,7 @@
 // them, so turning this on breaks nothing and needs no migration.
 
 export type HouseRole = "owner" | "staff";
-export type MemberRow = { email: string; role: string };
+export type MemberRow = { email: string; role: string; orgId?: number | null };
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -51,6 +51,25 @@ export function houseRoleFor(email: string, envStaff: string[], members: MemberR
   if (row) return row.role === "owner" ? "owner" : row.role === "staff" ? "staff" : null;
   // Legacy: still listed in the environment, nothing said otherwise.
   return envStaff.map(norm).includes(e) ? "staff" : null;
+}
+
+/**
+ * The house role AND which service company it is held at - the identity a
+ * multi-operator instance needs, where "staff" is meaningless without "of whom".
+ *
+ * A member row names its operator. Anyone resolved from the environment instead
+ * (the root owner, and legacy STAFF_EMAILS entries with no row) falls back to
+ * `rootOrgId`, the operator that runs the instance: those two mechanisms exist as
+ * lockout insurance for that company, and inventing a different answer here would
+ * be a locked-out owner.
+ */
+export function houseIdentityFor(
+  email: string, envStaff: string[], members: MemberRow[], rootOrgId: number | null,
+): { role: HouseRole; orgId: number | null } | null {
+  const role = houseRoleFor(email, envStaff, members);
+  if (!role) return null;
+  const row = members.find((m) => norm(m.email) === norm(email));
+  return { role, orgId: row ? row.orgId ?? null : rootOrgId };
 }
 
 /** Every house email, for digests and staff notifications. */

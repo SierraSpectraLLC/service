@@ -9,6 +9,7 @@
 // ever needed access still has it, it is probably on a label, nothing is
 // revocable without walking to the machine, and no record exists of who
 // connected. Every rule below exists to invert one of those.
+import { houseOfRecord } from "@/lib/tenants";
 
 /** Whether a session needs a human at the far end to say yes. */
 export type ConsentMode = "unattended" | "consent";
@@ -68,7 +69,12 @@ export function consentModeFor(
   return { mode: "unattended", why: "the system is still in the shop" };
 }
 
-export type Viewer = { role: string; orgId: number | null };
+// The tenancy fields are optional so a client component can pass its props
+// straight in; lib/tenants treats their absence as "tenant not in hand".
+export type Viewer = {
+  role: string; orgId: number | null;
+  operatorOrgId?: number | null; rootOperatorOrgId?: number | null;
+};
 
 export type Ability = {
   /** The device appears in their list at all. */
@@ -89,8 +95,6 @@ export type Ability = {
 
 const DENIED: Ability = { see: false, connect: false, enroll: false, unlink: false, refusal: "" };
 
-const isHouse = (role: string) => role === "owner" || role === "staff";
-
 /**
  * `personaActive` is the owner walking the portal as one of their clients. Such
  * a session may LOOK at the client's remote view - that is the whole point of
@@ -104,12 +108,15 @@ const isHouse = (role: string) => role === "owner" || role === "staff";
 export function remoteAbility(
   viewer: Viewer,
   ctx: { moduleOn: boolean; personaActive: boolean },
-  device: { orgId: number | null },
+  device: { orgId: number | null; tenantOrgId?: number | null },
   org: { remoteAccessEnabled: boolean },
 ): Ability {
   if (!ctx.moduleOn) return DENIED;
 
-  if (isHouse(viewer.role)) {
+  // The house of the workspace the machine was enrolled in. Reaching into a lab
+  // PC is the sharpest thing this product does, so it is the one place where
+  // "staff of some other service company" must mean nothing at all.
+  if (houseOfRecord(viewer, device.tenantOrgId)) {
     return {
       see: true, enroll: true, unlink: true,
       connect: !ctx.personaActive,
@@ -133,6 +140,8 @@ export function remoteAbility(
  * `remoteAbility` because enrollment happens before any device exists, so there
  * is nothing to pass as the device.
  */
-export function mayEnroll(viewer: Viewer, ctx: { moduleOn: boolean }): boolean {
-  return ctx.moduleOn && isHouse(viewer.role);
+export function mayEnroll(
+  viewer: Viewer, ctx: { moduleOn: boolean }, target?: { tenantOrgId?: number | null },
+): boolean {
+  return ctx.moduleOn && houseOfRecord(viewer, target?.tenantOrgId);
 }

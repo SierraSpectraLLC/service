@@ -4,7 +4,8 @@ import Link from "next/link";
 import { db } from "@/db";
 import { engagementRecords } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
+import { tenantOfOrg, tenantOfSystem } from "@/lib/tenancy";
+import { houseOfRecord } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import type { SystemDossier } from "@/lib/dossier";
 import ActivityFeed from "@/components/ActivityFeed";
@@ -27,8 +28,15 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
   const recId = parseInt(id);
   if (isNaN(recId)) notFound();
   const [rec] = await db.select().from(engagementRecords).where(eq(engagementRecords.id, recId));
-  // Yours or staff's - another org's record doesn't exist as far as you know.
-  if (!rec || (!isHouse(user.role) && rec.orgId !== user.orgId)) notFound();
+  if (!rec) notFound();
+  // Yours, or staff of the workspace that wrote it. A dossier is the whole
+  // history of a system - costs, files, hours - so "staff somewhere" is not
+  // enough: it has to be staff HERE. The record follows its system's tenant, or
+  // the holder's when the system is gone.
+  const recTenant = rec.instrumentId !== null
+    ? await tenantOfSystem(rec.instrumentId)
+    : await tenantOfOrg(rec.orgId);
+  if (!houseOfRecord(user, recTenant) && rec.orgId !== user.orgId) notFound();
   const d = rec.data as SystemDossier;
   const handoff = rec.kind === "handoff";
   // A superseded record still reads - it is evidence, and someone may have

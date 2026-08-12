@@ -3,7 +3,7 @@
 // to make the next move. Pure, so the dashboard, the system page and the
 // reports all answer the question the same way.
 import type { Role } from "@/lib/authz";
-import { isHouse } from "@/lib/houseRole";
+import { houseOfRecord } from "@/lib/tenants";
 
 export type QueueState = {
   /** Null = the operator's own queue. */
@@ -26,10 +26,12 @@ export function daysSince(since: Date, now: Date): number {
  * with the client must not read as work sitting on the shop's bench.
  */
 export function queueView(
-  viewer: { role: Role; orgId: number | null },
-  state: Pick<QueueState, "queueOrgId">,
+  viewer: { role: Role; orgId: number | null; operatorOrgId?: number | null; rootOperatorOrgId?: number | null },
+  state: Pick<QueueState, "queueOrgId"> & { tenantOrgId?: number | null },
 ): "mine" | "elsewhere" {
-  if (state.queueOrgId === null) return isHouse(viewer.role) ? "mine" : "elsewhere";
+  // An empty queue means "with the service company whose system this is", which
+  // is one company - not every company with staff.
+  if (state.queueOrgId === null) return houseOfRecord(viewer, state.tenantOrgId) ? "mine" : "elsewhere";
   return viewer.orgId !== null && viewer.orgId === state.queueOrgId ? "mine" : "elsewhere";
 }
 
@@ -40,11 +42,11 @@ export function queueView(
  * system is a decision about work, not a read.
  */
 export function canKick(
-  viewer: { role: Role; orgId: number | null },
-  system: { queueOrgId: number | null; ownerOrgId: number | null; archived: boolean },
+  viewer: { role: Role; orgId: number | null; operatorOrgId?: number | null; rootOperatorOrgId?: number | null },
+  system: { queueOrgId: number | null; ownerOrgId: number | null; archived: boolean; tenantOrgId?: number | null },
 ): boolean {
   if (system.archived) return false;
-  if (isHouse(viewer.role)) return true;
+  if (houseOfRecord(viewer, system.tenantOrgId)) return true;
   if (viewer.role !== "client_editor" || viewer.orgId === null) return false;
   return viewer.orgId === system.queueOrgId || viewer.orgId === system.ownerOrgId;
 }

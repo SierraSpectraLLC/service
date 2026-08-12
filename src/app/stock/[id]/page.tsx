@@ -107,7 +107,7 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
   const ownerName = room.orgId === null ? "us" : orgRows.find((o) => o.id === room.orgId)?.name ?? "an unknown organization";
   // What stock cost is the room owner's business, redacted by the same rule as
   // part costs on a shared system.
-  const showCosts = canSeeCosts(user, room.orgId);
+  const showCosts = canSeeCosts(user, room.orgId, room.tenantOrgId);
   const totals = stockTotals(items);
   const short = reorderLines(items);
   const knownParts = [...new Set([...priceRows.map((p) => p.partNumber), ...items.map((i) => i.partNumber)])].sort();

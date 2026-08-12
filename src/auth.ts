@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { users, accounts, sessions, verificationTokens, appSettings, clientAllowlist, orgs } from "@/db/schema";
 
 import { parseList, matchesEntry, roleForEmail } from "@/lib/allowMatch";
-import { houseRoleForEmail } from "@/lib/house";
+import { houseIdentityForEmail, houseRoleForEmail, rootOperatorOrgId } from "@/lib/house";
 
 export { parseList, matchesEntry, roleForEmail };
 
@@ -129,12 +129,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // in BOTH directions. Only ever promoting would mean a revoked owner kept
       // their powers until someone thought to edit the row by hand.
       const email = user.email?.toLowerCase() || "";
-      const houseRole = await houseRoleForEmail(email);
+      const house = await houseIdentityForEmail(email);
       const stored = (user as { role?: string }).role || "client_viewer";
-      let role = houseRole ?? "client_viewer";
+      let role = house?.role ?? "client_viewer";
       if (stored !== role) {
         await db.update(users).set({ role }).where(eq(users.id, user.id));
       }
+      // Which service company this staff member runs, and which one runs the
+      // instance. "Staff" means nothing on its own once there is more than one
+      // operator - see lib/tenants.
+      (session.user as { operatorOrgId?: number | null }).operatorOrgId = house?.orgId ?? null;
+      (session.user as { rootOperatorOrgId?: number | null }).rootOperatorOrgId = house?.rootOrgId
+        ?? await rootOperatorOrgId();
       // Clients are scoped to one organization; staff and owner are the house
       // and see everything, so they carry no org. Editor vs viewer comes from
       // the person's own allowlist entry, resolved fresh on every read so a

@@ -83,7 +83,7 @@ export default async function RemotePage() {
     const system = d.instrumentId === null ? null : systemById.get(d.instrumentId) ?? null;
     const ability = remoteAbility(
       user, { moduleOn, personaActive: persona !== null },
-      { orgId: d.orgId }, { remoteAccessEnabled: org?.remoteAccessEnabled ?? false },
+      { orgId: d.orgId, tenantOrgId: d.tenantOrgId }, { remoteAccessEnabled: org?.remoteAccessEnabled ?? false },
     );
     const consent = consentModeFor(d, system ? { ownerOrgId: system.ownerOrgId, stages: system.stages } : null);
     return {

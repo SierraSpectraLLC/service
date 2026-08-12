@@ -35,7 +35,10 @@ import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
 import { storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
-import { requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner, viewContext, VIEW_AS_COOKIE, type SessionUser } from "@/lib/authz";
+import {
+  houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner,
+  tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
+} from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen } from "@/lib/stages";
@@ -1545,6 +1548,24 @@ async function costOwnerOrg(row: { instrumentId: number | null; assetId?: number
   return null;
 }
 
+/**
+ * Which tenant a piece of work belongs to - the workspace of the service company
+ * whose record it is. Read alongside the cost owner, because the two together are
+ * what decide whether a viewer sees a price: their own tenant's, or one they paid
+ * for. See lib/redact.
+ */
+async function tenantOfWork(row: { instrumentId: number | null; assetId?: number | null }): Promise<number | null> {
+  if (row.instrumentId !== null) {
+    const [i] = await db.select({ tenantOrgId: instruments.tenantOrgId }).from(instruments).where(eq(instruments.id, row.instrumentId));
+    return i?.tenantOrgId ?? null;
+  }
+  if (row.assetId) {
+    const [a] = await db.select({ tenantOrgId: assets.tenantOrgId }).from(assets).where(eq(assets.id, row.assetId));
+    return a?.tenantOrgId ?? null;
+  }
+  return null;
+}
+
 /** Normalize client-supplied kind/specs so only well-formed values are stored. */
 function cleanPartInput(data: PartInput): PartInput {
   return {
@@ -1575,8 +1596,10 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   if (!data.name.trim()) return { error: "Name required" };
   const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: raw.assetId ?? target.assetId ?? null });
   if ("error" in t0) return t0;
-  const payer = await costOwnerOrg(t0);
-  if (!isHouse(u.role) && !canSeeCosts(u, payer)) { data.cost = ""; data.po = ""; }
+  const [payer, tenant] = await Promise.all([costOwnerOrg(t0), tenantOfWork(t0)]);
+  // Staff of the tenant see prices; a partner from another workspace does not,
+  // however senior they are at their own company.
+  if (!canSeeCosts(u, payer, tenant)) { data.cost = ""; data.po = ""; }
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
   const taggedAsset = t0.asset;
   const [p] = await db.insert(parts).values({
@@ -1615,7 +1638,9 @@ export async function updatePart(partId: number, raw: PartInput) {
   const assetId = retagged ? taggedAsset?.id ?? null : before.assetId;
   await assertWorkEditable(u, before);
   // An editor who can't see costs must not overwrite them blind.
-  if (!isHouse(u.role) && !canSeeCosts(u, await costOwnerOrg(before))) { data.cost = before.cost; data.po = before.po; }
+  if (!canSeeCosts(u, await costOwnerOrg(before), await tenantOfWork(before))) {
+    data.cost = before.cost; data.po = before.po;
+  }
   await db.update(parts).set({
     ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim(),
     costCents: parseMoney(data.cost),
@@ -2904,7 +2929,7 @@ export async function connectRemoteDevice(
   const { persona } = await viewContext();
   const ability = remoteAbility(
     u, { moduleOn, personaActive: persona !== null },
-    { orgId: device.orgId }, { remoteAccessEnabled: row.orgRemote ?? false },
+    { orgId: device.orgId, tenantOrgId: device.tenantOrgId }, { remoteAccessEnabled: row.orgRemote ?? false },
   );
   if (!ability.see) return { error: "Not found" };
   if (!ability.connect) return { error: ability.refusal || "You can't connect to this machine." };
@@ -3409,7 +3434,11 @@ export async function shareSystem(instrumentId: number, orgId: number, access: s
   if (!inst) return { error: "Not found" };
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Pick an organization" };
-  if (!isHouse(u.role)) {
+  // The house of THIS system's workspace shares it with anyone. Another
+  // operator's staff, invited onto it, follow the client rules below - they are a
+  // provider here, and a provider does not hand out access to somebody else's
+  // instrument.
+  if (!houseOf(u, inst.tenantOrgId)) {
     // An org may only add providers, only to systems it can edit, and never
     // itself (which would be a self-granted upgrade).
     try { await assertSystemEditable(u, instrumentId); } catch { return { error: "Not found" }; }
@@ -3457,7 +3486,7 @@ export async function unshareSystem(instrumentId: number, orgId: number): Promis
   if (!inst) return { error: "Not found" };
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
-  if (!isHouse(u.role)) {
+  if (!houseOf(u, inst.tenantOrgId)) {
     try { await assertSystemEditable(u, instrumentId); } catch { return { error: "Not found" }; }
     // An org can withdraw a provider it brought in, but not its own access
     // (that's the house's call) and not another client's.
@@ -3926,7 +3955,7 @@ export async function setViewAs(orgId: number | null, mode: "editor" | "viewer" 
 async function assetShareGate(u: SessionUser, assetId: number, org: { id: number; kind: string }): Promise<{ error?: string; asset?: typeof assets.$inferSelect }> {
   const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!asset) return { error: "Not found" };
-  if (!isHouse(u.role)) {
+  if (!houseOf(u, asset.tenantOrgId)) {
     const ownerEditor = asset.ownerOrgId !== null && asset.ownerOrgId === u.orgId && u.role === "client_editor";
     if (!ownerEditor) return { error: "Not found" };
     if (org.kind !== "provider") return { error: "You can only bring in a service provider" };

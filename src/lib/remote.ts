@@ -312,6 +312,7 @@ export async function linkedDevice(instrumentId: number) {
     id: remoteDevices.id,
     name: remoteDevices.name,
     orgId: remoteDevices.orgId,
+    tenantOrgId: remoteDevices.tenantOrgId,
     lastSeenAt: remoteDevices.lastSeenAt,
     consentOverride: remoteDevices.consentOverride,
     instrumentId: remoteDevices.instrumentId,

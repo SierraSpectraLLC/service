@@ -102,6 +102,30 @@ export function isHouseOf(v: TenantViewer, tenantOrgId: number | null): boolean 
 }
 
 /**
+ * The conversion primitive, for the places that used to ask isHouse(role).
+ *
+ * A viewer here may be a partially-shaped one - a client component's props, a
+ * test's literal - so the tenancy fields are optional. `tenantOrgId` of
+ * `undefined` means the caller genuinely does not have the record's tenant in
+ * hand and keeps the pre-tenancy answer (any staff is the house). That escape
+ * hatch is deliberate and greppable: it should shrink over time, and every use of
+ * it is a place where one operator's staff still answers as another's.
+ */
+export type MaybeTenantViewer = {
+  role: string; orgId: number | null;
+  operatorOrgId?: number | null; rootOperatorOrgId?: number | null;
+};
+
+export function houseOfRecord(v: MaybeTenantViewer, tenantOrgId: number | null | undefined): boolean {
+  if (tenantOrgId === undefined) return isStaffRole(v.role);
+  return isHouseOf({
+    role: v.role, orgId: v.orgId,
+    operatorOrgId: v.operatorOrgId ?? null,
+    rootOperatorOrgId: v.rootOperatorOrgId ?? null,
+  }, tenantOrgId);
+}
+
+/**
  * What a viewer may see.
  *
  * `{ all: true }` is platform staff - no filter at all, as the house had before

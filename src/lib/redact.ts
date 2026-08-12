@@ -4,10 +4,25 @@
 // above all - sees them blank. Vendor stays visible: it says where a part came
 // from, not what was paid.
 import type { SessionUser } from "@/lib/authz";
-import { isHouse } from "@/lib/houseRole";
+import { houseOfRecord } from "@/lib/tenants";
 
-export function canSeeCosts(user: Pick<SessionUser, "role" | "orgId">, ownerOrgId: number | null): boolean {
-  if (isHouse(user.role)) return true;
+export type CostViewer = Pick<SessionUser, "role" | "orgId">
+  & Partial<Pick<SessionUser, "operatorOrgId" | "rootOperatorOrgId">>;
+
+/**
+ * `tenantOrgId` is the record's own tenant, and passing it is what keeps this
+ * honest on an instance with more than one service company: being staff makes you
+ * the house of YOUR work, not of a system another operator shared with you. An
+ * engineer invited onto somebody else's instrument sees the same blanks a provider
+ * org sees - which is the whole reason two competitors can share a platform.
+ *
+ * Omitting it keeps the old answer (any staff sees costs) and is only right where
+ * the record's tenant genuinely isn't in hand.
+ */
+export function canSeeCosts(
+  user: CostViewer, ownerOrgId: number | null, tenantOrgId?: number | null,
+): boolean {
+  if (houseOfRecord(user, tenantOrgId)) return true;
   return user.orgId !== null && user.orgId === ownerOrgId;
 }
 
@@ -30,9 +45,10 @@ export function redactParts<
   T extends { cost: string; po: string; costCents?: number | null; ownerOrgId?: number | null },
 >(
   rows: T[],
-  viewer: Pick<SessionUser, "role" | "orgId">,
+  viewer: CostViewer,
   systemOwnerOrgId: number | null,
+  tenantOrgId?: number | null,
 ): T[] {
   return rows.map((r) =>
-    canSeeCosts(viewer, r.ownerOrgId ?? systemOwnerOrgId) ? r : redactPart(r));
+    canSeeCosts(viewer, r.ownerOrgId ?? systemOwnerOrgId, tenantOrgId) ? r : redactPart(r));
 }

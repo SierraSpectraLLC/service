@@ -109,7 +109,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const [homeOwner] = asset.instrumentId !== null
     ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];
-  const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId);
+  const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId);
   // Vendor offers for the part form - only sent to viewers who can see costs.
   const priceBook = showCosts
     ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
@@ -252,7 +252,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           ) },
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={target}
-              parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId)
+              parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId)
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
           ) },

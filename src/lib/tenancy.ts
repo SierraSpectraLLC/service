@@ -1,8 +1,9 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, assetShares, systemShares } from "@/db/schema";
+import { assets, assetShares, instruments, orgs, systemShares } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/houseRole";
+import { tenantOf } from "@/lib/tenants";
 
 // Who can see what. Sierra Spectra staff (owner/staff, from STAFF_EMAILS) are
 // the house and see everything. Everyone else belongs to one organization and
@@ -145,4 +146,23 @@ export async function assertWorkEditable(
     return;
   }
   throw new Error("Not found");
+}
+
+/**
+ * Which tenant an organization belongs to - itself when it runs a workspace, its
+ * operator otherwise. The database half of lib/tenants.tenantOf, for the places
+ * that hold an org id and need to know whose workspace it sits in.
+ */
+export async function tenantOfOrg(orgId: number | null): Promise<number | null> {
+  if (orgId === null) return null;
+  const [org] = await db.select({ id: orgs.id, parentOrgId: orgs.parentOrgId, isOperator: orgs.isOperator })
+    .from(orgs).where(eq(orgs.id, orgId));
+  return org ? tenantOf(org) : null;
+}
+
+/** The tenant a system belongs to, or null when it is gone or unstamped. */
+export async function tenantOfSystem(instrumentId: number): Promise<number | null> {
+  const [i] = await db.select({ tenantOrgId: instruments.tenantOrgId })
+    .from(instruments).where(eq(instruments.id, instrumentId));
+  return i?.tenantOrgId ?? null;
 }

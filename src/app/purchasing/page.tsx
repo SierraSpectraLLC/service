@@ -47,7 +47,7 @@ export default async function PurchasingPage() {
     const mine = lines.filter((l) => l.poId === p.id);
     const t = poTotals(mine);
     // Order value follows the destination room's owner, same rule as part cost.
-    const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null);
+    const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null, p.tenantOrgId);
     return (
       <div key={p.id} style={{ borderTop: "1px solid var(--line)", padding: "9px 0", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <Link href={`/purchasing/${p.id}`} className="mono" style={{ fontSize: 13, fontWeight: 700, textDecoration: "none" }}>

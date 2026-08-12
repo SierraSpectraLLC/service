@@ -97,7 +97,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     (gridModels[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
   }
 
-  const showCosts = canSeeCosts(user, inst.ownerOrgId);
+  const showCosts = canSeeCosts(user, inst.ownerOrgId, inst.tenantOrgId);
 
   // Chain of custody, oldest first - it reads as a story. The reader's own
   // panel arrangement rides along, so the page arrives already arranged.
@@ -198,7 +198,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const pc = modules.remote ? await linkedDevice(inst.id) : null;
   const pcAbility = pc
     ? remoteAbility(user, { moduleOn: true, personaActive: persona !== null },
-      { orgId: pc.orgId }, { remoteAccessEnabled: pc.orgRemote ?? false })
+      { orgId: pc.orgId, tenantOrgId: pc.tenantOrgId }, { remoteAccessEnabled: pc.orgRemote ?? false })
     : null;
   const pcConsent = pc
     ? consentModeFor(
@@ -383,7 +383,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ) },
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
-              parts={redactParts(partRows, user, inst.ownerOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+              parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
               canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
           ) },
