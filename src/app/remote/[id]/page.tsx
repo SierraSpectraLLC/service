@@ -72,25 +72,18 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
       )}
 
       {opened.url && (
-        <>
-          <iframe
-            src={opened.url}
-            title={`Remote desktop for ${device.name || "this machine"}`}
-            // Full screen and clipboard are the two the desktop viewer actually
-            // asks the browser for; without them a copy-paste into an instrument
-            // dialog silently does nothing.
-            allow="fullscreen; clipboard-read; clipboard-write"
-            style={{
-              display: "block", width: "100%", height: "max(420px, calc(100vh - 230px))",
-              border: "1px solid var(--line)", borderRadius: 6, background: "#101418",
-            }}
-          />
-          <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
-            Session runs directly between this browser and the support host. If the frame stays blank or shows a
-            sign-in box, the host is refusing to be embedded - see the framing settings in
-            docs/REMOTE_HOST_SETUP.md - and the link above still works in the meantime.
-          </div>
-        </>
+        <iframe
+          src={opened.url}
+          title={`Remote desktop for ${device.name || "this machine"}`}
+          // Full screen and clipboard are the two the desktop viewer actually
+          // asks the browser for; without them a copy-paste into an instrument
+          // dialog silently does nothing.
+          allow="fullscreen; clipboard-read; clipboard-write"
+          style={{
+            display: "block", width: "100%", height: "max(420px, calc(100vh - 190px))",
+            border: "1px solid var(--line)", borderRadius: 6, background: "#101418",
+          }}
+        />
       )}
     </div>
   );
