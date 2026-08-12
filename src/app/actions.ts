@@ -656,6 +656,60 @@ async function attachOne(assetId: number, instrumentId: number, externalId: stri
  * shelf is normally a list, not one part at a time. Attaches what it can and
  * reports the rest.
  */
+/**
+ * Give a lone unit a system of its own.
+ *
+ * Some clients own one instrument, not a rack of them - a UV-Vis on a bench is
+ * the whole engagement. Those still need what only a system carries: a place on
+ * the dashboard, stages, a queue, custody, a sign-off packet, a linked PC.
+ *
+ * The alternative was a flag on the asset saying "treat me as a system too",
+ * which would have meant every list in the app - dashboard, queue, EOD, records,
+ * metrics - reading from two tables and staying in agreement forever. A system
+ * with exactly one asset costs one row and no new code paths, and the page
+ * already names itself after that asset (lib/systemLabel), so it reads as the
+ * instrument rather than as a container holding it.
+ */
+export async function trackAssetAsSystem(
+  assetId: number, externalId: string,
+): Promise<{ error?: string; instrumentId?: number }> {
+  const u = await requireEditor();
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a) return { error: "Not found" };
+  if (a.instrumentId !== null) return { error: "This unit is already on a system." };
+  const tag = externalId.trim();
+  if (!tag) return { error: "Give the system a tag first." };
+  const [clash] = await db.select({ id: instruments.id }).from(instruments)
+    .where(eq(instruments.externalId, tag));
+  if (clash) return { error: `${tag} is taken by another system.` };
+
+  const instrumentId = await createInstrument({
+    externalId: tag,
+    client: a.owner,
+    // The unit's type is the system's type when the unit is all there is.
+    category: a.kind,
+    priority: 99,
+  });
+  const attached = await attachAssets([assetId], instrumentId);
+  if (attached.error && !attached.attached) return { error: attached.error };
+
+  // A one-unit system belongs to whoever owns the unit, and they get to see it.
+  if (a.ownerOrgId !== null) {
+    await db.update(instruments).set({ ownerOrgId: a.ownerOrgId }).where(eq(instruments.id, instrumentId));
+    await db.insert(systemShares)
+      .values({ instrumentId, orgId: a.ownerOrgId, access: "edit", addedBy: u.email })
+      .onConflictDoNothing();
+  }
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: tag,
+    action: `tracked ${a.kind}${a.model ? ` ${a.model}` : ""}${a.serial ? ` SN ${a.serial}` : ""} as system ${tag}`,
+  });
+  rev(instrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+  return { instrumentId };
+}
+
 export async function attachAssets(assetIds: number[], instrumentId: number): Promise<{ error?: string; attached?: number }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
