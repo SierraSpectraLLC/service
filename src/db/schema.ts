@@ -184,6 +184,14 @@ export const assetShares = pgTable("asset_shares", {
 // Stage vocabulary lives in src/lib/stages.ts; stored here as a text array.
 export const instruments = pgTable("instruments", {
   id: serial("id").primaryKey(),
+  /**
+   * The photo of the whole system - an LC and an MS standing next to each other,
+   * the thing an engineer recognizes across a room and a client recognizes as
+   * theirs. A pointer to an ordinary attachment rather than a URL of its own, so
+   * one file is one row: it counts against storage once, it is reachable only
+   * through the authorized proxy, and deleting the file clears this by itself.
+   */
+  photoAttachmentId: integer("photo_attachment_id"),
   tenantOrgId: tenantStamp(),
   externalId: text("external_id").unique().notNull(), // e.g. T-003, CASA-001
   client: text("client").notNull(),                   // Testen, GMI, Utah, Casablanca
@@ -708,6 +716,8 @@ export const timeEntries = pgTable("time_entries", {
 export const assets = pgTable("assets", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
+  /** This module's own photo. Same pointer-to-an-attachment rule as a system's. */
+  photoAttachmentId: integer("photo_attachment_id"),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }), // null = unattached
   kind: text("kind").notNull().default("Other"), // Pump, Autosampler, ... (vocabulary in lib/stages.ts)
   model: text("model").notNull().default(""),

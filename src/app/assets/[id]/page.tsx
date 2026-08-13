@@ -22,6 +22,7 @@ import { mergeAssetHistory } from "@/lib/assetHistory";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
 import PartsPanel from "@/components/PartsPanel";
+import PhotoCard from "@/components/PhotoCard";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
@@ -193,6 +194,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         panels={[
           { key: "unit", label: "Unit", node: (
             <div className="card">
+              {/* This module on its own - the counterpart to the system's photo
+                  of the whole bench. */}
+              <PhotoCard target={target} photoId={asset.photoAttachmentId}
+                alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`} canEdit={canEdit} />
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
                   {asset.kind} — {asset.model || "(no model)"}

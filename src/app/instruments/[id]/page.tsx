@@ -316,7 +316,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "system", label: "System", node: (
             <SystemPanel
               instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
-                location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken }}
+                location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
+                photoAttachmentId: inst.photoAttachmentId }}
               label={systemLabel(inst, assetRows)}
               clients={systemRows.map((c) => c.client)}
               categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
@@ -359,6 +360,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               instrumentId={inst.id}
               assets={assetRows.map((a) => ({
                 id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
+                photoAttachmentId: a.photoAttachmentId,
                 openItems:
                   taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
                   partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +

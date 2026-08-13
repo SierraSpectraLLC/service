@@ -1788,6 +1788,70 @@ export async function recordAttachments(
   return {};
 }
 
+
+/**
+ * Set the photo of a system or a unit.
+ *
+ * The photo is an ordinary attachment with a pointer to it, which is the whole
+ * design: one file is one row, so it counts against storage once, it is only
+ * reachable through the authorized proxy like every other file, and deleting it
+ * from Files clears the pointer by itself rather than leaving a broken picture.
+ *
+ * Replacing a photo leaves the old one in Files. It is a record of what the
+ * instrument looked like in March, and quietly destroying that to save a
+ * thumbnail's worth of storage is not ours to decide.
+ */
+export async function setPhoto(
+  target: WorkTarget, file: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const onSystem = t0.instrumentId !== null && t0.assetId === null;
+  const guard = await guardStorage(await storeOwnerForTarget(t0), file.size || 0);
+  if (guard) return guard;
+
+  const [row] = await db.insert(attachments).values({
+    tenantOrgId: t0.tenantOrgId,
+    instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+    fileName: file.fileName.slice(0, 200), kind: "Photo", url: file.url, size: file.size,
+    uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
+  }).returning();
+
+  if (onSystem) {
+    await db.update(instruments).set({ photoAttachmentId: row.id }).where(eq(instruments.id, t0.instrumentId!));
+  } else {
+    await db.update(assets).set({ photoAttachmentId: row.id }).where(eq(assets.id, t0.assetId!));
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: row.id,
+    action: `set the ${onSystem ? "system" : "module"} photo`,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
+/** Take the photo off the record. The file stays in Files, where it was filed. */
+export async function clearPhoto(target: WorkTarget): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const onSystem = t0.instrumentId !== null && t0.assetId === null;
+  if (onSystem) {
+    await db.update(instruments).set({ photoAttachmentId: null }).where(eq(instruments.id, t0.instrumentId!));
+  } else {
+    await db.update(assets).set({ photoAttachmentId: null }).where(eq(assets.id, t0.assetId!));
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "attachment",
+    entityId: t0.instrumentId ?? t0.assetId ?? 0,
+    action: `removed the ${onSystem ? "system" : "module"} photo - the file is still in Files`,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
 /**
  * File something in the caller's document library - storage that belongs to no
  * system or unit. Every organization has one: blank templates, SOPs, assembled

@@ -681,6 +681,8 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_group_id" text NOT NULL DEFA
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_hash" text NOT NULL DEFAULT '';
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_set_at" timestamp;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "phone" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "photo_attachment_id" integer;
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "photo_attachment_id" integer;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "is_operator" boolean NOT NULL DEFAULT false;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "parent_org_id" integer;
 ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "org_id" integer;
@@ -775,6 +777,18 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'audit_log_tenant_org_id_orgs_id_fk') THEN
     ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_tenant_org_id_orgs_id_fk"
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- A photo is an attachment; deleting the file clears the pointer to it.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_photo_attachment_id_fk') THEN
+    ALTER TABLE "instruments" ADD CONSTRAINT "instruments_photo_attachment_id_fk"
+      FOREIGN KEY ("photo_attachment_id") REFERENCES "attachments"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'assets_photo_attachment_id_fk') THEN
+    ALTER TABLE "assets" ADD CONSTRAINT "assets_photo_attachment_id_fk"
+      FOREIGN KEY ("photo_attachment_id") REFERENCES "attachments"("id") ON DELETE SET NULL;
   END IF;
 END $$;
 
