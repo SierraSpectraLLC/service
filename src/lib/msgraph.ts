@@ -246,7 +246,7 @@ const itemPath = (driveId: string, itemId: string) => {
 
 /** One folder's contents. `root` is the person's own drive root. */
 export async function listFolder(
-  accessToken: string, driveId: string, itemId: string,
+  accessToken: string, driveId: string, itemId: string, pdfOnly = true,
 ): Promise<{ items?: CloudItem[]; error?: string }> {
   // Things other people shared are not children of anything - they are their own
   // list, and every row is a pointer at an item on somebody else's drive.
@@ -255,7 +255,7 @@ export async function listFolder(
   if (driveId === SHARED_DRIVE) {
     const { body, error } = await get(accessToken, "/me/drive/sharedWithMe");
     if (error) return { error };
-    return { items: browseListing((body?.value as never[]) ?? []) };
+    return { items: browseListing((body?.value as never[]) ?? [], "", pdfOnly) };
   }
   const base = itemPath(driveId, itemId);
   // A page of 200 with only the fields the list shows: the default page is 200
@@ -263,7 +263,7 @@ export async function listFolder(
   const { body, error } = await get(accessToken,
     `${base}/children?$top=200&$select=id,name,size,lastModifiedDateTime,folder,file,parentReference,remoteItem`);
   if (error) return { error };
-  return { items: browseListing((body?.value as never[]) ?? [], driveId) };
+  return { items: browseListing((body?.value as never[]) ?? [], driveId, pdfOnly) };
 }
 
 /**
@@ -309,7 +309,7 @@ export async function listPlaces(accessToken: string): Promise<{ items?: CloudIt
  * documents live in a Team - the same failure as the browser starting there.
  */
 export async function searchFiles(
-  accessToken: string, query: string, driveId = "",
+  accessToken: string, query: string, driveId = "", pdfOnly = true,
 ): Promise<{ items?: CloudItem[]; error?: string }> {
   const q = query.trim();
   if (!q) return { items: [] };
@@ -318,7 +318,7 @@ export async function searchFiles(
   const { body, error } = await get(accessToken,
     `${base}/root/search(q='${encodeURIComponent(q.replace(/'/g, "''"))}')?$top=100`);
   if (error) return { error };
-  return { items: searchListing((body?.value as never[]) ?? [], real) };
+  return { items: searchListing((body?.value as never[]) ?? [], real, pdfOnly) };
 }
 
 /** One item, for naming a download without trusting what the browser sent. */

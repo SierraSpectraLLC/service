@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { browseCloud, disconnectCloud } from "@/app/actions";
 import {
@@ -7,18 +8,23 @@ import {
 } from "@/lib/cloudItems";
 
 /**
- * Somebody's own OneDrive and SharePoint, from inside the studio.
+ * Somebody's own OneDrive, Teams and SharePoint, browsed from inside the portal.
  *
  * The point is the round trip it removes: find the file in a browser tab,
  * download it, find it again in a file dialog, upload it. Here it is one list
- * and one click, and the bytes go Microsoft-to-browser without touching this
- * app's storage or counting against anybody's quota.
+ * and one click.
  *
- * Only folders and PDFs are listed. Everything else is left out rather than
- * greyed out - this is a place to find a PDF, and a list padded with
- * spreadsheets is the file dialog somebody came here to avoid.
+ * Used in two places that want different things from it, which is what the props
+ * are for. Files owns the CONNECTION - it is where documents live, so connecting
+ * an outside store is a filing decision made once - and lists everything, since
+ * the library takes any file. The studio borrows the connection to pull a PDF
+ * straight into the working set, so it shows no connect or disconnect chrome and
+ * lists only what it can open.
  */
-export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolder }: {
+export default function CloudBrowser({
+  account, brokenReason, onAdd, onPickFolder, manage = false, pdfOnly = true,
+  addLabel = "+ add", disabled = false,
+}: {
   /** The connected account, or "" for none yet. */
   account: string;
   /** Set when Microsoft has refused the connection - it needs remaking, not retrying. */
@@ -26,6 +32,12 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
   onAdd: (item: CloudItem) => void;
   /** Make the folder somebody is standing in the destination for a finished packet. */
   onPickFolder?: (driveId: string, folderId: string, name: string) => void;
+  /** Owns the connection: shows the account, connect and disconnect. One page should. */
+  manage?: boolean;
+  /** Hide everything that is not a PDF. The studio can open nothing else. */
+  pdfOnly?: boolean;
+  addLabel?: string;
+  disabled?: boolean;
 }) {
   const [trail, setTrail] = useState<Crumb[]>([ROOT]);
   const [items, setItems] = useState<CloudItem[]>([]);
@@ -39,18 +51,29 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
   const load = useCallback(async (crumb: Crumb, q: string) => {
     setBusy(true);
     setError("");
-    const res = await browseCloud(crumb.driveId, crumb.id, q);
+    const res = await browseCloud(crumb.driveId, crumb.id, q, pdfOnly);
     setItems(res.items ?? []);
     setError(res.error ?? "");
     setBusy(false);
-  }, []);
+  }, [pdfOnly]);
 
   useEffect(() => {
     if (!account || brokenReason) return;
     void load(here, searching);
   }, [account, brokenReason, here, searching, load]);
 
+  // Not connected, or connected and refused. Only the page that owns the
+  // connection offers to make it; anywhere else says where that page is, so
+  // there is one door rather than two that can disagree about the account.
   if (!account || brokenReason) {
+    if (!manage) {
+      return (
+        <div className="mut" style={{ fontSize: 11, marginTop: 10 }}>
+          {brokenReason || "No outside account is connected."}{" "}
+          <Link href="/documents">Connect one in Files</Link> to pull documents straight in.
+        </div>
+      );
+    }
     return (
       <div style={{ marginTop: 10 }}>
         {brokenReason && <div style={{ fontSize: 11, color: "#A32D2D", marginBottom: 6 }}>{brokenReason}</div>}
@@ -59,7 +82,7 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
         </a>
         {!brokenReason && (
           <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-            Sign in with your work account to pull PDFs straight out of OneDrive, Teams or SharePoint.
+            Sign in with your work account to reach OneDrive, Teams and SharePoint from here.
           </div>
         )}
       </div>
@@ -68,11 +91,13 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
 
   return (
     <div style={{ marginTop: 10 }}>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-        <span className="mut" style={{ fontSize: 11 }}>{account}</span>
-        <button className="btn link" style={{ fontSize: 11, marginLeft: "auto" }} disabled={busy}
-          onClick={() => { void disconnectCloud().then(() => location.reload()); }}>disconnect</button>
-      </div>
+      {manage && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+          <span className="mut" style={{ fontSize: 11 }}>{account}</span>
+          <button className="btn link" style={{ fontSize: 11, marginLeft: "auto" }} disabled={busy}
+            onClick={() => { void disconnectCloud().then(() => location.reload()); }}>disconnect</button>
+        </div>
+      )}
 
       {/* A search runs against one store. At the top of the trail there is no
           store yet - the list is OneDrive, shared items and each Team - so the
@@ -123,7 +148,9 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
         {busy && <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>Loading...</div>}
         {!busy && items.length === 0 && !error && (
           <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>
-            {searching ? "No PDFs match." : isPlaces(here) ? "Nothing to browse." : "No folders or PDFs here."}
+            {searching ? (pdfOnly ? "No PDFs match." : "Nothing matches.")
+              : isPlaces(here) ? "Nothing to browse."
+                : pdfOnly ? "No folders or PDFs here." : "Nothing here."}
           </div>
         )}
         {!busy && items.map((i) => (
@@ -134,7 +161,7 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
                 onClick={() => { setQuery(""); setSearching(""); setTrail((t) => pushCrumb(t, i)); }}>open</button>
             ) : (
               <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}
-                onClick={() => onAdd(i)}>+ add</button>
+                disabled={disabled} onClick={() => onAdd(i)}>{addLabel}</button>
             )}
             <span style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               title={i.name}>

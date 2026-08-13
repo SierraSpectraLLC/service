@@ -76,6 +76,17 @@ describe("a folder's contents, ready to show", () => {
       .toEqual(["alpha.pdf", "Tune 2.pdf", "Tune 10.pdf", "zeta.pdf"]);
   });
 
+  it("shows everything when the caller can file everything", () => {
+    // The library takes any file at all. Hiding the spreadsheets there would
+    // amputate half of what somebody opened the page to file.
+    expect(browseListing(raw, "", false).map((i) => i.name)).toEqual([
+      "2026 Reports", "Archive", "alpha.pdf", "budget.xlsx", "photo.jpg",
+      "Tune 2.pdf", "Tune 10.pdf", "zeta.pdf",
+    ]);
+    expect(searchListing(raw, "", false).some((i) => i.name === "budget.xlsx")).toBe(true);
+    expect(searchListing(raw, "", false).some((i) => i.isFolder)).toBe(false);
+  });
+
   it("copes with an empty folder", () => {
     expect(browseListing([])).toEqual([]);
   });

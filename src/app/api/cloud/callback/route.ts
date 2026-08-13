@@ -9,9 +9,9 @@ import { HANDSHAKE_COOKIE } from "../connect/route";
 
 export const dynamic = "force-dynamic";
 
-/** Back to the studio, saying what happened, rather than to a blank page. */
+/** Back to Files, where the connection is managed, saying what happened. */
 const back = (note: string) =>
-  NextResponse.redirect(`${graphBaseUrl()}/pdf?cloud=${encodeURIComponent(note)}`);
+  NextResponse.redirect(`${graphBaseUrl()}/documents?cloud=${encodeURIComponent(note)}`);
 
 /**
  * Where Microsoft sends somebody back to.

@@ -13,6 +13,8 @@ import { visibleOrgs } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
 import LibraryUpload from "@/components/LibraryUpload";
 import StorageMeter from "@/components/StorageMeter";
+import CloudLibraryCard from "@/components/CloudLibraryCard";
+import { myCloudConnection } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,19 +35,25 @@ const CAP = 500;
  * The operator can look at any organization's store: they set the limits, so
  * "what is LabZen actually holding" has to be answerable.
  */
-export default async function DocumentsPage({ searchParams }: { searchParams: Promise<{ store?: string }> }) {
+export default async function DocumentsPage(
+  { searchParams }: { searchParams: Promise<{ store?: string; cloud?: string }> },
+) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const isHouseUser = user.role === "owner" || user.role === "staff";
 
-  const { store: storeParam } = await searchParams;
+  // `cloud` is whatever the Microsoft handshake reported on its way back. Read
+  // here rather than left in the URL: the callback's only way to speak is this
+  // parameter, and until something showed it a refused connection looked like
+  // nothing at all happening.
+  const { store: storeParam, cloud: cloudNote } = await searchParams;
   const wanted = storeParam && /^\d+$/.test(storeParam) ? parseInt(storeParam) : null;
   // Only the house may look at another store; everyone else gets their own,
   // whatever the query string says.
   const viewing = isHouseUser ? wanted : user.orgId;
   const isOwnStore = viewing === user.orgId;
 
-  const [rows, quota, orgRows, brand, guestRows] = await Promise.all([
+  const [rows, quota, orgRows, brand, guestRows, cloud] = await Promise.all([
     storeFiles(viewing, CAP).catch(() => []),
     storeQuota(viewing),
     isHouseUser ? visibleOrgs(user).catch(() => []) : [],
@@ -54,6 +62,9 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
     // sold and stayed on as a viewer. These are why the PDF studio can offer
     // PDFs this page used to omit without explaining itself.
     isOwnStore ? visibleNotOwnedFiles(user).catch(() => []) : [],
+    // This person's own outside store. Never fatal to the page: a Microsoft
+    // outage must not take somebody's own files down with it.
+    myCloudConnection().catch(() => ({ configured: false, account: "", brokenReason: "", setupProblem: "" })),
   ]);
 
   const files = groupStoredFiles(rows);
@@ -120,6 +131,24 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           </div>
         )}
       </div>
+
+      {/* Somewhere else the org's documents already live. Only on your own
+          store, and only if you may write to it: copying a file in is a filing
+          act, and nobody files into somebody else's shelf. */}
+      {canEdit && isOwnStore && cloud.configured && (
+        <CloudLibraryCard
+          account={cloud.account} brokenReason={cloud.brokenReason}
+          note={(cloudNote ?? "").slice(0, 300)}
+          full={quota.state === "full"} />
+      )}
+      {/* Half-configured says so rather than vanishing. Staff only - the message
+          names environment variables. */}
+      {canEdit && isOwnStore && !cloud.configured && cloud.setupProblem && (
+        <div className="card" style={{ fontSize: 12, color: "#8A5410", background: "#FAF0DC",
+          border: "1px solid #F0C9A0" }}>
+          {cloud.setupProblem}
+        </div>
+      )}
 
       {/* The half that was missing. Files you can open that live in someone
           else's store - which is exactly the set the PDF studio offers and this

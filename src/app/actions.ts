@@ -2137,7 +2137,7 @@ export async function disconnectCloud(): Promise<{ error?: string }> {
  * posture from the rest of the app and the right one for files that are not ours.
  */
 export async function browseCloud(
-  driveId: string, itemId: string, query = "",
+  driveId: string, itemId: string, query = "", pdfOnly = true,
 ): Promise<{ items?: CloudItem[]; error?: string }> {
   const u = await requireUser();
   if (u.role === "client_viewer") return { error: "Read-only accounts cannot connect an outside account." };
@@ -2148,7 +2148,7 @@ export async function browseCloud(
     // Teams. There is no folder to list at that level, so a query there has
     // nothing to search either: pick a store first.
     if (driveId === PLACES_DRIVE) return listPlaces(token);
-    return q ? searchFiles(token, q, driveId) : listFolder(token, driveId, itemId);
+    return q ? searchFiles(token, q, driveId, pdfOnly) : listFolder(token, driveId, itemId, pdfOnly);
   });
   return out.error ? { error: out.error } : { items: out.items ?? [] };
 }

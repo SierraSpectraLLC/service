@@ -66,25 +66,26 @@ const PDF = /\.pdf$/i;
 export const isPdfItem = (i: CloudItem) => !i.isFolder && PDF.test(i.name);
 
 /**
- * A folder's contents, ready to show: folders first, then PDFs, each A-Z.
+ * A folder's contents, ready to show: folders first, then files, each A-Z.
  *
- * Everything that is neither is dropped rather than greyed out. This browser
- * exists to find a PDF; a list padded with spreadsheets and camera folders is a
- * list somebody has to read past, and the file dialog they came here to avoid
- * did the same thing.
+ * `pdfOnly` is the studio's rule, not the format's. That browser exists to find
+ * a PDF and can open nothing else, so a list padded with spreadsheets is the
+ * file dialog somebody came here to avoid - dropped rather than greyed out. The
+ * library takes any file at all, so the same browser on that page shows
+ * everything; filtering there would hide half of what somebody came to file.
  */
-export function browseListing(raw: GraphItem[], fallbackDriveId = ""): CloudItem[] {
+export function browseListing(raw: GraphItem[], fallbackDriveId = "", pdfOnly = true): CloudItem[] {
   const items = raw
     .map((r) => toCloudItem(r, fallbackDriveId))
     .filter((i): i is CloudItem => i !== null)
-    .filter((i) => i.isFolder || isPdfItem(i));
+    .filter((i) => i.isFolder || !pdfOnly || isPdfItem(i));
   return items.sort((a, b) =>
     Number(b.isFolder) - Number(a.isFolder) || a.name.localeCompare(b.name, undefined, { numeric: true }));
 }
 
 /** A search result set: the same rule, but no folders - you searched for a file. */
-export const searchListing = (raw: GraphItem[], fallbackDriveId = ""): CloudItem[] =>
-  browseListing(raw, fallbackDriveId).filter(isPdfItem);
+export const searchListing = (raw: GraphItem[], fallbackDriveId = "", pdfOnly = true): CloudItem[] =>
+  browseListing(raw, fallbackDriveId, pdfOnly).filter((i) => !i.isFolder);
 
 export type Crumb = { id: string; name: string; driveId: string };
 

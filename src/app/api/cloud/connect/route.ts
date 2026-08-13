@@ -26,8 +26,8 @@ const HANDSHAKE_TTL_S = 600;
 export async function GET() {
   const cfg = graphConfig();
   const u = await currentUser();
-  if (!u || u.role === "client_viewer") return NextResponse.redirect(`${graphBaseUrl()}/pdf`);
-  if (!cfg || !vaultConfigured()) return NextResponse.redirect(`${graphBaseUrl()}/pdf?cloud=unconfigured`);
+  if (!u || u.role === "client_viewer") return NextResponse.redirect(`${graphBaseUrl()}/documents`);
+  if (!cfg || !vaultConfigured()) return NextResponse.redirect(`${graphBaseUrl()}/documents?cloud=unconfigured`);
 
   const { verifier, challenge } = pkcePair();
   const state = pkcePair().verifier;   // another 48 random bytes; only its opacity matters

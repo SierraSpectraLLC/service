@@ -291,10 +291,18 @@ on the spot. No sign-in, no setup, no registration. Try this before doing
 anything below — for a machine that already syncs the folder, it *is* the
 feature.
 
-**Connect the account.** Everything below buys browsing and searching OneDrive
-and SharePoint from inside the studio, a connection that survives sign-out, and
-saving a finished packet back into a folder. Absent the two env vars, the studio
-simply never mentions OneDrive.
+**Connect the account.** Everything below buys browsing and searching OneDrive,
+Teams and SharePoint from inside the portal, a connection that survives
+sign-out, copying a document into the library, and saving a finished packet back
+into a folder. Absent the two env vars, nothing in the portal mentions OneDrive.
+
+The connection is made and unmade on **Files** — one door, on the page where
+documents live, because a connection to a company's document store outlives any
+one packet. Copying a file in from there takes a real copy into this org's own
+store and charges it to the quota, so the document survives somebody renaming
+the folder it came from. The PDF studio borrows the same connection to pull a
+PDF straight into a working set without storing it or touching the quota, and to
+pick a folder to save a finished packet into.
 
 ### The registration (Azure portal, ~15 minutes, free)
 
@@ -351,8 +359,8 @@ offers *Connect again*; one click fixes it, per person.
 **If OneDrive never appears, it is the redirect URI.** Microsoft has to be told
 where to send people back to, which means this instance has to know its own
 address. With none of `APP_URL`, `AUTH_URL` or Vercel's production URL set, the
-feature has nowhere to come back to. The studio now says so in orange to staff
-rather than hiding, so the answer is on the page.
+feature has nowhere to come back to. Files now says so in orange to staff rather
+than hiding, so the answer is on the page.
 
 **`CLOUD_TOKEN_KEY` is the one that matters.** Each connection stores a
 Microsoft refresh token — a standing key to somebody's files that does not

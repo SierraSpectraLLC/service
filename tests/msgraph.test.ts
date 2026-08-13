@@ -179,6 +179,15 @@ describe("which store gets read", () => {
     expect(asked[0]).toContain("/me/drive/root/search");
   });
 
+  it("hands the studio only what it can open, and the library everything", async () => {
+    answers.set(/children/, { value: [
+      { id: "1", name: "tune.pdf", file: {} }, { id: "2", name: "costs.xlsx", file: {} },
+    ] });
+    expect((await listFolder("tok", "d", "root")).items?.map((i) => i.name)).toEqual(["tune.pdf"]);
+    expect((await listFolder("tok", "d", "root", false)).items?.map((i) => i.name))
+      .toEqual(["costs.xlsx", "tune.pdf"]);
+  });
+
   it("offers the personal drive, shared items, and every team", async () => {
     answers.set(/joinedTeams/, { value: [{ id: "t1", displayName: "Sierra Spectra" }] });
     answers.set(/groups\/t1\/drive/, { id: "sharepoint-drive" });
