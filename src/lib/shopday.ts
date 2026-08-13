@@ -23,6 +23,11 @@ export function shopTime(d: Date): string {
   return fmtWhen(d, TZ());
 }
 
+/** The shop day a moment fell on: YYYY-MM-DD, for grouping history by visit. */
+export function shopDay(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: TZ() });
+}
+
 /** "Jul 22" in shop time - for the free-text date stamps on parts. */
 export function shopMonthDay(d: Date = new Date()): string {
   return d.toLocaleDateString("en-US", { timeZone: TZ(), month: "short", day: "numeric" });

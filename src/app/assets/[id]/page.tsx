@@ -14,7 +14,7 @@ import SharePanel from "@/components/SharePanel";
 import SalePanel from "@/components/SalePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import { getModules } from "@/lib/flags";
-import { shopTime, shopToday } from "@/lib/shopday";
+import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -110,6 +110,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];
   const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId);
+
+  // What closed on each day, so parts fitted during a job read as that job's work
+  // rather than as a growing wall of rows - see lib/partGroups.
+  const serviceEvents = taggedTasks
+    .filter((t) => t.completedAt !== null)
+    .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
   // Vendor offers for the part form - only sent to viewers who can see costs.
   const priceBook = showCosts
     ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
@@ -254,7 +260,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             <PartsPanel target={target}
               parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId)
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-              systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
+              systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
+              serviceEvents={serviceEvents} />
           ) },
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

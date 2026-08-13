@@ -256,6 +256,13 @@ export function connectUrl(nodeId: string, opts: { embedded?: boolean } = {}): s
     login,                                 // the page's parameter; the admin channel uses ?auth=
     node: bareEngineId(nodeId),            // the page prefixes the domain itself
     viewmode: "11",                        // straight to the desktop tab
+    // Never the engine's phone layout. It sniffs the user agent and serves a
+    // different template that has NO support for the hide bitmask at all
+    // (verified against the pinned 1.2.4: default-mobile.handlebars never reads
+    // it), so a phone got the full device tree - every client group by name,
+    // which is a disclosure and not just an eyesore. mobile=0 forces the layout
+    // that honours hide and viewmode (webserver.js:9955).
+    mobile: "0",
   });
   // Inside our own page, strip the engine's furniture: its banner, its tab strip,
   // its footer and its panel headings, all of which duplicate or contradict ours.

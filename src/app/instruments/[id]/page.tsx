@@ -17,7 +17,7 @@ import { getBrand } from "@/lib/brand";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
-import { shopTime, shopToday } from "@/lib/shopday";
+import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
@@ -100,6 +100,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   }
 
   const showCosts = canSeeCosts(user, inst.ownerOrgId, inst.tenantOrgId);
+
+  // What closed on each day, so the parts fitted that day read as that job's work
+  // rather than as forty loose rows - see lib/partGroups.
+  const serviceEvents = taskRows
+    .filter((t) => t.completedAt !== null)
+    .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
 
   // Chain of custody, oldest first - it reads as a story. The reader's own
   // panel arrangement rides along, so the page arrives already arranged.
@@ -387,7 +393,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
               parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
-              canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
+              canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
+              serviceEvents={serviceEvents} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
           { key: "custody", label: "Ownership history", node: (

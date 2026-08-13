@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  bareEngineId, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId, mintEngineToken,
-  pickExistingGroup,
+  bareEngineId, connectUrl, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId,
+  mintEngineToken, pickExistingGroup,
 } from "@/lib/remote";
 
 // The remote-support host authenticates the portal by a token it encrypts with a
@@ -156,5 +156,46 @@ describe("adopting a device group that already exists", () => {
     expect(pickExistingGroup([], "LabZen")).toBeNull();
     expect(pickExistingGroup([null, 7, {}, { name: "LabZen" }], "LabZen")).toBeNull();
     expect(pickExistingGroup([G("LabZen", "mesh//aaa")], "GMI")).toBeNull();
+  });
+});
+
+describe("the deep link's query", () => {
+  // The other half of the wire format. Same failure mode as the token: get a
+  // parameter wrong and the engine shows something else instead of the desktop,
+  // having logged nothing about why - so the shape is pinned here.
+  const url = () => {
+    process.env.REMOTE_URL = "https://remote.example.com";
+    process.env.REMOTE_LOGIN_KEY = KEY;
+    process.env.REMOTE_ADMIN_USER = "portal-admin";
+    const out = connectUrl("node//abc123", { embedded: true });
+    if (typeof out !== "string") throw new Error(out.error);
+    return new URL(out);
+  };
+
+  it("asks for the desktop of one machine, with the engine's furniture hidden", () => {
+    const q = url().searchParams;
+    expect(q.get("node")).toBe("abc123");   // the page prefixes the domain itself
+    expect(q.get("viewmode")).toBe("11");
+    expect(q.get("hide")).toBe("31");
+    expect(q.get("login")).toBeTruthy();
+    expect(q.get("auth")).toBeNull();       // that one is the admin channel's
+  });
+
+  it("refuses the engine's phone layout", () => {
+    // It sniffs the user agent and serves a template that ignores `hide`
+    // entirely, so a phone got the whole device tree - every client group by
+    // name. Verified against 1.2.4: default-mobile.handlebars never reads it.
+    expect(url().searchParams.get("mobile")).toBe("0");
+  });
+
+  it("leaves the engine's chrome alone outside our own page", () => {
+    process.env.REMOTE_URL = "https://remote.example.com";
+    process.env.REMOTE_LOGIN_KEY = KEY;
+    process.env.REMOTE_ADMIN_USER = "portal-admin";
+    const out = connectUrl("node//abc123");
+    if (typeof out !== "string") throw new Error(out.error);
+    const q = new URL(out).searchParams;
+    expect(q.get("hide")).toBeNull();
+    expect(q.get("mobile")).toBe("0");      // still never the phone layout
   });
 });
