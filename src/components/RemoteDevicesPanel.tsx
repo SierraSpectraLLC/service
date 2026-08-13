@@ -3,11 +3,15 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
-import { linkRemoteDevice, removeRemoteDevice, setRemoteConsent } from "@/app/actions";
+import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
+import { deviceLabel, deviceSubLabel, needsNickname } from "@/lib/deviceName";
 
 export type RemoteDevice = {
   id: number;
+  /** The Windows hostname, as the engine reports it. */
   name: string;
+  /** What somebody called it, or "" while it is still going by its hostname. */
+  nickname: string;
   orgName: string;
   platform: string;
   lastSeen: string;
@@ -78,7 +82,12 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                 width: 9, height: 9, borderRadius: 999, flexShrink: 0,
                 background: d.online ? "#2E6B2E" : "#94A3B8",
               }} />
-              <b style={{ fontSize: 13.5, color: "var(--navy)" }}>{d.name}</b>
+              <b style={{ fontSize: 13.5, color: "var(--navy)" }}>{deviceLabel(d.nickname, d.name)}</b>
+              {/* Kept beside the nickname, never replaced by it: the nickname
+                  finds the machine, the hostname proves it is the right one. */}
+              {deviceSubLabel(d.nickname, d.name) && (
+                <span className="mono mut" style={{ fontSize: 11 }}>{deviceSubLabel(d.nickname, d.name)}</span>
+              )}
               {d.orgName && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{d.orgName}</span>}
               {!d.orgName && <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>unassigned</span>}
               {/* Said up front, with the reason - never discovered after a click. */}
@@ -109,6 +118,22 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 
             {d.canManage && (
               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 7 }}>
+                {/* Typed here rather than behind a dialog: naming a machine is a
+                    two-second job somebody does while looking at the list. */}
+                <input defaultValue={d.nickname} disabled={pending}
+                  aria-label={`Name for ${d.name}`}
+                  placeholder={needsNickname(d.nickname, d.name) ? "name it — e.g. Altis PC" : "no name"}
+                  onBlur={(e) => {
+                    if (e.target.value.trim() === d.nickname) return;
+                    setError("");
+                    startTransition(async () => {
+                      const res = await renameRemoteDevice(d.id, e.target.value);
+                      setError(res?.error ?? "");
+                    });
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                  style={{ width: 170, fontSize: 11 }} />
+
                 <select value={d.systemId ?? ""} disabled={pending} aria-label={`System ${d.name} drives`}
                   onChange={(e) => {
                     const v = e.target.value ? parseInt(e.target.value) : null;
@@ -143,7 +168,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                 <button className="btn link" style={{ color: "#A32D2D", fontSize: 11, marginLeft: "auto" }} disabled={pending}
                   onClick={() => {
                     const why = promptReason(
-                      `Remove "${d.name}" from remote support? This forgets the machine here - the agent keeps `
+                      `Remove "${deviceLabel(d.nickname, d.name)}" from remote support? This forgets the machine here - the agent keeps `
                       + "running until somebody uninstalls it on the PC itself.",
                     );
                     if (!why) return;

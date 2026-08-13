@@ -21,6 +21,7 @@ import {
 import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
+import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
   agentInstallerLink, applyDeviceConsent, connectUrl, deviceWithOrg, ensureOrgGroup, NOT_CONFIGURED,
   remoteConfigured,
@@ -3387,6 +3388,34 @@ export async function linkRemoteDevice(deviceId: number, instrumentId: number | 
     action: `linked ${row.device.name || "a machine"} to ${label}`,
   });
   revalidatePath("/remote");
+  return {};
+}
+
+/**
+ * Give a machine a name a person can use.
+ *
+ * Stored beside the hostname rather than over it: the engine refreshes the
+ * hostname on every reconcile, so anything typed into that column would survive
+ * until the next time somebody opened the page. It also stays visible next to
+ * the nickname, because "Altis PC" finds the machine and DESKTOP-39VTF39 proves
+ * it is the right one.
+ */
+export async function renameRemoteDevice(deviceId: number, nickname: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const row = await deviceWithOrg(deviceId);
+  if (!row) return { error: "Not found" };
+  const next = cleanNickname(nickname);
+  if (next === row.device.nickname) return {};
+  await db.update(remoteDevices).set({ nickname: next }).where(eq(remoteDevices.id, deviceId));
+  await audit({
+    actor: u.email, instrumentId: row.device.instrumentId, entityType: "remote", entityId: deviceId,
+    action: next
+      ? `called ${row.device.name || "a machine"} "${next}"`
+      : `cleared the name on ${row.device.name || "a machine"}`,
+    field: "nickname", oldValue: row.device.nickname, newValue: next,
+  });
+  revalidatePath("/remote");
+  revalidatePath(`/remote/${deviceId}`);
   return {};
 }
 

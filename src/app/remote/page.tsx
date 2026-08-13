@@ -65,7 +65,9 @@ export default async function RemotePage() {
         or(orgIds.length ? inArray(remoteDevices.orgId, orgIds) : sql`false`, isNull(remoteDevices.orgId)),
       )
       : orgIds.length ? inArray(remoteDevices.orgId, orgIds) : sql`false`)
-    .orderBy(asc(remoteDevices.name), asc(remoteDevices.id))
+    // Sorted by what the list actually shows: a machine somebody named should
+    // sort under that name, not under the hostname nobody reads.
+    .orderBy(asc(sql`coalesce(nullif(${remoteDevices.nickname}, ''), ${remoteDevices.name})`), asc(remoteDevices.id))
     .catch(() => []);
 
   // The systems each device could be linked to, and the custody facts that decide
@@ -91,7 +93,8 @@ export default async function RemotePage() {
     const consent = consentModeFor(d, system ? { ownerOrgId: system.ownerOrgId, stages: system.stages } : null);
     return {
       id: d.id,
-      name: d.name || "(unnamed machine)",
+      name: d.name,
+      nickname: d.nickname,
       orgName: d.orgId === null ? "" : org?.name ?? "another organization",
       platform: d.platform,
       lastSeen: d.lastSeenAt ? shopTime(d.lastSeenAt) : "",
