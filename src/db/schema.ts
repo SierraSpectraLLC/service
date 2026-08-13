@@ -236,7 +236,8 @@ export const instruments = pgTable("instruments", {
   saleNote: text("sale_note").notNull().default(""), // public blurb on the listing
   listingToken: text("listing_token").notNull().default(""),
   priority: integer("priority").notNull().default(99),
-  // Who's driving this system - a people-roster name (Sierra or LabZen), assignable by either side.
+  // Who's driving this system - a name from the directory (lib/directory),
+  // assignable by either side.
   lead: text("lead").notNull().default(""),
   // Retired from the active fleet but kept in full. Archiving is the editor-safe
   // alternative to deletion; hard delete stays owner-only.
@@ -797,8 +798,14 @@ export const discussionReads = pgTable("discussion_reads", {
   lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
 }, (t) => [unique("discussion_reads_user_thread").on(t.userEmail, t.threadId)]);
 
-// People roster (Sierra + LabZen): task assignees and @mention targets.
-// Email optional - blank falls back to the STAFF_EMAILS heuristic in notify.ts.
+// RETIRED. The roster: a hand-typed list of names that task assignment and
+// @mentions read, kept separate from the logins and drifting from them the
+// moment anybody joined or left. Nothing reads it now - lib/directory assembles
+// the same answer from the logins that actually exist.
+//
+// The table stays because dropping one is a one-way door and this holds the only
+// record of who was on the roster of an instance that has not upgraded yet.
+// Nothing writes to it either.
 export const people = pgTable("people", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),

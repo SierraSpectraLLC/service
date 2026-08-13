@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
+  discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -22,6 +22,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
   fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit,
   stockSrc,
@@ -75,9 +76,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
-    db.select({ name: people.name }).from(people)
-      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
-      .orderBy(asc(people.org), asc(people.name)),
+    // Everyone this viewer may assign work to or @mention: the logins of their
+    // own organization and of the ones they work with. See lib/directory.
+    visibleDirectory(user),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     // Shelf stock offered for attaching: the house sees all of it; an org sees
     // only units it owns, never another client's spares. Retired units are
@@ -366,7 +367,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
               gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
               knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]}
-              people={peopleRows.map((p) => p.name)}
+              people={directoryNames(peopleRows)}
               shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
               orgOptions={orgRows}
               accessRequests={requestRows.map((r) => ({
@@ -420,11 +421,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             />
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />
+            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
-              people={peopleRows.map((p) => p.name)}
+              people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => {
                 const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;
                 return {
@@ -479,7 +480,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={{ instrumentId: inst.id, assetId: null }}
               entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
-              people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+              people={directoryNames(peopleRows)} defaultPerson={user.name}
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },
           // Today's client-facing note sits with the conversation it feeds, not up in the system's identity block.

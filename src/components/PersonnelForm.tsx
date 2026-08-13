@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import {
-  updateSettings, addOrg, addPerson, removePerson,
+  updateSettings, addOrg,
   removeClientAccess, setClientAccessOrg,
 } from "@/app/actions";
 
@@ -20,7 +20,7 @@ type OrgRow = {
   id: number; name: string; kind: string; themeColor: string;
   systems: number; logins: number; editors: number; recipients: string;
 };
-type PersonRow = { id: number; name: string; email: string; org: string };
+type PersonRow = { name: string; email: string; org: string };
 type OrphanRow = { id: number; entry: string };
 
 /**
@@ -32,7 +32,8 @@ type OrphanRow = { id: number; entry: string };
 export default function PersonnelForm(props: {
   clientAccessEnabled: boolean;
   orgs: OrgRow[]; orphans: OrphanRow[];
-  people: PersonRow[]; orgNames: string[];
+  /** Everyone with a login this viewer may see - read only, assembled not curated. */
+  directory: PersonRow[];
   operatorOrgId: number | null; sheetOrgId: number | null;
   showRecipients: boolean; showSheetSync: boolean;
 }) {
@@ -49,18 +50,6 @@ export default function PersonnelForm(props: {
       const res = await addOrg(orgDraft.name, orgDraft.kind);
       if (res?.error) setOrgError(res.error);
       else setOrgDraft({ name: "", kind: orgDraft.kind });
-    });
-  };
-
-  const [personDraft, setPersonDraft] = useState({ name: "", email: "", org: props.orgNames[0] ?? "" });
-  const [personError, setPersonError] = useState("");
-  const submitPerson = () => {
-    if (!personDraft.name.trim()) return;
-    setPersonError("");
-    startTransition(async () => {
-      const res = await addPerson(personDraft.name, personDraft.email, personDraft.org);
-      if (res?.error) setPersonError(res.error);
-      else setPersonDraft({ name: "", email: "", org: personDraft.org });
     });
   };
 
@@ -155,38 +144,24 @@ export default function PersonnelForm(props: {
         </div>
       )}
 
+      {/* Read-only on purpose. There is no roster to curate any more: a person
+          is a login, so this is a window onto the ones that exist rather than a
+          second list to keep in step with them. People are added where they get
+          their access - the house in Admin, an organization on its own page. */}
       <div className="card">
-        <div className="card-title">Roster</div>
+        <div className="card-title">Directory</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Names tasks can be assigned to and @mentions can reach. An email makes assignments and mentions reach
-          them; without one they can still be assigned, just not notified. Signing in is separate - that&apos;s
-          each organization&apos;s own page.
+          Everyone tasks can be assigned to and @mentions can reach. Add somebody by giving them a login:
+          your own people in <a href="/settings/admin">Admin</a>, a client&apos;s on their organization&apos;s page.
         </div>
-        {props.people.map((p) => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+        {props.directory.map((p) => (
+          <div key={p.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
             {p.org && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{p.org}</span>}
-            {p.email && <span className="mut mono" style={{ fontSize: 11 }}>{p.email}</span>}
-            <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
-              onClick={() => {
-                if (!window.confirm(`Remove ${p.name} from the roster? Existing task assignments keep the name.`)) return;
-                startTransition(() => removePerson(p.id));
-              }}>remove</button>
+            <span className="mut mono" style={{ fontSize: 11, marginLeft: "auto" }}>{p.email}</span>
           </div>
         ))}
-        {props.people.length === 0 && <div className="mut" style={{ fontSize: 12 }}>Nobody on the roster yet.</div>}
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          <input value={personDraft.name} onChange={(e) => setPersonDraft({ ...personDraft, name: e.target.value })}
-            placeholder="Name" style={{ flex: "1 1 90px", fontSize: 13 }} />
-          <input className="mono" value={personDraft.email} onChange={(e) => setPersonDraft({ ...personDraft, email: e.target.value })}
-            placeholder="email (optional)" style={{ flex: "2 1 160px", fontSize: 13 }} />
-          <select value={personDraft.org} onChange={(e) => setPersonDraft({ ...personDraft, org: e.target.value })} style={{ width: "auto", fontSize: 13 }}>
-            <option value="">no organization</option>
-            {props.orgNames.map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <button className="btn sm accent" onClick={submitPerson} disabled={pending || !personDraft.name.trim()}>Add</button>
-        </div>
-        {personError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{personError}</div>}
+        {props.directory.length === 0 && <div className="mut" style={{ fontSize: 12 }}>Nobody has a login yet.</div>}
       </div>
     </>
   );

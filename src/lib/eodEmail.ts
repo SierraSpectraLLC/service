@@ -7,7 +7,8 @@
 // their assets. A client never sees another client's work in their report.
 import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, eodUpdates, people, assets, orgs } from "@/db/schema";
+import { instruments, eodUpdates, assets, orgs } from "@/db/schema";
+import { namedLogins } from "@/lib/directory";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
@@ -79,18 +80,18 @@ const recordsSomething = (s: { systemUpdate: string; actionItem: string; skipped
  * today's filters would silently erase its entry.
  */
 export async function collectEodEntries(date: string, orgId: number | null, historical = false): Promise<EodEntry[]> {
-  const [rows, saved, roster, orgRow] = await Promise.all([
+  const [rows, saved, directory, orgRow] = await Promise.all([
     // All systems: includesSystem decides, so an archived-but-recorded one is
     // still reachable in history.
     db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
-    db.select().from(people),
+    namedLogins(),
     orgId === null ? Promise.resolve(undefined) : db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0]),
   ]);
 
   // Systems led by one of the client's own people are theirs to report on, not
   // the operator's - a live-report rule only, never applied to history.
-  const clientLed = new Set(roster.filter((p) => orgRow?.name && p.org === orgRow.name).map((p) => p.name));
+  const clientLed = new Set(directory.filter((p) => orgRow?.name && p.org === orgRow.name).map((p) => p.name));
   // What this org recorded that day, per the stamp on the row.
   const recorded = new Set(saved
     .filter((s) => s.instrumentId !== null && (s.ownerOrgId ?? null) === orgId && recordsSomething(s))
