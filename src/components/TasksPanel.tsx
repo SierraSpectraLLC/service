@@ -8,7 +8,7 @@ import { fmtWhen } from "@/lib/when";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
-  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, setTaskDue, setTaskAsset,
+  updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, setTaskDue, setTaskAsset, copyTasksTo,
 } from "@/app/actions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
@@ -74,9 +74,13 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   );
 }
 
-export default function TasksPanel({ target, tasks, people, systemAssets, today, canEdit, isStaff }: {
+export default function TasksPanel({
+  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [],
+}: {
   target: WorkTarget; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
+  /** Records this person may write to, for copying a batch of tasks across. */
+  copyTargets?: { key: string; label: string }[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -86,6 +90,13 @@ export default function TasksPanel({ target, tasks, people, systemAssets, today,
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
   const [inputs, setInputs] = useState<Record<string, string | boolean>>({});
+  // Copying is a mode rather than a permanent column of checkboxes: a list of
+  // twenty tasks is read far more often than it is copied, and a checkbox on
+  // every row would be in the way every other time.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [copyTo, setCopyTo] = useState("");
+  const [copyNote, setCopyNote] = useState("");
   const [pending, startTransition] = useTransition();
   const setInput = (k: string, v: string | boolean) => setInputs((s) => ({ ...s, [k]: v }));
 
@@ -147,13 +158,20 @@ export default function TasksPanel({ target, tasks, people, systemAssets, today,
     });
   };
 
+  const toggle = (id: number) =>
+    setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
   const renderTask = (t: Task, isDone: boolean) => {
     const open = expanded === t.id;
     const done = t.checklist.filter((c) => c.done).length;
     return (
       <div key={t.id} style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden", opacity: isDone && !open ? 0.7 : 1 }}>
-        <div className="row-hover" onClick={() => setExpanded(open ? null : t.id)}
+        <div className="row-hover" onClick={() => (picking ? toggle(t.id) : setExpanded(open ? null : t.id))}
           style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
+          {picking && (
+            <input type="checkbox" checked={picked.has(t.id)} readOnly tabIndex={-1}
+              aria-label={`Copy ${t.title}`} style={{ width: 15, height: 15, flexShrink: 0, pointerEvents: "none" }} />
+          )}
           <span className="pill" style={{ background: TASK_COLOR[t.state]?.bg, color: TASK_COLOR[t.state]?.fg }}>{t.state}</span>
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {t.checklist.length > 0 && <span className="mut" style={{ fontSize: 11 }}>{done}/{t.checklist.length}</span>}
@@ -295,12 +313,54 @@ export default function TasksPanel({ target, tasks, people, systemAssets, today,
         <div className="card-title">Tasks</div>
         {canEdit && (
           <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            {copyTargets.length > 0 && tasks.length > 0 && (
+              <button className="btn sm" onClick={() => {
+                setPicking((v) => !v); setPicked(new Set()); setCopyNote(""); setExpanded(null); setShowNew(false);
+              }}>{picking ? "Cancel" : "Copy to..."}</button>
+            )}
             <button className="btn sm primary" onClick={() => setShowNew((v) => !v)}>
               {showNew ? "Cancel" : "+ New task"}
             </button>
           </div>
         )}
       </div>
+
+      {picking && (
+        <div className="dash-form" style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, fontWeight: 700 }}>
+              {picked.size === 0 ? "Tick the tasks to copy" : `${picked.size} selected`}
+            </span>
+            <button className="btn link" style={{ fontSize: 11 }}
+              onClick={() => setPicked(new Set(tasks.filter((t) => t.title.trim()).map((t) => t.id)))}>all</button>
+            <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>none</button>
+            <select value={copyTo} onChange={(e) => setCopyTo(e.target.value)} aria-label="Copy to"
+              style={{ width: "auto", maxWidth: 260, fontSize: 12 }}>
+              <option value="">Choose where...</option>
+              {copyTargets.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </select>
+            <button className="btn sm accent" disabled={pending || !picked.size || !copyTo}
+              onClick={() => {
+                setCopyNote("");
+                const [kind, idStr] = copyTo.split(":");
+                const to = kind === "i"
+                  ? { instrumentId: parseInt(idStr), assetId: null }
+                  : { instrumentId: null, assetId: parseInt(idStr) };
+                startTransition(async () => {
+                  const res = await copyTasksTo([...picked], to);
+                  if (res?.error) { setCopyNote(res.error); return; }
+                  const where = copyTargets.find((d) => d.key === copyTo)?.label ?? "there";
+                  setCopyNote(`${res.copied} task${res.copied === 1 ? "" : "s"} copied to ${where} ✓`);
+                  setPicked(new Set());
+                });
+              }}>{pending ? "Copying..." : "Copy"}</button>
+          </div>
+          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+            Copies arrive open, with nothing ticked and no maintenance schedule attached.
+          </div>
+          {copyNote && <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: copyNote.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{copyNote}</div>}
+        </div>
+      )}
 
       {showNew && (
         <div className="dash-form">

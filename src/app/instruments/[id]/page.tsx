@@ -21,6 +21,7 @@ import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
+import { copyTargetsFor } from "@/lib/copyTargets";
 import {
   fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit, stockSrc,
 } from "@/lib/photos";
@@ -190,6 +191,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // A view-level share is read-only even for an org whose role can edit.
   const canEdit = await canEditSystem(user, instId);
+  // Other systems this person may write to, for copying a batch of tasks across.
+  const copyTargets = canEdit ? await copyTargetsFor(user, instId) : [];
   const isStaff = user.role === "owner" || user.role === "staff";
   const modules = await getModules();
   const { persona } = await viewContext();
@@ -417,7 +420,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             />
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}

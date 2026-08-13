@@ -19,6 +19,7 @@ import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
+import { copyTargetsFor } from "@/lib/copyTargets";
 import {
   fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
 } from "@/lib/photos";
@@ -139,6 +140,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
   const target = { instrumentId: null, assetId: asset.id };
+  // Systems this person may write to, for copying a batch of tasks across.
+  const copyTargets = canEdit ? await copyTargetsFor(user, null) : [];
   // ---- photos -------------------------------------------------------------
   // A unit tracked as a system of its own is two records describing one machine,
   // so the pair pools its photos (see lib/photos). Which attachments are
@@ -290,7 +293,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           ) },
           { key: "tasks", label: "Tasks", node: (
             <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
-              systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
+              systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff}
+              copyTargets={copyTargets} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
