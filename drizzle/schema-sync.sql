@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS "sessions" (
   "user_id" text NOT NULL,
   "expires" timestamp NOT NULL
 );
+CREATE TABLE IF NOT EXISTS "login_attempts" (
+  "identifier" text PRIMARY KEY NOT NULL,
+  "attempts" integer NOT NULL DEFAULT 0,
+  "requests" integer NOT NULL DEFAULT 0,
+  "window_start" timestamp NOT NULL DEFAULT now(),
+  "locked_until" timestamp,
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "verification_tokens" (
   "identifier" text NOT NULL,
   "token" text NOT NULL,

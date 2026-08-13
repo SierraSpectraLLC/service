@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
@@ -7,6 +8,7 @@ import { users, accounts, sessions, verificationTokens, appSettings, clientAllow
 
 import { parseList, matchesEntry, roleForEmail } from "@/lib/allowMatch";
 import { houseIdentityForEmail, houseRoleForEmail, rootOperatorOrgId } from "@/lib/house";
+import { CODE_TTL_MINUTES, newCode } from "@/lib/loginCode";
 
 export { parseList, matchesEntry, roleForEmail };
 
@@ -51,8 +53,8 @@ export async function orgForEmail(email: string): Promise<{ id: number; name: st
  */
 const SEND_TIMEOUT_MS = 8000;
 
-async function sendMagicLink({ identifier, url, provider }: {
-  identifier: string; url: string; provider: { from?: string; apiKey?: string };
+async function sendMagicLink({ identifier, url, token, provider }: {
+  identifier: string; url: string; token: string; provider: { from?: string; apiKey?: string };
 }) {
   const started = Date.now();
   let res: Response;
@@ -66,9 +68,15 @@ async function sendMagicLink({ identifier, url, provider }: {
       body: JSON.stringify({
         from: provider.from ?? process.env.EMAIL_FROM,
         to: identifier,
-        subject: "Your sign-in link",
-        html: `<p>Tap to sign in. The link expires in 24 hours and works once.</p><p><a href="${url}">Sign in</a></p>`,
-        text: `Sign in: ${url}\n\nThe link expires in 24 hours and works once.`,
+        // The code leads: the machine somebody is signing in ON is usually not
+        // the machine this email is open on. The link is still here, and still
+        // the faster path when you are reading this on the device you want in.
+        subject: `${token} is your sign-in code`,
+        html: `<p style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#172A4A;">Type this code to sign in:</p>
+          <p style="font-family:Menlo,Consolas,monospace;font-size:34px;letter-spacing:6px;font-weight:bold;color:#172A4A;margin:8px 0 14px;">${token}</p>
+          <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#64748B;">It expires in ${CODE_TTL_MINUTES} minutes and works once.</p>
+          <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;">Reading this on the device you want to sign in on? <a href="${url}">Sign in here instead</a>.</p>`,
+        text: `Your sign-in code is ${token}\n\nIt expires in ${CODE_TTL_MINUTES} minutes and works once.\n\nOr sign in on this device: ${url}`,
       }),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
@@ -101,6 +109,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       apiKey: process.env.AUTH_RESEND_KEY,
       from: process.env.EMAIL_FROM,
       sendVerificationRequest: sendMagicLink,
+      // A code somebody can read off a phone and type at an instrument, rather
+      // than a 32-byte token they can only click. It is the same credential
+      // either way - Auth.js hashes it, stores it once, and burns it on use -
+      // so the link in the email keeps working exactly as before.
+      generateVerificationToken: () => newCode((min, max) => crypto.randomInt(min, max)),
+      // Minutes, not the default day. Six digits is a million combinations, and
+      // the shorter life is half of what makes that enough (lib/loginCode).
+      maxAge: CODE_TTL_MINUTES * 60,
     }),
   ],
   pages: { signIn: "/login", verifyRequest: "/login?sent=1" },

@@ -41,6 +41,27 @@ export const sessions = pgTable("sessions", {
   expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
+/**
+ * Sign-in throttling, one row per email address.
+ *
+ * The six-digit code that goes in the same email as the magic link is only a
+ * credential because of what is counted here: wrong guesses, and codes asked
+ * for. Kept in its own table rather than on the verification token, because the
+ * counters have to outlive the code they are counting - a lock that vanished
+ * with the token it protected would be no lock at all.
+ *
+ * Not tenant-stamped on purpose: this is about an address trying to get in, and
+ * that happens before anybody knows whose workspace they belong to.
+ */
+export const loginAttempts = pgTable("login_attempts", {
+  identifier: text("identifier").primaryKey(),   // the email, lowercased
+  attempts: integer("attempts").notNull().default(0),
+  requests: integer("requests").notNull().default(0),
+  windowStart: timestamp("window_start").notNull().defaultNow(),
+  lockedUntil: timestamp("locked_until"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const verificationTokens = pgTable("verification_tokens", {
   identifier: text("identifier").notNull(),
   token: text("token").notNull(),
