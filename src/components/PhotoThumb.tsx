@@ -14,13 +14,16 @@ import { frameStyle, parseFrame } from "@/lib/photoFrame";
  * the assets list and in the gallery. Frame a photo once and it is framed
  * everywhere.
  *
- * Served through /api/files/<id> like every other file, so a photo of a client's
- * lab is not public just because it happens to be an image.
+ * The source is always an authorized route, never a blob URL: a photo of a
+ * client's lab is not public just because it happens to be an image. Two routes
+ * exist because there are two kinds of photograph - a file on this record
+ * (/api/files) and a stock photo of this kind of kit (/api/catalog/photo).
  */
 export default function PhotoThumb({
-  attachmentId, framing, alt, width, height, aspect, radius = 10, className, style,
+  src, framing, alt, width, height, aspect, radius = 10, className, style,
 }: {
-  attachmentId: number;
+  /** Built by fileSrc() or stockSrc() - the only two doors a photo comes through. */
+  src: string;
   /** "rot,zoom,x,y", or "" for a photo nobody has framed. */
   framing: string;
   alt: string;
@@ -44,7 +47,7 @@ export default function PhotoThumb({
         ...(height === undefined ? { aspectRatio: String(shape) } : { height }),
         borderRadius: radius, border: "1px solid var(--line)", background: "#EEF1F5", ...style,
       }}>
-      <img src={`/api/files/${attachmentId}`} alt={alt} loading="lazy"
+      <img src={src} alt={alt} loading="lazy"
         style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", ...frame }} />
     </span>
   );

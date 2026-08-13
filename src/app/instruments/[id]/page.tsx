@@ -21,7 +21,9 @@ import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
-import { isPhotoFile } from "@/lib/photos";
+import {
+  fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit, stockSrc,
+} from "@/lib/photos";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
@@ -191,10 +193,24 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const isStaff = user.role === "owner" || user.role === "staff";
   const modules = await getModules();
   const { persona } = await viewContext();
-  // Photos are ordinary attachments; what makes one a photograph is the file,
-  // not what somebody picked in a dropdown when they filed it.
-  const photoRows = attachRows.filter(isPhotoFile);
-  const coverFraming = photoRows.find((a) => a.id === inst.photoAttachmentId)?.framing ?? "";
+  // ---- photos -------------------------------------------------------------
+  // A system with exactly one unit IS that unit (see lib/photos), so the two
+  // pool their photos rather than each being photographed separately.
+  const soloUnit = sharesPhotos(assetRows.length) ? assetRows[0] : null;
+  const unitAttachRows = soloUnit
+    ? await db.select().from(attachments).where(eq(attachments.assetId, soloUnit.id))
+    : [];
+  // What makes an attachment a photograph is the file, not what somebody picked
+  // in a dropdown when they filed it.
+  const photoRows = [...attachRows, ...unitAttachRows].filter(isPhotoFile);
+  const coverId = sharedCover(inst.photoAttachmentId, soloUnit?.photoAttachmentId ?? null);
+  const coverFraming = photoRows.find((a) => a.id === coverId)?.framing ?? "";
+  // Stock photos live on the catalog row, not on any record. A one-unit system
+  // is better illustrated by its module's model than by "LC-MS".
+  const catalogPhotos = vocabRows.filter((v) => v.photoUrl);
+  const systemStock = (soloUnit && stockPhotoForUnit(catalogPhotos, soloUnit.kind, soloUnit.model))
+    || stockPhotoForSystem(catalogPhotos, inst.category);
+  const coverSrc = coverId !== null ? fileSrc(coverId) : systemStock ? stockSrc(systemStock.id) : "";
   // Each unit's own cover lives on the unit, so its framing has to be fetched -
   // otherwise the row of thumbnails is the one place a sideways photo stays
   // sideways.
@@ -203,6 +219,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     ? await db.select({ id: attachments.id, framing: attachments.framing })
         .from(attachments).where(inArray(attachments.id, assetCoverIds))
     : []).map((a) => [a.id, a.framing]));
+  /** A unit's thumbnail in the list: its own photo, else what the catalog says that model looks like. */
+  const unitPhoto = (a: { kind: string; model: string; photoAttachmentId: number | null }) => {
+    if (a.photoAttachmentId != null) {
+      return { photoSrc: fileSrc(a.photoAttachmentId), photoFraming: assetFraming.get(a.photoAttachmentId) ?? "" };
+    }
+    const s = stockPhotoForUnit(catalogPhotos, a.kind, a.model);
+    return { photoSrc: s ? stockSrc(s.id) : "", photoFraming: s?.photoFraming ?? "" };
+  };
   // Today's client-facing update, written here and picked up by the EOD page.
   const ownerIsViewer = inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId;
   const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
@@ -331,7 +355,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             <SystemPanel
               instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
                 location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
-                photoAttachmentId: inst.photoAttachmentId, photoFraming: coverFraming }}
+                photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
+                photoIsStock: coverId === null && systemStock !== null }}
               label={systemLabel(inst, assetRows)}
               clients={systemRows.map((c) => c.client)}
               categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
@@ -374,8 +399,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               instrumentId={inst.id}
               assets={assetRows.map((a) => ({
                 id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
-                photoAttachmentId: a.photoAttachmentId,
-                photoFraming: a.photoAttachmentId == null ? "" : assetFraming.get(a.photoAttachmentId) ?? "",
+                ...unitPhoto(a),
                 openItems:
                   taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
                   partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +
@@ -432,13 +456,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             />
           ) },
           { key: "photos", label: "Photos", node: (
-            <PhotosPanel target={{ instrumentId: inst.id, assetId: null }} coverId={inst.photoAttachmentId}
+            <PhotosPanel target={{ instrumentId: inst.id, assetId: null }} coverId={coverId}
               photos={photoRows.map((a) => ({
                 id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
                 uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
               }))}
               label={`${inst.externalId} - ${systemLabel(inst, assetRows) || "the system"}`}
-              canEdit={canEdit} storageFull={fileQuota.state === "full"} />
+              canEdit={canEdit} storageFull={fileQuota.state === "full"}
+              stock={systemStock && { termId: systemStock.id, framing: systemStock.photoFraming, what: systemStock.name }}
+              shared={soloUnit ? `${soloUnit.kind}${soloUnit.model ? ` ${soloUnit.model}` : ""}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

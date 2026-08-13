@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { setPhotoFraming } from "@/app/actions";
 import {
   frameStyle, NO_FRAME, parseFrame, serializeFrame, turned, ZOOM_MAX, ZOOM_MIN, type Frame,
 } from "@/lib/photoFrame";
@@ -19,10 +18,13 @@ import {
  * cropping evidence so a thumbnail looks tidy is not a trade worth making.
  * Re-framing tomorrow costs nothing and loses nothing.
  */
-export default function PhotoFramer({ attachmentId, framing, alt, onDone }: {
-  attachmentId: number;
+export default function PhotoFramer({ src, framing, alt, save, onDone }: {
+  /** The photo to frame - a file or a catalog stock photo. See lib/photos. */
+  src: string;
   framing: string;
   alt: string;
+  /** Where the four numbers go. Differs for a file and a catalog row. */
+  save: (framing: string) => Promise<{ error?: string } | void>;
   onDone: () => void;
 }) {
   const [frame, setFrame] = useState<Frame>(() => parseFrame(framing));
@@ -53,10 +55,10 @@ export default function PhotoFramer({ attachmentId, framing, alt, onDone }: {
     }));
   };
 
-  const save = () => {
+  const commit = () => {
     setError("");
     startTransition(async () => {
-      const res = await setPhotoFraming(attachmentId, serializeFrame(frame));
+      const res = await save(serializeFrame(frame));
       if (res?.error) { setError(res.error); return; }
       onDone();
     });
@@ -85,14 +87,14 @@ export default function PhotoFramer({ attachmentId, framing, alt, onDone }: {
             border: "1px solid var(--line)", background: "#0F172A", touchAction: "none",
             cursor: drag.current ? "grabbing" : "grab",
           }}>
-          <img src={`/api/files/${attachmentId}`} alt={alt} draggable={false}
+          <img src={src} alt={alt} draggable={false}
             style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", ...frameStyle(frame, 4 / 3) }} />
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
           <button className="btn sm" onClick={() => setFrame((f) => turned(f))} disabled={pending}>Turn ¼</button>
-          <label className="mut" style={{ fontSize: 12 }} htmlFor={`zoom-${attachmentId}`}>Zoom</label>
-          <input id={`zoom-${attachmentId}`} type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={0.05}
+          <label className="mut" style={{ fontSize: 12 }} htmlFor="photo-zoom">Zoom</label>
+          <input id="photo-zoom" type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={0.05}
             value={frame.zoom} disabled={pending}
             onChange={(e) => setFrame((f) => ({ ...f, zoom: Number(e.target.value) }))}
             style={{ flex: "1 1 120px", minWidth: 100 }} />
@@ -103,7 +105,7 @@ export default function PhotoFramer({ attachmentId, framing, alt, onDone }: {
 
         <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
           <button className="btn sm" onClick={onDone} disabled={pending}>Cancel</button>
-          <button className="btn sm primary" onClick={save} disabled={pending}>
+          <button className="btn sm primary" onClick={commit} disabled={pending}>
             {pending ? "Saving..." : "Save framing"}
           </button>
         </div>

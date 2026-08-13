@@ -10,8 +10,12 @@ import PhotoThumb from "./PhotoThumb";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
-  /** This module's cover photo, when it has one - see PhotosPanel. */
-  photoAttachmentId?: number | null;
+  /**
+   * Where to fetch this module's picture: its own cover photo, or the catalog's
+   * stock photo of the model when nobody has photographed this one. Blank for a
+   * unit with neither - a row with no thumbnail beats a row with a grey box.
+   */
+  photoSrc?: string;
   /** How that photo sits in a tile this small. See lib/photoFrame. */
   photoFraming?: string;
 };
@@ -154,8 +158,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
             {/* A thumbnail here is what makes the list read as the bench rather
                 than as a parts manifest. Absent for units without one, rather
                 than a placeholder box per row. */}
-            {a.photoAttachmentId != null && (
-              <PhotoThumb attachmentId={a.photoAttachmentId} framing={a.photoFraming ?? ""} alt=""
+            {a.photoSrc && (
+              <PhotoThumb src={a.photoSrc} framing={a.photoFraming ?? ""} alt=""
                 width={34} height={34} radius={6} />
             )}
             <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>

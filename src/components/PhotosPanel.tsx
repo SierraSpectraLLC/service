@@ -3,10 +3,10 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
-import { addPhotos, deleteAttachment, setCoverPhoto, type WorkTarget } from "@/app/actions";
+import { addPhotos, deleteAttachment, setCoverPhoto, setPhotoFraming, type WorkTarget } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import { fmtBytes } from "@/lib/storage";
-import { coverIsChosen, orderPhotos, photoCount } from "@/lib/photos";
+import { coverIsChosen, fileSrc, orderPhotos, photoCount, stockSrc } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
 import PhotoFramer from "./PhotoFramer";
 
@@ -37,8 +37,16 @@ export type PhotoRow = {
  *
  * These are ordinary attachments and appear under Files too. That is the point -
  * one file, one row, one charge against the quota, one authorized way to read it.
+ *
+ * The one exception is the catalog's stock photo, shown only while nobody has
+ * photographed this record and always labelled as such. It is not a file here
+ * and never becomes one: it illustrates the model, not this machine, and a
+ * stock image standing in silently for evidence is a lie the record would be
+ * telling on its own.
  */
-export default function PhotosPanel({ target, photos, coverId, label, canEdit, storageFull }: {
+export default function PhotosPanel({
+  target, photos, coverId, label, canEdit, storageFull, stock, shared,
+}: {
   target: WorkTarget;
   photos: PhotoRow[];
   coverId: number | null;
@@ -46,6 +54,10 @@ export default function PhotosPanel({ target, photos, coverId, label, canEdit, s
   label: string;
   canEdit: boolean;
   storageFull: boolean;
+  /** The catalog's photo of this kind of kit, when it has one. */
+  stock?: { termId: number; framing: string; what: string } | null;
+  /** Set when this record pools its photos with the unit/system it is. */
+  shared?: string;
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -117,15 +129,30 @@ export default function PhotosPanel({ target, photos, coverId, label, canEdit, s
         </div>
       )}
 
+      {shared && ordered.length > 0 && (
+        <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>Shared with {shared} - one machine, one set of photos.</div>
+      )}
+
       {ordered.length === 0 ? (
-        <div className="mut" style={{ fontSize: 13 }}>
-          No photos yet. Phone photos are fine - they can be turned upright and zoomed here.
-        </div>
+        stock ? (
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <PhotoThumb src={stockSrc(stock.termId)} framing={stock.framing}
+              alt={`Catalog photo of ${stock.what}`} width={240} height={180} />
+            <div className="mut" style={{ fontSize: 12, flex: "1 1 180px" }}>
+              Catalog photo of {stock.what} - not this one.
+              <br />Add a photo of the actual {target.instrumentId !== null ? "system" : "unit"} and it takes over here.
+            </div>
+          </div>
+        ) : (
+          <div className="mut" style={{ fontSize: 13 }}>
+            No photos yet. Phone photos are fine - they can be turned upright and zoomed here.
+          </div>
+        )
       ) : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
             <a href={`/api/files/${lead.id}`} target="_blank" rel="noreferrer" style={{ display: "block" }}>
-              <PhotoThumb attachmentId={lead.id} framing={lead.framing} alt={label} width={240} height={180} />
+              <PhotoThumb src={fileSrc(lead.id)} framing={lead.framing} alt={label} width={240} height={180} />
             </a>
             <div className="mut" style={{ fontSize: 11, marginTop: 4, maxWidth: 240, overflowWrap: "anywhere" }}>
               {chosen ? "Cover" : "Cover (newest, not chosen)"} · {lead.uploadedBy} · {lead.when}
@@ -144,7 +171,7 @@ export default function PhotosPanel({ target, photos, coverId, label, canEdit, s
                 <div key={p.id} style={{ width: 104 }}>
                   <a href={`/api/files/${p.id}`} target="_blank" rel="noreferrer" title={p.fileName}
                     style={{ display: "block" }}>
-                    <PhotoThumb attachmentId={p.id} framing={p.framing} alt={p.fileName}
+                    <PhotoThumb src={fileSrc(p.id)} framing={p.framing} alt={p.fileName}
                       width={104} height={78} radius={8} />
                   </a>
                   {canEdit && (
@@ -167,7 +194,8 @@ export default function PhotosPanel({ target, photos, coverId, label, canEdit, s
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
 
       {framing && (
-        <PhotoFramer attachmentId={framing.id} framing={framing.framing} alt={framing.fileName}
+        <PhotoFramer src={fileSrc(framing.id)} framing={framing.framing} alt={framing.fileName}
+          save={(f) => setPhotoFraming(framing.id, f)}
           onDone={() => { setFraming(null); router.refresh(); }} />
       )}
     </div>

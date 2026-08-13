@@ -850,6 +850,13 @@ export const vocabTerms = pgTable("vocab_terms", {
   // An array rather than one value because a pump can serve LC-MS and HPLC
   // alike - same reasoning as checkout_items.model_scope.
   categories: text("categories").array().notNull().default([]),
+  // What this kind of thing LOOKS like - a stock photo of the model, the module
+  // type or the system type. Deliberately NOT an attachment: a catalog photo
+  // illustrates a hundred records and belongs to none of them, so it must never
+  // turn up in a client's Files, their gallery, or their storage bill. It is one
+  // blob URL owned by the catalog row, served through /api/catalog/photo.
+  photoUrl: text("photo_url").notNull().default(""),
+  photoFraming: text("photo_framing").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Unique on identity only, not on categories: FID is one model that happens
   // to apply to several system types, not a row per type.
