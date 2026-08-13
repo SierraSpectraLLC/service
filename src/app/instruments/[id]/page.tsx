@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
+  serviceVisits,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -117,6 +118,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const serviceEvents = taskRows
     .filter((t) => t.completedAt !== null)
     .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
+  // A name somebody gave a day themselves beats any list of procedures.
+  const visitNames = Object.fromEntries((await db.select({ day: serviceVisits.day, title: serviceVisits.title })
+    .from(serviceVisits).where(eq(serviceVisits.instrumentId, inst.id)).catch(() => []))
+    .map((v) => [v.day, v.title]));
 
   // Chain of custody, oldest first - it reads as a story. The reader's own
   // panel arrangement rides along, so the page arrives already arranged.
@@ -447,7 +452,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
               canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
-              serviceEvents={serviceEvents} />
+              serviceEvents={serviceEvents} visitNames={visitNames} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
           { key: "custody", label: "Ownership history", node: (

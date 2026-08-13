@@ -4,7 +4,9 @@ import { promptReason } from "@/lib/reason";
 import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
-import { createPart, updatePart, setPartStatus, setPartAsset, deletePart, type WorkTarget } from "@/app/actions";
+import {
+  createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
+} from "@/app/actions";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
 import { formatCents, centsToInput } from "@/lib/money";
 import { dayText, isoDay, partGroups, type ServiceEvent } from "@/lib/partGroups";
@@ -54,10 +56,12 @@ const empty = { kind: "part", assetId: null as number | null, name: "", partNumb
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [] }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {} }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
   /** Jobs completed, by day, so a visit can be named after the work it was. */
   serviceEvents?: ServiceEvent[];
+  /** Names somebody gave a day themselves, keyed YYYY-MM-DD. Beats the jobs. */
+  visitNames?: Record<string, string>;
   // Cost and PO are the owner's business data: hidden (and blanked by the
   // server before they get here) for providers and other non-owner orgs.
   showCosts: boolean;
@@ -69,6 +73,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const [draft, setDraft] = useState<typeof empty>(empty);
   const [specPairs, setSpecPairs] = useState<SpecPair[]>([]);
   const [pending, startTransition] = useTransition();
+
+  // Which day's heading is being renamed, and to what.
+  const [naming, setNaming] = useState<null | { day: string; title: string }>(null);
 
   const openNew = () => { setDraft(empty); setSpecPairs([]); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
@@ -106,6 +113,16 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const showOrderFields =
     (ORDER_STATES as readonly string[]).includes(draft.status) ||
     !!(draft.po || draft.carrier || draft.tracking || draft.orderedAt || draft.eta);
+
+  const saveVisitName = (day?: string, title?: string) => {
+    const d = day ?? naming?.day;
+    if (!d) return;
+    const t = title ?? naming?.title ?? "";
+    startTransition(async () => {
+      await nameServiceVisit(target, d, t);
+      setNaming(null);
+    });
+  };
 
   const save = () => {
     if (!draft.name.trim() || !form) return;
@@ -342,7 +359,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         // Parts and consumables read as two lists; within each, what is still
         // coming stays open and what is done folds into the day it happened.
         const section = (rows: Part[]) => {
-          const { live, visits } = partGroups(rows, serviceEvents);
+          const { live, visits } = partGroups(rows, serviceEvents, visitNames);
           return (
             <>
               {live.map(renderRow)}
@@ -358,7 +375,35 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                       {v.parts.some((r) => r.status === "Removed") && v.parts.every((r) => r.status === "Removed")
                         ? " pulled" : " fitted"}
                     </span>
+                    {/* Call the day what it was. A PM day closes seven procedures
+                        at once and no list of them says "Annual PM". */}
+                    {canEdit && v.day !== "" && (
+                      <button className="btn link" style={{ fontSize: 11, marginLeft: 8 }}
+                        onClick={(e) => {
+                          // Inside a <summary>: without this the click also
+                          // toggles the fold shut under the form that opens.
+                          e.preventDefault(); e.stopPropagation();
+                          setNaming({ day: v.day, title: visitNames[v.day] ?? "" });
+                        }}>{v.named ? "rename" : "name this visit"}</button>
+                    )}
                   </summary>
+                  {naming?.day === v.day && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "0 2px 8px" }}>
+                      <input autoFocus value={naming.title} maxLength={80}
+                        placeholder="Annual PM"
+                        onChange={(e) => setNaming({ day: v.day, title: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Enter") saveVisitName(); }}
+                        style={{ flex: "1 1 180px", fontSize: 13 }} />
+                      <button className="btn sm accent" disabled={pending} onClick={() => saveVisitName()}>Save</button>
+                      <button className="btn sm" disabled={pending} onClick={() => setNaming(null)}>Cancel</button>
+                      {v.named && (
+                        <button className="btn link" style={{ fontSize: 12, color: "#A32D2D" }} disabled={pending}
+                          onClick={() => { setNaming({ day: v.day, title: "" }); saveVisitName(v.day, ""); }}>
+                          clear
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {v.parts.map(renderRow)}
                 </details>
               ))}

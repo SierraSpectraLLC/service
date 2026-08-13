@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  dayLabel, dayText, isFinished, isoDay, partDates, partGroups, serviceDay,
+  dayLabel, dayText, isFinished, isoDay, partDates, partGroups, serviceDay, visitLabel,
 } from "@/lib/partGroups";
 
 const p = (id: number, status: string, over: Partial<{ installedAt: string; removedAt: string; createdAt: string }> = {}) =>
@@ -165,5 +165,51 @@ describe("what a save writes for the dates", () => {
   it("does not re-stamp a state the part was already in", () => {
     const stored = { status: "Installed", receivedAt: "", installedAt: "2026-03-12", removedAt: "" };
     expect(partDates(stored, "Installed", {}, TODAY).installedAt).toBe("2026-03-12");
+  });
+});
+
+describe("what a visit is called", () => {
+  const DAY = "2026-08-12";
+
+  it("is just the date when nothing closed that day", () => {
+    expect(visitLabel(DAY, [])).toBe("12 Aug 2026");
+  });
+
+  it("names the job when there was one, or two", () => {
+    expect(visitLabel(DAY, ["Replace Deuterium Lamp"]))
+      .toBe("12 Aug 2026 · Replace Deuterium Lamp");
+    expect(visitLabel(DAY, ["Replace Deuterium Lamp", "Replace Tungsten Lamp"]))
+      .toBe("12 Aug 2026 · Replace Deuterium Lamp · Replace Tungsten Lamp");
+  });
+
+  it("counts the rest instead of listing them", () => {
+    // A PM day closes every procedure on the schedule at once. Joining them gave
+    // a three-line heading over two rows of parts.
+    expect(visitLabel(DAY, [
+      "Perform Baseline Flatness Check", "Replace Deuterium Lamp", "Replace Tungsten Lamp",
+      "Wavelength Accuracy 486.0nm", "Visual Verification at 550nm", "Baseline Flatness",
+      "Wavelength Accuracy 656.10nm",
+    ])).toBe("12 Aug 2026 · Perform Baseline Flatness Check · Replace Deuterium Lamp · +5 more");
+  });
+
+  it("takes a name somebody gave the day over any list of jobs", () => {
+    expect(visitLabel(DAY, ["Replace Deuterium Lamp", "Baseline Flatness"], "Annual PM"))
+      .toBe("12 Aug 2026 · Annual PM");
+    expect(visitLabel(DAY, [], "  Annual PM  ")).toBe("12 Aug 2026 · Annual PM");
+  });
+
+  it("still says so when there is no date at all", () => {
+    expect(visitLabel("", [])).toBe("No date recorded");
+    expect(visitLabel("", ["Replace Deuterium Lamp"])).toBe("No date recorded");
+    // A name is worth more than the apology, even undated.
+    expect(visitLabel("", [], "Bench rebuild")).toBe("Bench rebuild");
+  });
+
+  it("carries a name through the grouping", () => {
+    const parts = [p(1, "Installed", { installedAt: "2026-08-12" })];
+    const [visit] = partGroups(parts, [{ day: "2026-08-12", title: "Replace Deuterium Lamp" }],
+      { "2026-08-12": "Annual PM" }).visits;
+    expect(visit.label).toBe("12 Aug 2026 · Annual PM");
+    expect(visit.named).toBe(true);
   });
 });
