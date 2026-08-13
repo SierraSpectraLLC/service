@@ -6,7 +6,7 @@ import {
   instruments, tasks, parts, attachments, discussionPosts, assets, auditLog, vocabTerms,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { readTenant, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { findOutsideMatches } from "@/lib/serialLookup";
@@ -115,7 +115,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       // that hide an internal note on its own page hide it here.
       ...postRows
         .filter((p) => canSeePost(
-          { isHouse: user.role === "owner" || user.role === "staff", orgId: user.orgId },
+          {
+            isHouse: user.role === "owner" || user.role === "staff", orgId: user.orgId,
+            houseOrgId: user.role === "owner" || user.role === "staff" ? readTenant(user) : null,
+          },
           { ...p, audience: p.audience as Audience },
         ))
         .map((p) => ({ id: p.id, group: "Discussion", title: p.body.slice(0, 120), sub: p.author, ...place({ instrumentId: p.instrumentId }) })),

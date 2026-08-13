@@ -13,24 +13,62 @@
 //     the operator; the operator sits in every room and has one of its own.
 //     Without that, a general post by one client would be readable by every
 //     other client on the instance.
+//
+// "The house" is a COMPANY here, not a role, and that is the part worth reading
+// twice. When one service company ran the instance, staff meant the house and
+// `isHouse` was enough. Two service companies can now work the same client's
+// systems - Sierra on the LC-MS, Acme on the gas generator - and both of them
+// are staff. Comparing roles would have handed each of them the other's internal
+// notes and every room on the other's General board, in the exact configuration
+// the product is sold for. So a house viewer carries WHICH house, a post carries
+// which workspace it was written in, and the two have to match.
 
 export type Audience = "all" | "internal";
 
 export type PostScope = {
   /** Null = a General board post rather than one on a system. */
   instrumentId: number | null;
-  /** The organization the author spoke for; null = the operator's own staff. */
+  /** The organization the author spoke for; null = a service company's own staff. */
   authorOrgId: number | null;
-  /** General board only: whose room. Null = the operator's own board. */
+  /**
+   * The workspace the post was written in. For a staff post this is WHICH
+   * service company said it - the thing that makes "internal" mean something on
+   * an instance with more than one. Null on posts written before the column
+   * existed; callers resolve those to the instance's root operator, which is
+   * who wrote them, because there was nobody else.
+   */
+  tenantOrgId: number | null;
+  /** General board only: whose room. Null = a service company's own board. */
   roomOrgId: number | null;
   audience: Audience;
 };
 
-export type Viewer = { isHouse: boolean; orgId: number | null };
+export type Viewer = {
+  isHouse: boolean;
+  orgId: number | null;
+  /** Which service company they are staff of. Null for anyone who is not staff. */
+  houseOrgId: number | null;
+};
 
 /** Is the viewer part of the organization this post was written for? */
 export function sameParty(v: Viewer, orgId: number | null): boolean {
   return v.isHouse ? orgId === null : orgId !== null && orgId === v.orgId;
+}
+
+/**
+ * Did this viewer's own side write this post?
+ *
+ * For a client, their organization. For staff, their own service company AND no
+ * other - a second operator reading a system shared in to them is a provider on
+ * it, not its house, and an internal note is not addressed to them.
+ */
+export function wroteIt(v: Viewer, p: Pick<PostScope, "authorOrgId" | "tenantOrgId">): boolean {
+  if (p.authorOrgId !== null) return !v.isHouse && v.orgId === p.authorOrgId;
+  if (!v.isHouse) return false;
+  // A staff post with no workspace recorded is unattributable. Refusing it is
+  // the safe direction: the alternative shows one company's notes to another,
+  // and the backfill exists so this should never be a live row.
+  return v.houseOrgId !== null && v.houseOrgId === p.tenantOrgId;
 }
 
 /**
@@ -39,9 +77,21 @@ export function sameParty(v: Viewer, orgId: number | null): boolean {
  * function must never be used as the only gate on a system's posts.
  */
 export function canSeePost(v: Viewer, p: PostScope): boolean {
-  if (p.audience === "internal") return sameParty(v, p.authorOrgId);
-  if (p.instrumentId === null) return v.isHouse || sameParty(v, p.roomOrgId);
+  if (p.audience === "internal") return wroteIt(v, p);
+  if (p.instrumentId === null) return inRoom(v, p);
   return true;
+}
+
+/**
+ * Does this viewer sit in this General room?
+ *
+ * A service company sits in every room ON ITS OWN BOARD and in none of another
+ * company's - its rooms are with its own clients. An organization sits in its
+ * own room only.
+ */
+export function inRoom(v: Viewer, p: Pick<PostScope, "roomOrgId" | "tenantOrgId">): boolean {
+  if (v.isHouse) return v.houseOrgId !== null && v.houseOrgId === p.tenantOrgId;
+  return p.roomOrgId !== null && p.roomOrgId === v.orgId;
 }
 
 /**

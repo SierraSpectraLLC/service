@@ -43,7 +43,7 @@ import {
 import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen } from "@/lib/stages";
-import { shopToday, shopTodayMDY, shopMonthDay } from "@/lib/shopday";
+import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
@@ -73,6 +73,7 @@ import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/hous
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
+import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import {
@@ -1626,6 +1627,10 @@ type PartInput = {
   kind: string; assetId?: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
+  // The day it actually went in or came out, YYYY-MM-DD. Blank leaves whatever
+  // is stored alone rather than clearing it: a service date is a fact about the
+  // machine, and an unrelated edit to the note must not quietly erase one.
+  installedAt?: string; removedAt?: string;
   // "Removed - request new?": also file a Needed twin so the reorder isn't forgotten.
   requestReplacement?: boolean;
 };
@@ -1699,16 +1704,22 @@ function cleanPartInput(data: PartInput): PartInput {
   };
 }
 
-const today = () => shopMonthDay();
+/**
+ * Calendar days, and the reason it matters.
+ *
+ * This used to stamp "Aug 13" - no year. The parts panel groups finished work by
+ * the day it happened and can only do that with a sortable date, so every part
+ * anybody ever installed collapsed under "No date recorded" while carrying a
+ * stamp that looked perfectly fine on the row. Same format as everything else
+ * dated in this app now. The precedence rule lives in lib/partGroups.
+ */
+const today = () => shopToday();
 
-/** Auto-stamp the lifecycle date when a part first enters Received / Installed / Removed. */
-function partStamps(before: { status: string; receivedAt: string; installedAt: string; removedAt: string }, status: string) {
-  return {
-    receivedAt: status === "Received" && before.status !== "Received" ? today() : before.receivedAt,
-    installedAt: status === "Installed" && before.status !== "Installed" ? today() : before.installedAt,
-    removedAt: status === "Removed" && before.status !== "Removed" ? today() : before.removedAt,
-  };
-}
+const partStamps = (
+  before: { status: string; receivedAt: string; installedAt: string; removedAt: string },
+  status: string,
+  given: { installedAt?: string; removedAt?: string } = {},
+) => partDates(before, status, given, today());
 
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
@@ -1723,7 +1734,8 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   // Staff of the tenant see prices; a partner from another workspace does not,
   // however senior they are at their own company.
   if (!canSeeCosts(u, payer, tenant)) { data.cost = ""; data.po = ""; }
-  const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status);
+  const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status,
+    { installedAt: raw.installedAt, removedAt: raw.removedAt });
   const taggedAsset = t0.asset;
   const [p] = await db.insert(parts).values({
     ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
@@ -1753,7 +1765,7 @@ export async function updatePart(partId: number, raw: PartInput) {
   const data = cleanPartInput(raw);
   const [before] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!before) return;
-  const stamps = partStamps(before, data.status);
+  const stamps = partStamps(before, data.status, { installedAt: raw.installedAt, removedAt: raw.removedAt });
   // Only touch the asset tag when the edit actually changed it - re-validating
   // an unchanged tag would silently clear it if the asset has since detached.
   const retagged = (data.assetId ?? null) !== before.assetId;
@@ -2573,8 +2585,14 @@ async function postAudience(p: {
   return [...new Set([...staff, ...shares.flatMap((s) => emailsFor(s.orgId))])];
 }
 
-/** The viewer as the discussion rules see them: the house, or one organization. */
-const partyOf = (u: SessionUser): Viewer => ({ isHouse: isHouse(u.role), orgId: u.orgId });
+/**
+ * The viewer as the discussion rules see them: which house, or which
+ * organization. `houseOrgId` is the part that matters on an instance with two
+ * service companies - see lib/discussionScope.
+ */
+const partyOf = (u: SessionUser): Viewer => ({
+  isHouse: isHouse(u.role), orgId: u.orgId, houseOrgId: isHouse(u.role) ? myTenantOrgId(u) : null,
+});
 
 /** The organization a post is attributed to - null for the operator's own staff. */
 const authorOrgOf = (u: SessionUser): number | null => (isHouse(u.role) ? null : u.orgId);
@@ -2594,10 +2612,12 @@ export async function postDiscussion(
   const authorOrgId = authorOrgOf(u);
   let externalId = "";
   let roomOrgId: number | null = null;
+  let postTenant: number | null = myTenantOrgId(u);
 
   if (instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     if (!inst) throw new Error("Not found");
+    postTenant = inst.tenantOrgId;
     // A thread lives with its system: you can only post where you can see.
     await assertSystemVisible(u, instrumentId);
     externalId = inst.externalId;
@@ -2611,7 +2631,11 @@ export async function postDiscussion(
   }
 
   await db.insert(discussionPosts).values({
-    instrumentId, author: u.name, authorEmail: u.email, body: text, authorOrgId, audience, roomOrgId,
+    // The workspace this was said in. On a system it is the system's, so a note
+    // written on a client's machine stays with the company whose machine it is.
+    // On the General board it is the speaker's own.
+    tenantOrgId: postTenant, instrumentId,
+    author: u.name, authorEmail: u.email, body: text, authorOrgId, audience, roomOrgId,
   });
   // The activity feed is read by everyone who can see the system, so an internal
   // post is recorded as having happened without quoting a word of it.
@@ -3546,7 +3570,8 @@ export async function reportIssue(instrumentId: number, data: {
   // On the record as a conversation, which is the half they asked for: they can
   // add to it, and so can we, without either side leaving the system.
   await db.insert(discussionPosts).values({
-    instrumentId, body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
+    tenantOrgId: inst.tenantOrgId, instrumentId,
+    body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
     author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
   });
 
@@ -3599,6 +3624,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
   const who = u.name || u.email;
 
   const post = (body: string) => db.insert(discussionPosts).values({
+    tenantOrgId: inst.tenantOrgId,
     instrumentId, body, author: who, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
   });
 
@@ -5871,7 +5897,7 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
     inArray(parts.status, ["Needed", "Ordered", "In transit", "Backordered"]),
   ));
   for (const p of open) {
-    await db.update(parts).set({ status: "Received", receivedAt: shopMonthDay() }).where(eq(parts.id, p.id));
+    await db.update(parts).set({ status: "Received", receivedAt: shopToday() }).where(eq(parts.id, p.id));
     await audit({
       actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: p.id,
       action: `'${p.name}' (PN ${p.partNumber}) arrived on ${po.number} - marked Received`,

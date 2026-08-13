@@ -29,10 +29,23 @@ const FINISHED = new Set(["Installed", "Removed"]);
 
 export const isFinished = (p: PartLike) => FINISHED.has(p.status);
 
-/** The day a finished row belongs to: when it came out, else when it went in. */
+/** A calendar day, or "" for anything else. The only date format that sorts. */
+export const isoDay = (s: string | undefined | null): string =>
+  (/^\d{4}-\d{2}-\d{2}$/.test((s ?? "").trim()) ? (s ?? "").trim() : "");
+
+/**
+ * The day a finished row belongs to: when it came out, else when it went in,
+ * else the day the row was written.
+ *
+ * Each candidate is tested in turn rather than the first non-empty one being
+ * taken and then checked. That is the whole bug this line used to have: the
+ * stamp was written as "Aug 13" - no year, so nothing that can be sorted or
+ * grouped - and being non-empty it won, failed the format test, and took the
+ * row to "No date recorded" WITH a perfectly good creation date sitting right
+ * there behind it. Every part anybody ever installed landed in that bucket.
+ */
 export function serviceDay(p: PartLike): string {
-  const day = p.removedAt || p.installedAt || (p.createdAt ?? "").slice(0, 10);
-  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
+  return isoDay(p.removedAt) || isoDay(p.installedAt) || isoDay((p.createdAt ?? "").slice(0, 10));
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -42,6 +55,19 @@ export function dayLabel(iso: string): string {
   const [y, m, d] = iso.split("-");
   return `${parseInt(d)} ${MONTHS[parseInt(m) - 1] ?? m} ${y}`;
 }
+
+/**
+ * A stored lifecycle date, as a person should read it.
+ *
+ * Dates are stored as calendar days now. Rows written before that carry things
+ * like "Aug 13", which is not a date anything can sort but is still what
+ * somebody typed or what the old stamp left - so it is shown as it stands
+ * rather than blanked or guessed at.
+ */
+export const dayText = (stored: string): string => {
+  const iso = isoDay(stored);
+  return iso ? dayLabel(iso) : stored;
+};
 
 /** What was completed on a given day, for naming a visit. */
 export type ServiceEvent = { day: string; title: string };
@@ -91,5 +117,29 @@ export function partGroups<T extends PartLike>(
         parts: byDay.get(day)!,
       };
     }),
+  };
+}
+
+/**
+ * The lifecycle dates a save should write.
+ *
+ * A date somebody typed always wins - that is the whole point of being able to
+ * say when the work was really done, which is rarely the day it got recorded.
+ * Failing that, entering a state stamps it. Failing that, whatever was stored
+ * stays, including the old year-less strings: they read fine on a row, and
+ * clearing somebody's note about when a part went in because they edited its
+ * price would be a worse answer than leaving it.
+ */
+export function partDates(
+  before: { status: string; receivedAt: string; installedAt: string; removedAt: string },
+  status: string,
+  given: { installedAt?: string; removedAt?: string },
+  today: string,
+): { receivedAt: string; installedAt: string; removedAt: string } {
+  const entering = (s: string) => status === s && before.status !== s;
+  return {
+    receivedAt: entering("Received") ? today : before.receivedAt,
+    installedAt: isoDay(given.installedAt) || (entering("Installed") ? today : before.installedAt),
+    removedAt: isoDay(given.removedAt) || (entering("Removed") ? today : before.removedAt),
   };
 }

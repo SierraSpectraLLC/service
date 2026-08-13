@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, isFinished, partGroups, serviceDay } from "@/lib/partGroups";
+import {
+  dayLabel, dayText, isFinished, isoDay, partDates, partGroups, serviceDay,
+} from "@/lib/partGroups";
 
 const p = (id: number, status: string, over: Partial<{ installedAt: string; removedAt: string; createdAt: string }> = {}) =>
   ({ id, status, installedAt: "", removedAt: "", ...over });
@@ -28,6 +30,36 @@ describe("the day a finished part belongs to", () => {
   it("has no day rather than a wrong one", () => {
     expect(serviceDay(p(1, "Installed"))).toBe("");
     expect(serviceDay(p(1, "Installed", { installedAt: "sometime" }))).toBe("");
+  });
+
+  it("looks past a date it cannot read instead of giving up on the row", () => {
+    // The bug a customer found: the stamp was written as "Aug 13" - no year, so
+    // nothing that can be sorted - and being non-empty it beat a perfectly good
+    // creation date, failed the format check, and took the part to "No date
+    // recorded". Every part anybody had ever installed was in that bucket.
+    expect(serviceDay(p(1, "Installed", { installedAt: "Aug 13", createdAt: "2026-08-13T18:22:00.000Z" })))
+      .toBe("2026-08-13");
+    expect(serviceDay(p(1, "Removed", {
+      removedAt: "Aug 13", installedAt: "2026-03-12", createdAt: "2026-08-13T18:22:00.000Z",
+    }))).toBe("2026-03-12");
+  });
+});
+
+describe("reading a stored date", () => {
+  it("recognises a calendar day and nothing else", () => {
+    expect(isoDay("2026-08-13")).toBe("2026-08-13");
+    expect(isoDay(" 2026-08-13 ")).toBe("2026-08-13");
+    expect(isoDay("Aug 13")).toBe("");
+    expect(isoDay("")).toBe("");
+    expect(isoDay(undefined)).toBe("");
+  });
+
+  it("shows a real date properly and an old one as it stands", () => {
+    // Blanking what somebody typed, or guessing a year for it, would both be
+    // worse than printing the two words that are actually stored.
+    expect(dayText("2026-08-13")).toBe("13 Aug 2026");
+    expect(dayText("Aug 13")).toBe("Aug 13");
+    expect(dayText("")).toBe("");
   });
 });
 
@@ -92,5 +124,46 @@ describe("day labels", () => {
   it("reads as a date a person would say", () => {
     expect(dayLabel("2026-09-04")).toBe("4 Sep 2026");
     expect(dayLabel("2026-12-31")).toBe("31 Dec 2026");
+  });
+});
+
+describe("what a save writes for the dates", () => {
+  const TODAY = "2026-08-20";
+  const blank = { status: "Needed", receivedAt: "", installedAt: "", removedAt: "" };
+
+  it("stamps today when a part first reaches a state", () => {
+    expect(partDates(blank, "Installed", {}, TODAY).installedAt).toBe(TODAY);
+    expect(partDates(blank, "Removed", {}, TODAY).removedAt).toBe(TODAY);
+    expect(partDates(blank, "Received", {}, TODAY).receivedAt).toBe(TODAY);
+  });
+
+  it("takes the day somebody typed over today", () => {
+    // The whole point: a swap done on a site visit is recorded the following
+    // week, and the record should say the week it happened.
+    expect(partDates(blank, "Installed", { installedAt: "2026-08-13" }, TODAY).installedAt)
+      .toBe("2026-08-13");
+  });
+
+  it("lets a date be corrected long after the fact", () => {
+    const stored = { status: "Installed", receivedAt: "", installedAt: "Aug 13", removedAt: "" };
+    expect(partDates(stored, "Installed", { installedAt: "2026-08-13" }, TODAY).installedAt)
+      .toBe("2026-08-13");
+  });
+
+  it("leaves a stored date alone when the form sends nothing", () => {
+    // An edit to the note or the price must not quietly erase when the work was
+    // done - including the old year-less strings, which still say something.
+    const stored = { status: "Installed", receivedAt: "", installedAt: "Aug 13", removedAt: "" };
+    expect(partDates(stored, "Installed", {}, TODAY).installedAt).toBe("Aug 13");
+    expect(partDates(stored, "Installed", { installedAt: "" }, TODAY).installedAt).toBe("Aug 13");
+  });
+
+  it("ignores anything that is not a calendar day", () => {
+    expect(partDates(blank, "Installed", { installedAt: "last tuesday" }, TODAY).installedAt).toBe(TODAY);
+  });
+
+  it("does not re-stamp a state the part was already in", () => {
+    const stored = { status: "Installed", receivedAt: "", installedAt: "2026-03-12", removedAt: "" };
+    expect(partDates(stored, "Installed", {}, TODAY).installedAt).toBe("2026-03-12");
   });
 });

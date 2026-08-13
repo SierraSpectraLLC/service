@@ -669,6 +669,7 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "operator_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "author_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "audience" text NOT NULL DEFAULT 'all';
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "room_org_id" integer;
+ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_name" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
@@ -1779,5 +1780,38 @@ BEGIN
     -- No sentinel when there was no operator to stamp with: an instance that
     -- deploys before it names one must still get this backfill on the deploy
     -- after it does, so the block stays retryable until it has work to do.
+  END IF;
+END $$;
+
+-- ── Migration: stamp every discussion post with the workspace it was said in ─
+-- "Internal" used to mean "the house", and the house was a role. One service
+-- company ran an instance, so that was the same thing. It stops being the same
+-- thing the moment a second service company works a shared system: both are
+-- staff, and a role comparison would have handed each of them the other's
+-- internal notes and every room on the other's General board.
+--
+-- A post on a system belongs to the workspace that system belongs to. A General
+-- post belongs to the operator whose room it is in, and failing that to the root
+-- operator - who, on any instance with unstamped posts, is the only company that
+-- has ever existed on it.
+DO $$
+DECLARE v_sys integer; v_gen integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'discussion' AND "entity_id" = 'tenant-stamp') THEN
+    UPDATE "discussion_posts" p SET "tenant_org_id" = i."tenant_org_id"
+    FROM "instruments" i
+    WHERE p."instrument_id" = i."id" AND p."tenant_org_id" IS NULL;
+    GET DIAGNOSTICS v_sys = ROW_COUNT;
+
+    UPDATE "discussion_posts" SET "tenant_org_id" = COALESCE(
+      (SELECT COALESCE(o."parent_org_id", o."id") FROM "orgs" o WHERE o."id" = "discussion_posts"."room_org_id"),
+      (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1))
+    WHERE "tenant_org_id" IS NULL;
+    GET DIAGNOSTICS v_gen = ROW_COUNT;
+
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','discussion','tenant-stamp',
+            'stamped ' || v_sys || ' system post(s) with their system''s workspace and ' || v_gen || ' other post(s) with the operator whose board they sit on');
   END IF;
 END $$;

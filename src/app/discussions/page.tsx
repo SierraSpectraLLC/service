@@ -4,7 +4,7 @@ import { and, asc, desc, eq, isNull, isNotNull, inArray, lte, sql } from "drizzl
 import { db } from "@/db";
 import { discussionPosts, instruments, discussionReads, orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
@@ -26,14 +26,22 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
   try { user = await requireUser(); } catch { redirect("/login"); }
   const canEdit = user.role !== "client_viewer";
   const isHouseUser = user.role === "owner" || user.role === "staff";
-  const viewer = { isHouse: isHouseUser, orgId: user.orgId };
+  // Which house, not just "a house": two service companies on one instance are
+  // both staff, and each other's rooms are none of their business.
+  const myTenant = readTenant(user);
+  const viewer = { isHouse: isHouseUser, orgId: user.orgId, houseOrgId: isHouseUser ? myTenant : null };
 
   const visible = await visibleSystemIds(user);
   const mineSystems = visible === null ? undefined
     : visible.length ? inArray(discussionPosts.instrumentId, visible) : sql`false`;
 
   const [general, recent, insts, marks, orgRows, brand] = await Promise.all([
-    db.select().from(discussionPosts).where(isNull(discussionPosts.instrumentId)).orderBy(asc(discussionPosts.createdAt)),
+    // Scoped to this workspace. Unscoped, the General board handed one service
+    // company every room on another's - canSeePost refuses them now, but a query
+    // that reads them at all is one filter away from leaking them again.
+    db.select().from(discussionPosts)
+      .where(and(isNull(discussionPosts.instrumentId), forTenant(discussionPosts.tenantOrgId, myTenant)))
+      .orderBy(asc(discussionPosts.createdAt)),
     db.select().from(discussionPosts).where(and(isNotNull(discussionPosts.instrumentId), mineSystems)).orderBy(desc(discussionPosts.createdAt)).limit(60),
     db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments)
       .where(visible === null ? undefined : visible.length ? inArray(instruments.id, visible) : sql`false`),
