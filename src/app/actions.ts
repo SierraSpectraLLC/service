@@ -60,6 +60,7 @@ import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
+import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
 import { createUploadSession, graphConfigured, listFolder, searchFiles } from "@/lib/msgraph";
 import { vaultConfigured } from "@/lib/secretBox";
 import type { CloudItem } from "@/lib/cloudItems";
@@ -1036,6 +1037,89 @@ export async function createTask(
   }
   revWork(t);
   return {};
+}
+
+/**
+ * Copy tasks onto another system or unit.
+ *
+ * Written for the afternoon it saves: fifteen pump tasks exist on one system and
+ * an all-in-one pump has just arrived on another that needs the same fifteen.
+ *
+ * Both ends are checked, separately and for different reasons. The source has to
+ * be READABLE - copying is a way of reading a task, and a system somebody cannot
+ * open must not become one they can read the checklists of. The target has to be
+ * WRITABLE, because this creates work on it. resolveTarget answers the second;
+ * assertSystemVisible and assetAccess answer the first.
+ *
+ * What survives the trip, and what deliberately does not, is lib/taskCopy - the
+ * short version being that a copy arrives as open work with no schedule, no
+ * sign-off gate and nothing ticked.
+ */
+export async function copyTasksTo(
+  taskIds: number[], target: WorkTarget,
+): Promise<{ error?: string; copied?: number }> {
+  const u = await requireEditor();
+  const ids = [...new Set(taskIds)].filter((id) => Number.isInteger(id));
+  if (!ids.length) return { error: "Nothing selected" };
+  if (ids.length > 100) return { error: "That is more tasks than one copy should move." };
+
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+
+  const rows = await db.select().from(tasks).where(inArray(tasks.id, ids));
+  if (!rows.length) return { error: "Not found" };
+
+  // Readable at the source, one system or unit at a time rather than per task -
+  // a batch usually comes off a single record, and the check is a round trip.
+  for (const instrumentId of [...new Set(rows.map((r) => r.instrumentId))]) {
+    if (instrumentId === null) continue;
+    try { await assertSystemVisible(u, instrumentId); } catch { return { error: "Not found" }; }
+  }
+  for (const assetId of [...new Set(rows.map((r) => r.assetId))]) {
+    if (assetId === null) continue;
+    if (!(await assetAccess(u, assetId)).see) return { error: "Not found" };
+  }
+
+  const items = rows.length
+    ? await db.select().from(checklistItems).where(inArray(checklistItems.taskId, rows.map((r) => r.id)))
+    : [];
+
+  // After whatever is already there, so a copy appends rather than interleaving.
+  const existing = await db.select({ sortOrder: tasks.sortOrder }).from(tasks)
+    .where(t0.instrumentId !== null ? eq(tasks.instrumentId, t0.instrumentId) : eq(tasks.assetId, t0.assetId!));
+  const after = existing.reduce((n, r) => Math.max(n, r.sortOrder), 0);
+
+  const plan = copyPlan(rows.filter(copyable).map((r) => ({
+    id: r.id, title: r.title, body: r.body, assignee: r.assignee, dueDate: r.dueDate,
+    state: r.state, origin: r.origin, assetId: r.assetId,
+    pmScheduleId: r.pmScheduleId, procedureId: r.procedureId, sortOrder: r.sortOrder,
+    checklist: items.filter((c) => c.taskId === r.id).map((c) => ({ text: c.text, sortOrder: c.sortOrder })),
+  })), after);
+  if (!plan.length) return { error: "Nothing to copy" };
+
+  for (const copy of plan) {
+    const [made] = await db.insert(tasks).values({
+      tenantOrgId: t0.tenantOrgId,
+      instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+      title: copy.title, body: copy.body, assignee: copy.assignee, dueDate: copy.dueDate,
+      state: copy.state, origin: copy.origin, sortOrder: copy.sortOrder,
+    }).returning();
+    if (copy.checklist.length) {
+      await db.insert(checklistItems).values(copy.checklist.map((c) => ({
+        taskId: made.id, text: c.text, done: c.done, sortOrder: c.sortOrder,
+      })));
+    }
+  }
+
+  // One line for the batch, on the record that gained the work. Fifteen audit
+  // rows saying the same thing would bury the day it happened.
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "task", entityId: 0,
+    action: copySummary(plan.map((p) => p.title), targetLabel(t0.externalId, t0.asset)),
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return { copied: plan.length };
 }
 
 export async function setTaskAsset(taskId: number, assetId: number | null) {

@@ -47,8 +47,11 @@ export default function PhotoThumb({
         ...(height === undefined ? { aspectRatio: String(shape) } : { height }),
         borderRadius: radius, border: "1px solid var(--line)", background: "#EEF1F5", ...style,
       }}>
+      {/* objectFit comes from the frame: a photo somebody framed is drawn whole
+          and scaled, so every part of it was reachable in the editor. See
+          lib/photoFrame. */}
       <img src={src} alt={alt} loading="lazy"
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", ...frame }} />
+        style={{ width: "100%", height: "100%", display: "block", ...frame }} />
     </span>
   );
 }

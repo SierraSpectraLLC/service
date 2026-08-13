@@ -4,7 +4,7 @@ import {
   stockPhotoForSystem, stockPhotoForUnit, type CatalogPhoto,
 } from "@/lib/photos";
 import {
-  frameStyle, NO_FRAME, normalizeFrame, parseFrame, serializeFrame, turned, ZOOM_MAX,
+  coverZoom, frameStyle, NO_FRAME, normalizeFrame, parseFrame, serializeFrame, turned, ZOOM_MAX,
 } from "@/lib/photoFrame";
 
 const p = (id: number, fileName: string, createdAt: string, kind = "Photo") =>
@@ -60,8 +60,17 @@ describe("which photo goes on top", () => {
 
 describe("framing", () => {
   it("round-trips through the column it is stored in", () => {
-    const f = { rotate: 90, zoom: 1.5, x: -12, y: 8 };
+    const f = { rotate: 90, zoom: 1.5, x: -12, y: 8, aspect: 1.5 };
     expect(parseFrame(serializeFrame(f))).toEqual(f);
+  });
+
+  it("keeps a frame written before the photo's shape was recorded on the old rendering", () => {
+    // Four numbers means "framed, shape unknown". Re-reading one must not invent
+    // an aspect, or thousands of existing tiles would quietly shift.
+    const legacy = parseFrame("90,1.5,-12,8");
+    expect(legacy.aspect).toBe(0);
+    expect(serializeFrame(legacy)).toBe("90,1.5,-12,8");
+    expect(frameStyle(legacy).objectFit).toBe("cover");
   });
 
   it("stores an unframed photo as nothing at all", () => {
@@ -71,7 +80,8 @@ describe("framing", () => {
   });
 
   it("reads junk, a short string and a legacy blank as unframed", () => {
-    for (const junk of ["nonsense", "90,1", "90,1,0,0,7", "a,b,c,d", null, undefined]) {
+    // Four numbers or five; anything else is not a frame this app wrote.
+    for (const junk of ["nonsense", "90,1", "90,1,0,0,1.5,3", "a,b,c,d", "0,1,0,0,x", null, undefined]) {
       expect(parseFrame(junk as string)).toEqual(NO_FRAME);
     }
   });
@@ -81,8 +91,14 @@ describe("framing", () => {
     expect(f.rotate).toBe(90);        // snapped to the nearest quarter turn
     expect(normalizeFrame({ rotate: 44 }).rotate).toBe(0);
     expect(f.zoom).toBe(ZOOM_MAX);
-    expect(f.x).toBe(-50);
-    expect(f.y).toBe(50);
+    expect(f.x).toBe(-100);
+    expect(f.y).toBe(100);
+  });
+
+  it("refuses an aspect no photograph has, rather than rendering a sliver", () => {
+    expect(normalizeFrame({ aspect: 200 }).aspect).toBe(0);
+    expect(normalizeFrame({ aspect: 0.001 }).aspect).toBe(0);
+    expect(normalizeFrame({ aspect: 1.7778 }).aspect).toBe(1.7778);
   });
 
   it("wraps rotation rather than counting past a full turn", () => {
@@ -175,5 +191,47 @@ describe("a unit tracked as a system", () => {
     // Both set can only happen to rows written before the pair shared; the
     // record's own pointer is the one it keeps.
     expect(sharedCover(7, 9)).toBe(7);
+  });
+});
+
+describe("reframing reaches the whole photograph", () => {
+  // The bug: object-fit cover crops the photo to the tile BEFORE the transform,
+  // so the top and bottom of a portrait photo were thrown away and no amount of
+  // dragging brought them back. A framed photo is drawn contained instead.
+  it("draws all of a framed photo, not the part that survived a crop", () => {
+    expect(frameStyle({ rotate: 0, zoom: 1, x: 0, y: 0, aspect: 0.75 }).objectFit).toBe("contain");
+  });
+
+  it("leaves an unframed photo filling its tile as before", () => {
+    expect(frameStyle(NO_FRAME).objectFit).toBe("cover");
+  });
+
+  it("applies the stored zoom as it stands once the shape is known", () => {
+    // No hidden fill factor in this path: the framer already chose a zoom that
+    // means what it says, so the tile must not multiply it by anything.
+    const s = frameStyle({ rotate: 90, zoom: 2.5, x: 4, y: -6, aspect: 0.75 });
+    expect(s.transform).toBe("translate(4%, -6%) rotate(90deg) scale(2.5)");
+  });
+});
+
+describe("the zoom that exactly fills a tile", () => {
+  it("is 1 when the photo is the same shape as the tile", () => {
+    expect(coverZoom(4 / 3, 4 / 3)).toBe(1);
+  });
+
+  it("matches the old quarter-turn fill factor it replaces", () => {
+    // The previous code multiplied by max(r, 1/r) for a quarter turn; for a
+    // photo of the tile's own shape that is exactly this.
+    expect(coverZoom(4 / 3, 4 / 3, 90)).toBe(1.333);
+    expect(coverZoom(1, 1, 90)).toBe(1);
+  });
+
+  it("grows as the photo's shape departs from the tile's", () => {
+    expect(coverZoom(0.75, 4 / 3)).toBeCloseTo(1.778, 2);   // portrait in a landscape tile
+    expect(coverZoom(3, 4 / 3)).toBeCloseTo(2.25, 2);       // panorama in a landscape tile
+  });
+
+  it("falls back to filling exactly when the shape is unknown", () => {
+    expect(coverZoom(0, 4 / 3)).toBe(1);
   });
 });
