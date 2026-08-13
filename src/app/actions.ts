@@ -59,6 +59,8 @@ import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
+import { sharedCover } from "@/lib/photos";
+import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
@@ -1821,12 +1823,13 @@ export async function addPhotos(
     uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
   }))).returning();
 
-  const [record] = onSystem
-    ? await db.select({ cover: instruments.photoAttachmentId }).from(instruments).where(eq(instruments.id, t0.instrumentId!))
-    : await db.select({ cover: assets.photoAttachmentId }).from(assets).where(eq(assets.id, t0.assetId!));
-  if (record && record.cover === null) {
-    await setCoverRow(onSystem, t0, rows[0].id);
-  }
+  // The first photo a record ever gets becomes its cover - but a record sharing
+  // its photos with a unit that already has one is not empty, and should not
+  // quietly take the picture over.
+  const twin = await photoTwin(t0);
+  const held = sharedCover(await coverOf(t0), twin ? await coverOf(twin) : null);
+  if (held === null) await setCoverRow(onSystem, t0, rows[0].id);
+  if (twin) revWork(twin);
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
     entityType: "attachment", entityId: rows[0].id,
@@ -1846,26 +1849,44 @@ async function setCoverRow(
   }
 }
 
+/**
+ * The other half of a one-box pair, or null.
+ *
+ * A unit tracked as a system of its own is two records describing one machine
+ * (see lib/photos), and photographing it twice - once per page - is work nobody
+ * should have to do. So a system with exactly one unit, and that unit, pool
+ * their photos. Structural rather than a flag: attach a second module and the
+ * system becomes a bench, whose photo is the bench and not one module of it.
+ */
 /** Which of a record's photos leads. The rest stay exactly where they are. */
 export async function setCoverPhoto(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
   const u = await requireEditor();
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
-  // Only a photo already ON this record: a cover is a pointer, and a pointer at
-  // somebody else's file would be a way to read it.
+  // Only a photo already on this record, or on the unit/system it shares its
+  // photos with: a cover is a pointer, and a pointer at somebody else's file
+  // would be a way to read it.
   const [photo] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
-  const belongs = photo && (t0.instrumentId !== null
-    ? photo.instrumentId === t0.instrumentId
-    : photo.assetId === t0.assetId);
-  if (!belongs) return { error: "Not found" };
+  if (!photo) return { error: "Not found" };
+  const me = photoRecord(t0);
+  const twin = await photoTwin(t0);
+  const onRecord = (r: PhotoRecord) =>
+    r.instrumentId !== null ? photo.instrumentId === r.instrumentId : photo.assetId === r.assetId;
+  const holder = onRecord(me) ? me : twin && onRecord(twin) ? twin : null;
+  if (!holder) return { error: "Not found" };
 
-  await setCoverRow(t0.instrumentId !== null && t0.assetId === null, t0, attachmentId);
+  // Stamped on whichever record the file is actually filed under, and cleared on
+  // the other, so a shared pair has one cover rather than two that disagree.
+  await setCoverRow(holder.instrumentId !== null, holder, attachmentId);
+  const other = twin && (holder === me ? twin : me);
+  if (other) await setCoverRow(other.instrumentId !== null, other, null);
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
     entityType: "attachment", entityId: attachmentId,
     action: `made '${photo.fileName}' the cover photo`,
   });
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  if (twin) revWork(twin);
   return {};
 }
 
@@ -1957,10 +1978,15 @@ export async function updateAttachment(attachmentId: number, data: { fileName: s
 async function deleteBlobs(urls: string[]) {
   if (!urls.length) return;
   const unique = [...new Set(urls)];
-  const stillUsed = new Set(
-    (await db.select({ url: attachments.url }).from(attachments).where(inArray(attachments.url, unique)))
+  // Two tables can point at one blob: attachments, and a catalog row holding a
+  // stock photo. Both count as "still used", or clearing a model's photo would
+  // delete the bytes out from under a file that happens to share the URL.
+  const stillUsed = new Set([
+    ...(await db.select({ url: attachments.url }).from(attachments).where(inArray(attachments.url, unique)))
       .map((r) => r.url),
-  );
+    ...(await db.select({ url: vocabTerms.photoUrl }).from(vocabTerms).where(inArray(vocabTerms.photoUrl, unique)))
+      .map((r) => r.url),
+  ]);
   const orphans = unique.filter((u) => !stillUsed.has(u));
   if (!orphans.length) return;
   try {
@@ -5636,6 +5662,72 @@ export async function deletePartPrice(id: number): Promise<{ error?: string }> {
 }
 
 /** Who makes a model. Blank is honest for kit whose maker nobody recorded. */
+/**
+ * What a catalog entry LOOKS like - a stock photo of the model, the module type
+ * or the system type.
+ *
+ * This is the one photo in the app that is not an attachment, and the difference
+ * is the whole point. A photo of an SPD-20A illustrates every SPD-20A anybody
+ * ever files; making it an attachment would put it on one record, in that
+ * client's files, in their gallery, and on their storage bill - and then again
+ * for the next client, and the next. So the catalog row owns the blob, every
+ * unit of that kind reads it, and nobody is charged for a picture of a model
+ * number.
+ *
+ * Which also means it is never evidence, and the pages that show it say so.
+ */
+export async function setCatalogPhoto(
+  termId: number, file: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t) return { error: "Not found" };
+  if (readTenant(u) !== null && t.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const old = t.photoUrl;
+  // A new photo replaces the old one outright: a catalog entry has one picture,
+  // and keeping the previous one would be storage nobody can see or reach.
+  await db.update(vocabTerms).set({ photoUrl: file.url, photoFraming: "" }).where(eq(vocabTerms.id, termId));
+  if (old && old !== file.url) await deleteBlobs([old]);
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId,
+    action: `${old ? "replaced" : "added"} the catalog photo for ${t.kind === "model" ? `${t.assetType} ` : ""}"${t.name}"`,
+  });
+  revalidatePath("/settings/catalog");
+  rev();
+  return {};
+}
+
+export async function clearCatalogPhoto(termId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t) return { error: "Not found" };
+  if (readTenant(u) !== null && t.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  if (!t.photoUrl) return {};
+  await db.update(vocabTerms).set({ photoUrl: "", photoFraming: "" }).where(eq(vocabTerms.id, termId));
+  await deleteBlobs([t.photoUrl]);
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId,
+    action: `removed the catalog photo for "${t.name}"`,
+  });
+  revalidatePath("/settings/catalog");
+  rev();
+  return {};
+}
+
+/** Frame a catalog photo, the same four numbers a record's photo carries. */
+export async function setCatalogPhotoFraming(termId: number, framing: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!t?.photoUrl) return { error: "Not found" };
+  if (readTenant(u) !== null && t.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  await db.update(vocabTerms)
+    .set({ photoFraming: serializeFrame(parseFrame(framing)) })
+    .where(eq(vocabTerms.id, termId));
+  revalidatePath("/settings/catalog");
+  rev();
+  return {};
+}
+
 export async function setVocabManufacturer(termId: number, manufacturer: string): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [t] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import PhotoThumb from "./PhotoThumb";
+import { fileSrc } from "@/lib/photos";
 import type { Place } from "@/lib/storeGroup";
 
 export type GalleryPhoto = {
@@ -78,7 +79,7 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
               {/* The column is fluid, so the tile keeps its shape rather than
                   its height - and the framing is told that shape, or a sideways
                   photo would sit in a wide box with bars down both sides. */}
-              <PhotoThumb attachmentId={p.attachmentId} framing={p.framing} alt={p.description || p.fileName}
+              <PhotoThumb src={fileSrc(p.attachmentId)} framing={p.framing} alt={p.description || p.fileName}
                 width="100%" aspect={4 / 3} />
             </a>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>

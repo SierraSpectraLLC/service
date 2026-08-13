@@ -57,3 +57,78 @@ export const coverIsChosen = (photos: PhotoLike[], coverId: number | null): bool
 
 /** "3 photos", for a heading that should not say "3 photo". */
 export const photoCount = (n: number) => `${n} photo${n === 1 ? "" : "s"}`;
+
+// ---------------------------------------------------------------------------
+// Where a photo comes from
+// ---------------------------------------------------------------------------
+
+/** The two doors: a stored file, or a stock photo on a catalog row. */
+export const fileSrc = (attachmentId: number) => `/api/files/${attachmentId}`;
+export const stockSrc = (termId: number) => `/api/catalog/photo/${termId}`;
+
+// ---------------------------------------------------------------------------
+// Stock photos from the catalog
+// ---------------------------------------------------------------------------
+
+export type CatalogPhoto = {
+  id: number;
+  kind: string;          // 'category' | 'asset_type' | 'model'
+  assetType: string;     // models only
+  name: string;
+  photoFraming: string;
+};
+
+const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/**
+ * What this kind of unit looks like, when nobody has photographed THIS one.
+ *
+ * The catalog already knows an SPD-20A is an SPD-20A; a stock photo of one saves
+ * every shop that ever files a unit from photographing the same beige box again.
+ * The model wins over the module type, because "Shimadzu SPD-20A" is a better
+ * answer to "which one is that" than "Detector".
+ *
+ * This is a FALLBACK and never evidence. It is not an attachment, it is not in
+ * anybody's files or gallery, and nothing bills for it - which is exactly why it
+ * has to be labelled as a catalog photo wherever it appears. A stock image
+ * standing in silently for a photo of the actual unit would be a lie the record
+ * tells on its own.
+ */
+export function stockPhotoForUnit(
+  catalog: CatalogPhoto[], kind: string, model: string,
+): CatalogPhoto | null {
+  return (model.trim() && catalog.find(
+    (c) => c.kind === "model" && same(c.name, model) && (!c.assetType || same(c.assetType, kind)),
+  )) || catalog.find((c) => c.kind === "asset_type" && same(c.name, kind)) || null;
+}
+
+/** The same, for a system: what a machine of this category looks like. */
+export function stockPhotoForSystem(catalog: CatalogPhoto[], category: string): CatalogPhoto | null {
+  return (category.trim() && catalog.find((c) => c.kind === "category" && same(c.name, category))) || null;
+}
+
+// ---------------------------------------------------------------------------
+// A one-unit system and its unit
+// ---------------------------------------------------------------------------
+
+/**
+ * Are this system and this unit the same physical box?
+ *
+ * A unit tracked as a system of its own - which is how a single instrument on a
+ * bench gets stages, a queue and a sign-off packet - ends up as two records
+ * describing one machine. Photographing it twice, once on each page, is work
+ * nobody should have to do, so the two share their photos.
+ *
+ * The test is structural rather than a flag: a system with exactly one unit IS
+ * that unit, whether it was created that way or arrived there. It also unwinds
+ * itself - attach a second module and the system becomes a bench, whose photo is
+ * the bench and not one module of it.
+ */
+export const sharesPhotos = (unitsOnSystem: number) => unitsOnSystem === 1;
+
+/**
+ * The cover for a shared pair. At most one of the two pointers is ever set (see
+ * setCoverPhoto), so "whichever is set" is unambiguous rather than a precedence
+ * rule somebody has to remember.
+ */
+export const sharedCover = (own: number | null, twin: number | null) => own ?? twin;

@@ -684,6 +684,11 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "phone" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "photo_attachment_id" integer;
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "photo_attachment_id" integer;
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "framing" text NOT NULL DEFAULT '';
+-- Stock photos on the catalog itself: what a model, a module type or a system
+-- type looks like. Not attachments, so they never reach a client's files,
+-- gallery or storage bill - see src/lib/photos.ts.
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "photo_url" text NOT NULL DEFAULT '';
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "photo_framing" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "is_operator" boolean NOT NULL DEFAULT false;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "parent_org_id" integer;
 ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "org_id" integer;

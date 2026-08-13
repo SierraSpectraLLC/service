@@ -7,6 +7,7 @@ import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
+import CatalogPhotosCard from "@/components/CatalogPhotosCard";
 import PriceBookCard from "@/components/PriceBookCard";
 
 export const dynamic = "force-dynamic";
@@ -81,6 +82,12 @@ export default async function CatalogPage() {
     <div className="container page">
       <SettingsTabs active="catalog" isOwner={user.role === "owner"} isPlatform={isPlatform} />
       <CatalogForm categories={categories} models={models} types={types} />
+      <CatalogPhotosCard entries={terms.map((t) => ({
+        id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, manufacturer: t.manufacturer,
+        // The URL itself never reaches the browser: the photo is fetched through
+        // /api/catalog/photo, which checks who is asking.
+        hasPhoto: !!t.photoUrl, photoFraming: t.photoFraming,
+      }))} />
       <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
     </div>
   );

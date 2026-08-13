@@ -17,10 +17,16 @@ type Inst = {
   lead: string; notes: string; archived: boolean; archivedBy: string;
   location: string; name: string;
   forSale: boolean; saleNote: string; listingToken: string;
-  /** The photo that represents the system - the cover, see PhotosPanel. */
-  photoAttachmentId: number | null;
+  /**
+   * Where to fetch the picture that represents the system: its cover photo, or
+   * the catalog's photo of this system type while nobody has photographed it.
+   * Blank for neither. See lib/photos.
+   */
+  photoSrc: string;
   /** How that photo sits in its tile. See lib/photoFrame. */
   photoFraming: string;
+  /** True while the picture is the catalog's rather than this system's. */
+  photoIsStock: boolean;
 };
 
 function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead: string; people: string[] }) {
@@ -93,14 +99,21 @@ export default function SystemPanel({ instrument, label, clients, categories, st
           )}
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+      {/* Wrapping, not shrinking: on a phone the picture and the button would
+          squeeze the name into a four-line column otherwise. */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         {/* The whole bench, beside the numbers rather than above them - it is
             what somebody recognizes the system by. The rest are in Photos. */}
-        {instrument.photoAttachmentId != null && (
-          <PhotoThumb attachmentId={instrument.photoAttachmentId} framing={instrument.photoFraming}
-            alt={`${instrument.externalId} - the system`} width={132} height={99} />
+        {instrument.photoSrc && (
+          <span style={{ flexShrink: 0 }}>
+            <PhotoThumb src={instrument.photoSrc} framing={instrument.photoFraming}
+              alt={`${instrument.externalId} - the system`} width={132} height={99} />
+            {instrument.photoIsStock && (
+              <div className="mut" style={{ fontSize: 10, marginTop: 2, textAlign: "center" }}>catalog photo</div>
+            )}
+          </span>
         )}
-        <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ flex: "1 1 190px", minWidth: 0 }}>
           <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
             {instrument.externalId} · {instrument.client} · Priority {instrument.priority}
           </div>

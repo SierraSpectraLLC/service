@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { coverIsChosen, coverPhoto, isPhotoFile, orderPhotos, photoCount } from "@/lib/photos";
+import {
+  coverIsChosen, coverPhoto, isPhotoFile, orderPhotos, photoCount, sharedCover, sharesPhotos,
+  stockPhotoForSystem, stockPhotoForUnit, type CatalogPhoto,
+} from "@/lib/photos";
 import {
   frameStyle, NO_FRAME, normalizeFrame, parseFrame, serializeFrame, turned, ZOOM_MAX,
 } from "@/lib/photoFrame";
@@ -112,5 +115,65 @@ describe("framing", () => {
     const { transform } = frameStyle({ rotate: 90, zoom: 2, x: 10, y: -5 });
     expect(transform.indexOf("translate")).toBeLessThan(transform.indexOf("rotate"));
     expect(transform.indexOf("rotate")).toBeLessThan(transform.indexOf("scale"));
+  });
+});
+
+describe("stock photos from the catalog", () => {
+  const term = (id: number, kind: string, name: string, assetType = ""): CatalogPhoto =>
+    ({ id, kind, name, assetType, photoFraming: "" });
+  const catalog = [
+    term(1, "model", "SPD-20A", "Detector"),
+    term(2, "asset_type", "Detector"),
+    term(3, "asset_type", "Pump"),
+    term(4, "category", "LC-MS"),
+    term(5, "model", "Universal PC"),        // a model nobody pinned to a type
+  ];
+
+  it("prefers the model, because that is what somebody recognizes", () => {
+    expect(stockPhotoForUnit(catalog, "Detector", "SPD-20A")?.id).toBe(1);
+  });
+
+  it("falls back to the module type when the model has no photo", () => {
+    expect(stockPhotoForUnit(catalog, "Detector", "SPD-40")?.id).toBe(2);
+    expect(stockPhotoForUnit(catalog, "Pump", "")?.id).toBe(3);
+  });
+
+  it("has nothing to offer for kit the catalog has never seen", () => {
+    expect(stockPhotoForUnit(catalog, "Chiller", "XR-9")).toBeNull();
+    expect(stockPhotoForUnit(catalog, "", "")).toBeNull();
+  });
+
+  it("matches the way the catalog matches everywhere else - case and space blind", () => {
+    expect(stockPhotoForUnit(catalog, "detector", " spd-20a ")?.id).toBe(1);
+    expect(stockPhotoForSystem(catalog, "lc-ms")?.id).toBe(4);
+  });
+
+  it("does not let one type's model stand in for another's", () => {
+    // A "Pump" called SPD-20A is not the detector, whatever it was named.
+    expect(stockPhotoForUnit(catalog, "Pump", "SPD-20A")?.id).toBe(3);
+    // A model with no type pinned is offered to whoever asks for it by name.
+    expect(stockPhotoForUnit(catalog, "Anything", "Universal PC")?.id).toBe(5);
+  });
+
+  it("gives a system nothing when its category is blank", () => {
+    expect(stockPhotoForSystem(catalog, "")).toBeNull();
+    expect(stockPhotoForSystem(catalog, "GC-MS")).toBeNull();
+  });
+});
+
+describe("a unit tracked as a system", () => {
+  it("shares its photos while it is the only thing on the system", () => {
+    expect(sharesPhotos(1)).toBe(true);
+    expect(sharesPhotos(0)).toBe(false);   // a system with nothing on it yet
+    expect(sharesPhotos(2)).toBe(false);   // a bench, whose photo is the bench
+  });
+
+  it("takes whichever of the pair holds the cover", () => {
+    expect(sharedCover(7, null)).toBe(7);
+    expect(sharedCover(null, 9)).toBe(9);
+    expect(sharedCover(null, null)).toBeNull();
+    // Both set can only happen to rows written before the pair shared; the
+    // record's own pointer is the one it keeps.
+    expect(sharedCover(7, 9)).toBe(7);
   });
 });

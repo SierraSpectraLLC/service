@@ -19,7 +19,9 @@ import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
-import { isPhotoFile } from "@/lib/photos";
+import {
+  fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
+} from "@/lib/photos";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
 import PartsPanel from "@/components/PartsPanel";
@@ -137,10 +139,29 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
   const target = { instrumentId: null, assetId: asset.id };
-  // Photos are ordinary attachments; which of them is a photograph is a
-  // question about the file, not about what somebody picked in a dropdown.
-  const photoRows = attachRows.filter(isPhotoFile);
-  const coverFraming = photoRows.find((a) => a.id === asset.photoAttachmentId)?.framing ?? "";
+  // ---- photos -------------------------------------------------------------
+  // A unit tracked as a system of its own is two records describing one machine,
+  // so the pair pools its photos (see lib/photos). Which attachments are
+  // photographs is a question about the file, not about what somebody picked in
+  // a dropdown when they filed it.
+  const [homeUnits, [homeSystem]] = home
+    ? await Promise.all([
+      db.select({ id: assets.id }).from(assets).where(eq(assets.instrumentId, home.id)),
+      db.select({ id: instruments.id, externalId: instruments.externalId, cover: instruments.photoAttachmentId })
+        .from(instruments).where(eq(instruments.id, home.id)),
+    ])
+    : [[], []];
+  const soloSystem = sharesPhotos(homeUnits.length) ? homeSystem ?? null : null;
+  const sysAttachRows = soloSystem
+    ? await db.select().from(attachments).where(eq(attachments.instrumentId, soloSystem.id))
+    : [];
+  const photoRows = [...attachRows, ...sysAttachRows].filter(isPhotoFile);
+  const coverId = sharedCover(asset.photoAttachmentId, soloSystem?.cover ?? null);
+  const coverFraming = photoRows.find((a) => a.id === coverId)?.framing ?? "";
+  // What the catalog says this model looks like, while nobody has photographed
+  // this one. Never a file, never billed - see lib/photos.
+  const unitStock = stockPhotoForUnit(vocab.filter((v) => v.photoUrl), asset.kind, asset.model);
+  const coverSrc = coverId !== null ? fileSrc(coverId) : unitStock ? stockSrc(unitStock.id) : "";
   // The unit's own recurring upkeep, wherever it currently sits.
   const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId)).orderBy(asc(pmSchedules.nextDue));
   // This reader's own panel arrangement, so the page arrives already arranged.
@@ -200,14 +221,19 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         panels={[
           { key: "unit", label: "Unit", node: (
             <div className="card">
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
                 {/* This module on its own - the counterpart to the system's
                     photo of the whole bench. The rest are in Photos. */}
-                {asset.photoAttachmentId != null && (
-                  <PhotoThumb attachmentId={asset.photoAttachmentId} framing={coverFraming}
-                    alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`} width={132} height={99} />
+                {coverSrc && (
+                  <span style={{ flexShrink: 0 }}>
+                    <PhotoThumb src={coverSrc} framing={coverId !== null ? coverFraming : unitStock?.photoFraming ?? ""}
+                      alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`} width={132} height={99} />
+                    {coverId === null && (
+                      <div className="mut" style={{ fontSize: 10, marginTop: 2, textAlign: "center" }}>catalog photo</div>
+                    )}
+                  </span>
                 )}
-                <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ flex: "1 1 190px", minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                     <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
                       {asset.kind} — {asset.model || "(no model)"}
@@ -284,13 +310,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               serviceEvents={serviceEvents} />
           ) },
           { key: "photos", label: "Photos", node: (
-            <PhotosPanel target={target} coverId={asset.photoAttachmentId}
+            <PhotosPanel target={target} coverId={coverId}
               photos={photoRows.map((a) => ({
                 id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
                 uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
               }))}
               label={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}${asset.serial ? ` SN ${asset.serial}` : ""}`}
-              canEdit={canEdit} storageFull={fileQuota.state === "full"} />
+              canEdit={canEdit} storageFull={fileQuota.state === "full"}
+              stock={unitStock && { termId: unitStock.id, framing: unitStock.photoFraming, what: unitStock.name }}
+              shared={soloSystem ? `system ${soloSystem.externalId}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
