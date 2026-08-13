@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { recordAttachments, recordLibraryFiles } from "@/app/actions";
 import type { PageRef } from "@/lib/pdfCombine";
+import { isFileDrag, rejectedMessage, splitDropped } from "@/lib/dropFiles";
 
 // pdfjs renders thumbnails; pdf-lib assembles the result. Both are loaded on
 // demand so nobody pays for the studio until they open it.
@@ -70,6 +71,12 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | "end" | null>(null);
   const [filter, setFilter] = useState("");
+  // A drag from outside the page. Counted rather than flagged: dragenter and
+  // dragleave both fire for every child element the pointer crosses, so a plain
+  // boolean flickers off the moment the cursor moves over a card inside.
+  const [fileOver, setFileOver] = useState(false);
+  const dragDepth = useRef(0);
+  const [dropNote, setDropNote] = useState("");
   const [cover, setCover] = useState("");
   const [numbers, setNumbers] = useState(true);
   const [headers, setHeaders] = useState(true);
@@ -178,10 +185,31 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
       return res.arrayBuffer();
     });
 
-  const addLocal = (files: FileList | null) => {
-    for (const f of Array.from(files ?? [])) {
-      void ingest(`local-${uidCounter++}`, titleFrom(f.name), "this device", f.name, () => f.arrayBuffer());
+  const addLocal = (files: FileList | null, from = "this device") => {
+    const { pdfs, rejected } = splitDropped(Array.from(files ?? []));
+    for (const f of pdfs) {
+      void ingest(`local-${uidCounter++}`, titleFrom(f.name), from, f.name, () => f.arrayBuffer());
     }
+    // Said out loud rather than swallowed: a packet quietly missing the pages
+    // somebody thought they added is worse than a line of text.
+    setDropNote(rejectedMessage(rejected));
+  };
+
+  /**
+   * Files dragged straight in from a folder window.
+   *
+   * The point of this is the file that is not on the machine yet. A PDF sitting
+   * in OneDrive, SharePoint or any other synced folder appears in Explorer like
+   * any other file, and dragging it here makes the OS fetch it on the spot - so
+   * the "download it first, then upload it" round trip disappears without this
+   * app knowing anything about anybody's cloud storage.
+   */
+  const onFileDrop = (e: React.DragEvent) => {
+    if (!isFileDrag(e.dataTransfer?.types)) return;   // a page tile being reordered
+    e.preventDefault();
+    dragDepth.current = 0;
+    setFileOver(false);
+    addLocal(e.dataTransfer.files, "dropped in");
   };
 
   const removeDoc = (key: string) => {
@@ -330,16 +358,37 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
   const canStore = dest !== "download";
 
   return (
-    <div className="pdf-studio">
+    <div className="pdf-studio"
+      onDragEnter={(e) => {
+        if (!isFileDrag(e.dataTransfer?.types)) return;
+        dragDepth.current += 1;
+        setFileOver(true);
+      }}
+      onDragOver={(e) => { if (isFileDrag(e.dataTransfer?.types)) e.preventDefault(); }}
+      onDragLeave={(e) => {
+        if (!isFileDrag(e.dataTransfer?.types)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setFileOver(false);
+      }}
+      onDrop={onFileDrop}
+      style={fileOver ? { outline: "2px dashed var(--sky)", outlineOffset: 6, borderRadius: 10 } : undefined}>
       {/* ── Sources ── */}
       <div>
         <div className="card">
           <div className="card-title" style={{ marginBottom: 6 }}>Sources</div>
-          <label className="btn sm" style={{ display: "inline-block", cursor: "pointer", marginBottom: 8 }}>
+          <label className="btn sm" style={{ display: "inline-block", cursor: "pointer", marginBottom: 4 }}>
             + From this device
             <input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
               onChange={(e) => { addLocal(e.target.files); e.target.value = ""; }} />
           </label>
+          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+            {fileOver ? "Drop to add" : "or drag PDFs in from a folder — OneDrive included"}
+          </div>
+          {dropNote && (
+            <div style={{ fontSize: 11, color: "#8A5410", marginBottom: 8 }}>
+              {dropNote} <button className="btn link" style={{ fontSize: 11 }} onClick={() => setDropNote("")}>dismiss</button>
+            </div>
+          )}
           {sources.length > 6 && (
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or record"
               style={{ fontSize: 12, marginBottom: 8 }} />
