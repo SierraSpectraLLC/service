@@ -1,10 +1,12 @@
 import { desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { notifications, notificationPrefs } from "@/db/schema";
+import { notifications, notificationPrefs, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
 import InboxPanel from "@/components/InboxPanel";
+import SignInSettings from "@/components/SignInSettings";
+import { smsConfigured } from "@/lib/sms";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +20,15 @@ export default async function InboxPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
   const email = user.email.toLowerCase();
 
-  const [items, prefs] = await Promise.all([
+  const [items, prefs, [me]] = await Promise.all([
     db.select().from(notifications)
       .where(eq(notifications.email, email))
       .orderBy(desc(notifications.createdAt), desc(notifications.id)).limit(100),
     db.select({ kind: notificationPrefs.kind, emailOn: notificationPrefs.emailOn })
       .from(notificationPrefs).where(eq(notificationPrefs.email, email)),
+    // How this person gets in, which belongs on the one page that is already
+    // theirs rather than in Settings, which is about the instance.
+    db.select({ hash: users.passwordHash, phone: users.phone }).from(users).where(eq(users.email, email)),
   ]);
 
   return (
@@ -34,6 +39,11 @@ export default async function InboxPage() {
           when: shopTime(n.createdAt), read: n.readAt !== null,
         }))}
         prefs={prefs}
+      />
+      <SignInSettings
+        hasPassword={!!me?.hash}
+        phone={me?.phone ?? ""}
+        smsConfigured={smsConfigured()}
       />
     </div>
   );

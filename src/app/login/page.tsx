@@ -1,7 +1,12 @@
-import { signIn } from "@/auth";
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { CHANNEL_COOKIE, signIn, signInAllowed } from "@/auth";
 import { getBrand } from "@/lib/brand";
-import { takeSendSlot } from "@/lib/loginGate";
+import { checkTryAllowed, clearAttempts, recordFailure, takeSendSlot } from "@/lib/loginGate";
+import { checkPassword } from "@/lib/passwordAuth";
+import { startSession } from "@/lib/sessionCookie";
 import { CODE_DIGITS } from "@/lib/loginCode";
+import { smsConfigured } from "@/lib/sms";
 import LoginForm from "@/components/LoginForm";
 
 export default async function LoginPage({ searchParams }: {
@@ -18,18 +23,54 @@ export default async function LoginPage({ searchParams }: {
    * the code, so `redirect: false` keeps Auth.js from bouncing the browser to
    * its "check your email" screen and losing the address they just typed.
    */
-  async function send(email: string): Promise<{ error?: string } | void> {
+  async function send(email: string, channel: "email" | "sms" = "email"): Promise<{ error?: string } | void> {
     "use server";
     // Codes asked for are rate limited before a single one is sent: an address
     // somebody is hammering must not become a way to fill somebody's inbox.
     const slot = await takeSendSlot(email);
     if (!slot.allow) return { error: `${slot.reason} Try again in ${slot.retryAfterMinutes} minute${slot.retryAfterMinutes === 1 ? "" : "s"}.` };
+    // The channel travels to the delivery step as a cookie, because Auth.js makes
+    // the code inside its own flow and that step is the only place holding both
+    // the code and the request. Cleared straight after, so it never decides a
+    // later sign-in (see CHANNEL_COOKIE in src/auth.ts).
+    const jar = await cookies();
+    jar.set(CHANNEL_COOKIE, channel, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 });
     try {
       await signIn("resend", { email, redirect: false });
     } catch (e) {
       if ((e as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")) throw e;
       return { error: (e as Error).message || "Could not send the sign-in email." };
+    } finally {
+      jar.delete(CHANNEL_COOKIE);
     }
+  }
+
+  /**
+   * The way in when email is not working at all - a blocked domain, a filter, a
+   * fourteen-day provider timeout. Same gate as every other path (signInAllowed),
+   * same throttle as codes, and the same answer whichever half was wrong: "no
+   * account with that address" and "wrong password" are different answers only
+   * to somebody who is guessing.
+   */
+  async function withPassword(email: string, password: string): Promise<{ error?: string } | void> {
+    "use server";
+    const e = email.trim().toLowerCase();
+    const gate = await checkTryAllowed(e);
+    if (!gate.allow) return { error: `${gate.reason} Try again in ${gate.retryAfterMinutes} minute${gate.retryAfterMinutes === 1 ? "" : "s"}.` };
+
+    const allowed = await signInAllowed(e);
+    const found = allowed ? await checkPassword(e, password) : null;
+    if (!found) {
+      const { locked } = await recordFailure(e);
+      return {
+        error: locked
+          ? "Too many attempts. Try again in 15 minutes, or use a sign-in code."
+          : "That email and password don't match.",
+      };
+    }
+    await clearAttempts(e);
+    await startSession(found.userId);
+    redirect("/");
   }
 
   return (
@@ -52,7 +93,7 @@ export default async function LoginPage({ searchParams }: {
                 That code didn&apos;t work. It may have expired or already been used - ask for a new one.
               </p>
             )}
-            <LoginForm send={send} />
+            <LoginForm send={send} withPassword={withPassword} smsOffered={smsConfigured()} />
           </>
         )}
       </div>

@@ -19,6 +19,21 @@ export const users = pgTable("users", {
   image: text("image"),
   // owner | staff | client_viewer | client_editor
   role: text("role").notNull().default("client_viewer"),
+  /**
+   * The fallback way in, for the days email doesn't arrive - a provider blocks a
+   * domain, a filter eats the message. Set from inside the app by somebody
+   * already signed in, so the address was proved before a password ever existed
+   * for it; blank means this person has none and signs in by code as usual.
+   * Format and rules live in lib/password.
+   */
+  passwordHash: text("password_hash").notNull().default(""),
+  passwordSetAt: timestamp("password_set_at"),
+  /**
+   * Where to text a sign-in code, E.164. Set by the person themselves from
+   * inside the app, so it is a second way back into an account rather than a way
+   * to get one. Blank means codes go by email as they always have.
+   */
+  phone: text("phone").notNull().default(""),
 });
 
 export const accounts = pgTable("accounts", {

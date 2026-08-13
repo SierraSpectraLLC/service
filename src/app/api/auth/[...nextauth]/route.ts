@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { handlers } from "@/auth";
-import { checkTryAllowed, clearAttempts, recordWrongCode } from "@/lib/loginGate";
+import { checkTryAllowed, clearAttempts, recordFailure } from "@/lib/loginGate";
 
 /**
  * Auth.js's own routes, with a throttle in front of the one that takes a code.
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
   const location = res.headers.get("location") ?? "";
   const refused = res.status >= 300 && res.status < 400 && /error=/i.test(location);
   if (refused && email) {
-    const { locked } = await recordWrongCode(email);
+    const { locked } = await recordFailure(email);
     if (locked) {
       return NextResponse.redirect(new URL("/login?locked=15", url.origin));
     }
