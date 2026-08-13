@@ -57,3 +57,35 @@ export const getBrand = cache(async (): Promise<Brand> => {
     return { name: DEFAULT_BRAND, tagline: "instrument portal", operatorName: DEFAULT_BRAND, operatorOrgId: null, operatorLogoUrl: "" };
   }
 });
+
+/**
+ * Who signs a document about one record: the operator whose workspace it belongs
+ * to, not the company that runs the instance.
+ *
+ * A sign-off packet, a service report, a QR label - each of these is one service
+ * company putting its name to work it did. With one operator those were the same
+ * thing, and everything read them off app_settings. With several, a report about
+ * another operator's system carrying our name on it would be a false statement
+ * about who did the work.
+ *
+ * The PLATFORM's name and tagline stay the instance's: the product is the
+ * platform, and the operator is who signs. Per-tenant white-labelling of the
+ * shell itself is a deliberate step beyond this, not an accident of it.
+ */
+export const brandForTenant = cache(async (tenantOrgId: number | null): Promise<Brand> => {
+  const base = await getBrand();
+  if (tenantOrgId === null || tenantOrgId === base.operatorOrgId) return base;
+  try {
+    const [o] = await db.select({ name: orgs.name, logoUrl: orgs.logoUrl })
+      .from(orgs).where(eq(orgs.id, tenantOrgId));
+    if (!o) return base;
+    return {
+      ...base,
+      operatorName: o.name || base.operatorName,
+      operatorOrgId: tenantOrgId,
+      operatorLogoUrl: o.logoUrl,
+    };
+  } catch {
+    return base;
+  }
+});

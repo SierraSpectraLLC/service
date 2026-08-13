@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { assets } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess } from "@/lib/tenancy";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import LabelCard from "@/components/LabelCard";
 
@@ -19,11 +19,9 @@ export default async function AssetLabelPage({ params }: { params: Promise<{ id:
   if (isNaN(assetId)) notFound();
   if (!(await assetAccess(user, assetId)).see) notFound();
 
-  const [[asset], brand] = await Promise.all([
-    db.select().from(assets).where(eq(assets.id, assetId)),
-    getBrand(),
-  ]);
+  const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!asset) notFound();
+  const brand = await brandForTenant(asset.tenantOrgId);
 
   const base = appUrl();
   return (

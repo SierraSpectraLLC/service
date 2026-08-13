@@ -63,7 +63,7 @@ import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/c
 import { systemLabel } from "@/lib/systemLabel";
 import { composeSystemDossier } from "@/lib/dossier";
 import {
-  assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, viewTenant, visibleOrgs, visibleSystemIds,
+  assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
 import { canSeePost, resolveRoom, type Audience, type Viewer } from "@/lib/discussionScope";
 import { sendEmail } from "@/lib/email";
@@ -1405,11 +1405,16 @@ export async function deleteChecklistItem(itemId: number) {
  */
 async function taskMentionAudience(t: { instrumentId: number | null; assetId: number | null }): Promise<string[]> {
   if (t.instrumentId !== null) {
-    return postAudience({ instrumentId: t.instrumentId, audience: "all", authorOrgId: null, roomOrgId: null });
+    return postAudience({
+      instrumentId: t.instrumentId, audience: "all", authorOrgId: null, roomOrgId: null,
+      tenantOrgId: await tenantOfSystem(t.instrumentId),
+    });
   }
-  const staff = await houseEmails();
+  const [a] = t.assetId
+    ? await db.select({ ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId }).from(assets).where(eq(assets.id, t.assetId))
+    : [];
+  const staff = await houseEmails(a?.tenantOrgId);
   if (!t.assetId) return staff;
-  const [a] = await db.select({ ownerOrgId: assets.ownerOrgId }).from(assets).where(eq(assets.id, t.assetId));
   const shares = await db.select({ orgId: assetShares.orgId }).from(assetShares).where(eq(assetShares.assetId, t.assetId));
   const orgIds = [...new Set([...(a?.ownerOrgId !== null && a?.ownerOrgId !== undefined ? [a.ownerOrgId] : []), ...shares.map((s) => s.orgId)])];
   if (!orgIds.length) return staff;
@@ -2189,8 +2194,10 @@ export async function setEodSkip(
  */
 async function postAudience(p: {
   instrumentId: number | null; audience: Audience; authorOrgId: number | null; roomOrgId: number | null;
+  /** The thread's workspace, so its own engineers are the staff side of it. */
+  tenantOrgId?: number | null;
 }): Promise<string[]> {
-  const staff = await houseEmails();
+  const staff = await houseEmails(p.tenantOrgId);
   const entries = await db.select().from(clientAllowlist);
   const emailsFor = (orgId: number) => entries
     .filter((e) => e.orgId === orgId && !e.entry.trim().startsWith("@"))
@@ -2258,7 +2265,10 @@ export async function postDiscussion(
     actorEmail: u.email, actorName: u.name,
     actorIsClient: u.role === "client_viewer" || u.role === "client_editor",
     body: text, instrumentId, label: externalId || "General",
-    allowedEmails: await postAudience({ instrumentId, audience, authorOrgId, roomOrgId }),
+    allowedEmails: await postAudience({
+      instrumentId, audience, authorOrgId, roomOrgId,
+      tenantOrgId: instrumentId === null ? myTenantOrgId(u) : await tenantOfSystem(instrumentId),
+    }),
   });
   if (instrumentId !== null) rev(instrumentId);
   revalidatePath("/discussions");
@@ -3128,7 +3138,7 @@ export async function reportIssue(instrumentId: number, data: {
   });
 
   await notifyIssueRaised({
-    to: await houseEmails(), externalId: inst.externalId, instrumentId, orgName,
+    to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
     severity, summary, details, reporter: u.name || u.email, files: files.length,
   });
 
@@ -3218,7 +3228,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
     action: `${orgName} asked for maintenance on ${inst.externalId} - ${w.label.toLowerCase()}, due ${dueDate}`,
   });
   await notifyPmRequested({
-    to: await houseEmails(), externalId: inst.externalId, instrumentId, orgName,
+    to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
     windowLabel: w.label, note, calendar, requester: who, dueDate,
   });
 
@@ -3662,7 +3672,7 @@ export async function kickToQueue(
   // Tell the side that now owns the next move. Landing in our own queue tells
   // staff; landing in an org's queue tells that org's people.
   const recipients = toOrgId === null
-    ? await houseEmails()
+    ? await houseEmails(inst.tenantOrgId)
     : (await db.select({ entry: clientAllowlist.entry }).from(clientAllowlist)
         .where(eq(clientAllowlist.orgId, toOrgId)))
         // An "@domain" entry names a domain, not a mailbox.
@@ -4198,8 +4208,8 @@ export async function setAttachmentListed(attachmentId: number, on: boolean): Pr
 // they create it as an unclaimed system and start its service history.
 
 /** Who decides on (and hears about) an access request: staff, plus the owning org's sign-in emails. */
-async function ownerAudience(ownerOrgId: number | null): Promise<string[]> {
-  const staff = await houseEmails();
+async function ownerAudience(ownerOrgId: number | null, tenantOrgId?: number | null): Promise<string[]> {
+  const staff = await houseEmails(tenantOrgId);
   if (ownerOrgId === null) return staff;
   const entries = await db.select().from(clientAllowlist).where(eq(clientAllowlist.orgId, ownerOrgId));
   // A @domain entry names no one in particular, so it can't be a recipient.

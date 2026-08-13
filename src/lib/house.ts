@@ -63,7 +63,14 @@ export async function houseIdentityForEmail(email: string): Promise<{
   return id && { ...id, rootOrgId };
 }
 
-/** Who gets staff mail: digests, gas alerts, access requests, house queue kicks. */
-export async function houseEmails(): Promise<string[]> {
-  return houseEmailsFrom(envStaff(), await houseMemberRows());
+/**
+ * Who gets staff mail: digests, gas alerts, access requests, queue kicks.
+ *
+ * `tenantOrgId` names the workspace it concerns, and passing it is what stops one
+ * operator's engineers being emailed about another operator's instrument. Leave it
+ * out only for a message about the instance itself.
+ */
+export async function houseEmails(tenantOrgId?: number | null): Promise<string[]> {
+  const [members, rootOrgId] = await Promise.all([houseMemberRows(), rootOperatorOrgId()]);
+  return houseEmailsFrom(envStaff(), members, tenantOrgId, rootOrgId);
 }

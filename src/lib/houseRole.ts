@@ -73,12 +73,27 @@ export function houseIdentityFor(
 }
 
 /** Every house email, for digests and staff notifications. */
-export function houseEmailsFrom(envStaff: string[], members: MemberRow[]): string[] {
+export function houseEmailsFrom(
+  envStaff: string[], members: MemberRow[],
+  // One workspace's staff. Null (or omitted) is every staff member on the
+  // instance, which is only ever right for a platform-level message: a fault
+  // reported on one operator's system must not email another operator's
+  // engineers, who cannot even open the link.
+  //
+  // The environment list belongs to the operator that runs the instance (it is
+  // that company's break-glass access), so it is included only when asking for
+  // that workspace or for everybody.
+  orgId?: number | null, rootOrgId?: number | null,
+): string[] {
+  const scoped = orgId !== undefined && orgId !== null;
   const out = new Set<string>();
-  for (const e of envStaff.map(norm).filter(Boolean)) out.add(e);
+  if (!scoped || orgId === rootOrgId) {
+    for (const e of envStaff.map(norm).filter(Boolean)) out.add(e);
+  }
   for (const m of members) {
     const e = norm(m.email);
     if (!e) continue;
+    if (scoped && (m.orgId ?? null) !== orgId) continue;
     if (m.role === "none") out.delete(e); else out.add(e);
   }
   return [...out];

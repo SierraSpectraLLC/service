@@ -3,6 +3,7 @@ import { canSeeCosts, redactParts } from "@/lib/redact";
 import { stockAccess } from "@/lib/stock";
 import { canKick, queueView } from "@/lib/queue";
 import { remoteAbility, mayEnroll } from "@/lib/remoteAccess";
+import { houseEmailsFrom } from "@/lib/houseRole";
 
 /**
  * The same question asked of every rule that used to say "is this person staff?":
@@ -122,5 +123,39 @@ describe("reaching a lab PC", () => {
   it("denies everything when the module is off, tenant or not", () => {
     expect(remoteAbility(sierraStaff, { ...ctx, moduleOn: false }, sierraPc, orgOn)).toMatchObject({ see: false });
     expect(mayEnroll(sierraStaff, { moduleOn: false }, { tenantOrgId: SIERRA })).toBe(false);
+  });
+});
+
+describe("who gets the email", () => {
+  // The other half of isolation: not just what you can see, but what lands in
+  // your inbox. A fault on a Sierra instrument must not page Northwind's
+  // engineers, who could not open the link if they tried.
+  const ENV = ["joe@sierra.com"];
+  const members = [
+    { email: "bill@sierra.com", role: "staff", orgId: SIERRA },
+    { email: "tech@northwind.com", role: "staff", orgId: NORTHWIND },
+    { email: "owner@northwind.com", role: "owner", orgId: NORTHWIND },
+  ];
+
+  it("emails one workspace's staff about its own work", () => {
+    expect(houseEmailsFrom(ENV, members, SIERRA, SIERRA).sort())
+      .toEqual(["bill@sierra.com", "joe@sierra.com"]);
+    expect(houseEmailsFrom(ENV, members, NORTHWIND, SIERRA).sort())
+      .toEqual(["owner@northwind.com", "tech@northwind.com"]);
+  });
+
+  it("keeps the break-glass address with the company it belongs to", () => {
+    // STAFF_EMAILS is the platform operator's own lockout insurance, so it must
+    // not be copied on another operator's mail.
+    expect(houseEmailsFrom(ENV, members, NORTHWIND, SIERRA)).not.toContain("joe@sierra.com");
+  });
+
+  it("reaches everyone only for a message about the instance itself", () => {
+    expect(houseEmailsFrom(ENV, members).length).toBe(4);
+  });
+
+  it("still honours a revoked row inside a workspace", () => {
+    const revoked = [...members, { email: "tech@northwind.com", role: "none", orgId: NORTHWIND }];
+    expect(houseEmailsFrom(ENV, revoked, NORTHWIND, SIERRA)).toEqual(["owner@northwind.com"]);
   });
 });

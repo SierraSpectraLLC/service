@@ -5,7 +5,7 @@ import { assets, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { canSeeSystem } from "@/lib/tenancy";
 import { systemLabel } from "@/lib/systemLabel";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import LabelCard from "@/components/LabelCard";
 
@@ -20,12 +20,12 @@ export default async function SystemLabelPage({ params }: { params: Promise<{ id
   if (isNaN(instId)) notFound();
   if (!(await canSeeSystem(user, instId))) notFound();
 
-  const [[inst], assetRows, brand] = await Promise.all([
+  const [[inst], assetRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
-    getBrand(),
   ]);
   if (!inst) notFound();
+  const brand = await brandForTenant(inst.tenantOrgId);
 
   const base = appUrl();
   return (
