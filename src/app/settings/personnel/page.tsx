@@ -25,7 +25,7 @@ export default async function PersonnelPage() {
     db.select({ orgId: systemShares.orgId }).from(systemShares),
   ]);
   return (
-    <div className="container page">
+    <div className="container settings">
       <SettingsTabs active="personnel" isPlatform={isPlatform} />
       <PersonnelForm
         clientAccessEnabled={s?.clientAccessEnabled ?? false}

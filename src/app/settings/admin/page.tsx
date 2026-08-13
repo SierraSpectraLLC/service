@@ -59,7 +59,7 @@ export default async function AdminSettingsPage() {
   }
 
   return (
-    <div className="container page">
+    <div className="container settings">
       <SettingsTabs active="admin" isPlatform={isPlatform} />
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />

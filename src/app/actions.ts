@@ -61,8 +61,8 @@ import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
 import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
-import { createUploadSession, graphConfigured, listFolder, searchFiles } from "@/lib/msgraph";
-import { vaultConfigured } from "@/lib/secretBox";
+import { createUploadSession, graphSetupProblem, listFolder, searchFiles } from "@/lib/msgraph";
+import { vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
 import type { CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { sharedCover } from "@/lib/photos";
@@ -2096,17 +2096,24 @@ async function deleteBlobs(urls: string[]) {
  * quietly hand over their document library too.
  */
 export async function myCloudConnection(): Promise<{
-  configured: boolean; account: string; brokenReason: string;
+  configured: boolean; account: string; brokenReason: string; setupProblem: string;
 }> {
   const u = await requireUser();
-  if (!graphConfigured() || !vaultConfigured()) {
-    return { configured: false, account: "", brokenReason: "" };
+  const isHouse = u.role === "owner" || u.role === "staff";
+  // Half-configured is the state worth naming. The feature used to vanish
+  // entirely, which is indistinguishable from a bug to whoever just set the
+  // environment variables - so staff get told exactly what is missing.
+  const problem = graphSetupProblem()
+    || (vaultConfigured() ? "" : VAULT_UNCONFIGURED);
+  if (problem) {
+    return { configured: false, account: "", brokenReason: "", setupProblem: isHouse ? problem : "" };
   }
   const c = await connectionView(u.email);
   return {
     configured: true,
     account: c ? (c.accountEmail || c.accountName) : "",
     brokenReason: c?.brokenReason ?? "",
+    setupProblem: "",
   };
 }
 

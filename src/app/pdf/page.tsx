@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * offers records they may edit, and their own shelf only if they may write to
  * it - so the studio degrades to "build it and download it".
  */
-export default async function PdfStudioPage() {
+export default async function PdfStudioPage({ searchParams }: { searchParams: Promise<{ cloud?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const house = isHouse(user.role);
@@ -94,7 +94,12 @@ export default async function PdfStudioPage() {
     if (house || (await assetAccess(user, a.id)).edit) editableShelf.push(a);
   }
 
-  const cloud = await myCloudConnection().catch(() => ({ configured: false, account: "", brokenReason: "" }));
+  const cloud = await myCloudConnection()
+    .catch(() => ({ configured: false, account: "", brokenReason: "", setupProblem: "" }));
+  // Whatever the Microsoft handshake reported on its way back. Read here rather
+  // than left in the URL: the callback's only way to speak is this parameter,
+  // and until something showed it a refused connection looked like nothing.
+  const { cloud: cloudNote } = await searchParams;
 
   return (
     <div className="container split">
@@ -111,6 +116,7 @@ export default async function PdfStudioPage() {
         // knowing whether to offer it, rather than flashing a Connect button at
         // somebody who connected months ago.
         cloud={cloud}
+        cloudNote={(cloudNote ?? "").slice(0, 300)}
       />
     </div>
   );

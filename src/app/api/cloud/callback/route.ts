@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { audit } from "@/lib/audit";
 import { currentUser, myTenantOrgId } from "@/lib/authz";
-import { exchangeCode, graphConfig } from "@/lib/msgraph";
+import { exchangeCode, graphBaseUrl, graphConfig } from "@/lib/msgraph";
 import { open, sameSecret } from "@/lib/secretBox";
 import { saveConnection } from "@/lib/cloudStore";
 import { HANDSHAKE_COOKIE } from "../connect/route";
@@ -10,10 +10,8 @@ import { HANDSHAKE_COOKIE } from "../connect/route";
 export const dynamic = "force-dynamic";
 
 /** Back to the studio, saying what happened, rather than to a blank page. */
-const back = (note: string) => {
-  const base = (process.env.APP_URL || process.env.AUTH_URL || "").replace(/\/+$/, "");
-  return NextResponse.redirect(`${base}/pdf?cloud=${encodeURIComponent(note)}`);
-};
+const back = (note: string) =>
+  NextResponse.redirect(`${graphBaseUrl()}/pdf?cloud=${encodeURIComponent(note)}`);
 
 /**
  * Where Microsoft sends somebody back to.

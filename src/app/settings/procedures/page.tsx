@@ -46,7 +46,7 @@ export default async function ProceduresPage() {
   const categories = terms.filter((t) => t.kind === "category").map((t) => t.name);
 
   return (
-    <div className="container page">
+    <div className="container settings">
       <SettingsTabs active="procedures" isOwner={user.role === "owner"} isPlatform={isPlatform} />
       <ProceduresPanel
         assetTypes={assetTypes}
