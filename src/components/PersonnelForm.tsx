@@ -32,6 +32,8 @@ type OrphanRow = { id: number; entry: string };
 export default function PersonnelForm(props: {
   clientAccessEnabled: boolean;
   orgs: OrgRow[]; orphans: OrphanRow[];
+  /** Platform staff, who can open a workspace for a service company. */
+  isPlatform: boolean;
   /** Everyone with a login this viewer may see - read only, assembled not curated. */
   directory: PersonRow[];
   operatorOrgId: number | null; sheetOrgId: number | null;
@@ -58,8 +60,11 @@ export default function PersonnelForm(props: {
       <div className="card">
         <div className="card-title">Organizations</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          A client owns systems; a provider services them. Each sees only what&apos;s shared with it. Open one to
-          set its look, its people and where its reports go.
+          Companies inside this workspace. A client owns systems; a provider services them. Each sees only
+          what&apos;s shared with it, and neither runs a workspace of its own - a service company that needs
+          its own staff, catalog and clients is set up in{" "}
+          {props.isPlatform ? <Link href="/settings/tenants">Service providers</Link> : <b>Service companies</b>}{" "}
+          instead. Open one to set its look, its people and where its reports go.
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "2px 0 10px" }}>
@@ -108,8 +113,8 @@ export default function PersonnelForm(props: {
             placeholder="New organization name" style={{ flex: "1 1 160px", fontSize: 13 }} />
           <select value={orgDraft.kind} onChange={(e) => setOrgDraft({ ...orgDraft, kind: e.target.value })}
             style={{ width: "auto", fontSize: 12 }}>
-            <option value="client">client</option>
-            <option value="provider">provider</option>
+            <option value="client">client - owns systems</option>
+            <option value="provider">provider - services them</option>
           </select>
           <button className="btn sm accent" onClick={submitOrg} disabled={pending || !orgDraft.name.trim()}>Add</button>
         </div>

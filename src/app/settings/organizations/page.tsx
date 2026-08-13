@@ -30,6 +30,7 @@ export default async function OrganizationsPage() {
     <div className="container settings">
       <SettingsTabs active="organizations" isPlatform={isPlatform} />
       <PersonnelForm
+        isPlatform={isPlatform}
         clientAccessEnabled={s?.clientAccessEnabled ?? false}
         orgs={orgRows.map((o) => ({
           id: o.id, name: o.name, kind: o.kind, themeColor: o.themeColor, recipients: o.eodRecipients,
