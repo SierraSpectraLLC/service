@@ -314,9 +314,6 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
           </div>
         )}
       </div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
-        Tune files, test data, reports, source photos. Stored permanently and attributed.
-      </div>
 
       {/* Whose storage these land in, and how much is left. Shown here because
           this is where the bytes arrive - a meter only on the library page would

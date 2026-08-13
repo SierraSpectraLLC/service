@@ -335,10 +335,6 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
       <div>
         <div className="card">
           <div className="card-title" style={{ marginBottom: 6 }}>Sources</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-            Any PDF you can read, from any record - or drop files from this device.
-            Adding one puts all its pages in the working set.
-          </div>
           <label className="btn sm" style={{ display: "inline-block", cursor: "pointer", marginBottom: 8 }}>
             + From this device
             <input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}

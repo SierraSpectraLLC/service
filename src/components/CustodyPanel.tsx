@@ -54,7 +54,6 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
       </div>
       <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
         Currently owned by <b style={{ color: "var(--ink)" }}>{ownerName}</b>.
-        The service history stays with the system through every change of hands.
       </div>
 
       {open && (

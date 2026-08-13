@@ -508,7 +508,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "activity", label: "Activity", node: (
             <div className="card">
               <div className="card-title">Activity</div>
-              <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>Append-only. Nothing here can be edited or erased.</div>
               {canEdit && <ActivityNoteForm target={{ instrumentId: inst.id, assetId: null }} />}
               <ActivityFeed items={activity.map((a) => ({
                 id: a.id, actor: a.actor, action: a.action, field: a.field, newValue: a.newValue,

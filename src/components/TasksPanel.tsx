@@ -339,7 +339,6 @@ export default function TasksPanel({ target, tasks, people, systemAssets, today,
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <span className="eyebrow">Checkout</span>
             <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{checkout.length}</span>
-            <span className="mut" style={{ fontSize: 11 }}>auto-generated · delete any that don&apos;t apply</span>
           </div>
           {checkout.map((t) => renderTask(t, false))}
           {active.length > 0 && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Tasks</div>}

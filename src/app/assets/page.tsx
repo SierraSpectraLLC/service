@@ -69,10 +69,11 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
             <a className="btn link" href="/api/export/systems">Export systems</a>
           </span>
         </div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Every unit we track - in a system, on the shelf, or retired. Tap one for its full service
-          history.{unattached > 0 ? ` ${unattached} not in a system right now.` : ""}
-        </div>
+        {unattached > 0 && (
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            {unattached} not in a system right now.
+          </div>
+        )}
         {user.role !== "client_viewer" && (
           <>
             <NewAssetForm owners={owners} kinds={catalogKinds} models={catalogModels} />

@@ -81,7 +81,6 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
         <StorageMeter
           quota={quota}
           name={quota.storeName}
-          hint="This organization's own shelf plus the files on every system and unit it owns. A document filed onto several records is stored - and counted - once."
         />
       </div>
 
@@ -96,11 +95,11 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
             Open PDF studio
           </Link>
         </div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          {isOwnStore
-            ? "Your shelf, plus the paperwork on every system and unit you own."
-            : `Everything ${quota.storeName} is storing.`}
-        </div>
+        {!isOwnStore && (
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            Everything {quota.storeName} is storing.
+          </div>
+        )}
         {canEdit && isOwnStore && <LibraryUpload full={quota.state === "full"} />}
         <StoreFileList
           files={files.map((f) => ({
@@ -130,7 +129,7 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Pr
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
             <div className="card-title">Shared with you</div>
             <span className="mut" style={{ fontSize: 12 }}>
-              {guests.length} file{guests.length === 1 ? "" : "s"} · {fmtBytes(totalBytes(guests))} · not counted against your storage
+              {guests.length} file{guests.length === 1 ? "" : "s"} · {fmtBytes(totalBytes(guests))}
             </span>
           </div>
           <StoreFileList
