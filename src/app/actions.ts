@@ -59,6 +59,10 @@ import { pmHandoff } from "@/lib/pmQueue";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
+import { createUploadSession, graphConfigured, listFolder, searchFiles } from "@/lib/msgraph";
+import { vaultConfigured } from "@/lib/secretBox";
+import type { CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
@@ -1996,6 +2000,80 @@ async function deleteBlobs(urls: string[]) {
   } catch (e) {
     console.error("[blob] delete failed (orphaned file, harmless but billed):", (e as Error).message);
   }
+}
+
+// ---------------- Outside file stores (OneDrive / SharePoint) ----------------
+
+/**
+ * Whose account is connected, if any.
+ *
+ * Per person, never per organization: the connection reaches whatever that
+ * individual can reach in their own company, so handing it to a colleague would
+ * quietly hand over their document library too.
+ */
+export async function myCloudConnection(): Promise<{
+  configured: boolean; account: string; brokenReason: string;
+}> {
+  const u = await requireUser();
+  if (!graphConfigured() || !vaultConfigured()) {
+    return { configured: false, account: "", brokenReason: "" };
+  }
+  const c = await connectionView(u.email);
+  return {
+    configured: true,
+    account: c ? (c.accountEmail || c.accountName) : "",
+    brokenReason: c?.brokenReason ?? "",
+  };
+}
+
+export async function disconnectCloud(): Promise<{ error?: string }> {
+  const u = await requireUser();
+  await removeConnection(u.email);
+  await audit({
+    actor: u.email, entityType: "cloud", entityId: 0,
+    action: "disconnected their Microsoft account",
+  });
+  revalidatePath("/pdf");
+  return {};
+}
+
+/**
+ * One folder's contents, or the results of a search.
+ *
+ * Reads only. Nothing here is written down: browsing somebody's OneDrive should
+ * leave no trace of their folder names in this database, which is a different
+ * posture from the rest of the app and the right one for files that are not ours.
+ */
+export async function browseCloud(
+  driveId: string, itemId: string, query = "",
+): Promise<{ items?: CloudItem[]; error?: string }> {
+  const u = await requireUser();
+  if (u.role === "client_viewer") return { error: "Read-only accounts cannot connect an outside account." };
+  const q = query.trim();
+  const out = await withGraph(u.email, (token) =>
+    (q ? searchFiles(token, q) : listFolder(token, driveId, itemId)));
+  return out.error ? { error: out.error } : { items: out.items ?? [] };
+}
+
+/**
+ * Somewhere to put a finished packet.
+ *
+ * Returns a pre-authorized upload URL and the browser sends the bytes straight
+ * to Microsoft. Routing a scanned packet through a serverless function to hand
+ * it on unchanged would cost memory, time and a request-body ceiling smaller
+ * than the packets people actually assemble.
+ */
+export async function startCloudUpload(
+  driveId: string, folderId: string, fileName: string,
+): Promise<{ uploadUrl?: string; name?: string; error?: string }> {
+  const u = await requireEditor();
+  const out = await withGraph(u.email, (token) => createUploadSession(token, driveId, folderId, fileName));
+  if (out.error) return { error: out.error };
+  await audit({
+    actor: u.email, entityType: "cloud", entityId: 0,
+    action: `saved "${out.name ?? fileName}" to their OneDrive`,
+  });
+  return { uploadUrl: out.uploadUrl, name: out.name };
 }
 
 /**

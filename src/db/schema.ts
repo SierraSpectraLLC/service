@@ -903,6 +903,48 @@ export const notificationPrefs = pgTable("notification_prefs", {
   emailOn: boolean("email_on").notNull().default(true),
 }, (t) => [unique("notification_prefs_unique").on(t.email, t.kind)]);
 
+/**
+ * One person's standing connection to an outside file store - today Microsoft,
+ * which covers OneDrive and SharePoint through the same API.
+ *
+ * Per PERSON, never per organization. The connection carries whatever that
+ * individual can see in their own tenant, so sharing one between colleagues
+ * would quietly hand one person's document library to another. It is also why
+ * every read through it is scoped to the signed-in user rather than to their
+ * org, which is the opposite of how the rest of this schema works and is
+ * deliberate.
+ *
+ * The refresh token is SEALED (see lib/secretBox), not stored as text: it is a
+ * standing key to somebody's files, it does not expire on its own, and a copy of
+ * this table on its own must not be enough to use it.
+ */
+export const cloudConnections = pgTable("cloud_connections", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Sign-in email, the same identity the notification tables key on. */
+  email: text("email").notNull(),
+  provider: text("provider").notNull().default("microsoft"),
+  /** Who the far end says this is, so a person can tell which account they connected. */
+  accountName: text("account_name").notNull().default(""),
+  accountEmail: text("account_email").notNull().default(""),
+  /** Sealed. Never selected into anything that reaches a browser. */
+  refreshToken: text("refresh_token").notNull().default(""),
+  /**
+   * The short-lived token, also sealed, kept only so that clicking through
+   * folders does not pay for a round trip to Microsoft's token endpoint on every
+   * click. Treated as a cache: anything unreadable or stale simply refreshes.
+   */
+  accessToken: text("access_token").notNull().default(""),
+  accessExpiresAt: timestamp("access_expires_at"),
+  /** What was actually granted, which can be less than what was asked for. */
+  scopes: text("scopes").notNull().default(""),
+  connectedAt: timestamp("connected_at").notNull().defaultNow(),
+  /** Last time the far end accepted the token. A connection can rot silently. */
+  lastUsedAt: timestamp("last_used_at"),
+  /** Set when a refresh is refused, so the UI can say why rather than retrying forever. */
+  brokenReason: text("broken_reason").notNull().default(""),
+}, (t) => [unique("cloud_connection_unique").on(t.email, t.provider)]);
+
 // ── Stock ───────────────────────────────────────────────────────────────────
 // Where parts physically live. Three kinds, because "where is it" has three
 // different answers in this business: a shelf in the shop, the client's own

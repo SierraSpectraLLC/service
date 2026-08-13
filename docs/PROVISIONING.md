@@ -276,3 +276,81 @@ run both side by side, and pull TV per-machine once ours has earned it.
 Removing a device row **does not remove access** — the agent keeps checking in
 until somebody uninstalls it on the machine itself. The confirmation dialog says
 so, and so should you.
+
+---
+
+## OneDrive and SharePoint in the PDF studio (optional, needs an app registration)
+
+Bill asked whether the studio could pull a PDF out of OneDrive instead of
+downloading it to the PC first. Two answers ship, and the cheap one needs
+nothing at all:
+
+**Drag it in.** A PDF in a synced OneDrive or SharePoint folder shows up in
+Explorer like any other file. Dragging it onto the studio makes Windows fetch it
+on the spot. No sign-in, no setup, no registration. Try this before doing
+anything below — for a machine that already syncs the folder, it *is* the
+feature.
+
+**Connect the account.** Everything below buys browsing and searching OneDrive
+and SharePoint from inside the studio, a connection that survives sign-out, and
+saving a finished packet back into a folder. Absent the two env vars, the studio
+simply never mentions OneDrive.
+
+### The registration (Azure portal, ~15 minutes, free)
+
+1. **Entra ID → App registrations → New registration.** Name it for the portal.
+   Under *Supported account types* pick **Accounts in any organizational
+   directory** — anything narrower means only this company's accounts can ever
+   connect, which rules out a client's own OneDrive.
+2. **Redirect URI**, platform **Web**: `https://<portal-domain>/api/cloud/callback`.
+   It must match exactly, including the scheme.
+3. **Certificates & secrets → New client secret.** Copy the *Value* (not the id)
+   immediately; Azure never shows it again. Note the expiry — a secret that
+   lapses breaks every connection at once, and 24 months is the longest offered.
+4. **API permissions → Microsoft Graph → Delegated**: `Files.ReadWrite.All`,
+   `Sites.Read.All`, `User.Read`, `offline_access`. Delegated, never
+   Application: the app then sees exactly what the signed-in person sees, so
+   connecting cannot quietly grant this portal read access to a whole tenant.
+
+### Portal env vars
+
+| Var | What |
+| --- | --- |
+| `MS_CLIENT_ID` | Application (client) ID from the registration |
+| `MS_CLIENT_SECRET` | The secret's **Value** |
+| `MS_TENANT` | Optional. `common` (default) lets any work account connect; a tenant id locks it to one company |
+| `CLOUD_TOKEN_KEY` | 32+ random characters. Seals stored refresh tokens |
+
+**`CLOUD_TOKEN_KEY` is the one that matters.** Each connection stores a
+Microsoft refresh token — a standing key to somebody's files that does not
+expire on its own — and the token is sealed with this key before it is written,
+so a copy of the database on its own opens nothing. Generate it with
+`openssl rand -base64 48`. Changing it does not corrupt anything: every
+connection simply reports that it needs making again.
+
+`MS_CLIENT_ID` and `MS_CLIENT_SECRET` absent is a supported state. So is
+`CLOUD_TOKEN_KEY` absent — the studio then declines to store a connection at all
+rather than writing a token in the clear.
+
+### A client's own tenant
+
+The first person from another company to connect will see a consent screen, and
+if their admin has locked consent down, an **admin approval required** message.
+Their IT approves the app once for their tenant and it works for everyone there
+after that. Nothing in this portal can shortcut that, and it should not be able
+to.
+
+### What it does and does not touch
+
+- Reading a PDF out of OneDrive puts it in the browser's working set only. It
+  is never copied into this app's storage and never counts against a quota
+  unless somebody then saves the packet to a record or the library.
+- Saving a packet **to** OneDrive goes browser-to-Microsoft directly, off an
+  upload URL this server mints. The bytes never pass through a serverless
+  function, whose request body is capped well below the size of a scanned
+  packet.
+- Browsing writes nothing down. Folder names from somebody's company do not end
+  up in this database.
+- A connection belongs to one person, never to an organization: it reaches
+  whatever that individual can reach, so sharing one would hand over their
+  document library with it.
