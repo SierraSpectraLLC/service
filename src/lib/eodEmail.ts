@@ -9,7 +9,7 @@ import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, eodUpdates, people, assets, orgs } from "@/db/schema";
 import { getSystemLabels } from "@/lib/systemLabel";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 
 const SEP = "-".repeat(50);
@@ -142,12 +142,20 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
  * they have, and a system that has since changed hands stays on the report of
  * the client it was written for.
  */
-export async function eodGroups(date: string, historical = false): Promise<{ orgId: number | null; name: string; recipients: string }[]> {
-  const [rows, orgRows, brand, standalone, saved] = await Promise.all([
-    db.select({ id: instruments.id, ownerOrgId: instruments.ownerOrgId, archived: instruments.archived }).from(instruments),
+export async function eodGroups(
+  date: string, historical = false,
+  // Whose report this is. One workspace's clients and one workspace's systems -
+  // null only on an instance with a single operator, where there is nothing to
+  // separate.
+  tenantOrgId: number | null = null,
+): Promise<{ orgId: number | null; name: string; recipients: string }[]> {
+  const mine = <T extends { tenantOrgId: number | null }>(rows: T[]) =>
+    tenantOrgId === null ? rows : rows.filter((r) => r.tenantOrgId === tenantOrgId);
+  const [rowsAll, orgRowsAll, brand, standaloneAll, savedAll] = await Promise.all([
+    db.select({ id: instruments.id, ownerOrgId: instruments.ownerOrgId, archived: instruments.archived, tenantOrgId: instruments.tenantOrgId }).from(instruments),
     db.select().from(orgs).orderBy(asc(orgs.name)),
     getBrand(),
-    historical ? Promise.resolve([]) : db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId }).from(assets)
+    historical ? Promise.resolve([]) : db.select({ id: assets.id, ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId }).from(assets)
       .where(and(
         isNull(assets.instrumentId),
         // A retired unit on tonight's client report is noise.
@@ -155,6 +163,13 @@ export async function eodGroups(date: string, historical = false): Promise<{ org
       )),
     historical ? db.select().from(eodUpdates).where(eq(eodUpdates.date, date)) : Promise.resolve([]),
   ]);
+  // Only this workspace's equipment, and only organizations it runs.
+  const rows = mine(rowsAll);
+  const standalone = mine(standaloneAll as { id: number; ownerOrgId: number | null; tenantOrgId: number | null }[]);
+  const saved = mine(savedAll as unknown as { ownerOrgId: number | null; tenantOrgId: number | null }[]) as unknown as typeof savedAll;
+  const orgRows = tenantOrgId === null
+    ? orgRowsAll
+    : orgRowsAll.filter((o) => o.id === tenantOrgId || o.parentOrgId === tenantOrgId);
   const owners = historical
     // Straight off the rows: no join to who owns the equipment now, which is
     // what used to let a handoff move a past day's report between clients.
@@ -175,10 +190,15 @@ export async function eodGroups(date: string, historical = false): Promise<{ org
   return groups;
 }
 
-export async function composeEodEmail(date: string, dateMDY: string, orgId: number | null): Promise<{
+export async function composeEodEmail(
+  date: string, dateMDY: string, orgId: number | null,
+  // The workspace whose report this is: its name goes on the subject line, since
+  // it is the company reporting the day's work.
+  tenantOrgId: number | null = null,
+): Promise<{
   subject: string; html: string; filled: number; total: number;
 }> {
-  const brand = await getBrand();
+  const brand = await brandForTenant(tenantOrgId);
   const entries = await collectEodEntries(date, orgId, false);
   const included = entries.filter((e) => !e.skipped);
   const url = appUrl();

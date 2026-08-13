@@ -39,7 +39,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     db.selectDistinct({ date: eodUpdates.date }).from(eodUpdates)
       .where(forTenant(eodUpdates.tenantOrgId, readTenant(user)))
       .orderBy(desc(eodUpdates.date)).limit(60),
-    eodGroups(date, !isToday),
+    eodGroups(date, !isToday, readTenant(user)),
     db.select().from(auditLog).where(forTenant(auditLog.tenantOrgId, readTenant(user)))
       .orderBy(desc(auditLog.createdAt)).limit(400),
   ]);

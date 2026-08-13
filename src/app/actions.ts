@@ -2136,7 +2136,7 @@ export async function sendEodEmail(orgId: number | null): Promise<{ error?: stri
   }
   const to = recipients.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
   if (!to.length) return { error: `No recipients for ${who} - add them in Settings first` };
-  const { subject, html, filled, total } = await composeEodEmail(shopToday(), shopTodayMDY(), orgId);
+  const { subject, html, filled, total } = await composeEodEmail(shopToday(), shopTodayMDY(), orgId, myTenantOrgId(u));
   if (!total) return { error: `Nothing to report for ${who}` };
   if (!filled) return { error: `Every line for ${who} is still blank - write at least one update first` };
   try {
