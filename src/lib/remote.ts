@@ -34,6 +34,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, remoteDevices } from "@/db/schema";
+import { tenantOfOrg } from "@/lib/tenancy";
 
 /** How long a connect URL is good for. Bounds the START of a session, not its length. */
 export const CONNECT_TTL_SECONDS = 120;
@@ -292,6 +293,9 @@ export const NOT_CONFIGURED =
  * opens the page.
  */
 export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): Promise<void> {
+  // A machine belongs to the workspace that runs the organization it enrolled
+  // into, so a device list can be scoped without a join.
+  const tenantOrgId = await tenantOfOrg(orgId);
   const known = await db.select({ id: remoteDevices.id, nodeId: remoteDevices.nodeId })
     .from(remoteDevices).where(eq(remoteDevices.orgId, orgId));
   const byNode = new Map(known.map((k) => [k.nodeId, k.id]));
@@ -300,6 +304,7 @@ export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): 
     const id = byNode.get(d.nodeId);
     if (id === undefined) {
       await db.insert(remoteDevices).values({
+        tenantOrgId,
         orgId, nodeId: d.nodeId, name: d.name, platform: d.platform || "windows",
         lastSeenAt: d.online ? now : null, enrolledBy: "the agent installer",
       }).onConflictDoNothing({ target: remoteDevices.nodeId });

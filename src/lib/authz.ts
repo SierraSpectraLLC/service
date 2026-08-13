@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { parsePersona, VIEW_AS_COOKIE, type Persona } from "@/lib/viewAs";
-import { isHouseOf, tenantViewer } from "@/lib/tenants";
+import { isHouseOf, isPlatformStaff, tenantViewer } from "@/lib/tenants";
 
 export type Role = "owner" | "staff" | "client_viewer" | "client_editor";
 
@@ -151,6 +151,18 @@ export async function requireStaff() {
 export async function requireOwner() {
   const u = await requireUser();
   if (u.role !== "owner") throw new Error("Owner only");
+  return u;
+}
+
+/**
+ * Throws unless the caller owns the INSTANCE - the operator that runs the
+ * platform. Distinct from requireOwner, which is now "an owner of some service
+ * company": a second operator's owner runs their own workspace and must not be
+ * able to rename the platform, flip its modules, or point the sheet somewhere.
+ */
+export async function requirePlatformOwner() {
+  const u = await requireOwner();
+  if (!isPlatformStaff(tenantViewer(u))) throw new Error("This is a platform setting");
   return u;
 }
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
 import { visibleOrgs } from "@/lib/tenancy";
@@ -27,6 +28,7 @@ export default async function AdminSettingsPage() {
   if (!user) redirect("/login");
   // Owner only: this page can move ownership of anything.
   if (user.role !== "owner") redirect("/");
+  const isPlatform = isPlatformStaff(tenantViewer(user));
 
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.archived), asc(instruments.externalId)),
@@ -58,7 +60,7 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="container page">
-      <SettingsTabs active="admin" />
+      <SettingsTabs active="admin" isPlatform={isPlatform} />
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { procedures, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { parseProcParts } from "@/lib/procedures";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
@@ -19,6 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function ProceduresPage() {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
+  const isPlatform = isPlatformStaff(tenantViewer(user));
 
   const [rows, terms] = await Promise.all([
     db.select().from(procedures).where(forTenant(procedures.tenantOrgId, readTenant(user)))
@@ -45,7 +47,7 @@ export default async function ProceduresPage() {
 
   return (
     <div className="container page">
-      <SettingsTabs active="procedures" isOwner={user.role === "owner"} />
+      <SettingsTabs active="procedures" isOwner={user.role === "owner"} isPlatform={isPlatform} />
       <ProceduresPanel
         assetTypes={assetTypes}
         modelOptions={modelOptions}

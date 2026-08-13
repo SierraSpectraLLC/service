@@ -36,8 +36,8 @@ import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
 import { storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
 import {
-  houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requireRealOwner,
-  tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
+  houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
+  requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
@@ -55,6 +55,7 @@ import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
+import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
@@ -62,8 +63,7 @@ import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/c
 import { systemLabel } from "@/lib/systemLabel";
 import { composeSystemDossier } from "@/lib/dossier";
 import {
-  assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess,
-  canEditSystem, isHouse, visibleSystemIds,
+  assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
 import { canSeePost, resolveRoom, type Audience, type Viewer } from "@/lib/discussionScope";
 import { sendEmail } from "@/lib/email";
@@ -99,15 +99,27 @@ const revWork = (t: { instrumentId: number | null; assetId?: number | null }) =>
  * exist, and if both are given the asset must actually be on that system.
  */
 async function resolveTarget(t: WorkTarget): Promise<
-  { error: string } | { instrumentId: number | null; assetId: number | null; externalId: string; asset: typeof assets.$inferSelect | null }
+  { error: string } | {
+    instrumentId: number | null; assetId: number | null; externalId: string;
+    asset: typeof assets.$inferSelect | null;
+    /**
+     * Whose workspace the work belongs to - the RECORD's, not the writer's. An
+     * engineer from another operator, invited onto a system, files work that
+     * belongs to the company whose system it is. Getting this backwards would
+     * scatter one job's records across two workspaces, each seeing half.
+     */
+    tenantOrgId: number | null;
+  }
 > {
   // Every created task/part/gas/file/note comes through here, so this is where
   // "may this caller write to this system or asset?" is answered once.
   const u = await requireEditor();
   let externalId = "";
+  let tenantOrgId: number | null = myTenantOrgId(u);
   if (t.instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, t.instrumentId));
     if (!inst) return { error: "Not found" };
+    tenantOrgId = inst.tenantOrgId;
     if (!(await canEditSystem(u, t.instrumentId))) {
       return { error: (await canSeeSystemSafe(u, t.instrumentId)) ? "Read-only access to this system" : "Not found" };
     }
@@ -125,9 +137,10 @@ async function resolveTarget(t: WorkTarget): Promise<
       if (!acc.edit) return { error: "Read-only access to this asset" };
     }
     asset = a;
+    if (t.instrumentId === null) tenantOrgId = a.tenantOrgId;
   }
   if (t.instrumentId === null && !asset) return { error: "Not found" };
-  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset };
+  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId };
 }
 
 /**
@@ -349,6 +362,7 @@ export async function createInstrument(
     if (!roster.some((p) => p.name === lead)) lead = "";
   }
   const [row] = await db.insert(instruments).values({
+    tenantOrgId: myTenantOrgId(u),
     // model stays blank: the system is named by the assets added to it
     // (lib/systemLabel). The column lives on only as the pre-asset fallback
     // for older records and sheet imports.
@@ -395,7 +409,7 @@ export async function createInstrument(
       instrumentId: row.id, externalId: row.externalId, label: "",
     });
   }
-  await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email);
+  await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email, row.tenantOrgId);
   // Recurring upkeep that belongs to the instrument rather than to a unit in it.
   await applySystemProcedures(row.id, shopToday(), u.email);
   rev(row.id);
@@ -474,10 +488,14 @@ async function generateCheckout(
   instrumentId: number | null,
   target: { id: number | null; kind: string; model: string; serial: string },
   actorEmail: string,
+  // Whose workspace this intake belongs to: its procedures fire, its tasks are
+  // created. Another operator's checklist must not run on our bench.
+  tenantOrgId: number | null,
 ): Promise<number> {
   const assetType = target.id === null ? "system" : target.kind;
   const items = await db.select().from(procedures)
-    .where(and(eq(procedures.assetType, assetType), eq(procedures.runsAtIntake, true)));
+    .where(and(eq(procedures.assetType, assetType), eq(procedures.runsAtIntake, true),
+      forTenant(procedures.tenantOrgId, tenantOrgId)));
   const picked = matchItems(items, assetType, target.model);
   if (!picked.length) return 0;
   const existing = target.id !== null
@@ -490,6 +508,7 @@ async function generateCheckout(
   if (!fresh.length) return 0;
   for (const i of fresh) {
     await db.insert(tasks).values({
+      tenantOrgId,
       instrumentId, title: i.name, body: procedureTaskBody(i, parseProcParts(i.parts)), origin: "checkout",
       assetId: target.id, sortOrder: i.position, procedureId: i.id ?? null,
     });
@@ -513,7 +532,7 @@ export async function runAssetCheckout(assetId: number): Promise<{ error?: strin
   const acc = await assetAccess(u, assetId);
   if (!acc.see) return { error: "Not found" };
   if (!acc.edit) return { error: "Read-only access to this asset" };
-  const created = await generateCheckout(a.instrumentId, a, u.email);
+  const created = await generateCheckout(a.instrumentId, a, u.email, a.tenantOrgId);
   revWork({ instrumentId: a.instrumentId, assetId });
   if (!created) return { error: "Nothing new to add - its checkout items are already open (or none are defined for this type)" };
   return { created };
@@ -524,6 +543,9 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   const a = cleanAsset(data);
   if (!a.model && !a.serial) return { error: "Give the asset a model or a serial number" };
   let externalId = "";
+  // A unit installed in a system joins that system's workspace, whoever is
+  // fitting it; a shelf spare joins the workspace of whoever put it there.
+  let instTenantOrgId: number | null = null;
   if (instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     if (!inst) return { error: "Not found" };
@@ -531,12 +553,14 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       return { error: (await canSeeSystemSafe(u, instrumentId)) ? "Read-only access to this system" : "Not found" };
     }
     externalId = inst.externalId;
+    instTenantOrgId = inst.tenantOrgId;
   }
   const siblings = instrumentId !== null
     ? await db.select().from(assets).where(eq(assets.instrumentId, instrumentId)) : [];
   const sortOrder = Math.max(0, ...siblings.map((x) => x.sortOrder)) + 1;
   const [row] = await db.insert(assets).values({
     ...a, instrumentId, sortOrder, status: instrumentId !== null ? "In service" : "Spare",
+    tenantOrgId: instTenantOrgId ?? myTenantOrgId(u),
     // Stock added by a client organization stays theirs, so they keep seeing it
     // while it sits on no system. A provider's entries are records, not
     // property - see creatorOwns.
@@ -548,7 +572,7 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
       actor: u.email, instrumentId, entityType: "asset", entityId: row.id,
       action: `added ${assetLabel(row)}`,
     });
-    await generateCheckout(instrumentId, row, u.email);
+    await generateCheckout(instrumentId, row, u.email, row.tenantOrgId);
     rev(instrumentId);
   } else {
     // Stock: bought, on the shelf, not part of a system yet.
@@ -655,7 +679,7 @@ async function attachOne(assetId: number, instrumentId: number, externalId: stri
     actor: u.email, instrumentId, entityType: "asset", entityId: assetId,
     action: `installed ${assetLabel(a)}${a.location ? ` (from ${a.location})` : ""}`,
   });
-  await generateCheckout(instrumentId, a, u.email);
+  await generateCheckout(instrumentId, a, u.email, a.tenantOrgId);
   revalidatePath(`/assets/${assetId}`);
   return {};
 }
@@ -786,7 +810,7 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
     actor: u.email, instrumentId: toInstrumentId, entityType: "asset", entityId: assetId,
     action: `installed ${assetLabel(a)}${from ? ` (moved from ${from.externalId})` : ""}`,
   });
-  await generateCheckout(toInstrumentId, a, u.email);
+  await generateCheckout(toInstrumentId, a, u.email, a.tenantOrgId);
   rev(toInstrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -983,6 +1007,7 @@ export async function createTask(
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
   const [t] = await db.insert(tasks).values({
+    tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
     dueDate: (data.dueDate ?? "").trim(),
@@ -1136,6 +1161,7 @@ export async function addPmSchedule(
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
   const [s] = await db.insert(pmSchedules).values({
+    tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
     everyDays: cadence.days, nextDue: firstDue, createdBy: u.email,
@@ -1740,7 +1766,7 @@ export async function recordAttachments(
   if (guard) return guard;
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
-      ...f, description: f.description.trim(),
+      ...f, description: f.description.trim(), tenantOrgId: t0.tenantOrgId,
       instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
       uploadedBy: u.name,
     })))
@@ -1773,7 +1799,7 @@ export async function recordLibraryFiles(
   if (guard) return guard;
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
-      ...f, description: f.description.trim(), kind: "Report",
+      ...f, description: f.description.trim(), kind: "Report", tenantOrgId: myTenantOrgId(u),
       instrumentId: null, assetId: null, orgId: u.orgId, uploadedBy: u.name,
     })))
     .returning();
@@ -1859,6 +1885,7 @@ export async function attachLibraryFile(target: WorkTarget, attachmentId: number
     ));
   if (already.length) return { error: `${src.fileName} is already on this record` };
   const [row] = await db.insert(attachments).values({
+    tenantOrgId: t.tenantOrgId,
     instrumentId: t.instrumentId, assetId: t.assetId,
     fileName: src.fileName, kind: src.kind, description: src.description,
     url: src.url, size: src.size, uploadedBy: u.name,
@@ -1998,6 +2025,7 @@ export async function resolveDiff(
       }
       const rowStages = stages.length ? stages : ["Intake"];
       const [row] = await db.insert(instruments).values({
+        tenantOrgId: myTenantOrgId(u),
         externalId: d.externalId, client, model, priority, stages: rowStages, notes,
       }).onConflictDoNothing().returning();
       if (row) {
@@ -2058,7 +2086,7 @@ export async function saveEodUpdate(
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
     if (!inst) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .values({ tenantOrgId: inst.tenantOrgId, instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.instrumentId, eodUpdates.date],
         set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
@@ -2067,7 +2095,7 @@ export async function saveEodUpdate(
     const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
     if (!a) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .values({ tenantOrgId: a.tenantOrgId, assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.assetId, eodUpdates.date],
         set: { systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() },
@@ -2131,7 +2159,7 @@ export async function setEodSkip(
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
     if (!inst) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
+      .values({ tenantOrgId: inst.tenantOrgId, instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.instrumentId, eodUpdates.date],
         set: { skipped, updatedBy: u.name, updatedAt: new Date() },
@@ -2140,7 +2168,7 @@ export async function setEodSkip(
     const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
     if (!a) throw new Error("Not found");
     await db.insert(eodUpdates)
-      .values({ assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
+      .values({ tenantOrgId: a.tenantOrgId, assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, skipped, updatedBy: u.name, updatedAt: new Date() })
       .onConflictDoUpdate({
         target: [eodUpdates.assetId, eodUpdates.date],
         set: { skipped, updatedBy: u.name, updatedAt: new Date() },
@@ -2472,7 +2500,7 @@ export async function addProcedure(data: ProcedureInput): Promise<{ error?: stri
       && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
     return { error: `"${clean.name}" already exists for this type` };
   const position = Math.max(0, ...siblings.map((i) => i.position)) + 1;
-  const [row] = await db.insert(procedures).values({ ...clean, position }).returning();
+  const [row] = await db.insert(procedures).values({ ...clean, position, tenantOrgId: myTenantOrgId(u) }).returning();
   await audit({
     actor: u.email, entityType: "procedure", entityId: row.id,
     action: `added ${clean.kind} procedure "${clean.name}" for ${clean.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
@@ -2480,7 +2508,7 @@ export async function addProcedure(data: ProcedureInput): Promise<{ error?: stri
   // A new recurring procedure covers the fleet already on the floor, per unit
   // deduped by title so hand-written schedules block the catalog's copy.
   let applied = 0;
-  if (clean.intervalDays !== null) applied = await backfillProcedure(clean.assetType, shopToday(), u.email);
+  if (clean.intervalDays !== null) applied = await backfillProcedure(clean.assetType, shopToday(), u.email, myTenantOrgId(u));
   revalidatePath("/settings/procedures");
   revalidatePath("/maintenance");
   return { applied };
@@ -2517,7 +2545,7 @@ export async function updateProcedure(
   const changedInterval = before.intervalDays !== null && clean.intervalDays !== null && before.intervalDays !== clean.intervalDays;
   let applied = 0, retimed = 0, unscheduled = 0;
   if (applyNow && addedRepeat) {
-    applied = await backfillProcedure(before.assetType, shopToday(), u.email);
+    applied = await backfillProcedure(before.assetType, shopToday(), u.email, myTenantOrgId(u));
   }
   if (applyNow && changedInterval) {
     // Re-time the schedules this procedure stamped out: keep their history,
@@ -2737,7 +2765,7 @@ export async function addStage(name: string, bg: string): Promise<{ error?: stri
   const existing = await db.select().from(stageDefs);
   if (existing.some((s) => s.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
   const sortOrder = Math.max(0, ...existing.map((s) => s.sortOrder)) + 1;
-  await db.insert(stageDefs).values({ name: n, bg: bg.toUpperCase(), fg: autoFg(bg), sortOrder }).onConflictDoNothing();
+  await db.insert(stageDefs).values({ tenantOrgId: myTenantOrgId(u), name: n, bg: bg.toUpperCase(), fg: autoFg(bg), sortOrder }).onConflictDoNothing();
   await audit({ actor: u.email, entityType: "settings", entityId: n, action: `added stage "${n}"` });
   revalidatePath("/settings");
   rev();
@@ -2823,7 +2851,7 @@ export async function addPerson(name: string, email: string, org: string): Promi
   const o = org.trim().slice(0, 60);
   const existing = await db.select().from(people);
   if (existing.some((p) => p.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" is already on the roster` };
-  await db.insert(people).values({ name: n, email: e, org: o }).onConflictDoNothing();
+  await db.insert(people).values({ tenantOrgId: myTenantOrgId(u), name: n, email: e, org: o }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: n,
     action: `added person to roster: ${n}${e ? ` <${e}>` : ""}${o ? ` (${o})` : ""}`,
@@ -2861,10 +2889,29 @@ export async function removePerson(id: number) {
  * self-service tier and nothing else. Owner-only, like every other commercial
  * dial on that page.
  */
-export async function setOrgRemoteAccess(orgId: number, on: boolean): Promise<{ error?: string }> {
-  const u = await requireOwner();
+/**
+ * The gate on administering one organization: its dials, its people, its
+ * existence. An operator's staff administer their own clients and nobody else's -
+ * not another operator, and not another operator's client, however the id arrives.
+ *
+ * Owner-only used to be the rule because there was one service company on the
+ * instance and one owner of it. What matters now is WHICH company, so the check
+ * is per-organization; being an owner elsewhere is not a key to this.
+ */
+async function adminOrgGate(u: SessionUser, orgId: number): Promise<
+  { error: string } | { org: typeof orgs.$inferSelect }
+> {
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
+  if (!mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  return { org };
+}
+
+export async function setOrgRemoteAccess(orgId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await adminOrgGate(u, orgId);
+  if ("error" in gate) return gate;
+  const { org } = gate;
   await db.update(orgs).set({ remoteAccessEnabled: on }).where(eq(orgs.id, orgId));
   await audit({
     actor: u.email, entityType: "settings", entityId: orgId,
@@ -2968,16 +3015,16 @@ export async function connectRemoteDevice(
  * in the system's history rather than like something that happened to it.
  */
 async function handOffForClientAsk(
-  inst: { id: number; externalId: string; queueOrgId: number | null; archived: boolean },
+  inst: { id: number; externalId: string; queueOrgId: number | null; archived: boolean; tenantOrgId: number | null },
   why: string, actor: string,
 ): Promise<void> {
   const shares = await db.select({ orgId: orgs.id, kind: orgs.kind })
     .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
     .where(eq(systemShares.instrumentId, inst.id));
-  const [cfg] = await db.select({ operatorOrgId: appSettings.operatorOrgId })
-    .from(appSettings).where(eq(appSettings.id, 1));
   const decision = pmHandoff({
-    queueOrgId: inst.queueOrgId, operatorOrgId: cfg?.operatorOrgId ?? null,
+    queueOrgId: inst.queueOrgId,
+    // Whoever services this system is the workspace it belongs to.
+    operatorOrgId: inst.tenantOrgId,
     shares, archived: inst.archived,
   });
   if (!decision.move) return;
@@ -3047,6 +3094,7 @@ export async function reportIssue(instrumentId: number, data: {
   // Something to work from, dated today, so it shows up as work rather than as a
   // message somebody has to remember to act on.
   const [task] = await db.insert(tasks).values({
+    tenantOrgId: inst.tenantOrgId,
     instrumentId, assetId: null,
     title: `${severity}: ${summary}`,
     body: [details, `Reported by ${u.name || u.email} at ${orgName}.`].filter(Boolean).join("\n\n"),
@@ -3056,6 +3104,7 @@ export async function reportIssue(instrumentId: number, data: {
   // The files, attached to the task so they read as evidence for it.
   for (const f of files) {
     await db.insert(attachments).values({
+      tenantOrgId: inst.tenantOrgId,
       instrumentId, taskId: task.id, fileName: f.fileName.slice(0, 200), url: f.url,
       size: f.size, kind: f.kind || "Other", uploadedBy: u.email,
       description: `Reported with "${summary}"`, orgId: u.orgId,
@@ -3155,6 +3204,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
 
   const dueDate = pmRequestDue(today, w.key);
   const [task] = await db.insert(tasks).values({
+    tenantOrgId: inst.tenantOrgId,
     instrumentId, assetId: null,
     title: pmRequestTitle(note),
     body: [note, `Requested by ${who} at ${orgName} - ${w.label.toLowerCase()}.`, calendar].filter(Boolean).join("\n\n"),
@@ -3241,10 +3291,11 @@ export async function removeRemoteDevice(deviceId: number, reason: string): Prom
 }
 
 export async function setOrgStorageLimit(orgId: number, limitMb: number): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requireStaff();
   const mb = Math.max(0, Math.round(Number(limitMb) || 0));
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org) return { error: "Not found" };
+  const gate = await adminOrgGate(u, orgId);
+  if ("error" in gate) return gate;
+  const { org } = gate;
   if (mb > 0) {
     const used = await storeUsedBytes(orgId);
     if (used > mb * MB) {
@@ -3287,22 +3338,27 @@ const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 
 export async function addClientAccess(raw: string, orgId: number, canEdit = false): Promise<{ error?: string }> {
-  // The owner invites anyone anywhere; an organization's editors invite their
-  // own colleagues - exact emails only, into their own org. Domains stay an
-  // operator-level grant.
+  // Two routes in, and they are the two halves of the product's story: an
+  // operator's staff invite anyone into an organization THEY administer - their
+  // own clients, which is what "log in and get operational" means for a service
+  // company that just bought this - and an organization's own editors invite
+  // colleagues into their own org, exact emails only. Domain wildcards stay with
+  // the workspace: "@acme.com" is a standing grant, not a colleague.
   const u = await requireEditor();
   const entry = raw.trim().toLowerCase();
-  const selfService = u.role !== "owner";
-  if (selfService) {
-    if (u.role === "staff" || u.orgId === null || orgId !== u.orgId) return { error: "Not found" };
+  const asStaff = u.role === "owner" || u.role === "staff";
+  if (!asStaff) {
+    if (u.orgId === null || orgId !== u.orgId) return { error: "Not found" };
     if (!ALLOW_EMAIL.test(entry)) return { error: 'Enter a colleague\'s email, like "jane@company.com"' };
   } else if (!ALLOW_EMAIL.test(entry) && !ALLOW_DOMAIN.test(entry)) {
     // Returned, not thrown: prod masks thrown server-action messages.
     return { error: 'Enter an email like "jane@company.com" or a domain like "@company.com"' };
   }
-  // An entry with no organization would be a login with no scope, so require it.
+  // An entry with no organization would be a login with no scope, so require it -
+  // and staff may only name one their own workspace runs.
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Pick which organization they sign in as" };
+  if (asStaff && !mayAdminOrg(tenantViewer(u), org)) return { error: "Pick which organization they sign in as" };
   await db.insert(clientAllowlist).values({ entry, orgId, canEdit, addedBy: u.name }).onConflictDoNothing();
   await audit({
     actor: u.email, entityType: "settings", entityId: entry,
@@ -3317,11 +3373,16 @@ export async function addClientAccess(raw: string, orgId: number, canEdit = fals
   return {};
 }
 
-/** Owner-only: flip an entry between editor and viewer. Takes effect on their next page load. */
+/** Flip a sign-in entry between editor and viewer. Takes effect on their next page load. */
 export async function setClientAccessRole(id: number, canEdit: boolean): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requireStaff();
   const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
   if (!row) return { error: "Not found" };
+  // Their organization has to be one this workspace administers - a role is
+  // access, and access to somebody else's client is not ours to widen.
+  if (row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
   if (row.canEdit === canEdit) return {};
   await db.update(clientAllowlist).set({ canEdit }).where(eq(clientAllowlist.id, id));
   await audit({
@@ -3334,11 +3395,18 @@ export async function setClientAccessRole(id: number, canEdit: boolean): Promise
 }
 
 export async function setClientAccessOrg(id: number, orgId: number): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requireStaff();
   const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
   if (!row) return { error: "Not found" };
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org) return { error: "Pick an organization" };
+  // Both ends: the organization it is leaving and the one it is joining must
+  // both be ours, or this would move a login between workspaces.
+  const to = await adminOrgGate(u, orgId);
+  if ("error" in to) return { error: "Pick an organization" };
+  const org = to.org;
+  if (row.orgId !== null) {
+    const from = await adminOrgGate(u, row.orgId);
+    if ("error" in from) return { error: "Not found" };
+  }
   if (row.orgId === orgId) return {};
   await db.update(clientAllowlist).set({ orgId }).where(eq(clientAllowlist.id, id));
   await audit({
@@ -3351,13 +3419,16 @@ export async function setClientAccessOrg(id: number, orgId: number): Promise<{ e
 }
 
 export async function removeClientAccess(id: number) {
-  // Owner removes anyone; an org's editors remove their own colleagues
-  // (exact-email rows in their own org only).
+  // An operator's staff remove anyone from an organization they administer; an
+  // org's editors remove their own colleagues (exact-email rows in their own org).
   const u = await requireEditor();
   const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
   if (!row) return;
-  if (u.role !== "owner") {
-    if (u.role === "staff" || u.orgId === null || row.orgId !== u.orgId || row.entry.trim().startsWith("@")) return;
+  if (u.role === "owner" || u.role === "staff") {
+    if (row.orgId === null) return;
+    if (!("org" in await adminOrgGate(u, row.orgId))) return;
+  } else if (u.orgId === null || row.orgId !== u.orgId || row.entry.trim().startsWith("@")) {
+    return;
   }
   await db.delete(clientAllowlist).where(eq(clientAllowlist.id, id));
   // Revoke live sessions for anyone who just lost access - removal should
@@ -3394,6 +3465,7 @@ export async function logTime(
   if ("error" in t0) return t0;
   const person = data.person.trim() || u.name;
   const [row] = await db.insert(timeEntries).values({
+    tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     person, date, minutes, note: data.note.trim(), loggedBy: u.email,
   }).returning();
@@ -3888,7 +3960,7 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
         newTerms.push({ kind: "category", assetType: "", name: cat });
     }
     if (newTerms.length) {
-      await db.insert(vocabTerms).values(newTerms).onConflictDoNothing();
+      await db.insert(vocabTerms).values(newTerms.map((t) => ({ ...t, tenantOrgId: myTenantOrgId(u) }))).onConflictDoNothing();
       await audit({
         actor: u.email, entityType: "vocab", entityId: "csv-import",
         action: `import added ${newTerms.length} catalog term(s) - review in Settings > Catalog`,
@@ -4346,24 +4418,37 @@ export async function setOrgAppearance(
 }
 
 export async function addOrg(name: string, kind: string): Promise<{ error?: string; id?: number }> {
-  const u = await requireOwner();
+  // Any operator's staff, for their own workspace. This is the verb that makes
+  // the product sellable to another service company: their clients are theirs to
+  // create, not something they file a request for.
+  const u = await requireStaff();
+  if (!mayCreateOrgs(tenantViewer(u))) return { error: "Not found" };
   const n = name.trim();
   if (!n || n.length > 60) return { error: "Name must be 1-60 characters" };
   const k = kind === "provider" ? "provider" : "client";
   const existing = await db.select().from(orgs);
   if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
-  const [row] = await db.insert(orgs).values({ name: n, kind: k }).returning();
-  await audit({ actor: u.email, entityType: "org", entityId: row.id, action: `created ${k} organization "${n}"` });
+  const [row] = await db.insert(orgs).values({
+    name: n, kind: k,
+    // A client belongs to the workspace that created it; that parent is what
+    // every tenancy rule reads afterwards.
+    parentOrgId: myTenantOrgId(u),
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "org", entityId: row.id, tenantOrgId: myTenantOrgId(u),
+    action: `created ${k} organization "${n}"`,
+  });
   revalidatePath("/settings");
   return { id: row.id };
 }
 
 export async function removeOrg(orgId: number, reason: string): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requireStaff();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
-  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org) return {};
+  const gate = await adminOrgGate(u, orgId);
+  if ("error" in gate) return {};
+  const { org } = gate;
   // Cascades take the shares and allowlist entries with it, which is the point:
   // their logins stop working and their access disappears in one step.
   await db.delete(orgs).where(eq(orgs.id, orgId));
@@ -4382,7 +4467,7 @@ export async function removeOrg(orgId: number, reason: string): Promise<{ error?
  * rather than a string in the source - see lib/brand.ts.
  */
 export async function setBranding(data: { name: string; tagline: string }): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requirePlatformOwner();
   const name = data.name.trim().slice(0, 60);
   const tagline = data.tagline.trim().slice(0, 80);
   if (!name) return { error: "Give the platform a name" };
@@ -4403,7 +4488,7 @@ export async function setBranding(data: { name: string; tagline: string }): Prom
  * platform generates, and which org inherits systems the operator creates.
  */
 export async function setOperatorOrg(orgId: number | null): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requirePlatformOwner();
   const [org] = orgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (orgId !== null && !org) return { error: "Not found" };
   await db.update(appSettings).set({ operatorOrgId: orgId }).where(eq(appSettings.id, 1));
@@ -4427,7 +4512,7 @@ const MODULES = {
 export async function setModule(
   moduleKey: keyof typeof MODULES, on: boolean,
 ): Promise<{ error?: string }> {
-  const u = await requireOwner();
+  const u = await requirePlatformOwner();
   const m = MODULES[moduleKey];
   if (!m) return { error: "Unknown module" };
   await db.update(appSettings).set({ [m.col]: on }).where(eq(appSettings.id, 1));
@@ -4442,7 +4527,7 @@ export async function setModule(
 }
 
 export async function setSheetOrg(orgId: number | null) {
-  const u = await requireOwner();
+  const u = await requirePlatformOwner();
   const [org] = orgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (orgId !== null && !org) return;
   await db.update(appSettings).set({ sheetOrgId: orgId }).where(eq(appSettings.id, 1));
@@ -4493,7 +4578,10 @@ export async function addVocabTerm(
     return { error: `${n} is already defined` };
   }
   const [row] = await db.insert(vocabTerms)
-    .values({ kind, assetType: at, name: n, categories: cats, manufacturer: kind === "model" ? manufacturer.trim() : "" })
+    .values({
+      tenantOrgId: myTenantOrgId(u),
+      kind, assetType: at, name: n, categories: cats, manufacturer: kind === "model" ? manufacturer.trim() : "",
+    })
     .returning();
   await audit({
     actor: u.email, entityType: "vocab", entityId: row.id,
@@ -4682,6 +4770,7 @@ export async function createStockroom(data: {
     if (!org) return { error: "Unknown organization" };
   }
   const [room] = await db.insert(stockrooms).values({
+    tenantOrgId: myTenantOrgId(u),
     name, kind, orgId, keeper: (data.keeper ?? "").trim().slice(0, 60),
     location: (data.location ?? "").trim().slice(0, 120), note: (data.note ?? "").trim().slice(0, 300),
     createdBy: u.email,
@@ -5037,6 +5126,7 @@ export async function createPurchaseOrder(data: {
 
   const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
   const [po] = await db.insert(purchaseOrders).values({
+    tenantOrgId: acc.room.tenantOrgId ?? myTenantOrgId(u),
     number: nextPoNumber(existing.map((r) => r.number)),
     vendor, stockroomId: data.stockroomId, orgId: acc.room.orgId,
     reference: (data.reference ?? "").trim().slice(0, 80),
@@ -5301,6 +5391,7 @@ export async function addPartPrices(
       updated++;
     } else {
       const [p] = await db.insert(partPrices).values({
+        tenantOrgId: myTenantOrgId(u),
         partNumber: pn, vendor, priceCents: cents, isOem, url, note, updatedBy: u.email,
       }).returning();
       await audit({
@@ -5401,7 +5492,7 @@ export async function deleteVocabTerm(termId: number): Promise<{ error?: string 
  * compat, read by nothing.
  */
 export async function updateSettings(data: { clientAccessEnabled: boolean }) {
-  const u = await requireOwner();
+  const u = await requirePlatformOwner();
   await db.insert(appSettings)
     .values({ id: 1, clientAccessEnabled: data.clientAccessEnabled })
     .onConflictDoUpdate({ target: appSettings.id, set: { clientAccessEnabled: data.clientAccessEnabled } });

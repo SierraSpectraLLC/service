@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { assets, instruments, partPrices, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
@@ -19,6 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function CatalogPage() {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
+  const isPlatform = isPlatformStaff(tenantViewer(user));
 
   const [terms, assetRows, systemRows, priceRows] = await Promise.all([
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, readTenant(user)))
@@ -77,7 +79,7 @@ export default async function CatalogPage() {
 
   return (
     <div className="container page">
-      <SettingsTabs active="catalog" isOwner={user.role === "owner"} />
+      <SettingsTabs active="catalog" isOwner={user.role === "owner"} isPlatform={isPlatform} />
       <CatalogForm categories={categories} models={models} types={types} />
       <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
     </div>

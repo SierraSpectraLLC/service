@@ -8,12 +8,18 @@ import Link from "next/link";
  * their staff alike. Admin is the operator's override - every system's ownership
  * and visibility in one place - so it sits last and stays the owner's alone.
  */
-export default function SettingsTabs({ active, isOwner = true }: {
+export default function SettingsTabs({ active, isOwner = true, isPlatform = true }: {
   active: "configuration" | "personnel" | "catalog" | "procedures" | "admin";
   isOwner?: boolean;
+  /**
+   * Staff of the operator that runs the instance. Configuration is the instance's
+   * own - its name, its modules - so another service company's owner never sees
+   * the tab rather than seeing it and being turned away at the door.
+   */
+  isPlatform?: boolean;
 }) {
   const tabs = [
-    { key: "configuration", href: "/settings", label: "Configuration", ownerOnly: true },
+    { key: "configuration", href: "/settings", label: "Configuration", ownerOnly: true, platformOnly: true },
     { key: "personnel", href: "/settings/personnel", label: "Personnel", ownerOnly: true },
     { key: "catalog", href: "/settings/catalog", label: "Catalog", ownerOnly: false },
     { key: "procedures", href: "/settings/procedures", label: "Procedures", ownerOnly: false },
@@ -21,7 +27,7 @@ export default function SettingsTabs({ active, isOwner = true }: {
   ] as const;
   return (
     <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-      {tabs.filter((t) => isOwner || !t.ownerOnly).map((t) => (
+      {tabs.filter((t) => (isOwner || !t.ownerOnly) && (isPlatform || !("platformOnly" in t && t.platformOnly))).map((t) => (
         <Link key={t.key} href={t.href} className={t.key === active ? "btn sm accent" : "btn sm"}
           style={{ textDecoration: "none" }} aria-current={t.key === active ? "page" : undefined}>
           {t.label}

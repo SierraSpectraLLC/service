@@ -240,6 +240,13 @@ export async function tenantOfOrg(orgId: number | null): Promise<number | null> 
   return org ? tenantOf(org) : null;
 }
 
+/** The tenant a unit belongs to, or null when it is gone or unstamped. */
+export async function tenantOfAsset(assetId: number): Promise<number | null> {
+  const [a] = await db.select({ tenantOrgId: assets.tenantOrgId })
+    .from(assets).where(eq(assets.id, assetId));
+  return a?.tenantOrgId ?? null;
+}
+
 /** The tenant a system belongs to, or null when it is gone or unstamped. */
 export async function tenantOfSystem(instrumentId: number): Promise<number | null> {
   const [i] = await db.select({ tenantOrgId: instruments.tenantOrgId })
