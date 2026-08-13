@@ -35,6 +35,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, remoteDevices } from "@/db/schema";
 import { tenantOfOrg } from "@/lib/tenancy";
+import { brandingFrom, type AgentBranding } from "@/lib/agentName";
 
 /** How long a connect URL is good for. Bounds the START of a session, not its length. */
 export const CONNECT_TTL_SECONDS = 120;
@@ -241,6 +242,47 @@ export function agentDownloads(remoteGroupId: string): AgentDownload[] {
     { label: "Windows 32-bit", note: "older controllers still on 32-bit Windows", url: at(3), primary: false },
     { label: "Assistant (optional)", note: "tray app so whoever is at the machine can see us", url: at(10006), primary: false },
   ];
+}
+
+/**
+ * What the host would call the installer if somebody downloaded one now.
+ *
+ * The agent's branding - its window title, its Windows service name, its picture
+ * and its file name - is baked into the binary by the support host as it serves
+ * it, from settings in that host's own config. None of it is reachable from
+ * here, and the failure mode is silent: the software works perfectly while
+ * handing a client a file with somebody else's name on it.
+ *
+ * So ask. The id=4 download with no group attached is the cheap question - the
+ * engine answers it by sending a file off disk rather than merging one - and the
+ * name in its Content-Disposition header is the name it would brand a real
+ * installer with. HEAD gets that header and no body; the GET is a fallback for
+ * anything in the way that refuses HEAD, aborted the moment the header lands,
+ * because reporting "looks fine" for want of a header would hide exactly the
+ * problem this exists to catch.
+ *
+ * Null means "could not ask", which is deliberately not the same as "not
+ * branded": a host that is down is not evidence that somebody forgot a setting.
+ */
+export async function agentBranding(): Promise<AgentBranding | null> {
+  const cfg = remoteConfig();
+  if (!cfg) return null;
+  const url = `${cfg.url}/meshagents?id=4`;
+  for (const method of ["HEAD", "GET"] as const) {
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), ENGINE_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { method, signal: stop.signal, redirect: "follow" });
+      const branding = brandingFrom(res.headers.get("content-disposition"));
+      stop.abort();            // the name is all we wanted; don't pull a few MB for it
+      if (branding) return branding;
+    } catch {
+      return null;             // unreachable or timed out: retrying with GET won't help
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
 }
 
 /**

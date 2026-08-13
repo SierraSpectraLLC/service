@@ -8,7 +8,7 @@ import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { mayEnroll } from "@/lib/remoteAccess";
-import { agentDownloads, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured } from "@/lib/remote";
+import { agentBranding, agentDownloads, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured } from "@/lib/remote";
 import RemoteInviteLink from "@/components/RemoteInviteLink";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +53,9 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
   // organization's name.
   const group = await ensureOrgGroup(id);
   const downloads = "groupId" in group ? agentDownloads(group.groupId) : [];
+  // What the client will actually see on their desktop. Asked of the host rather
+  // than assumed, because the branding lives there and nothing here can set it.
+  const branding = downloads.length ? await agentBranding() : null;
   if ("groupId" in group) {
     await audit({
       actor: user.email, entityType: "remote", entityId: id,
@@ -94,6 +97,25 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 <span className="mut" style={{ fontSize: 11.5 }}>{d.note}</span>
               </div>
             ))}
+
+            {/* Not decoration: this is the one place the borrowed branding is
+                catchable before a client's IT sees it on their own desktop. */}
+            {branding && !branding.branded && (
+              <div style={{ background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 10px", marginTop: 12, fontSize: 12 }}>
+                <b style={{ color: "#8A5410" }}>The support host has no agent branding set.</b>{" "}
+                This downloads as <span className="mono">{branding.fileName}</span>, and installs a window and a
+                Windows service under the engine&apos;s name rather than {brand.operatorName || brand.name}&apos;s.
+                Fix it on the host — <span className="mono">agentCustomization</span> in{" "}
+                <span className="mono">meshcentral-data/config.json</span>, §13 of the remote host setup — then
+                restart it. Agents already installed keep the old name until they are reinstalled.
+              </div>
+            )}
+            {branding?.branded && (
+              <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
+                Downloads under your own name — the host is serving{" "}
+                <span className="mono">{branding.fileName}</span>.
+              </div>
+            )}
 
             <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
               Outbound 443 only, nothing listening — a site that filters by destination needs one entry for{" "}

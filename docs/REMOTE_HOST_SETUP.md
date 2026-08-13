@@ -421,6 +421,24 @@ time.
 
 ## 13. Making it yours
 
+> **The agent branding below is not optional polish — do it before the gate in
+> section 12.** Nothing in the portal can set it: the name, the picture and the
+> Windows service name are baked into the binary by *this host* as it serves the
+> download, from `config.json` and nowhere else. Skip it and everything still
+> works, which is the problem — the first sign is a client's IT being handed a
+> file called `meshagent64-Acme.exe` by a company that is not called MeshAgent.
+>
+> The enrollment page checks this now and says so in orange if the host is still
+> serving the engine's name, so you find out at your own desk rather than at
+> theirs. To check from here:
+>
+> ```bash
+> curl -sI "https://remote.<your-domain>/meshagents?id=4" | grep -i content-disposition
+> ```
+>
+> `filename="meshagent64.exe"` means it was never set. Your own name there means
+> it took. A real per-group download is named `<fileName>64-<GroupName>.exe`.
+
 Three surfaces carry someone else's branding out of the box, and they are worth
 very different amounts of effort.
 
@@ -470,10 +488,19 @@ print("branding written")
 ENDBRAND
 ```
 
+Every key above is real and lands where you expect: MeshCentral lowercases config
+keys as it loads them (`common.objKeysToLower`), so the camelCase here matches
+the `agentcustomization.displayname` / `.filename` the server actually reads.
+`serviceName` must have no spaces — it becomes the Windows service name.
+
 Restart, then **download a fresh installer** — these settings are baked into the
 executable when it is served, so machines already carrying an agent keep the old
 name and picture until they are reinstalled. `serviceName` in particular is only
 read at install time.
+
+Confirm it took with the `curl -sI` line at the top of this section, or just open
+the enrollment page for any client: it asks the host what it would serve and
+shows the answer under the download buttons.
 
 **The tray icon is a separate program: MeshCentral Assistant.** The agent is a
 background service with no interface by design; the Assistant is the user-facing
