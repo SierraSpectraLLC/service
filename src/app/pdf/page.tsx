@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * offers records they may edit, and their own shelf only if they may write to
  * it - so the studio degrades to "build it and download it".
  */
-export default async function PdfStudioPage({ searchParams }: { searchParams: Promise<{ cloud?: string }> }) {
+export default async function PdfStudioPage() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const house = isHouse(user.role);
@@ -95,11 +95,7 @@ export default async function PdfStudioPage({ searchParams }: { searchParams: Pr
   }
 
   const cloud = await myCloudConnection()
-    .catch(() => ({ configured: false, account: "", brokenReason: "", setupProblem: "" }));
-  // Whatever the Microsoft handshake reported on its way back. Read here rather
-  // than left in the URL: the callback's only way to speak is this parameter,
-  // and until something showed it a refused connection looked like nothing.
-  const { cloud: cloudNote } = await searchParams;
+    .catch(() => ({ configured: false, account: "", brokenReason: "" }));
 
   return (
     <div className="container split">
@@ -112,11 +108,9 @@ export default async function PdfStudioPage({ searchParams }: { searchParams: Pr
         // Anyone who may write has a shelf of their own to save to.
         canUseLibrary={canWrite}
         libraryLabel={house ? "Document library" : "Our file shelf"}
-        // This person's own outside file store. Read here so the studio arrives
-        // knowing whether to offer it, rather than flashing a Connect button at
-        // somebody who connected months ago.
-        cloud={cloud}
-        cloudNote={(cloudNote ?? "").slice(0, 300)}
+        // This person's own outside file store, borrowed. The connection itself
+        // is made and unmade in Files; the studio only reads through it.
+        cloud={{ configured: cloud.configured, account: cloud.account, brokenReason: cloud.brokenReason }}
       />
     </div>
   );
