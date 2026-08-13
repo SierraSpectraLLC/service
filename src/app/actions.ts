@@ -4648,6 +4648,54 @@ async function guardFor(actorEmail: string, subjectEmail: string, next: "owner" 
   return { members, guard: memberGuard({ actorEmail, subjectEmail, next, envStaff: parseList(process.env.STAFF_EMAILS), members }) };
 }
 
+
+// ---------------- Operators: a service company of their own ----------------
+
+/**
+ * Set a service company up with a workspace on this instance.
+ *
+ * Everything else in this file is about work inside a workspace; this is the one
+ * action that makes a new one. It is the whole onboarding: an operator
+ * organization, its first owner, and nothing else - their fleet, clients, catalog
+ * and procedures are theirs to enter, and an empty workspace shows the built-in
+ * stage vocabulary until they define their own (see lib/stageDefs), so it is
+ * usable from the first sign-in rather than after a setup call.
+ *
+ * Platform-owner only. Handing out workspaces is the act of selling the product,
+ * and a tenant creating tenants would be reselling it.
+ */
+export async function createOperator(
+  name: string, ownerEmail: string,
+): Promise<{ error?: string; orgId?: number }> {
+  const u = await requirePlatformOwner();
+  const n = name.trim();
+  if (!n || n.length > 60) return { error: "Company name must be 1-60 characters" };
+  const e = ownerEmail.trim().toLowerCase();
+  if (!validHouseEmail(e)) return { error: "Give one exact email for their first owner - no @domain wildcards" };
+
+  const existing = await db.select().from(orgs);
+  if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
+  // One person is staff of one company (house_members is unique on email), so a
+  // borrowed address would move them rather than adding them - say so instead.
+  const [taken] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  if (taken) return { error: `${e} is already staff somewhere on this instance` };
+
+  const [org] = await db.insert(orgs).values({
+    name: n, kind: "provider", isOperator: true, parentOrgId: null,
+  }).returning();
+  await db.insert(houseMembers).values({
+    email: e, role: "owner", name: "", addedBy: u.email, orgId: org.id,
+  });
+  await audit({
+    actor: u.email, entityType: "org", entityId: org.id, tenantOrgId: org.id,
+    action: `opened a workspace for "${n}" with ${e} as its first owner`,
+  });
+  await notifyInvite({ to: e, inviterName: u.name, orgName: n });
+  revalidatePath("/settings/tenants");
+  revHouse();
+  return { orgId: org.id };
+}
+
 /** Add somebody to the house, or change what they already are. */
 export async function setHouseMember(
   email: string, role: string, name?: string,
@@ -4670,9 +4718,13 @@ export async function setHouseMember(
       field: "role", oldValue: existing.role, newValue: want,
     });
   } else {
-    await db.insert(houseMembers).values({ email: e, role: want, name: label, addedBy: u.email });
+    await db.insert(houseMembers).values({
+      email: e, role: want, name: label, addedBy: u.email,
+      // Staff of the workspace that hired them, which is the one adding them here.
+      orgId: myTenantOrgId(u),
+    });
     await audit({
-      actor: u.email, entityType: "house", entityId: e,
+      actor: u.email, entityType: "house", entityId: e, tenantOrgId: myTenantOrgId(u),
       action: `granted ${e} ${want} access to the whole shop`,
       field: "role", newValue: want,
     });
