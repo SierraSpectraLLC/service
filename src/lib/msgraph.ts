@@ -22,7 +22,41 @@ export const NOT_CONFIGURED =
   "OneDrive is not set up on this instance yet. An owner adds the Microsoft app registration in the environment.";
 
 /** Delegated scopes. `offline_access` is what makes the connection outlive the browser tab. */
-export const SCOPES = ["offline_access", "openid", "profile", "User.Read", "Files.ReadWrite.All", "Sites.Read.All"];
+export const SCOPES = [
+  "offline_access", "openid", "profile", "User.Read",
+  "Files.ReadWrite.All", "Sites.Read.All",
+  // Teams. A team's files are not in anybody's OneDrive - every team is backed
+  // by a SharePoint site, and "Files > General" is a folder in that site's
+  // document library. Without this the one place a shop actually keeps its
+  // documents is the one place this browser could not see.
+  "Team.ReadBasic.All",
+];
+
+/**
+ * Scopes this app now needs that a connection was never granted.
+ *
+ * A connection made before a scope was added keeps working for everything it was
+ * approved for and quietly does nothing for the new thing - so somebody who
+ * connected last week would open the browser, see no Teams, and have no way to
+ * know that reconnecting was the fix. Microsoft also refuses the refresh once a
+ * request asks for a scope nobody consented to, so a stale connection is dead
+ * anyway; this is what makes it say so in words.
+ *
+ * Compared on the last path segment because Microsoft echoes scopes back
+ * sometimes short (`Files.ReadWrite.All`) and sometimes fully qualified. A blank
+ * string means the token response never said, which is not evidence of anything.
+ */
+export function missingScopes(granted: string): string[] {
+  const short = (s: string) => (s.split("/").pop() ?? "").toLowerCase();
+  const have = new Set(granted.split(/[\s,]+/).filter(Boolean).map(short));
+  if (!have.size) return [];
+  // openid, profile and offline_access are not consistently echoed back, and
+  // none of them is what makes a feature appear or not.
+  return SCOPES.filter((s) => s.includes(".") && !have.has(short(s)));
+}
+
+export const RECONNECT_FOR_SCOPES =
+  "This connection was made before team files were supported. Connect again to reach Teams and SharePoint.";
 
 /** Graph calls get a ceiling: a slow tenant must not hang a page render. */
 const GRAPH_TIMEOUT_MS = 12_000;
@@ -197,15 +231,33 @@ export async function whoAmI(accessToken: string): Promise<{ name: string; email
   };
 }
 
-const itemPath = (driveId: string, itemId: string) =>
-  driveId ? `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`
-    : `/me/drive/items/${encodeURIComponent(itemId)}`;
+/** The drive that stands for "shared with me" rather than a real drive id. */
+export const SHARED_DRIVE = "\u0000shared";
+
+/**
+ * One item's path. `root` is a named position, not an id, so it addresses
+ * `/root` - `/items/root` is not a thing Graph accepts, and getting that wrong
+ * breaks every drive except the signed-in person's own.
+ */
+const itemPath = (driveId: string, itemId: string) => {
+  const drive = driveId ? `/drives/${encodeURIComponent(driveId)}` : "/me/drive";
+  return itemId === "root" ? `${drive}/root` : `${drive}/items/${encodeURIComponent(itemId)}`;
+};
 
 /** One folder's contents. `root` is the person's own drive root. */
 export async function listFolder(
   accessToken: string, driveId: string, itemId: string,
 ): Promise<{ items?: CloudItem[]; error?: string }> {
-  const base = itemId === "root" && !driveId ? "/me/drive/root" : itemPath(driveId, itemId);
+  // Things other people shared are not children of anything - they are their own
+  // list, and every row is a pointer at an item on somebody else's drive.
+  // toCloudItem already follows those (remoteItem), which is what makes a shared
+  // folder openable rather than a dead row.
+  if (driveId === SHARED_DRIVE) {
+    const { body, error } = await get(accessToken, "/me/drive/sharedWithMe");
+    if (error) return { error };
+    return { items: browseListing((body?.value as never[]) ?? []) };
+  }
+  const base = itemPath(driveId, itemId);
   // A page of 200 with only the fields the list shows: the default page is 200
   // rows of forty fields each, most of which cross the wire to be discarded.
   const { body, error } = await get(accessToken,
@@ -214,16 +266,59 @@ export async function listFolder(
   return { items: browseListing((body?.value as never[]) ?? [], driveId) };
 }
 
-/** Search the whole of what this person can reach, not just the folder they are in. */
+/**
+ * The places somebody can look, which is the thing this browser got wrong.
+ *
+ * It listed the signed-in person's own OneDrive and stopped - so a shop that
+ * keeps every document in a Team saw an empty list and reasonably concluded the
+ * feature was broken. A team's files are in the SharePoint site behind the team,
+ * not in anybody's personal drive, and a folder somebody shared is in a third
+ * place again.
+ *
+ * Each entry is a folder whose driveId points at a different store. Anything
+ * that fails is left out rather than failing the whole list: a tenant that will
+ * not answer for teams should still show a person their own files.
+ */
+export async function listPlaces(accessToken: string): Promise<{ items?: CloudItem[]; error?: string }> {
+  const place = (id: string, name: string, driveId: string): CloudItem =>
+    ({ id, name, isFolder: true, size: 0, modified: "", childCount: 0, driveId });
+
+  const items: CloudItem[] = [
+    place("root", "My files", ""),
+    place("root", "Shared with me", SHARED_DRIVE),
+  ];
+
+  const { body } = await get(accessToken, "/me/joinedTeams?$select=id,displayName");
+  const teams = (body?.value as { id?: string; displayName?: string }[] | undefined) ?? [];
+  for (const t of teams) {
+    if (!t.id) continue;
+    // The team's own document library. Asked for per team because the id that
+    // addresses the files is the drive's, not the team's.
+    const { body: drive } = await get(accessToken, `/groups/${encodeURIComponent(t.id)}/drive?$select=id`);
+    const driveId = typeof drive?.id === "string" ? drive.id : "";
+    if (driveId) items.push(place("root", t.displayName || "Team", driveId));
+  }
+  return { items };
+}
+
+/**
+ * Search a whole store, not just the folder somebody is standing in.
+ *
+ * Scoped to the drive being browsed, because "search" that always meant the
+ * signed-in person's own OneDrive answered nothing at all for a shop whose
+ * documents live in a Team - the same failure as the browser starting there.
+ */
 export async function searchFiles(
-  accessToken: string, query: string,
+  accessToken: string, query: string, driveId = "",
 ): Promise<{ items?: CloudItem[]; error?: string }> {
   const q = query.trim();
   if (!q) return { items: [] };
+  const real = driveId && driveId !== SHARED_DRIVE ? driveId : "";
+  const base = real ? `/drives/${encodeURIComponent(real)}` : "/me/drive";
   const { body, error } = await get(accessToken,
-    `/me/drive/search(q='${encodeURIComponent(q.replace(/'/g, "''"))}')?$top=100`);
+    `${base}/root/search(q='${encodeURIComponent(q.replace(/'/g, "''"))}')?$top=100`);
   if (error) return { error };
-  return { items: searchListing((body?.value as never[]) ?? []) };
+  return { items: searchListing((body?.value as never[]) ?? [], real) };
 }
 
 /** One item, for naming a download without trusting what the browser sent. */

@@ -444,7 +444,7 @@ export default function PdfStudio({
           {cloud?.configured && (
             <details open={!cloud.account} style={{ marginBottom: 8 }}>
               <summary style={{ cursor: "pointer", fontSize: 12, color: "#1D6396" }}>
-                {cloud.account ? `OneDrive · ${cloud.account}` : "OneDrive and SharePoint"}
+                {cloud.account ? `OneDrive · ${cloud.account}` : "OneDrive, Teams and SharePoint"}
               </summary>
               {cloudNote && (
                 <div style={{ fontSize: 11, marginTop: 6, color: cloudNote === "connected" ? "#2E6B2E" : "#A32D2D" }}>

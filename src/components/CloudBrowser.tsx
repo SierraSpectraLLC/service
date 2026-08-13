@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { browseCloud, disconnectCloud } from "@/app/actions";
 import {
-  itemNote, pushCrumb, ROOT, truncateTo, type CloudItem, type Crumb,
+  crumbKey, isPlaces, itemNote, pushCrumb, ROOT, truncateTo, type CloudItem, type Crumb,
 } from "@/lib/cloudItems";
 
 /**
@@ -59,7 +59,7 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
         </a>
         {!brokenReason && (
           <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-            Sign in with your work account to pull PDFs straight out of OneDrive or SharePoint.
+            Sign in with your work account to pull PDFs straight out of OneDrive, Teams or SharePoint.
           </div>
         )}
       </div>
@@ -74,11 +74,17 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
           onClick={() => { void disconnectCloud().then(() => location.reload()); }}>disconnect</button>
       </div>
 
-      <input value={query} disabled={busy}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Enter") setSearching(query.trim()); }}
-        placeholder="Search your files, or press Enter"
-        style={{ fontSize: 12, marginBottom: 6 }} />
+      {/* A search runs against one store. At the top of the trail there is no
+          store yet - the list is OneDrive, shared items and each Team - so the
+          box would have to either lie about its reach or quietly search only the
+          personal drive, which is the bug this whole screen came from. */}
+      {!isPlaces(here) && (
+        <input value={query} disabled={busy}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") setSearching(query.trim()); }}
+          placeholder={`Search ${trail[1]?.name ?? "your files"}, or press Enter`}
+          style={{ fontSize: 12, marginBottom: 6 }} />
+      )}
 
       {searching ? (
         <div style={{ display: "flex", gap: 6, alignItems: "baseline", marginBottom: 4 }}>
@@ -91,12 +97,12 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
         // and two shared libraries can both hold a folder called /Reports/2026.
         <div style={{ display: "flex", gap: 3, flexWrap: "wrap", alignItems: "baseline", marginBottom: 4 }}>
           {trail.map((c, i) => (
-            <span key={c.id} style={{ fontSize: 11 }}>
+            <span key={crumbKey(c)} style={{ fontSize: 11 }}>
               {i > 0 && <span className="mut"> / </span>}
               {i === trail.length - 1
                 ? <span className="mut">{c.name}</span>
                 : <button className="btn link" style={{ fontSize: 11 }}
-                  onClick={() => setTrail((t) => truncateTo(t, c.id))}>{c.name}</button>}
+                  onClick={() => setTrail((t) => truncateTo(t, crumbKey(c)))}>{c.name}</button>}
             </span>
           ))}
         </div>
@@ -104,7 +110,7 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
 
       {/* Saving into the folder you are looking at, rather than choosing a path
           twice. Not offered on a search, where "here" is not a place. */}
-      {onPickFolder && !searching && (
+      {onPickFolder && !searching && !isPlaces(here) && (
         <button className="btn link" style={{ fontSize: 11, marginBottom: 4 }} disabled={busy}
           onClick={() => onPickFolder(here.driveId, here.id, here.name)}>
           save finished packets into {here.name}
@@ -117,11 +123,11 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
         {busy && <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>Loading...</div>}
         {!busy && items.length === 0 && !error && (
           <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>
-            {searching ? "No PDFs match." : "No folders or PDFs here."}
+            {searching ? "No PDFs match." : isPlaces(here) ? "Nothing to browse." : "No folders or PDFs here."}
           </div>
         )}
         {!busy && items.map((i) => (
-          <div key={`${i.driveId}:${i.id}`}
+          <div key={`${i.driveId}:${i.id}:${i.name}`}
             style={{ display: "flex", gap: 6, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
             {i.isFolder ? (
               <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}
@@ -134,7 +140,11 @@ export default function CloudBrowser({ account, brokenReason, onAdd, onPickFolde
               title={i.name}>
               {i.isFolder ? "📁 " : ""}{i.name}
             </span>
-            <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{itemNote(i)}</span>
+            {/* A store has no item count worth printing - "My files · 0 items"
+                reads as empty when it is simply not a folder anybody counted. */}
+            {!isPlaces(here) && (
+              <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{itemNote(i)}</span>
+            )}
           </div>
         ))}
       </div>
