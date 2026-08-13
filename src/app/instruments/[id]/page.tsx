@@ -32,6 +32,7 @@ import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
+import ReportIssueButton from "@/components/ReportIssueButton";
 import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
@@ -240,6 +241,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ← All instruments
         </Link>
         <span style={{ marginLeft: "auto" }} />
+
+        {/* Anybody who can see the system can say something is wrong with it -
+            including a read-only account watching an instrument fail, who should
+            not have to find somebody with more rights first. */}
+        {!inst.archived && <ReportIssueButton instrumentId={inst.id} externalId={inst.externalId} />}
 
         {/* The instrument's own PC. Sits with the other actions on the system
             rather than on a list somewhere else, because it is used in the

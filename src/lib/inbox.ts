@@ -17,6 +17,7 @@ export const NOTIFY_KINDS = [
   { kind: "gas_empty", label: "A gas is marked empty" },
   { kind: "queue", label: "A system moves into my queue" },
   { kind: "handoff", label: "A system changes hands" },
+  { kind: "issue", label: "A client reports a problem" },
 ] as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];

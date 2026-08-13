@@ -258,6 +258,37 @@ export async function notifyMention(opts: {
  * an expectation with it, so it leads with the reason: what the sender is
  * waiting on is the only thing the recipient actually needs.
  */
+/**
+ * A client raised a problem on one of their systems.
+ *
+ * Sent to whoever services it, not to the client - they know; they just pressed
+ * the button. Severity leads the subject line because "down" and "a question"
+ * deserve different reactions from somebody reading on a phone.
+ */
+export async function notifyIssueRaised(opts: {
+  to: string[]; externalId: string; instrumentId: number; orgName: string;
+  severity: string; summary: string; details: string; reporter: string; files: number;
+}) {
+  try {
+    const url = appUrl();
+    const urgent = opts.severity === "Down";
+    await deliver({
+      to: opts.to, kind: "issue", href: `/instruments/${opts.instrumentId}`,
+      title: `${opts.orgName} reported ${opts.severity.toLowerCase()} on ${opts.externalId}: ${opts.summary}`,
+      subject: `${urgent ? "DOWN" : opts.severity} - ${opts.externalId}: ${opts.summary}`,
+      html: await wrap(`<b>${esc(opts.orgName)}</b> reported a problem with
+        <b>${esc(opts.externalId)}</b>${urgent ? " and says it is <b>down</b>" : ""}.
+        <div style="margin-top:8px;"><b>${esc(opts.summary)}</b></div>
+        ${opts.details ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.details)}</div>` : ""}
+        <div style="margin-top:8px;">Raised by ${esc(opts.reporter)}${opts.files ? `, with ${opts.files} file${opts.files === 1 ? "" : "s"} attached` : ""}.
+        The system is marked as needing maintenance and is in your queue.</div>
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] issue email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyQueueKick(opts: {
   to: string[]; externalId: string; instrumentId: number;
   fromName: string; toName: string; reason: string; stages: string[];

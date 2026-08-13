@@ -444,7 +444,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
           );
         }
         return (
-          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
+          // Wraps rather than crushes: this panel sits in a column that can be
+          // 340px wide, and the controls on the right have real minimum widths.
+          <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
             {isImage(a.fileName) ? (
               <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ flexShrink: 0, lineHeight: 0 }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -454,9 +456,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
             ) : (
               <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
             )}
-            <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ minWidth: 0, flex: "1 1 190px" }}>
               <div className="mono" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
-              {a.description && <div style={{ fontSize: 12, marginTop: 2 }}>{a.description}</div>}
+              {a.description && <div style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{a.description}</div>}
               <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                 <span className="pill" style={{ background: m.bg, color: m.fg }}>{a.kind}</span>
                 <span style={{ marginLeft: 6 }}>
@@ -470,7 +472,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                   const v = e.target.value ? parseInt(e.target.value) : null;
                   startTransition(async () => { await setAttachmentTask(a.id, v); });
                 }}
-                style={{ width: "auto", maxWidth: 150, fontSize: 11, padding: "1px 4px", flexShrink: 0 }}>
+                style={{ width: "auto", minWidth: 0, maxWidth: 150, fontSize: 11, padding: "1px 4px", flexShrink: 0 }}>
                 <option value="">not evidence</option>
                 {evidenceTasks.map((t) => (
                   <option key={t.id} value={t.id}>{t.required ? "★ " : ""}{t.title}</option>
