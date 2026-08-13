@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  coverIsChosen, coverPhoto, isPhotoFile, orderPhotos, photoCount, sharedCover, sharesPhotos,
-  stockPhotoForSystem, stockPhotoForUnit, type CatalogPhoto,
+  coverIsChosen, coverPhoto, isPhotoFile, livingCover, orderPhotos, photoCount, photoRemovalNote,
+  sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit, type CatalogPhoto,
 } from "@/lib/photos";
 import {
   coverZoom, frameStyle, NO_FRAME, normalizeFrame, parseFrame, serializeFrame, turned, ZOOM_MAX,
@@ -233,5 +233,45 @@ describe("the zoom that exactly fills a tile", () => {
 
   it("falls back to filling exactly when the shape is unknown", () => {
     expect(coverZoom(0, 4 / 3)).toBe(1);
+  });
+});
+
+describe("a cover pointer that outlived its photo", () => {
+  const photos = [p(1, "bench.jpg", "2026-01-04T10:00:00Z"), p(2, "inlet.jpg", "2026-06-01T10:00:00Z")];
+
+  it("keeps a cover whose file is still there", () => {
+    expect(livingCover(photos, 2)).toBe(2);
+  });
+
+  it("lets go of one whose file is gone", () => {
+    // The bug this closes: deleting the cover left an id on the record pointing
+    // at nothing, so the thumbnail asked for a 404 and the catalog stand-in
+    // never got its turn - the page thought it had a cover.
+    expect(livingCover(photos, 99)).toBe(null);
+    expect(livingCover([], 2)).toBe(null);
+    expect(livingCover(photos, null)).toBe(null);
+  });
+});
+
+describe("saying that photos were removed", () => {
+  it("is one line for one photo", () => {
+    expect(photoRemovalNote(["inlet.jpg"], "duplicate"))
+      .toBe("removed photo: inlet.jpg (files deleted from storage) - reason: duplicate");
+  });
+
+  it("is still one line for fifteen", () => {
+    // A row per file turned clearing a setup shoot into fifteen entries in a
+    // history meant to record what happened to the machine.
+    const names = Array.from({ length: 15 }, (_, i) => `setup-${i + 1}.jpg`);
+    const line = photoRemovalNote(names, "setup shots, no longer needed");
+    expect(line).toContain("removed 15 photos");
+    expect(line).toContain("setup-1.jpg");
+    expect(line).toContain("and 7 more");
+    expect(line.split("removed").length - 1).toBe(1);
+  });
+
+  it("names them all when there are few enough to read", () => {
+    expect(photoRemovalNote(["a.jpg", "b.jpg"], "why")).toContain("a.jpg, b.jpg");
+    expect(photoRemovalNote(["a.jpg", "b.jpg"], "why")).not.toContain("more");
   });
 });

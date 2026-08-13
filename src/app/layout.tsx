@@ -112,7 +112,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     instance's modules and the viewer's role. */}
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
-                {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Stock</Link>}
+                {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Inventory</Link>}
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
                 {isStaff ? (
                   <NavMore items={[

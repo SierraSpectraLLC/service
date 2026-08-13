@@ -9,7 +9,7 @@ import Link from "next/link";
  * and visibility in one place - so it sits last and stays the owner's alone.
  */
 export default function SettingsTabs({ active, isOwner = true, isPlatform = true }: {
-  active: "configuration" | "personnel" | "catalog" | "procedures" | "admin" | "tenants";
+  active: "configuration" | "organizations" | "catalog" | "procedures" | "admin" | "tenants";
   isOwner?: boolean;
   /**
    * Staff of the operator that runs the instance. Configuration is the instance's
@@ -20,7 +20,7 @@ export default function SettingsTabs({ active, isOwner = true, isPlatform = true
 }) {
   const tabs = [
     { key: "configuration", href: "/settings", label: "Configuration", ownerOnly: true, platformOnly: true },
-    { key: "personnel", href: "/settings/personnel", label: "Personnel", ownerOnly: true },
+    { key: "organizations", href: "/settings/organizations", label: "Organizations", ownerOnly: true },
     { key: "catalog", href: "/settings/catalog", label: "Catalog", ownerOnly: false },
     { key: "procedures", href: "/settings/procedures", label: "Procedures", ownerOnly: false },
     { key: "admin", href: "/settings/admin", label: "Admin", ownerOnly: true },

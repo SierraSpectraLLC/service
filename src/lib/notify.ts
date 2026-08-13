@@ -5,12 +5,13 @@
 // opt out of or needs a record of.
 import { inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { users, people, notifications, notificationPrefs } from "@/db/schema";
+import { users, notifications, notificationPrefs } from "@/db/schema";
 import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { emailAllowed, type NotifyKind } from "@/lib/inbox";
 import { getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
+import { namedLogins } from "@/lib/directory";
 
 export type Person = { name: string; email: string };
 
@@ -20,28 +21,28 @@ const esc = (s: string) =>
 
 /**
  * Assignees/mentions are freeform names ("Joe", "Thomas", "Chris Ma").
- * Resolve to an email by (1) the people roster (Settings), (2) exact
- * users.name match, then (3) a staff email whose local part starts with the
- * name (joe -> joe.vincent96@...). Null when nothing matches - the caller
- * skips the notification rather than guessing.
+ * Resolve to an email by (1) the directory of logins, (2) exact users.name
+ * match, then (3) a staff email whose local part starts with the name
+ * (joe -> joe.vincent96@...). Null when nothing matches - the caller skips the
+ * notification rather than guessing.
  */
 export function resolveAssigneeEmail(
   name: string,
   staffEmails: string[],
   userRows: { name: string | null; email: string }[],
-  roster: Person[] = [],
+  directory: Person[] = [],
 ): string | null {
   const n = name.trim().toLowerCase();
   if (!n) return null;
-  const inRoster = roster.find((p) => p.name.trim().toLowerCase() === n && p.email.trim());
-  if (inRoster) return inRoster.email.trim().toLowerCase();
+  const inDirectory = directory.find((p) => p.name.trim().toLowerCase() === n && p.email.trim());
+  if (inDirectory) return inDirectory.email.trim().toLowerCase();
   const byName = userRows.find((u) => (u.name || "").trim().toLowerCase() === n);
   if (byName) return byName.email.toLowerCase();
   return staffEmails.find((e) => e.split("@")[0].startsWith(n)) ?? null;
 }
 
 /**
- * Which roster names does a post @mention? A name matches on its full form
+ * Which directory names does a post @mention? A name matches on its full form
  * ("@Chris Ma") or its first word ("@Chris"), case-insensitive.
  */
 export function parseMentions(body: string, names: string[]): string[] {
@@ -93,11 +94,11 @@ export async function notifyTaskAssigned(opts: {
 }) {
   try {
     const staff = await houseEmails();
-    const [userRows, roster] = await Promise.all([
+    const [userRows, directory] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
-      db.select({ name: people.name, email: people.email }).from(people),
+      namedLogins(),
     ]);
-    const to = resolveAssigneeEmail(opts.assignee, staff, userRows, roster);
+    const to = resolveAssigneeEmail(opts.assignee, staff, userRows, directory);
     if (!to || to === opts.actorEmail.toLowerCase()) return; // unknown assignee or self-assign
     const url = appUrl();
     const href = opts.instrumentId ? `/instruments/${opts.instrumentId}` : opts.assetId ? `/assets/${opts.assetId}` : "";
@@ -120,11 +121,11 @@ export async function notifySystemAssigned(opts: {
 }) {
   try {
     const staff = await houseEmails();
-    const [userRows, roster] = await Promise.all([
+    const [userRows, directory] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
-      db.select({ name: people.name, email: people.email }).from(people),
+      namedLogins(),
     ]);
-    const to = resolveAssigneeEmail(opts.lead, staff, userRows, roster);
+    const to = resolveAssigneeEmail(opts.lead, staff, userRows, directory);
     if (!to || to === opts.actorEmail.toLowerCase()) return;
     const url = appUrl();
     await deliver({
@@ -148,15 +149,15 @@ export async function notifyDiscussion(opts: {
 }) {
   try {
     const staff = await houseEmails();
-    const [userRows, roster] = await Promise.all([
+    const [userRows, directory] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
-      db.select({ name: people.name, email: people.email }).from(people),
+      namedLogins(),
     ]);
     const actor = opts.actorEmail.toLowerCase();
     const to = new Set<string>();
     // Mentioned people get pinged directly.
-    for (const name of parseMentions(opts.body, roster.map((p) => p.name))) {
-      const email = resolveAssigneeEmail(name, staff, userRows, roster);
+    for (const name of parseMentions(opts.body, directory.map((p) => p.name))) {
+      const email = resolveAssigneeEmail(name, staff, userRows, directory);
       if (email && email !== actor) to.add(email);
     }
     // A client post always reaches all staff - their questions must never be missed.
@@ -211,7 +212,7 @@ export async function notifyAccessRequest(opts: {
 
 /**
  * Somebody wrote @Name in a task or checklist note. Same name resolution as
- * discussion mentions (roster, then users, then a staff-email prefix), and the
+ * discussion mentions (directory, then users, then a staff-email prefix), and the
  * same visibility discipline: the note's text travels in the notification, so
  * only people who could open the task may be pinged by it - the caller passes
  * that audience in.
@@ -224,14 +225,14 @@ export async function notifyMention(opts: {
 }) {
   try {
     const staff = await houseEmails();
-    const [userRows, roster] = await Promise.all([
+    const [userRows, directory] = await Promise.all([
       db.select({ name: users.name, email: users.email }).from(users),
-      db.select({ name: people.name, email: people.email }).from(people),
+      namedLogins(),
     ]);
     const actor = opts.actorEmail.toLowerCase();
     const to = new Set<string>();
-    for (const name of parseMentions(opts.body, roster.map((p) => p.name))) {
-      const email = resolveAssigneeEmail(name, staff, userRows, roster);
+    for (const name of parseMentions(opts.body, directory.map((p) => p.name))) {
+      const email = resolveAssigneeEmail(name, staff, userRows, directory);
       if (email && email !== actor) to.add(email);
     }
     if (opts.allowedEmails) {

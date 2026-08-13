@@ -1,7 +1,7 @@
 import { and, asc, eq, desc, inArray, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, people, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
 import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
@@ -9,6 +9,7 @@ import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages
 import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { requireUser } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { shelveRecords } from "@/lib/records";
@@ -35,9 +36,9 @@ export default async function Home() {
     db.select().from(auditLog).where(mine(auditLog.instrumentId)).orderBy(desc(auditLog.createdAt)).limit(200),
     db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
     getStageDefs(await viewTenant(user)),
-    db.select({ name: people.name }).from(people)
-      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
-      .orderBy(asc(people.org), asc(people.name)),
+    // Who work can be assigned to: the logins of the organizations this viewer
+    // works with. See lib/directory.
+    visibleDirectory(user),
     db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks).where(mine(tasks.instrumentId)),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
     // Archived systems included, so retiring the last system for a client (or
@@ -127,7 +128,7 @@ export default async function Home() {
       <Dashboard
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
-        people={peopleRows.map((p) => p.name)}
+        people={directoryNames(peopleRows)}
         clients={allSystems.map((c) => c.client).filter(Boolean)}
         categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
         canEdit={user.role !== "client_viewer"}

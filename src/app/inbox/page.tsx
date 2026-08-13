@@ -41,6 +41,7 @@ export default async function InboxPage() {
         prefs={prefs}
       />
       <SignInSettings
+        name={user.name} email={user.email}
         hasPassword={!!me?.hash}
         phone={me?.phone ?? ""}
         smsConfigured={smsConfigured()}

@@ -16,7 +16,7 @@ export default async function SettingsPage() {
   // The instance's own settings - its name, its modules, which organization runs
   // it. Another operator's owner runs a workspace, not the platform, so they land
   // on the tab that is theirs instead.
-  try { user = await requirePlatformOwner(); } catch { redirect("/settings/personnel"); }
+  try { user = await requirePlatformOwner(); } catch { redirect("/settings/organizations"); }
   const [[s], stageDefList, orgRows] = await Promise.all([
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
     getStageDefs(await viewTenant(user)),

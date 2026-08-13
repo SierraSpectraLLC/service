@@ -58,6 +58,36 @@ export const coverIsChosen = (photos: PhotoLike[], coverId: number | null): bool
 /** "3 photos", for a heading that should not say "3 photo". */
 export const photoCount = (n: number) => `${n} photo${n === 1 ? "" : "s"}`;
 
+/**
+ * The cover, but only if the file is still there.
+ *
+ * The pointer outlives the photo: deleting the cover leaves an id on the record
+ * addressing an attachment that no longer exists, and the thumbnail at the top
+ * of the page then asks for a file that answers 404 - a broken image where a
+ * machine should be, and no fall back to the catalog's stand-in either, because
+ * as far as the page was concerned there WAS a cover. Resolved on read rather
+ * than only on delete, so a pointer left dangling by any path heals itself.
+ */
+export const livingCover = (photos: PhotoLike[], coverId: number | null): number | null =>
+  (coverId !== null && photos.some((p) => p.id === coverId) ? coverId : null);
+
+/**
+ * One audit line for removing a set of photos, however big the set.
+ *
+ * A row per file turned clearing fifteen setup photos into fifteen entries in a
+ * history meant to show what happened to the machine. The names are still all
+ * there - the point is that removing them was one act by one person, and reads
+ * as one.
+ */
+export function photoRemovalNote(names: string[], reason: string): string {
+  const shown = names.slice(0, 8).join(", ");
+  const extra = names.length > 8 ? `, and ${names.length - 8} more` : "";
+  const what = names.length === 1
+    ? `removed photo: ${shown}`
+    : `removed ${names.length} photos: ${shown}${extra}`;
+  return `${what} (files deleted from storage) - reason: ${reason}`;
+}
+
 // ---------------------------------------------------------------------------
 // Where a photo comes from
 // ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
     <div className="container settings">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {isOwner && (
-          <Link href="/settings/personnel" className="btn sm" style={{ textDecoration: "none" }}>← Personnel</Link>
+          <Link href="/settings/organizations" className="btn sm" style={{ textDecoration: "none" }}>← Organizations</Link>
         )}
         <h1 style={{ fontSize: 20, margin: 0 }}>{org.name}</h1>
         <span className="pill" style={{ background: org.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: org.kind === "provider" ? "#8A5410" : "#1D6396" }}>

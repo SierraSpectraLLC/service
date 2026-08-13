@@ -45,7 +45,7 @@ export default async function StockPage() {
     <div className="container wide">
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <div className="card-title">Stock</div>
+          <div className="card-title">Inventory</div>
           {shortAll > 0 && (
             <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D", fontWeight: 700 }}>
               {shortAll} line{shortAll === 1 ? "" : "s"} at or below reorder point

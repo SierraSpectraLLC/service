@@ -4,9 +4,10 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
-  attachments, checklistItems, itemNotes, taskNotes, auditLog, people, assetShares, orgs, eodUpdates,
+  attachments, checklistItems, itemNotes, taskNotes, auditLog, assetShares, orgs, eodUpdates,
   pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
@@ -21,7 +22,7 @@ import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import {
-  fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
+  fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
 } from "@/lib/photos";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
@@ -73,9 +74,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(desc(attachments.createdAt)),
     db.select().from(auditLog).where(eq(auditLog.assetId, assetId)).orderBy(desc(auditLog.createdAt)).limit(100),
-    db.select({ name: people.name }).from(people)
-      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
-      .orderBy(asc(people.org), asc(people.name)),
+    // Everyone this viewer may assign work to or @mention: the logins of their
+    // own organization and of the ones they work with. See lib/directory.
+    visibleDirectory(user),
   ]);
   if (!asset) notFound();
   const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
@@ -159,7 +160,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     ? await db.select().from(attachments).where(eq(attachments.instrumentId, soloSystem.id))
     : [];
   const photoRows = [...attachRows, ...sysAttachRows].filter(isPhotoFile);
-  const coverId = sharedCover(asset.photoAttachmentId, soloSystem?.cover ?? null);
+  // See the system page: a pointer at a deleted file must read as "no cover".
+  const coverId = livingCover(photoRows, sharedCover(asset.photoAttachmentId, soloSystem?.cover ?? null));
   const coverFraming = photoRows.find((a) => a.id === coverId)?.framing ?? "";
   // What the catalog says this model looks like, while nobody has photographed
   // this one. Never a file, never billed - see lib/photos.
@@ -292,13 +294,13 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             </div>
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={target} tasks={fullTasks} people={peopleRows.map((p) => p.name)}
+            <TasksPanel target={target} tasks={fullTasks} people={directoryNames(peopleRows)}
               systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff}
               copyTargets={copyTargets} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
-              people={peopleRows.map((p) => p.name)}
+              people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => ({
                 id: s.id, title: s.title, body: s.body, assignee: s.assignee,
                 everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
@@ -321,7 +323,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               }))}
               label={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}${asset.serial ? ` SN ${asset.serial}` : ""}`}
               canEdit={canEdit} storageFull={fileQuota.state === "full"}
-              stock={unitStock && { termId: unitStock.id, framing: unitStock.photoFraming, what: unitStock.name }}
               shared={soloSystem ? `system ${soloSystem.externalId}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
@@ -336,7 +337,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             <HoursPanel target={target}
               entries={[...taggedTime].sort((a, b) => (a.date < b.date ? 1 : -1))
                 .map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
-              people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+              people={directoryNames(peopleRows)} defaultPerson={user.name}
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },
           { key: "update", label: "Today's update", node: (

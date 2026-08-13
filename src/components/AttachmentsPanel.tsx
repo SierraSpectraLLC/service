@@ -10,6 +10,7 @@ import PdfCombiner from "@/components/PdfCombiner";
 import StorageMeter from "@/components/StorageMeter";
 import type { Quota } from "@/lib/storage";
 import { fmtWhen } from "@/lib/when";
+import { isPhotoFile, photoCount } from "@/lib/photos";
 
 // No `url`: raw blob URLs never reach the client. Every read goes through
 // /api/files/[id], which applies the same authorization as the pages.
@@ -173,6 +174,14 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
   // (staff or the owning org's editors): each file gets a show-on-listing toggle.
   listingCuration?: boolean;
 }) {
+  // Photos live in the Photos section and are listed only there. They are still
+  // ordinary attachments underneath - one row, one charge against the quota -
+  // but a system with fifteen setup photos buried its four documents, and
+  // removing one from here cost an activity entry for a picture nobody meant to
+  // file. The section that shows photos is the section that manages them.
+  const docs = attachments.filter((a) => !isPhotoFile(a));
+  const photos = attachments.length - docs.length;
+
   const fileRef = useRef<HTMLInputElement>(null);
   const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -411,8 +420,15 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
         </div>
       )}
 
-      {attachments.length === 0 && staged.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>}
-      {attachments.map((a) => {
+      {docs.length === 0 && staged.length === 0 && (
+        <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>
+      )}
+      {photos > 0 && (
+        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+          {photoCount(photos)} in the Photos section.
+        </div>
+      )}
+      {docs.map((a) => {
         const m = ATTACH_META[a.kind] || ATTACH_META.Other;
         if (editing === a.id) {
           return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setMyPassword, clearMyPassword, setMyPhone } from "@/app/actions";
+import { setMyPassword, clearMyPassword, setMyName, setMyPhone } from "@/app/actions";
 import { MIN_PASSWORD } from "@/lib/password";
 
 /**
@@ -16,10 +16,13 @@ import { MIN_PASSWORD } from "@/lib/password";
  * the address was already proved, so neither is a way to get an account, only a
  * second way back into one you already have.
  */
-export default function SignInSettings({ hasPassword, phone, smsConfigured }: {
+export default function SignInSettings({ name, email, hasPassword, phone, smsConfigured }: {
+  /** What everybody else sees on your assignments and mentions. Yours to set. */
+  name: string; email: string;
   hasPassword: boolean; phone: string; smsConfigured: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [who, setWho] = useState(name);
   const [pw, setPw] = useState("");
   const [again, setAgain] = useState("");
   const [tel, setTel] = useState(phone);
@@ -39,6 +42,16 @@ export default function SignInSettings({ hasPassword, phone, smsConfigured }: {
     });
   };
 
+  const saveName = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(""); setMsg("");
+    startTransition(async () => {
+      const res = await setMyName(who);
+      if (res?.error) { setError(res.error); return; }
+      setMsg("Name saved - it's what the rest of the shop sees.");
+    });
+  };
+
   const savePhone = (e: React.FormEvent) => {
     e.preventDefault();
     setError(""); setMsg("");
@@ -51,7 +64,24 @@ export default function SignInSettings({ hasPassword, phone, smsConfigured }: {
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
-      <div className="card-title" style={{ marginBottom: 6 }}>Signing in</div>
+      <div className="card-title" style={{ marginBottom: 6 }}>You</div>
+
+      {/* Yours to set, not the owner's. This is the name on your assignments,
+          your mentions and your hours; before this it was whatever somebody
+          typed when they added you, which was usually nothing. */}
+      <form onSubmit={saveName} style={{ marginBottom: 14 }}>
+        <label htmlFor="my-name" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>
+          Your name <span className="mut" style={{ fontWeight: 400 }}>{email}</span>
+        </label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input id="my-name" value={who} disabled={pending} maxLength={60}
+            onChange={(e) => setWho(e.target.value)} placeholder="Joe Harris"
+            style={{ flex: "1 1 200px", fontSize: 16 }} />
+          <button className="btn sm" type="submit" disabled={pending || !who.trim() || who === name}>
+            {pending ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </form>
 
       {/* Only once texting actually works. Asking for a number that nothing can
           send to is a field that does nothing and a promise we haven't kept -

@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  stageEvents, discussionPosts, people, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
+  stageEvents, discussionPosts, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
@@ -66,13 +66,14 @@ import { createUploadSession, graphSetupProblem, listFolder, listPlaces, searchF
 import { vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
 import { PLACES_DRIVE, type CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
-import { sharedCover } from "@/lib/photos";
+import { isPhotoFile, photoRemovalNote, sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
+import { assignableNames } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
@@ -341,10 +342,9 @@ export async function pushInstrumentToSheet(instrumentId: number): Promise<{ err
 export async function setInstrumentLead(instrumentId: number, lead: string) {
   const u = await requireEditor();
   const name = lead.trim();
-  if (name) {
-    const roster = await db.select().from(people);
-    if (!roster.some((p) => p.name === name)) throw new Error("Unknown person");
-  }
+  // Somebody with a login this person can see, not free text: a lead nobody can
+  // be notified at is a system that looks assigned and is not.
+  if (name && !(await assignableNames(u)).has(name)) throw new Error("Unknown person");
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst || inst.lead === name) return;
   await assertSystemEditable(u, instrumentId);
@@ -369,10 +369,7 @@ export async function createInstrument(
   // Editors, not just staff: LabZen adds their internal systems themselves.
   const u = await requireEditor();
   let lead = (data.lead ?? "").trim();
-  if (lead) {
-    const roster = await db.select().from(people);
-    if (!roster.some((p) => p.name === lead)) lead = "";
-  }
+  if (lead && !(await assignableNames(u)).has(lead)) lead = "";
   const [row] = await db.insert(instruments).values({
     tenantOrgId: myTenantOrgId(u),
     // model stays blank: the system is named by the assets added to it
@@ -1981,6 +1978,59 @@ export async function setCoverPhoto(target: WorkTarget, attachmentId: number): P
 }
 
 /**
+ * Remove several photos at once, as one act.
+ *
+ * The reason this exists rather than looping deleteAttachment: fifteen setup
+ * shots removed one at a time wrote fifteen lines into a history that is meant
+ * to say what happened to the machine, and made a five-second job into fifteen
+ * confirmations. One selection, one reason, one line.
+ *
+ * Same gate as deleting any file off a record - staff only, and only on a record
+ * they may edit. Ids that are not photos, or belong to another record, are
+ * dropped rather than refused: a stale page in another tab should take the rows
+ * it can and say what it took.
+ */
+export async function removePhotos(
+  target: WorkTarget, ids: number[], reason: string,
+): Promise<{ removed?: number; error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  if (!ids.length) return { removed: 0 };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  if (!isHouse(u.role)) return { error: "Staff only" };
+  await assertWorkEditable(u, { instrumentId: t0.instrumentId, assetId: t0.assetId });
+
+  const me = photoRecord(t0);
+  const twin = await photoTwin(t0);
+  const onRecord = (a: { instrumentId: number | null; assetId: number | null }, r: PhotoRecord) =>
+    (r.instrumentId !== null ? a.instrumentId === r.instrumentId : a.assetId === r.assetId);
+  const rows = (await db.select().from(attachments).where(inArray(attachments.id, ids.slice(0, 200))))
+    .filter((a) => isPhotoFile(a) && (onRecord(a, me) || (twin !== null && onRecord(a, twin))));
+  if (!rows.length) return { error: "Nothing there to remove." };
+
+  await db.delete(attachments).where(inArray(attachments.id, rows.map((a) => a.id)));
+  await deleteBlobs(rows.map((a) => a.url));
+  // A cover that was in the set leaves a pointer at a file that no longer
+  // exists. Cleared on both halves of a shared pair, since either may hold it.
+  const gone = new Set(rows.map((a) => a.id));
+  for (const r of [me, ...(twin ? [twin] : [])]) {
+    const held = await coverOf(r);
+    if (held !== null && gone.has(held)) await setCoverRow(r.instrumentId !== null, r, null);
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: rows[0].id,
+    action: photoRemovalNote(rows.map((a) => a.fileName), why),
+    field: "reason", newValue: why,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  if (twin) revWork(twin);
+  return { removed: rows.length };
+}
+
+/**
  * How a photo sits in its tile - turned upright, zoomed, nudged.
  *
  * The stored file is not touched. Every place that shows this photo reads the
@@ -3252,42 +3302,6 @@ export async function deleteStage(id: number): Promise<{ error?: string }> {
   revalidatePath("/settings");
   rev();
   return {};
-}
-
-// ---------------- People roster ----------------
-// Task assignees and @mention targets, Sierra + LabZen. Owner-managed in Settings.
-
-export async function addPerson(name: string, email: string, org: string): Promise<{ error?: string }> {
-  const u = await requireOwner();
-  const n = name.trim();
-  const e = email.trim().toLowerCase();
-  if (!n || n.length > 40) return { error: "Name must be 1-40 characters" };
-  if (e && !ALLOW_EMAIL.test(e)) return { error: "Enter a valid email, or leave it blank" };
-  // Free-text org name (or blank) - the roster predates real organizations
-  // and stays lightweight; the name is only used for labels and the EOD
-  // "client-led" rule.
-  const o = org.trim().slice(0, 60);
-  const existing = await db.select().from(people);
-  if (existing.some((p) => p.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" is already on the roster` };
-  await db.insert(people).values({ tenantOrgId: myTenantOrgId(u), name: n, email: e, org: o }).onConflictDoNothing();
-  await audit({
-    actor: u.email, entityType: "settings", entityId: n,
-    action: `added person to roster: ${n}${e ? ` <${e}>` : ""}${o ? ` (${o})` : ""}`,
-  });
-  revalidatePath("/settings");
-  return {};
-}
-
-export async function removePerson(id: number) {
-  const u = await requireOwner();
-  const [p] = await db.select().from(people).where(eq(people.id, id));
-  if (!p) return;
-  await db.delete(people).where(eq(people.id, id));
-  await audit({
-    actor: u.email, entityType: "settings", entityId: p.name,
-    action: `removed person from roster: ${p.name}`,
-  });
-  revalidatePath("/settings");
 }
 
 /** Who the EOD "Send to LabZen" button emails. Comma-separated. */
@@ -5130,6 +5144,32 @@ export async function setMyPhone(raw: string): Promise<{ error?: string }> {
     action: phone ? "added a mobile number for sign-in codes" : "removed their mobile number",
   });
   revalidatePath("/inbox");
+  return {};
+}
+
+/**
+ * What everybody else calls you.
+ *
+ * Theirs to set, not the owner's. Before this, a name was whatever somebody
+ * typed when they added you - usually nothing - and the directory fell back to
+ * guessing one out of your email address. It is the name on your task
+ * assignments, your @mentions, your signatures and your hours, so it should be
+ * the one you answer to.
+ */
+export async function setMyName(raw: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const name = raw.trim().replace(/\s+/g, " ").slice(0, 60);
+  if (!name) return { error: "A name can't be blank." };
+  if (name === u.name) return {};
+  await db.update(users).set({ name }).where(eq(users.email, u.email.toLowerCase()));
+  await audit({
+    actor: u.email, entityType: "auth", entityId: u.email,
+    action: `changed their display name to ${name}`,
+    field: "name", oldValue: u.name, newValue: name,
+  });
+  // Their name is on assignee pickers and mention lists across the app, and the
+  // session carries it - so everything, and it takes effect on the next load.
+  revalidatePath("/", "layout");
   return {};
 }
 

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
-  discussionPosts, people, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
+  discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -22,8 +22,10 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
-  fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit, stockSrc,
+  fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit,
+  stockSrc,
 } from "@/lib/photos";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
@@ -74,9 +76,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
-    db.select({ name: people.name }).from(people)
-      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
-      .orderBy(asc(people.org), asc(people.name)),
+    // Everyone this viewer may assign work to or @mention: the logins of their
+    // own organization and of the ones they work with. See lib/directory.
+    visibleDirectory(user),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     // Shelf stock offered for attaching: the house sees all of it; an org sees
     // only units it owns, never another client's spares. Retired units are
@@ -206,7 +208,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // What makes an attachment a photograph is the file, not what somebody picked
   // in a dropdown when they filed it.
   const photoRows = [...attachRows, ...unitAttachRows].filter(isPhotoFile);
-  const coverId = sharedCover(inst.photoAttachmentId, soloUnit?.photoAttachmentId ?? null);
+  // livingCover, not the raw pointer: a cover whose file has been deleted would
+  // otherwise leave the thumbnail asking for a 404 with no fall back to the
+  // catalog's stand-in, because the page believed it had one.
+  const coverId = livingCover(photoRows, sharedCover(inst.photoAttachmentId, soloUnit?.photoAttachmentId ?? null));
   const coverFraming = photoRows.find((a) => a.id === coverId)?.framing ?? "";
   // Stock photos live on the catalog row, not on any record. A one-unit system
   // is better illustrated by its module's model than by "LC-MS".
@@ -295,16 +300,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         </Link>
         <span style={{ marginLeft: "auto" }} />
 
-        {/* Anybody who can see the system can say something is wrong with it, or
-            ask for its upkeep - including a read-only account watching an
-            instrument fail, who should not have to find somebody with more
-            rights first. */}
+        {/* Anybody who can see the system can ask for help with it - including a
+            read-only account watching an instrument fail, who should not have to
+            find somebody with more rights first. */}
         {!inst.archived && (
-          <>
-            <ClientRequest kind="issue" instrumentId={inst.id} externalId={inst.externalId} />
-            <ClientRequest kind="pm" instrumentId={inst.id} externalId={inst.externalId}
-              nextPm={scheduleLine(pmRows, shopToday())} />
-          </>
+          <ClientRequest instrumentId={inst.id} externalId={inst.externalId}
+            nextPm={scheduleLine(pmRows, shopToday())} />
         )}
 
         {/* The instrument's own PC. Sits with the other actions on the system
@@ -366,7 +367,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
               gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
               knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]}
-              people={peopleRows.map((p) => p.name)}
+              people={directoryNames(peopleRows)}
               shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
               orgOptions={orgRows}
               accessRequests={requestRows.map((r) => ({
@@ -420,11 +421,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             />
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={peopleRows.map((p) => p.name)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />
+            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
-              people={peopleRows.map((p) => p.name)}
+              people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => {
                 const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;
                 return {
@@ -466,7 +467,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               }))}
               label={`${inst.externalId} - ${systemLabel(inst, assetRows) || "the system"}`}
               canEdit={canEdit} storageFull={fileQuota.state === "full"}
-              stock={systemStock && { termId: systemStock.id, framing: systemStock.photoFraming, what: systemStock.name }}
               shared={soloUnit ? `${soloUnit.kind}${soloUnit.model ? ` ${soloUnit.model}` : ""}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
@@ -480,7 +480,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={{ instrumentId: inst.id, assetId: null }}
               entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
-              people={peopleRows.map((p) => p.name)} defaultPerson={user.name}
+              people={directoryNames(peopleRows)} defaultPerson={user.name}
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },
           // Today's client-facing note sits with the conversation it feeds, not up in the system's identity block.
