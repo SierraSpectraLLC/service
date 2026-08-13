@@ -49,12 +49,13 @@ export async function checkTryAllowed(email: string, now = new Date()): Promise<
 }
 
 /**
- * Record a wrong guess. When it is the last one allowed, the outstanding codes
- * for that address are deleted as well: a locked address with a live code would
- * only be locked at the front door, and the link in the same email is a second
- * one.
+ * Record a wrong guess - a code or a password, since both are guesses at the same
+ * door and an attacker should not get two budgets for it.
+ *
+ * When it is the last guess allowed, that address's outstanding codes are deleted
+ * too: a locked front door with a live link beside it is not locked.
  */
-export async function recordWrongCode(email: string, now = new Date()): Promise<{ locked: boolean }> {
+export async function recordFailure(email: string, now = new Date()): Promise<{ locked: boolean }> {
   const id = norm(email);
   const current = await readRow(id) ?? freshAttempts(now);
   const { row, locked } = afterWrongCode(current, now);

@@ -9,6 +9,8 @@ import AssetGrid, { type GridModel } from "./AssetGrid";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
+  /** This module's own photo, when it has one - see PhotoCard. */
+  photoAttachmentId?: number | null;
 };
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
@@ -146,6 +148,13 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           <Link key={a.id} href={`/assets/${a.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 4px", borderTop: "1px solid var(--line)", flexWrap: "wrap", textDecoration: "none", color: "inherit" }}>
             <span title={a.status} style={{ width: 10, height: 10, borderRadius: "50%", background: c.fg, flexShrink: 0 }} />
+            {/* A thumbnail here is what makes the list read as the bench rather
+                than as a parts manifest. Absent for units without one, rather
+                than a placeholder box per row. */}
+            {a.photoAttachmentId != null && (
+              <img src={`/api/files/${a.photoAttachmentId}`} alt="" loading="lazy"
+                style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)", flexShrink: 0 }} />
+            )}
             <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>
             {a.serial && <span className="mono mut" style={{ fontSize: 12 }}>SN {a.serial}</span>}

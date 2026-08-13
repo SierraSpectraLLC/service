@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { cookies } from "next/headers";
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
@@ -9,6 +10,7 @@ import { users, accounts, sessions, verificationTokens, appSettings, clientAllow
 import { parseList, matchesEntry, roleForEmail } from "@/lib/allowMatch";
 import { houseIdentityForEmail, houseRoleForEmail, rootOperatorOrgId } from "@/lib/house";
 import { CODE_TTL_MINUTES, newCode } from "@/lib/loginCode";
+import { sendSms, smsConfigured } from "@/lib/sms";
 
 export { parseList, matchesEntry, roleForEmail };
 
@@ -53,9 +55,33 @@ export async function orgForEmail(email: string): Promise<{ id: number; name: st
  */
 const SEND_TIMEOUT_MS = 8000;
 
-async function sendMagicLink({ identifier, url, token, provider }: {
+/**
+ * How this code is being asked for. Set by the sign-in action just before it
+ * calls signIn, read here - the two run inside one request, so the cookie is a
+ * per-request hand-off and never outlives it.
+ *
+ * It exists because Auth.js generates the code inside its own flow: this is the
+ * only place that has both the code and the request, which is where the choice
+ * of "email it" or "text it" has to be made.
+ */
+export const CHANNEL_COOKIE = "login_channel";
+
+async function deliverCode({ identifier, url, token, provider }: {
   identifier: string; url: string; token: string; provider: { from?: string; apiKey?: string };
 }) {
+  // Texting first when it was asked for and there is a number on file. A carrier
+  // failure falls through to email rather than leaving somebody with nothing -
+  // the code is already made and already stored, so the only question left is
+  // how it reaches them.
+  const wantsSms = (await cookies()).get(CHANNEL_COOKIE)?.value === "sms";
+  if (wantsSms && smsConfigured()) {
+    const [u] = await db.select({ phone: users.phone }).from(users)
+      .where(eq(users.email, identifier.toLowerCase())).catch(() => []);
+    if (u?.phone) {
+      const sent = await sendSms(u.phone, `${token} is your sign-in code. It expires in ${CODE_TTL_MINUTES} minutes.`);
+      if (sent) return;
+    }
+  }
   const started = Date.now();
   let res: Response;
   try {
@@ -97,6 +123,33 @@ async function sendMagicLink({ identifier, url, token, provider }: {
   console.log(`[auth] magic link sent in ${ms}ms`);
 }
 
+/**
+ * May this address sign in at all?
+ *
+ * Exported because it is no longer only Auth.js that asks: the password fallback
+ * signs somebody in without going through Auth.js's routes, and it has to answer
+ * the same question, or a revoked client with a password set last month would
+ * still be walking in.
+ */
+export async function signInAllowed(rawEmail: string): Promise<boolean> {
+  const email = rawEmail.toLowerCase();
+  if (!email) return false;
+  // House membership is owner-managed in the database now, with the first
+  // STAFF_EMAILS entry as an un-revocable root (see lib/houseRole).
+  if (await houseRoleForEmail(email)) return true;
+  // Everyone else is a client: the access toggle must be on, and the email
+  // must match the env list or the owner-managed list in Settings. Both
+  // reads are independent, so they go out together - on the sign-in path
+  // two sequential round trips is two waits the person can feel.
+  const envRole = roleForEmail(email);
+  const [[s], allowed] = await Promise.all([
+    db.select().from(appSettings).where(eq(appSettings.id, 1)),
+    envRole === "client_viewer" ? Promise.resolve(true) : emailInClientAllowlist(email),
+  ]);
+  if (!s?.clientAccessEnabled) return false;
+  return allowed;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
     usersTable: users,
@@ -108,7 +161,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Resend({
       apiKey: process.env.AUTH_RESEND_KEY,
       from: process.env.EMAIL_FROM,
-      sendVerificationRequest: sendMagicLink,
+      sendVerificationRequest: deliverCode,
       // A code somebody can read off a phone and type at an instrument, rather
       // than a 32-byte token they can only click. It is the same credential
       // either way - Auth.js hashes it, stores it once, and burns it on use -
@@ -123,22 +176,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     // Gate who is allowed to sign in at all.
     async signIn({ user }) {
-      const email = user.email?.toLowerCase();
-      if (!email) return false;
-      // House membership is owner-managed in the database now, with the first
-      // STAFF_EMAILS entry as an un-revocable root (see lib/houseRole).
-      if (await houseRoleForEmail(email)) return true;
-      // Everyone else is a client: the access toggle must be on, and the email
-      // must match the env list or the owner-managed list in Settings. Both
-      // reads are independent, so they go out together - on the sign-in path
-      // two sequential round trips is two waits the person can feel.
-      const envRole = roleForEmail(email);
-      const [[s], allowed] = await Promise.all([
-        db.select().from(appSettings).where(eq(appSettings.id, 1)),
-        envRole === "client_viewer" ? Promise.resolve(true) : emailInClientAllowlist(email),
-      ]);
-      if (!s?.clientAccessEnabled) return false;
-      return allowed;
+      return signInAllowed(user.email ?? "");
     },
     async session({ session, user }) {
       // Keep the stored role in step with the live rules on every session read,

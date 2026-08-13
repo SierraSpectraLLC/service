@@ -55,6 +55,8 @@ import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
+import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
+import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
@@ -1782,6 +1784,70 @@ export async function recordAttachments(
       action: `uploaded ${a.kind}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}`,
     });
   }
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
+
+/**
+ * Set the photo of a system or a unit.
+ *
+ * The photo is an ordinary attachment with a pointer to it, which is the whole
+ * design: one file is one row, so it counts against storage once, it is only
+ * reachable through the authorized proxy like every other file, and deleting it
+ * from Files clears the pointer by itself rather than leaving a broken picture.
+ *
+ * Replacing a photo leaves the old one in Files. It is a record of what the
+ * instrument looked like in March, and quietly destroying that to save a
+ * thumbnail's worth of storage is not ours to decide.
+ */
+export async function setPhoto(
+  target: WorkTarget, file: { fileName: string; url: string; size: number },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const onSystem = t0.instrumentId !== null && t0.assetId === null;
+  const guard = await guardStorage(await storeOwnerForTarget(t0), file.size || 0);
+  if (guard) return guard;
+
+  const [row] = await db.insert(attachments).values({
+    tenantOrgId: t0.tenantOrgId,
+    instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+    fileName: file.fileName.slice(0, 200), kind: "Photo", url: file.url, size: file.size,
+    uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
+  }).returning();
+
+  if (onSystem) {
+    await db.update(instruments).set({ photoAttachmentId: row.id }).where(eq(instruments.id, t0.instrumentId!));
+  } else {
+    await db.update(assets).set({ photoAttachmentId: row.id }).where(eq(assets.id, t0.assetId!));
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: row.id,
+    action: `set the ${onSystem ? "system" : "module"} photo`,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
+/** Take the photo off the record. The file stays in Files, where it was filed. */
+export async function clearPhoto(target: WorkTarget): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const onSystem = t0.instrumentId !== null && t0.assetId === null;
+  if (onSystem) {
+    await db.update(instruments).set({ photoAttachmentId: null }).where(eq(instruments.id, t0.instrumentId!));
+  } else {
+    await db.update(assets).set({ photoAttachmentId: null }).where(eq(assets.id, t0.assetId!));
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "attachment",
+    entityId: t0.instrumentId ?? t0.assetId ?? 0,
+    action: `removed the ${onSystem ? "system" : "module"} photo - the file is still in Files`,
+  });
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   return {};
 }
@@ -4648,6 +4714,54 @@ async function guardFor(actorEmail: string, subjectEmail: string, next: "owner" 
   return { members, guard: memberGuard({ actorEmail, subjectEmail, next, envStaff: parseList(process.env.STAFF_EMAILS), members }) };
 }
 
+
+
+// ---------------- How I sign in ----------------
+// Both of these are set by the person themselves, signed in, and that is what
+// makes them safe: the address was proved by the email path before either
+// existed, so neither is a way to GET an account - only a second way back into
+// one when email stops arriving.
+
+/** Set or change my own password. */
+export async function setMyPassword(password: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const res = await setPasswordFor(u.email, password);
+  if (res.error) return res;
+  await audit({
+    actor: u.email, entityType: "auth", entityId: u.email,
+    action: "set a sign-in password for their own account",
+  });
+  revalidatePath("/inbox");
+  return {};
+}
+
+/** Forget it. Codes never stopped working, so this takes nothing away. */
+export async function clearMyPassword(): Promise<{ error?: string }> {
+  const u = await requireUser();
+  await clearPasswordFor(u.email);
+  await audit({
+    actor: u.email, entityType: "auth", entityId: u.email,
+    action: "removed the sign-in password from their own account",
+  });
+  revalidatePath("/inbox");
+  return {};
+}
+
+/** Where to text my codes. Blank removes it. */
+export async function setMyPhone(raw: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const phone = raw.trim() ? normalizePhone(raw) : "";
+  if (raw.trim() && !phone) return { error: "That doesn't look like a mobile number." };
+  await db.update(users).set({ phone }).where(eq(users.email, u.email.toLowerCase()));
+  await audit({
+    actor: u.email, entityType: "auth", entityId: u.email,
+    // The number itself is not written to the log: an audit line is read by more
+    // people than a phone number should be.
+    action: phone ? "added a mobile number for sign-in codes" : "removed their mobile number",
+  });
+  revalidatePath("/inbox");
+  return {};
+}
 
 // ---------------- Operators: a service company of their own ----------------
 

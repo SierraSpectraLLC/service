@@ -7,6 +7,7 @@ import GasPanel, { type GasRow } from "./GasPanel";
 import PickOrAdd from "./PickOrAdd";
 import CatalogSelect from "./CatalogSelect";
 import SharePanel, { type ShareEntry } from "./SharePanel";
+import PhotoCard from "./PhotoCard";
 import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
 import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
@@ -16,6 +17,8 @@ type Inst = {
   lead: string; notes: string; archived: boolean; archivedBy: string;
   location: string; name: string;
   forSale: boolean; saleNote: string; listingToken: string;
+  /** The attachment holding the system's photo, or null. */
+  photoAttachmentId: number | null;
 };
 
 function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead: string; people: string[] }) {
@@ -88,6 +91,11 @@ export default function SystemPanel({ instrument, label, clients, categories, st
           )}
         </div>
       )}
+      {/* The whole bench, before any of the numbers - it is what somebody
+          recognizes the system by. */}
+      <PhotoCard target={{ instrumentId: instrument.id, assetId: null }} photoId={instrument.photoAttachmentId}
+        alt={`${instrument.externalId} - the system`} canEdit={canEdit} />
+
       <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
