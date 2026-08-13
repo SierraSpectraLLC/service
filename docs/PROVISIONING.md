@@ -308,9 +308,35 @@ simply never mentions OneDrive.
    immediately; Azure never shows it again. Note the expiry — a secret that
    lapses breaks every connection at once, and 24 months is the longest offered.
 4. **API permissions → Microsoft Graph → Delegated**: `Files.ReadWrite.All`,
-   `Sites.Read.All`, `User.Read`, `offline_access`. Delegated, never
-   Application: the app then sees exactly what the signed-in person sees, so
-   connecting cannot quietly grant this portal read access to a whole tenant.
+   `Sites.Read.All`, `Team.ReadBasic.All`, `User.Read`, `offline_access`.
+   Delegated, never Application: the app then sees exactly what the signed-in
+   person sees, so connecting cannot quietly grant this portal read access to a
+   whole tenant.
+
+### Where the files actually are
+
+Most shops keep nothing in anybody's personal OneDrive. Sierra's own documents
+live at *Teams → Sierra Spectra → Files → General* — and that is not OneDrive at
+all: every team is backed by a SharePoint site, and "Files" is a folder in that
+site's document library. A browser that opens onto the signed-in person's own
+drive shows them an empty list and looks broken.
+
+So the browser opens on a list of **stores** rather than a folder:
+
+- **My files** — the person's own OneDrive.
+- **Shared with me** — folders other people shared, each a pointer at an item on
+  somebody else's drive.
+- **One entry per team** they are in, pointing at that team's document library.
+
+`Team.ReadBasic.All` is what makes the third group exist. A team whose library
+cannot be read is left out of the list rather than failing it, so a tenant that
+will not answer still shows a person their own files. Search runs against the
+store being browsed, which is why there is no search box until one is open.
+
+**An existing connection has to be made again.** A connection approved before
+`Team.ReadBasic.All` was asked for was never granted it, and Microsoft refuses
+the next token refresh on a scope nobody consented to. The studio says so and
+offers *Connect again*; one click fixes it, per person.
 
 ### Portal env vars
 

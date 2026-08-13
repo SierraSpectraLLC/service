@@ -62,9 +62,9 @@ import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
 import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
 import { alreadyHas, procedureCopy, refilePlan, refileSummary } from "@/lib/procedureMove";
-import { createUploadSession, graphSetupProblem, listFolder, searchFiles } from "@/lib/msgraph";
+import { createUploadSession, graphSetupProblem, listFolder, listPlaces, searchFiles } from "@/lib/msgraph";
 import { vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
-import type { CloudItem } from "@/lib/cloudItems";
+import { PLACES_DRIVE, type CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
@@ -2142,8 +2142,14 @@ export async function browseCloud(
   const u = await requireUser();
   if (u.role === "client_viewer") return { error: "Read-only accounts cannot connect an outside account." };
   const q = query.trim();
-  const out = await withGraph(u.email, (token) =>
-    (q ? searchFiles(token, q) : listFolder(token, driveId, itemId)));
+  const out = await withGraph(u.email, (token) => {
+    // The top of the trail is a list of STORES - the person's own OneDrive, what
+    // others shared with them, and the SharePoint library behind each of their
+    // Teams. There is no folder to list at that level, so a query there has
+    // nothing to search either: pick a store first.
+    if (driveId === PLACES_DRIVE) return listPlaces(token);
+    return q ? searchFiles(token, q, driveId) : listFolder(token, driveId, itemId);
+  });
   return out.error ? { error: out.error } : { items: out.items ?? [] };
 }
 

@@ -14,7 +14,9 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { cloudConnections } from "@/db/schema";
 import { open, seal, vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
-import { graphConfig, NOT_CONFIGURED, refreshTokens, whoAmI, type TokenSet } from "@/lib/msgraph";
+import {
+  graphConfig, missingScopes, NOT_CONFIGURED, RECONNECT_FOR_SCOPES, refreshTokens, whoAmI, type TokenSet,
+} from "@/lib/msgraph";
 
 export const PROVIDER = "microsoft";
 
@@ -39,6 +41,7 @@ export async function connectionView(email: string): Promise<ConnectionView | nu
     lastUsedAt: cloudConnections.lastUsedAt,
     brokenReason: cloudConnections.brokenReason,
     refreshToken: cloudConnections.refreshToken,
+    scopes: cloudConnections.scopes,
   }).from(cloudConnections)
     .where(and(eq(cloudConnections.email, email), eq(cloudConnections.provider, PROVIDER)))
     .catch(() => []);
@@ -46,11 +49,16 @@ export async function connectionView(email: string): Promise<ConnectionView | nu
   // A row this server cannot decrypt is worse than no row: it looks connected
   // and fails on use. Say so here, where the page can offer "connect again".
   const readable = open(row.refreshToken) !== null;
+  // A connection approved before a scope was added is dead in a quieter way:
+  // Microsoft refuses the next refresh, and until then the new capability just
+  // silently finds nothing. Naming it is the difference between one click and a
+  // bug report.
+  const stale = missingScopes(row.scopes ?? "").length > 0;
   return {
     accountName: row.accountName, accountEmail: row.accountEmail,
     connectedAt: row.connectedAt, lastUsedAt: row.lastUsedAt,
-    brokenReason: readable ? row.brokenReason
-      : "This server cannot read the stored connection. Connect again.",
+    brokenReason: !readable ? "This server cannot read the stored connection. Connect again."
+      : row.brokenReason || (stale ? RECONNECT_FOR_SCOPES : ""),
   };
 }
 

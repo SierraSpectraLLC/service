@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  browseListing, itemNote, pushCrumb, ROOT, searchListing, toCloudItem, truncateTo, type CloudItem,
+  browseListing, crumbKey, isPlaces, itemNote, PLACES_DRIVE, pushCrumb, ROOT, searchListing,
+  toCloudItem, truncateTo, type CloudItem,
 } from "@/lib/cloudItems";
 
 const file = (name: string, size = 1024, id = name) =>
@@ -84,6 +85,14 @@ describe("the trail back", () => {
   const f = (name: string, id: string, driveId = "d1"): CloudItem =>
     ({ id, name, isFolder: true, size: 0, modified: "", childCount: 0, driveId });
 
+  it("starts at the list of stores, not at one person's OneDrive", () => {
+    // The bug this closes: a shop that keeps every document in a Team opened the
+    // browser onto an empty personal drive and concluded the feature was broken.
+    expect(isPlaces(ROOT)).toBe(true);
+    expect(ROOT.driveId).toBe(PLACES_DRIVE);
+    expect(isPlaces({ id: "root", name: "My files", driveId: "" })).toBe(false);
+  });
+
   it("grows as you descend", () => {
     const t = pushCrumb(pushCrumb([ROOT], f("Reports", "r1")), f("2026", "r2"));
     expect(t.map((c) => c.name)).toEqual(["Files", "Reports", "2026"]);
@@ -92,8 +101,16 @@ describe("the trail back", () => {
 
   it("cuts back to whichever crumb was clicked", () => {
     const t = pushCrumb(pushCrumb([ROOT], f("Reports", "r1")), f("2026", "r2"));
-    expect(truncateTo(t, "r1").map((c) => c.name)).toEqual(["Files", "Reports"]);
-    expect(truncateTo(t, "root").map((c) => c.name)).toEqual(["Files"]);
+    expect(truncateTo(t, crumbKey(t[1])).map((c) => c.name)).toEqual(["Files", "Reports"]);
+    expect(truncateTo(t, crumbKey(ROOT)).map((c) => c.name)).toEqual(["Files"]);
+  });
+
+  it("tells apart two crumbs that are both called root", () => {
+    // Every store's top folder is `root`. Keyed on the id alone, clicking the
+    // Team crumb jumped back to "My files" - the first root in the trail.
+    const t = pushCrumb(pushCrumb([ROOT], f("Sierra Spectra", "root", "team-drive")), f("General", "g1", "team-drive"));
+    expect(truncateTo(t, crumbKey(t[1])).map((c) => c.name)).toEqual(["Files", "Sierra Spectra"]);
+    expect(crumbKey(t[1])).not.toBe(crumbKey(ROOT));
   });
 
   it("leaves the trail alone for a crumb that is not in it", () => {

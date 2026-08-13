@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  authorizeUrl, graphBaseUrl, graphConfig, graphConfigured, graphSetupProblem, pkcePair, SCOPES,
+  authorizeUrl, graphBaseUrl, graphConfig, graphConfigured, graphSetupProblem, listFolder, listPlaces,
+  missingScopes, pkcePair, searchFiles, SCOPES, SHARED_DRIVE,
 } from "@/lib/msgraph";
 import { createHash } from "node:crypto";
 
@@ -90,12 +91,109 @@ describe("where somebody is sent to approve this", () => {
     expect(SCOPES).toContain("Files.ReadWrite.All");
   });
 
+  it("asks to see which teams somebody is in", () => {
+    // Without it the one place a shop actually keeps its documents - the
+    // SharePoint library behind its Team - is invisible to this browser.
+    expect(SCOPES).toContain("Team.ReadBasic.All");
+  });
+
   it("asks which account, rather than silently taking the last one used", () => {
     expect(url().searchParams.get("prompt")).toBe("select_account");
   });
 
   it("never puts the client secret in a URL somebody's browser will follow", () => {
     expect(authorizeUrl(graphConfig()!, "s", "c")).not.toContain("shhh");
+  });
+});
+
+describe("a connection made before a scope was added", () => {
+  it("spots the scope nobody ever approved", () => {
+    expect(missingScopes("openid profile User.Read Files.ReadWrite.All Sites.Read.All offline_access"))
+      .toEqual(["Team.ReadBasic.All"]);
+  });
+
+  it("is satisfied by the scopes it was given, however Microsoft spells them", () => {
+    // Echoed back short in one tenant and fully qualified in another; both mean
+    // the same grant, and treating the second as missing would tell somebody
+    // with a perfectly good connection to make it again.
+    const full = SCOPES.filter((s) => s.includes("."))
+      .map((s) => `https://graph.microsoft.com/${s}`).join(" ");
+    expect(missingScopes(full)).toEqual([]);
+    expect(missingScopes(SCOPES.join(" "))).toEqual([]);
+  });
+
+  it("says nothing when the token response never listed any", () => {
+    // Silence is not evidence. Reading a blank scope string as "nothing was
+    // granted" would break every working connection at once.
+    expect(missingScopes("")).toEqual([]);
+  });
+});
+
+describe("which store gets read", () => {
+  // Graph's URL shapes are the part of this file that is easy to get wrong and
+  // impossible to see wrong: a bad path answers 400 and the browser shows an
+  // empty folder. These stub fetch and assert on the URL that would have gone out.
+  const asked: string[] = [];
+  const answers = new Map<RegExp, unknown>();
+  const realFetch = global.fetch;
+
+  beforeEach(() => {
+    asked.length = 0;
+    answers.clear();
+    global.fetch = (async (url: string) => {
+      asked.push(String(url));
+      const hit = [...answers].find(([re]) => re.test(String(url)));
+      return {
+        ok: true, status: 200,
+        json: async () => (hit ? hit[1] : { value: [] }),
+      };
+    }) as unknown as typeof fetch;
+  });
+  afterEach(() => { global.fetch = realFetch; });
+
+  it("addresses a drive's top folder as root, not as an item called root", async () => {
+    // `/items/root` is not a thing Graph accepts. Getting this wrong broke every
+    // drive except the signed-in person's own - which is every Team.
+    await listFolder("tok", "team-drive", "root");
+    expect(asked[0]).toContain("/drives/team-drive/root/children");
+    expect(asked[0]).not.toContain("/items/root");
+  });
+
+  it("addresses everything below the top by id", async () => {
+    await listFolder("tok", "team-drive", "01ABCDEF");
+    expect(asked[0]).toContain("/drives/team-drive/items/01ABCDEF/children");
+  });
+
+  it("reads shared items from their own list, since they are children of nothing", async () => {
+    await listFolder("tok", SHARED_DRIVE, "root");
+    expect(asked[0]).toContain("/me/drive/sharedWithMe");
+  });
+
+  it("searches the store somebody is standing in", async () => {
+    await searchFiles("tok", "tune report", "team-drive");
+    expect(asked[0]).toContain("/drives/team-drive/root/search(q='tune%20report')");
+  });
+
+  it("searches the personal drive when there is no real drive to scope to", async () => {
+    await searchFiles("tok", "tune", SHARED_DRIVE);
+    expect(asked[0]).toContain("/me/drive/root/search");
+  });
+
+  it("offers the personal drive, shared items, and every team", async () => {
+    answers.set(/joinedTeams/, { value: [{ id: "t1", displayName: "Sierra Spectra" }] });
+    answers.set(/groups\/t1\/drive/, { id: "sharepoint-drive" });
+    const { items } = await listPlaces("tok");
+    expect(items?.map((i) => i.name)).toEqual(["My files", "Shared with me", "Sierra Spectra"]);
+    expect(items?.[2]).toMatchObject({ id: "root", driveId: "sharepoint-drive", isFolder: true });
+  });
+
+  it("still shows somebody their own files when the tenant will not answer for teams", async () => {
+    // A tenant that refuses the teams call, or a team with no library, must not
+    // take the whole browser down with it.
+    answers.set(/joinedTeams/, { value: [{ id: "t1", displayName: "Sierra Spectra" }] });
+    answers.set(/groups\/t1\/drive/, {});
+    const { items } = await listPlaces("tok");
+    expect(items?.map((i) => i.name)).toEqual(["My files", "Shared with me"]);
   });
 });
 

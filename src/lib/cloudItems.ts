@@ -95,15 +95,28 @@ export type Crumb = { id: string; name: string; driveId: string };
  * path string, because a driveItem's id is what addresses it and its path is not
  * unique across drives - two shared libraries can both have /Reports/2026.
  */
-export const ROOT: Crumb = { id: "root", name: "Files", driveId: "" };
+/**
+ * The top of the trail is a list of PLACES, not a folder.
+ *
+ * Files live in at least three different stores: the person's own OneDrive, the
+ * things other people shared with them, and the SharePoint library behind every
+ * Team they are in. Starting at "my drive" is what made a shop that keeps
+ * everything in a Team see an empty browser.
+ */
+export const PLACES_DRIVE = "\u0000places";
+export const ROOT: Crumb = { id: "places", name: "Files", driveId: PLACES_DRIVE };
+export const isPlaces = (c: Crumb) => c.driveId === PLACES_DRIVE;
 
 /** Descend: everything up to here, then the new folder. */
 export const pushCrumb = (trail: Crumb[], folder: CloudItem): Crumb[] =>
   [...trail, { id: folder.id, name: folder.name, driveId: folder.driveId }];
 
+/** A crumb's identity. Several stores each have a folder called `root`. */
+export const crumbKey = (c: Crumb) => `${c.driveId}:${c.id}`;
+
 /** Jump back to a crumb already in the trail. Anything not in it leaves the trail alone. */
-export function truncateTo(trail: Crumb[], id: string): Crumb[] {
-  const ix = trail.findIndex((c) => c.id === id);
+export function truncateTo(trail: Crumb[], key: string): Crumb[] {
+  const ix = trail.findIndex((c) => crumbKey(c) === key);
   return ix === -1 ? trail : trail.slice(0, ix + 1);
 }
 
