@@ -66,7 +66,7 @@ import { createUploadSession, graphSetupProblem, listFolder, listPlaces, searchF
 import { vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
 import { PLACES_DRIVE, type CloudItem } from "@/lib/cloudItems";
 import { parseFrame, serializeFrame } from "@/lib/photoFrame";
-import { sharedCover } from "@/lib/photos";
+import { isPhotoFile, photoRemovalNote, sharedCover } from "@/lib/photos";
 import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPair";
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
@@ -1978,6 +1978,59 @@ export async function setCoverPhoto(target: WorkTarget, attachmentId: number): P
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   if (twin) revWork(twin);
   return {};
+}
+
+/**
+ * Remove several photos at once, as one act.
+ *
+ * The reason this exists rather than looping deleteAttachment: fifteen setup
+ * shots removed one at a time wrote fifteen lines into a history that is meant
+ * to say what happened to the machine, and made a five-second job into fifteen
+ * confirmations. One selection, one reason, one line.
+ *
+ * Same gate as deleting any file off a record - staff only, and only on a record
+ * they may edit. Ids that are not photos, or belong to another record, are
+ * dropped rather than refused: a stale page in another tab should take the rows
+ * it can and say what it took.
+ */
+export async function removePhotos(
+  target: WorkTarget, ids: number[], reason: string,
+): Promise<{ removed?: number; error?: string }> {
+  const u = await requireEditor();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  if (!ids.length) return { removed: 0 };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  if (!isHouse(u.role)) return { error: "Staff only" };
+  await assertWorkEditable(u, { instrumentId: t0.instrumentId, assetId: t0.assetId });
+
+  const me = photoRecord(t0);
+  const twin = await photoTwin(t0);
+  const onRecord = (a: { instrumentId: number | null; assetId: number | null }, r: PhotoRecord) =>
+    (r.instrumentId !== null ? a.instrumentId === r.instrumentId : a.assetId === r.assetId);
+  const rows = (await db.select().from(attachments).where(inArray(attachments.id, ids.slice(0, 200))))
+    .filter((a) => isPhotoFile(a) && (onRecord(a, me) || (twin !== null && onRecord(a, twin))));
+  if (!rows.length) return { error: "Nothing there to remove." };
+
+  await db.delete(attachments).where(inArray(attachments.id, rows.map((a) => a.id)));
+  await deleteBlobs(rows.map((a) => a.url));
+  // A cover that was in the set leaves a pointer at a file that no longer
+  // exists. Cleared on both halves of a shared pair, since either may hold it.
+  const gone = new Set(rows.map((a) => a.id));
+  for (const r of [me, ...(twin ? [twin] : [])]) {
+    const held = await coverOf(r);
+    if (held !== null && gone.has(held)) await setCoverRow(r.instrumentId !== null, r, null);
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: rows[0].id,
+    action: photoRemovalNote(rows.map((a) => a.fileName), why),
+    field: "reason", newValue: why,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  if (twin) revWork(twin);
+  return { removed: rows.length };
 }
 
 /**

@@ -23,7 +23,8 @@ import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import {
-  fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit, stockSrc,
+  fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit,
+  stockSrc,
 } from "@/lib/photos";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
@@ -206,7 +207,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // What makes an attachment a photograph is the file, not what somebody picked
   // in a dropdown when they filed it.
   const photoRows = [...attachRows, ...unitAttachRows].filter(isPhotoFile);
-  const coverId = sharedCover(inst.photoAttachmentId, soloUnit?.photoAttachmentId ?? null);
+  // livingCover, not the raw pointer: a cover whose file has been deleted would
+  // otherwise leave the thumbnail asking for a 404 with no fall back to the
+  // catalog's stand-in, because the page believed it had one.
+  const coverId = livingCover(photoRows, sharedCover(inst.photoAttachmentId, soloUnit?.photoAttachmentId ?? null));
   const coverFraming = photoRows.find((a) => a.id === coverId)?.framing ?? "";
   // Stock photos live on the catalog row, not on any record. A one-unit system
   // is better illustrated by its module's model than by "LC-MS".
@@ -295,16 +299,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         </Link>
         <span style={{ marginLeft: "auto" }} />
 
-        {/* Anybody who can see the system can say something is wrong with it, or
-            ask for its upkeep - including a read-only account watching an
-            instrument fail, who should not have to find somebody with more
-            rights first. */}
+        {/* Anybody who can see the system can ask for help with it - including a
+            read-only account watching an instrument fail, who should not have to
+            find somebody with more rights first. */}
         {!inst.archived && (
-          <>
-            <ClientRequest kind="issue" instrumentId={inst.id} externalId={inst.externalId} />
-            <ClientRequest kind="pm" instrumentId={inst.id} externalId={inst.externalId}
-              nextPm={scheduleLine(pmRows, shopToday())} />
-          </>
+          <ClientRequest instrumentId={inst.id} externalId={inst.externalId}
+            nextPm={scheduleLine(pmRows, shopToday())} />
         )}
 
         {/* The instrument's own PC. Sits with the other actions on the system
@@ -466,7 +466,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               }))}
               label={`${inst.externalId} - ${systemLabel(inst, assetRows) || "the system"}`}
               canEdit={canEdit} storageFull={fileQuota.state === "full"}
-              stock={systemStock && { termId: systemStock.id, framing: systemStock.photoFraming, what: systemStock.name }}
               shared={soloUnit ? `${soloUnit.kind}${soloUnit.model ? ` ${soloUnit.model}` : ""}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (

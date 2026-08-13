@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function TenantsPage() {
   let user;
-  try { user = await requirePlatformOwner(); } catch { redirect("/settings/personnel"); }
+  try { user = await requirePlatformOwner(); } catch { redirect("/settings/organizations"); }
 
   const [operators, staffRows, clientRows, systemRows, deviceRows, shareRows] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.isOperator, true)).orderBy(asc(orgs.name)),

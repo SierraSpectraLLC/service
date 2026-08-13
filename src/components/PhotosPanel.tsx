@@ -3,10 +3,12 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
-import { addPhotos, deleteAttachment, setCoverPhoto, setPhotoFraming, type WorkTarget } from "@/app/actions";
+import {
+  addPhotos, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming, type WorkTarget,
+} from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import { fmtBytes } from "@/lib/storage";
-import { coverIsChosen, fileSrc, orderPhotos, photoCount, stockSrc } from "@/lib/photos";
+import { coverIsChosen, fileSrc, orderPhotos, photoCount } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
 import PhotoFramer from "./PhotoFramer";
 
@@ -38,14 +40,15 @@ export type PhotoRow = {
  * These are ordinary attachments and appear under Files too. That is the point -
  * one file, one row, one charge against the quota, one authorized way to read it.
  *
- * The one exception is the catalog's stock photo, shown only while nobody has
- * photographed this record and always labelled as such. It is not a file here
- * and never becomes one: it illustrates the model, not this machine, and a
- * stock image standing in silently for evidence is a lie the record would be
- * telling on its own.
+ * The catalog's stock photo is deliberately NOT here. It still stands in for the
+ * thumbnail at the top of the record, where the job is "which machine is this" -
+ * but this section is the evidence somebody gathered about this exact unit, and
+ * a picture of the model is not evidence of anything. Listing it here, however
+ * carefully labelled, put a photo nobody took in the place people go looking for
+ * photos somebody took.
  */
 export default function PhotosPanel({
-  target, photos, coverId, label, canEdit, storageFull, stock, shared,
+  target, photos, coverId, label, canEdit, storageFull, shared,
 }: {
   target: WorkTarget;
   photos: PhotoRow[];
@@ -54,8 +57,6 @@ export default function PhotosPanel({
   label: string;
   canEdit: boolean;
   storageFull: boolean;
-  /** The catalog's photo of this kind of kit, when it has one. */
-  stock?: { termId: number; framing: string; what: string } | null;
   /** Set when this record pools its photos with the unit/system it is. */
   shared?: string;
 }) {
@@ -64,6 +65,11 @@ export default function PhotosPanel({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [framing, setFraming] = useState<PhotoRow | null>(null);
+  // Empty set = not selecting. Clearing fifteen setup shots one confirmation at
+  // a time is the thing this replaces, so the whole mode exists to end in one
+  // reason and one line of history.
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [selecting, setSelecting] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const ordered = orderPhotos(photos, coverId);
@@ -103,6 +109,65 @@ export default function PhotosPanel({
     act(() => deleteAttachment(p.id, why));
   };
 
+  const toggle = (id: number) => setPicked((s) => {
+    const next = new Set(s);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); };
+
+  const removePicked = () => {
+    const n = picked.size;
+    if (!n) return;
+    const why = promptReason(
+      `Remove ${n} photo${n === 1 ? "" : "s"}? The file${n === 1 ? " is" : "s are"} permanently deleted from storage.`);
+    if (!why) return;
+    const ids = [...picked];
+    startTransition(async () => {
+      const res = await removePhotos(target, ids, why);
+      setError(res?.error ?? "");
+      if (!res?.error) stopSelecting();
+    });
+  };
+
+  /**
+   * One photo. Opens the file normally; while selecting, it is a checkbox
+   * instead - the same tile does both jobs, because a separate row of little
+   * boxes beside the pictures is a second thing to aim at on a phone.
+   */
+  const Tile = ({ p, width, height, radius, alt }: {
+    p: PhotoRow; width: number; height: number; radius: number; alt: string;
+  }) => {
+    const on = picked.has(p.id);
+    const thumb = <PhotoThumb src={fileSrc(p.id)} framing={p.framing} alt={alt}
+      width={width} height={height} radius={radius} />;
+    if (!selecting) {
+      return (
+        <a href={`/api/files/${p.id}`} target="_blank" rel="noreferrer" title={p.fileName}
+          style={{ display: "block" }}>{thumb}</a>
+      );
+    }
+    return (
+      <button type="button" role="checkbox" aria-checked={on} aria-label={p.fileName}
+        onClick={() => toggle(p.id)}
+        style={{
+          display: "block", padding: 0, border: "none", background: "none", cursor: "pointer",
+          position: "relative", lineHeight: 0, borderRadius: radius,
+          outline: on ? "3px solid #1D6396" : "3px solid transparent", outlineOffset: 2,
+          opacity: on ? 1 : 0.65,
+        }}>
+        {thumb}
+        <span aria-hidden style={{
+          position: "absolute", top: 4, left: 4, width: 20, height: 20, borderRadius: 10,
+          background: on ? "#1D6396" : "rgba(255,255,255,0.85)",
+          color: "#fff", fontSize: 13, lineHeight: "20px", textAlign: "center",
+          border: "1px solid #1D6396", fontWeight: 700,
+        }}>{on ? "✓" : ""}</span>
+      </button>
+    );
+  };
+
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
@@ -112,7 +177,14 @@ export default function PhotosPanel({
         </span>
         {canEdit && (
           <>
-            <button className="btn sm primary" style={{ marginLeft: "auto" }}
+            <span style={{ marginLeft: "auto" }} />
+            {ordered.length > 1 && (
+              <button className="btn sm" disabled={pending}
+                onClick={() => (selecting ? stopSelecting() : setSelecting(true))}>
+                {selecting ? "Cancel" : "Select"}
+              </button>
+            )}
+            <button className="btn sm primary"
               disabled={!!busy || storageFull} onClick={() => input.current?.click()}>
               {busy ? "Uploading..." : "+ Add photos"}
             </button>
@@ -121,6 +193,22 @@ export default function PhotosPanel({
           </>
         )}
       </div>
+
+      {selecting && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <span className="mut" style={{ fontSize: 12 }}>
+            {picked.size === 0 ? "Tap photos to select" : `${picked.size} selected`}
+          </span>
+          <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
+            onClick={() => setPicked(new Set(ordered.map((p) => p.id)))}>all</button>
+          <button className="btn link" style={{ fontSize: 12 }} disabled={pending || picked.size === 0}
+            onClick={() => setPicked(new Set())}>none</button>
+          <button className="btn sm" style={{ marginLeft: "auto", borderColor: "#E4B4B4", color: "#A32D2D" }}
+            disabled={pending || picked.size === 0} onClick={removePicked}>
+            Remove {picked.size || ""}
+          </button>
+        </div>
+      )}
 
       {busy && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>{busy}</div>}
       {storageFull && canEdit && (
@@ -134,28 +222,15 @@ export default function PhotosPanel({
       )}
 
       {ordered.length === 0 ? (
-        stock ? (
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <PhotoThumb src={stockSrc(stock.termId)} framing={stock.framing}
-              alt={`Catalog photo of ${stock.what}`} width={240} height={180} />
-            <div className="mut" style={{ fontSize: 12, flex: "1 1 180px" }}>
-              Catalog photo of {stock.what} - not this one.
-              <br />Add a photo of the actual {target.instrumentId !== null ? "system" : "unit"} and it takes over here.
-            </div>
-          </div>
-        ) : (
-          <div className="mut" style={{ fontSize: 13 }}>No photos yet.</div>
-        )
+        <div className="mut" style={{ fontSize: 13 }}>No photos yet.</div>
       ) : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
-            <a href={`/api/files/${lead.id}`} target="_blank" rel="noreferrer" style={{ display: "block" }}>
-              <PhotoThumb src={fileSrc(lead.id)} framing={lead.framing} alt={label} width={240} height={180} />
-            </a>
+            <Tile p={lead} width={240} height={180} radius={10} alt={label} />
             <div className="mut" style={{ fontSize: 11, marginTop: 4, maxWidth: 240, overflowWrap: "anywhere" }}>
               {chosen ? "Cover" : "Cover (newest, not chosen)"} · {lead.uploadedBy} · {lead.when}
             </div>
-            {canEdit && (
+            {canEdit && !selecting && (
               <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                 <button className="btn sm" disabled={pending} onClick={() => setFraming(lead)}>Frame</button>
                 <button className="btn sm" disabled={pending} onClick={() => remove(lead)}>Remove</button>
@@ -167,12 +242,8 @@ export default function PhotosPanel({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", flex: "1 1 200px" }}>
               {rest.map((p) => (
                 <div key={p.id} style={{ width: 104 }}>
-                  <a href={`/api/files/${p.id}`} target="_blank" rel="noreferrer" title={p.fileName}
-                    style={{ display: "block" }}>
-                    <PhotoThumb src={fileSrc(p.id)} framing={p.framing} alt={p.fileName}
-                      width={104} height={78} radius={8} />
-                  </a>
-                  {canEdit && (
+                  <Tile p={p} width={104} height={78} radius={8} alt={p.fileName} />
+                  {canEdit && !selecting && (
                     <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
                       <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                         onClick={() => act(() => setCoverPhoto(target, p.id))}>Cover</button>

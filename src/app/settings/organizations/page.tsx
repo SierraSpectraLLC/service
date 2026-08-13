@@ -26,7 +26,7 @@ export default async function PersonnelPage() {
   ]);
   return (
     <div className="container settings">
-      <SettingsTabs active="personnel" isPlatform={isPlatform} />
+      <SettingsTabs active="organizations" isPlatform={isPlatform} />
       <PersonnelForm
         clientAccessEnabled={s?.clientAccessEnabled ?? false}
         orgs={orgRows.map((o) => ({

@@ -6,32 +6,37 @@ import { reportIssue, requestPm } from "@/app/actions";
 import { PM_WINDOWS } from "@/lib/pmRequest";
 
 /**
- * The two things a client presses on their own system: something is wrong, or
- * please do the maintenance.
+ * One button: ask the service team for something.
  *
- * One dialog for both, because they are the same act from the client's side - a
- * choice, a sentence, send - and they should not feel like two different products.
- * What follows differs: a fault carries evidence and a severity, a request carries
- * a horizon and touches no schedule (see requestPm).
+ * It used to be two - "Report a problem" and "Request maintenance" - sitting
+ * side by side and asking somebody to classify their own situation before they
+ * had said anything. From the client's side it is one act: a choice, a
+ * sentence, send. Which of the four they pick decides what follows, and only
+ * then does the form differ - a fault carries evidence and a severity, upkeep
+ * carries a horizon and touches no schedule (see requestPm).
  *
  * Files upload before the report is filed, so a photo of an error dialog arrives
  * with it rather than after it - which is the difference between a report and a
  * conversation that starts "can you send a screenshot".
  */
-const SEVERITIES = [
+const PM = "pm";
+
+const NEEDS = [
   { key: "Down", label: "Down", hint: "Not usable at all" },
   { key: "Degraded", label: "Something's wrong", hint: "Usable, but not right" },
   { key: "Question", label: "A question", hint: "Nothing is broken" },
+  { key: PM, label: "Request PM", hint: "Planned maintenance, nothing is wrong" },
 ] as const;
 
-export default function ClientRequest({ instrumentId, externalId, kind, nextPm }: {
-  instrumentId: number; externalId: string; kind: "issue" | "pm";
+export default function ClientRequest({ instrumentId, externalId, nextPm }: {
+  instrumentId: number; externalId: string;
   /** What the calendar already says, so a request isn't made blind. */
   nextPm?: string;
 }) {
-  const isPm = kind === "pm";
   const [open, setOpen] = useState(false);
-  const [choice, setChoice] = useState<string>(isPm ? "month" : "Degraded");
+  // What they are asking for, and - once they ask for upkeep - how soon.
+  const [choice, setChoice] = useState<string>("Degraded");
+  const [pmWindow, setPmWindow] = useState<string>("month");
   const [summary, setSummary] = useState("");
   const [details, setDetails] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -40,11 +45,12 @@ export default function ClientRequest({ instrumentId, externalId, kind, nextPm }
   const [done, setDone] = useState<"" | "filed" | "already">("");
   const [pending, startTransition] = useTransition();
 
-  const title = isPm ? "Request maintenance" : "Report a problem";
+  const isPm = choice === PM;
+  const title = "Request service";
 
   const close = () => {
     setOpen(false); setError(""); setDone("");
-    setSummary(""); setDetails(""); setFiles([]); setChoice(isPm ? "month" : "Degraded");
+    setSummary(""); setDetails(""); setFiles([]); setChoice("Degraded"); setPmWindow("month");
   };
 
   const submit = () => {
@@ -53,7 +59,7 @@ export default function ClientRequest({ instrumentId, externalId, kind, nextPm }
       try {
         if (isPm) {
           setBusy("Sending...");
-          const res = await requestPm(instrumentId, { window: choice, note: details });
+          const res = await requestPm(instrumentId, { window: pmWindow, note: details });
           if (res?.error) { setError(res.error); return; }
           setDone(res?.already ? "already" : "filed");
           return;
@@ -83,15 +89,9 @@ export default function ClientRequest({ instrumentId, externalId, kind, nextPm }
 
   if (!open) {
     return (
-      <button className="btn sm"
-        style={{ flexShrink: 0, ...(isPm ? {} : { borderColor: "#E4B4B4", color: "#A32D2D" }) }}
-        onClick={() => setOpen(true)}>{title}</button>
+      <button className="btn sm" style={{ flexShrink: 0 }} onClick={() => setOpen(true)}>{title}</button>
     );
   }
-
-  const options = isPm
-    ? PM_WINDOWS.map((w) => ({ key: w.key, label: w.label, hint: "" }))
-    : SEVERITIES.map((s) => ({ key: s.key, label: s.label, hint: s.hint }));
 
   return (
     <>
@@ -120,7 +120,7 @@ export default function ClientRequest({ instrumentId, externalId, kind, nextPm }
         ) : (
           <>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-              {options.map((o) => (
+              {NEEDS.map((o) => (
                 <button key={o.key} type="button" onClick={() => setChoice(o.key)}
                   className={choice === o.key ? "btn sm accent" : "btn sm"}
                   title={o.hint} style={{ flex: "1 1 100px" }}>{o.label}</button>
@@ -129,6 +129,15 @@ export default function ClientRequest({ instrumentId, externalId, kind, nextPm }
 
             {isPm ? (
               <>
+                {/* How soon, asked only once upkeep is what they came for -
+                    a horizon is meaningless against a broken instrument. */}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                  {PM_WINDOWS.map((w) => (
+                    <button key={w.key} type="button" onClick={() => setPmWindow(w.key)}
+                      className={pmWindow === w.key ? "btn sm accent" : "btn sm"}
+                      style={{ flex: "1 1 100px" }}>{w.label}</button>
+                  ))}
+                </div>
                 {nextPm && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{nextPm}</div>}
                 <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>
                   Anything specific? <span className="mut" style={{ fontWeight: 400 }}>Optional</span>

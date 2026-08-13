@@ -349,7 +349,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                   const res = await removeOrg(org.id, reason);
                   if (res?.error) setDangerError(res.error);
                   // This page is about an organization that no longer exists.
-                  else window.location.assign("/settings/personnel");
+                  else window.location.assign("/settings/organizations");
                 });
               }}>remove</button>
           </div>

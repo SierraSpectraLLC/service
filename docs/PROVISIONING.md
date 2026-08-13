@@ -52,8 +52,8 @@ scheduled on every instance.
 ## 4. First sign-in checklist (as the owner)
 
 Settings has four parts, split by how often each changes: **Configuration**
-(`/settings`) is the instance itself, set up once; **Personnel**
-(`/settings/personnel`) is who is on it, changing weekly; **Catalog**
+(`/settings`) is the instance itself, set up once; **Organizations**
+(`/settings/organizations`) is who is on it, changing weekly; **Catalog**
 (`/settings/catalog`) is the equipment reference and **Procedures**
 (`/settings/procedures`) is what gets done to equipment - one catalog where
 each procedure says WHEN it fires: once at intake, on a cadence, or both -
@@ -71,11 +71,11 @@ also the page that organization's own editors get.
    deletes and signature revocation; staff get every system and all the work.
    Roles take effect on the person's next page load.
 3. **Configuration → This instance**: name the instance; set the tagline.
-4. **Personnel → Organizations**: create the operator's own org (kind
+4. **Organizations**: create the operator's own org (kind
    `provider`), then set it as **Operated by** back in Configuration — its
    name and logo go on sign-off packets and reports. Create the first client
    org(s).
-5. **Personnel → Client sign-in**: switch the master toggle on. Then open each
+5. **Organizations → Client sign-in**: switch the master toggle on. Then open each
    organization and invite its people from its own page (each entry gets an
    editor/viewer role; invitations email automatically).
 6. **Configuration → Modules**: switch on EOD / digest / sheet sync only if

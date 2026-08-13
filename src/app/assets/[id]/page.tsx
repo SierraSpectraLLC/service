@@ -21,7 +21,7 @@ import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import {
-  fileSrc, isPhotoFile, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
+  fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
 } from "@/lib/photos";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
@@ -159,7 +159,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     ? await db.select().from(attachments).where(eq(attachments.instrumentId, soloSystem.id))
     : [];
   const photoRows = [...attachRows, ...sysAttachRows].filter(isPhotoFile);
-  const coverId = sharedCover(asset.photoAttachmentId, soloSystem?.cover ?? null);
+  // See the system page: a pointer at a deleted file must read as "no cover".
+  const coverId = livingCover(photoRows, sharedCover(asset.photoAttachmentId, soloSystem?.cover ?? null));
   const coverFraming = photoRows.find((a) => a.id === coverId)?.framing ?? "";
   // What the catalog says this model looks like, while nobody has photographed
   // this one. Never a file, never billed - see lib/photos.
@@ -321,7 +322,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               }))}
               label={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}${asset.serial ? ` SN ${asset.serial}` : ""}`}
               canEdit={canEdit} storageFull={fileQuota.state === "full"}
-              stock={unitStock && { termId: unitStock.id, framing: unitStock.photoFraming, what: unitStock.name }}
               shared={soloSystem ? `system ${soloSystem.externalId}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
