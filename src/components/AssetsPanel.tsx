@@ -6,11 +6,14 @@ import { ASSET_COLOR } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
 import CatalogSelect from "./CatalogSelect";
 import AssetGrid, { type GridModel } from "./AssetGrid";
+import PhotoThumb from "./PhotoThumb";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
-  /** This module's own photo, when it has one - see PhotoCard. */
+  /** This module's cover photo, when it has one - see PhotosPanel. */
   photoAttachmentId?: number | null;
+  /** How that photo sits in a tile this small. See lib/photoFrame. */
+  photoFraming?: string;
 };
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
@@ -152,8 +155,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
                 than as a parts manifest. Absent for units without one, rather
                 than a placeholder box per row. */}
             {a.photoAttachmentId != null && (
-              <img src={`/api/files/${a.photoAttachmentId}`} alt="" loading="lazy"
-                style={{ width: 34, height: 34, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)", flexShrink: 0 }} />
+              <PhotoThumb attachmentId={a.photoAttachmentId} framing={a.photoFraming ?? ""} alt=""
+                width={34} height={34} radius={6} />
             )}
             <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>

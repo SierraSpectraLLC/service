@@ -86,6 +86,8 @@ export type StoreFileRow = {
   description: string;
   uploadedBy: string;
   createdAt: Date;
+  /** How the photo sits in its tile, for the ones that are photos. See lib/photoFrame. */
+  framing: string;
   /** Where it lives. All null = the shelf. */
   instrumentId: number | null;
   externalId: string | null;
@@ -104,7 +106,7 @@ export async function storeFiles(orgId: number | null, limit = 500): Promise<Sto
   const [k1, k2] = await storeKeys(orgId);
   const res = await db.execute(sql`
     SELECT a.id, a.file_name, a.url, a.size, a.kind, a.description,
-           a.uploaded_by, a.created_at, a.org_id,
+           a.uploaded_by, a.created_at, a.org_id, a.framing,
            a.instrument_id, i.external_id,
            a.asset_id,
            CASE WHEN a.asset_id IS NULL THEN NULL ELSE
@@ -120,13 +122,13 @@ export async function storeFiles(orgId: number | null, limit = 500): Promise<Sto
   `);
   type Raw = {
     id: number; file_name: string; url: string; size: number; kind: string; description: string;
-    uploaded_by: string; created_at: string | Date; org_id: number | null;
+    uploaded_by: string; created_at: string | Date; org_id: number | null; framing: string | null;
     instrument_id: number | null; external_id: string | null;
     asset_id: number | null; asset_label: string | null;
   };
   return allRows<Raw>(res).map((r) => ({
     id: r.id, fileName: r.file_name, url: r.url, size: Number(r.size), kind: r.kind,
-    description: r.description, uploadedBy: r.uploaded_by,
+    description: r.description, uploadedBy: r.uploaded_by, framing: r.framing ?? "",
     createdAt: r.created_at instanceof Date ? r.created_at : new Date(r.created_at),
     instrumentId: r.instrument_id, externalId: r.external_id,
     assetId: r.asset_id, assetLabel: r.asset_label, orgId: r.org_id,
@@ -166,7 +168,7 @@ export async function visibleNotOwnedFiles(user: SessionUser, limit = 200): Prom
   const rows = await db.select({
     id: attachments.id, fileName: attachments.fileName, url: attachments.url, size: attachments.size,
     kind: attachments.kind, description: attachments.description, uploadedBy: attachments.uploadedBy,
-    createdAt: attachments.createdAt, orgId: attachments.orgId,
+    createdAt: attachments.createdAt, orgId: attachments.orgId, framing: attachments.framing,
     instrumentId: attachments.instrumentId, externalId: instruments.externalId,
     assetId: attachments.assetId,
     assetKind: assets.kind, assetModel: assets.model, assetSerial: assets.serial,
@@ -187,7 +189,7 @@ export async function visibleNotOwnedFiles(user: SessionUser, limit = 200): Prom
     })
     .map((r) => ({
       id: r.id, fileName: r.fileName, url: r.url, size: r.size, kind: r.kind,
-      description: r.description, uploadedBy: r.uploadedBy, createdAt: r.createdAt,
+      description: r.description, uploadedBy: r.uploadedBy, createdAt: r.createdAt, framing: r.framing,
       instrumentId: r.instrumentId, externalId: r.externalId,
       assetId: r.assetId,
       assetLabel: r.assetId === null ? null

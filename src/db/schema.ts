@@ -574,6 +574,13 @@ export const parts = pgTable("parts", {
 }, (t) => [index("parts_instrument_idx").on(t.instrumentId)]);
 
 export const attachments = pgTable("attachments", {
+  /**
+   * How this photo sits in a thumbnail: "rot,zoom,x,y", blank for untouched.
+   * The stored file is never altered - framing is a preference about display,
+   * and cropping evidence to tidy a tile is not a trade worth making. Parsed by
+   * lib/photoFrame, which is also the only place that knows the format.
+   */
+  framing: text("framing").notNull().default(""),
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),

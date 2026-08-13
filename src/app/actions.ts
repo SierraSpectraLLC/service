@@ -58,6 +58,7 @@ import { pmHandoff } from "@/lib/pmQueue";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { parseFrame, serializeFrame } from "@/lib/photoFrame";
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
@@ -1790,65 +1791,105 @@ export async function recordAttachments(
 
 
 /**
- * Set the photo of a system or a unit.
+ * Add photos to a system or a unit.
  *
- * The photo is an ordinary attachment with a pointer to it, which is the whole
- * design: one file is one row, so it counts against storage once, it is only
- * reachable through the authorized proxy like every other file, and deleting it
- * from Files clears the pointer by itself rather than leaving a broken picture.
+ * A photo is an ordinary attachment - one file, one row, counted against a quota
+ * once and served through the same authorized proxy as every other file. What
+ * makes it a photo is that a browser can show it (lib/photos), and what makes one
+ * of them the COVER is a pointer on the record, so choosing a different cover
+ * moves a pointer rather than moving files around.
  *
- * Replacing a photo leaves the old one in Files. It is a record of what the
- * instrument looked like in March, and quietly destroying that to save a
- * thumbnail's worth of storage is not ours to decide.
+ * The first photo a record ever gets becomes its cover: a record with pictures
+ * and no cover would show nothing, which is never what somebody uploading a
+ * photo meant.
  */
-export async function setPhoto(
-  target: WorkTarget, file: { fileName: string; url: string; size: number },
+export async function addPhotos(
+  target: WorkTarget, files: { fileName: string; url: string; size: number }[],
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
+  if (!files.length) return {};
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
   const onSystem = t0.instrumentId !== null && t0.assetId === null;
-  const guard = await guardStorage(await storeOwnerForTarget(t0), file.size || 0);
+  const guard = await guardStorage(await storeOwnerForTarget(t0), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
 
-  const [row] = await db.insert(attachments).values({
+  const rows = await db.insert(attachments).values(files.map((f) => ({
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
-    fileName: file.fileName.slice(0, 200), kind: "Photo", url: file.url, size: file.size,
+    fileName: f.fileName.slice(0, 200), kind: "Photo", url: f.url, size: f.size,
     uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
-  }).returning();
+  }))).returning();
 
-  if (onSystem) {
-    await db.update(instruments).set({ photoAttachmentId: row.id }).where(eq(instruments.id, t0.instrumentId!));
-  } else {
-    await db.update(assets).set({ photoAttachmentId: row.id }).where(eq(assets.id, t0.assetId!));
+  const [record] = onSystem
+    ? await db.select({ cover: instruments.photoAttachmentId }).from(instruments).where(eq(instruments.id, t0.instrumentId!))
+    : await db.select({ cover: assets.photoAttachmentId }).from(assets).where(eq(assets.id, t0.assetId!));
+  if (record && record.cover === null) {
+    await setCoverRow(onSystem, t0, rows[0].id);
   }
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
-    entityType: "attachment", entityId: row.id,
-    action: `set the ${onSystem ? "system" : "module"} photo`,
+    entityType: "attachment", entityId: rows[0].id,
+    action: `added ${rows.length} ${onSystem ? "system" : "module"} photo${rows.length === 1 ? "" : "s"}`,
   });
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   return {};
 }
 
-/** Take the photo off the record. The file stays in Files, where it was filed. */
-export async function clearPhoto(target: WorkTarget): Promise<{ error?: string }> {
+async function setCoverRow(
+  onSystem: boolean, t0: { instrumentId: number | null; assetId: number | null }, id: number | null,
+) {
+  if (onSystem) {
+    await db.update(instruments).set({ photoAttachmentId: id }).where(eq(instruments.id, t0.instrumentId!));
+  } else {
+    await db.update(assets).set({ photoAttachmentId: id }).where(eq(assets.id, t0.assetId!));
+  }
+}
+
+/** Which of a record's photos leads. The rest stay exactly where they are. */
+export async function setCoverPhoto(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
   const u = await requireEditor();
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
-  const onSystem = t0.instrumentId !== null && t0.assetId === null;
-  if (onSystem) {
-    await db.update(instruments).set({ photoAttachmentId: null }).where(eq(instruments.id, t0.instrumentId!));
-  } else {
-    await db.update(assets).set({ photoAttachmentId: null }).where(eq(assets.id, t0.assetId!));
-  }
+  // Only a photo already ON this record: a cover is a pointer, and a pointer at
+  // somebody else's file would be a way to read it.
+  const [photo] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  const belongs = photo && (t0.instrumentId !== null
+    ? photo.instrumentId === t0.instrumentId
+    : photo.assetId === t0.assetId);
+  if (!belongs) return { error: "Not found" };
+
+  await setCoverRow(t0.instrumentId !== null && t0.assetId === null, t0, attachmentId);
   await audit({
-    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "attachment",
-    entityId: t0.instrumentId ?? t0.assetId ?? 0,
-    action: `removed the ${onSystem ? "system" : "module"} photo - the file is still in Files`,
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: attachmentId,
+    action: `made '${photo.fileName}' the cover photo`,
   });
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
+/**
+ * How a photo sits in its tile - turned upright, zoomed, nudged.
+ *
+ * The stored file is not touched. Every place that shows this photo reads the
+ * same numbers, so framing it once frames it everywhere, and re-framing later
+ * costs nothing and loses nothing.
+ */
+export async function setPhotoFraming(attachmentId: number, framing: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [photo] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  if (!photo) return { error: "Not found" };
+  await assertWorkEditable(u, photo.instrumentId === null && photo.assetId === null
+    ? { instrumentId: null, assetId: null }
+    : photo);
+  // Round-tripped through the parser, so nothing unparseable or out of range is
+  // ever stored - whatever a client sends.
+  await db.update(attachments)
+    .set({ framing: serializeFrame(parseFrame(framing)) })
+    .where(eq(attachments.id, attachmentId));
+  revWork(photo);
+  revalidatePath("/gallery");
   return {};
 }
 

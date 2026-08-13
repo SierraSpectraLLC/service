@@ -683,6 +683,7 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_set_at" timestamp;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "phone" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "photo_attachment_id" integer;
 ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "photo_attachment_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "framing" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "is_operator" boolean NOT NULL DEFAULT false;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "parent_org_id" integer;
 ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "org_id" integer;

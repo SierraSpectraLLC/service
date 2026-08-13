@@ -120,6 +120,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     { href: "/purchasing", label: "Purchasing" },
                     { href: "/pdf", label: "PDF studio" },
                     { href: "/documents", label: "Files" },
+                    { href: "/gallery", label: "Gallery" },
                     ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
                     { href: "/metrics", label: "Metrics" },
                     { href: "/archive", label: "Archived" },
@@ -135,6 +136,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   // to keep a document and no way to assemble a packet.
                   <NavMore items={[
                     { href: "/documents", label: "Files" },
+                    { href: "/gallery", label: "Gallery" },
                     { href: "/pdf", label: "PDF studio" },
                     ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
                   ]} />
