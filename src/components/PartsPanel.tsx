@@ -7,7 +7,7 @@ import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/li
 import { createPart, updatePart, setPartStatus, setPartAsset, deletePart, type WorkTarget } from "@/app/actions";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
 import { formatCents, centsToInput } from "@/lib/money";
-import { partGroups, type ServiceEvent } from "@/lib/partGroups";
+import { dayText, isoDay, partGroups, type ServiceEvent } from "@/lib/partGroups";
 
 type Part = {
   id: number; kind: string; assetId: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
@@ -50,7 +50,7 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
   );
 }
 
-const empty = { kind: "part", assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", requestReplacement: false };
+const empty = { kind: "part", assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
@@ -72,7 +72,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
 
   const openNew = () => { setDraft(empty); setSpecPairs([]); setForm({ mode: "new" }); };
   const openEdit = (p: Part) => {
-    setDraft({ kind: p.kind, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, requestReplacement: false });
+    // A date input only accepts a calendar day, so a row still carrying one of
+    // the old year-less strings opens blank and says what is stored underneath.
+    setDraft({ kind: p.kind, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -84,6 +86,20 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   };
   const setPair = (i: number, patch: Partial<SpecPair>) =>
     setSpecPairs((s) => s.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+
+  const editing = form?.mode === "edit" ? parts.find((p) => p.id === form.id) : undefined;
+
+  // Dates matter once a row is finished, or about to be. Offered on the way in
+  // too, so recording a swap a week later takes one form rather than two visits.
+  const showServiceDates =
+    draft.status === "Installed" || draft.status === "Removed"
+    || !!(draft.installedAt || draft.removedAt || editing?.installedAt || editing?.removedAt);
+
+  /** Say what a row is still carrying when a date input could not show it. */
+  const legacy = (stored: string | undefined, shown: string) =>
+    (stored && !isoDay(stored) && !shown
+      ? <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>recorded as &ldquo;{stored}&rdquo;</div>
+      : null);
 
   // Order paperwork only matters once something is actually on order; keep the
   // fields visible when editing a row that already has them filled.
@@ -212,6 +228,25 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               </div>
             </>
           )}
+          {/* When the work actually happened, which is often not the day
+              somebody got round to recording it. Shown whenever the row is
+              finished or heading there, since that is when it means anything. */}
+          {showServiceDates && (
+            <div className="pf2" style={{ marginBottom: 8 }}>
+              <div>
+                <label>Installed</label>
+                <input type="date" value={draft.installedAt}
+                  onChange={(e) => setDraft({ ...draft, installedAt: e.target.value })} />
+                {legacy(form?.mode === "edit" ? editing?.installedAt : "", draft.installedAt)}
+              </div>
+              <div>
+                <label>Removed</label>
+                <input type="date" value={draft.removedAt}
+                  onChange={(e) => setDraft({ ...draft, removedAt: e.target.value })} />
+                {legacy(form?.mode === "edit" ? editing?.removedAt : "", draft.removedAt)}
+              </div>
+            </div>
+          )}
           <div style={{ marginBottom: 8 }}>
             <label>Install / swap note</label>
             <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
@@ -295,9 +330,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                     : <span className="mono" style={{ color: "#1D6396" }}>{p.carrier ? p.carrier + " " : ""}{p.tracking}</span>)}
                   {p.orderedAt && <span className="mut">Ordered {p.orderedAt}</span>}
                   {p.eta && <span className="mut">ETA {p.eta}</span>}
-                  {p.receivedAt && <span style={{ color: "#2E6B2E" }}>Received {p.receivedAt}</span>}
-                  {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {p.installedAt}</span>}
-                  {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {p.removedAt}</span>}
+                  {p.receivedAt && <span style={{ color: "#2E6B2E" }}>Received {dayText(p.receivedAt)}</span>}
+                  {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {dayText(p.installedAt)}</span>}
+                  {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {dayText(p.removedAt)}</span>}
                 </div>
               )}
               {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
