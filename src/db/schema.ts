@@ -770,6 +770,10 @@ export const assetEvents = pgTable("asset_events", {
 // clients may post even when the edit toggle is off (talking != editing).
 export const discussionPosts = pgTable("discussion_posts", {
   id: serial("id").primaryKey(),
+  // Which workspace this was said in. On a staff post it is WHICH service
+  // company said it, and that is what makes "internal" mean anything once two of
+  // them work the same client's systems - see lib/discussionScope.
+  tenantOrgId: tenantStamp(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }), // null = General
   author: text("author").notNull(),
   authorEmail: text("author_email").notNull().default(""),

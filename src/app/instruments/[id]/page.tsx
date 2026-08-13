@@ -8,7 +8,9 @@ import {
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
-import { assertSystemVisible, canEditSystem, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import {
+  assertSystemVisible, canEditSystem, forTenant, readTenant, viewTenant, visibleOrgs, visibleSystemIds,
+} from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -267,7 +269,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const partyName = (orgId: number | null) => (orgId === null ? brand.operatorName : orgName.get(orgId) ?? "a former organization");
-  const viewer = { isHouse: isStaff, orgId: user.orgId };
+  // Which house. On a system shared in from another service company, their staff
+  // are a provider on it, not its house - so its house's internal notes are not
+  // theirs to read. See lib/discussionScope.
+  const viewer = { isHouse: isStaff, orgId: user.orgId, houseOrgId: isStaff ? readTenant(user) : null };
   const visiblePosts = discussion.filter((p) => canSeePost(viewer, { ...p, audience: p.audience as Audience }));
   const sharedWith = [brand.operatorName, ...shareRows.map((s) => s.name)].join(", ");
 

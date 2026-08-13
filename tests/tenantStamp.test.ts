@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
  */
 const STAMPED = [
   "instruments", "assets", "tasks", "pmSchedules", "timeEntries", "attachments",
-  "procedures", "vocabTerms", "stageDefs", "people", "stockrooms",
+  "procedures", "vocabTerms", "stageDefs", "people", "stockrooms", "discussionPosts",
   "purchaseOrders", "partPrices", "eodUpdates", "remoteDevices", "auditLog",
   "cloudConnections",
 ];

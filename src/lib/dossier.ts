@@ -105,7 +105,11 @@ export async function composeSystemDossier(instrumentId: number, forOrgId: numbe
       size: a.size, uploadedBy: a.uploadedBy, createdAt: a.createdAt.toISOString(),
     })),
     discussion: discussion
-      .filter((p) => canSeePost({ isHouse: false, orgId: forOrgId }, { ...p, audience: p.audience as Audience }))
+      // Composed for one organization, never for a house, so there is no house
+      // identity to carry: they read what was shared with them and their own.
+      .filter((p) => canSeePost(
+        { isHouse: false, orgId: forOrgId, houseOrgId: null },
+        { ...p, audience: p.audience as Audience }))
       .map((p) => ({ author: p.author, body: p.body, createdAt: p.createdAt.toISOString() })),
     activity: activity.map((a) => ({
       actor: a.actor, action: a.action, field: a.field, newValue: a.newValue, createdAt: a.createdAt.toISOString(),

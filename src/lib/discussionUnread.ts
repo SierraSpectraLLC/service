@@ -11,12 +11,17 @@ import { discussionPosts, discussionReads, orgs } from "@/db/schema";
 import type { SessionUser } from "@/lib/authz";
 import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
 import { isHouse } from "@/lib/houseRole";
+import { forTenant, readTenant } from "@/lib/tenancy";
 
 /** Enough for any real backlog; the badge caps rather than scanning a year. */
 const SCAN_CAP = 200;
 
 export async function unreadDiscussions(user: SessionUser): Promise<number> {
-  const viewer = { isHouse: isHouse(user.role), orgId: user.orgId };
+  const myTenant = readTenant(user);
+  const viewer = {
+    isHouse: isHouse(user.role), orgId: user.orgId,
+    houseOrgId: isHouse(user.role) ? myTenant : null,
+  };
   // An org viewer has exactly one room; the operator has its own plus a seat in
   // every organization's.
   const marks = await db.select().from(discussionReads)
@@ -29,9 +34,13 @@ export async function unreadDiscussions(user: SessionUser): Promise<number> {
   const posts = await db.select({
     roomOrgId: discussionPosts.roomOrgId, authorEmail: discussionPosts.authorEmail,
     authorOrgId: discussionPosts.authorOrgId, audience: discussionPosts.audience,
-    createdAt: discussionPosts.createdAt,
+    tenantOrgId: discussionPosts.tenantOrgId, createdAt: discussionPosts.createdAt,
   }).from(discussionPosts)
-    .where(and(isNull(discussionPosts.instrumentId), oldest ? gt(discussionPosts.createdAt, oldest) : undefined))
+    .where(and(
+      isNull(discussionPosts.instrumentId),
+      forTenant(discussionPosts.tenantOrgId, myTenant),
+      oldest ? gt(discussionPosts.createdAt, oldest) : undefined,
+    ))
     .limit(SCAN_CAP)
     .catch(() => []);
   if (!posts.length) return 0;

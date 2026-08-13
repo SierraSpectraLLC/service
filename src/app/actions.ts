@@ -2573,8 +2573,14 @@ async function postAudience(p: {
   return [...new Set([...staff, ...shares.flatMap((s) => emailsFor(s.orgId))])];
 }
 
-/** The viewer as the discussion rules see them: the house, or one organization. */
-const partyOf = (u: SessionUser): Viewer => ({ isHouse: isHouse(u.role), orgId: u.orgId });
+/**
+ * The viewer as the discussion rules see them: which house, or which
+ * organization. `houseOrgId` is the part that matters on an instance with two
+ * service companies - see lib/discussionScope.
+ */
+const partyOf = (u: SessionUser): Viewer => ({
+  isHouse: isHouse(u.role), orgId: u.orgId, houseOrgId: isHouse(u.role) ? myTenantOrgId(u) : null,
+});
 
 /** The organization a post is attributed to - null for the operator's own staff. */
 const authorOrgOf = (u: SessionUser): number | null => (isHouse(u.role) ? null : u.orgId);
@@ -2594,10 +2600,12 @@ export async function postDiscussion(
   const authorOrgId = authorOrgOf(u);
   let externalId = "";
   let roomOrgId: number | null = null;
+  let postTenant: number | null = myTenantOrgId(u);
 
   if (instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
     if (!inst) throw new Error("Not found");
+    postTenant = inst.tenantOrgId;
     // A thread lives with its system: you can only post where you can see.
     await assertSystemVisible(u, instrumentId);
     externalId = inst.externalId;
@@ -2611,7 +2619,11 @@ export async function postDiscussion(
   }
 
   await db.insert(discussionPosts).values({
-    instrumentId, author: u.name, authorEmail: u.email, body: text, authorOrgId, audience, roomOrgId,
+    // The workspace this was said in. On a system it is the system's, so a note
+    // written on a client's machine stays with the company whose machine it is.
+    // On the General board it is the speaker's own.
+    tenantOrgId: postTenant, instrumentId,
+    author: u.name, authorEmail: u.email, body: text, authorOrgId, audience, roomOrgId,
   });
   // The activity feed is read by everyone who can see the system, so an internal
   // post is recorded as having happened without quoting a word of it.
@@ -3546,7 +3558,8 @@ export async function reportIssue(instrumentId: number, data: {
   // On the record as a conversation, which is the half they asked for: they can
   // add to it, and so can we, without either side leaving the system.
   await db.insert(discussionPosts).values({
-    instrumentId, body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
+    tenantOrgId: inst.tenantOrgId, instrumentId,
+    body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
     author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
   });
 
@@ -3599,6 +3612,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
   const who = u.name || u.email;
 
   const post = (body: string) => db.insert(discussionPosts).values({
+    tenantOrgId: inst.tenantOrgId,
     instrumentId, body, author: who, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
   });
 

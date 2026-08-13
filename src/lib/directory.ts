@@ -14,13 +14,23 @@
 // clients it works for can see each other, because that is what makes a shared
 // system a shared conversation. Two client organizations of the same provider
 // cannot see each other at all.
+//
+// Nor does it stop at the workspace boundary. Two service companies can work one
+// client's bench - Sierra on the LC-MS, Acme Engineering on the gas generator -
+// and the moment a record is shared between them they are colleagues on it and
+// have to be able to reach each other. That follows from the sharing itself:
+// nobody adds the other company to their own organization list, because there is
+// nothing to add. Whoever is a counterparty on a record you can see is somebody
+// you can name.
 
-import { inArray, ne } from "drizzle-orm";
+import { eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { clientAllowlist, houseMembers, orgs, users } from "@/db/schema";
+import {
+  assets, assetShares, clientAllowlist, houseMembers, instruments, orgs, systemShares, users,
+} from "@/db/schema";
 import type { SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/houseRole";
-import { readTenant, visibleOrgs } from "@/lib/tenancy";
+import { readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { tenantOf } from "@/lib/tenants";
 
 export type Member = {
@@ -65,12 +75,18 @@ export function directoryOrgIds(
   viewer: { orgId: number | null; isHouse: boolean },
   all: { id: number; isOperator: boolean; tenant: number | null }[],
   myTenant: number | null,
+  /** Organizations that are counterparties on a record this viewer can see. */
+  collaborators: number[] = [],
 ): number[] {
   if (myTenant === null) return all.map((o) => o.id);
-  if (viewer.isHouse) return all.filter((o) => o.tenant === myTenant).map((o) => o.id);
+  const known = new Set(all.map((o) => o.id));
+  const shared = collaborators.filter((id) => known.has(id));
+  if (viewer.isHouse) {
+    return [...new Set([...all.filter((o) => o.tenant === myTenant).map((o) => o.id), ...shared])];
+  }
   const mine = all.filter((o) => o.id === viewer.orgId);
   const operator = all.filter((o) => o.isOperator && o.tenant === myTenant);
-  return [...new Set([...mine, ...operator].map((o) => o.id))];
+  return [...new Set([...[...mine, ...operator].map((o) => o.id), ...shared])];
 }
 
 type Raw = { name: string | null; email: string; org: string };
@@ -154,13 +170,46 @@ async function assemble(ids: number[] | null, myOrgId: number | null): Promise<M
   ], orgName(myOrgId));
 }
 
+/**
+ * The organizations this viewer is actually working alongside.
+ *
+ * Read off the records rather than configured: for every system and unit they
+ * can see, the workspace it belongs to and every organization it is shared with.
+ * On their own tenant's records that is just their own clients, already covered.
+ * On a record shared across the tenant line it is the other service company -
+ * which is exactly who they need to be able to name, and exactly the thing
+ * nobody should have to set up by hand.
+ */
+async function collaboratorOrgIds(user: SessionUser): Promise<number[]> {
+  const systemIds = await visibleSystemIds(user);
+  // Null is platform staff, who already get everybody.
+  if (systemIds === null) return [];
+  if (!systemIds.length) return [];
+  const capped = systemIds.slice(0, 2000);
+  const [owners, shares, unitShares] = await Promise.all([
+    db.select({ tenantOrgId: instruments.tenantOrgId }).from(instruments)
+      .where(inArray(instruments.id, capped)).catch(() => []),
+    db.select({ orgId: systemShares.orgId }).from(systemShares)
+      .where(inArray(systemShares.instrumentId, capped)).catch(() => []),
+    // A unit can be shared on its own - one company services the generator on a
+    // bench whose system belongs to another.
+    db.select({ orgId: assetShares.orgId }).from(assetShares)
+      .innerJoin(assets, eq(assetShares.assetId, assets.id))
+      .where(inArray(assets.instrumentId, capped)).catch(() => []),
+  ]);
+  return [...new Set([
+    ...owners.map((r) => r.tenantOrgId), ...shares.map((r) => r.orgId), ...unitShares.map((r) => r.orgId),
+  ])].filter((id): id is number => id !== null);
+}
+
 /** The directory for one signed-in person, read from the logins that exist. */
 export async function visibleDirectory(user: SessionUser): Promise<Member[]> {
-  const orgRows = await visibleOrgs(user);
+  const [orgRows, collaborators] = await Promise.all([visibleOrgs(user), collaboratorOrgIds(user)]);
   const ids = directoryOrgIds(
     { orgId: user.orgId, isHouse: isHouse(user.role) },
     orgRows.map((o) => ({ id: o.id, isOperator: o.isOperator, tenant: tenantOf(o) })),
     readTenant(user),
+    collaborators,
   );
   return ids.length ? assemble(ids, user.orgId) : [];
 }

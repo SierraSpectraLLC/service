@@ -6,16 +6,23 @@ import { canSeePost, resolveRoom, roomThreadId, type PostScope, type Viewer } fr
 // directions: what must be shared stays shared, what must be private stays
 // private even from the operator running the instance.
 
-const HOUSE: Viewer = { isHouse: true, orgId: null };
-const LABZEN: Viewer = { isHouse: false, orgId: 5 };
-const ACME: Viewer = { isHouse: false, orgId: 7 };
-const NO_ORG: Viewer = { isHouse: false, orgId: null };
+// Two service companies, both staff, both on the same client's bench: Sierra on
+// the LC-MS, Acme Engineering on the gas generator. Everything below has to hold
+// with both of them signed in.
+const SIERRA = 1;
+const ACME_ENG = 2;
+
+const HOUSE: Viewer = { isHouse: true, orgId: null, houseOrgId: SIERRA };
+const OTHER_HOUSE: Viewer = { isHouse: true, orgId: null, houseOrgId: ACME_ENG };
+const LABZEN: Viewer = { isHouse: false, orgId: 5, houseOrgId: null };
+const ACME: Viewer = { isHouse: false, orgId: 7, houseOrgId: null };
+const NO_ORG: Viewer = { isHouse: false, orgId: null, houseOrgId: null };
 
 const onSystem = (over: Partial<PostScope> = {}): PostScope => ({
-  instrumentId: 42, authorOrgId: null, roomOrgId: null, audience: "all", ...over,
+  instrumentId: 42, authorOrgId: null, tenantOrgId: SIERRA, roomOrgId: null, audience: "all", ...over,
 });
 const general = (over: Partial<PostScope> = {}): PostScope => ({
-  instrumentId: null, authorOrgId: null, roomOrgId: null, audience: "all", ...over,
+  instrumentId: null, authorOrgId: null, tenantOrgId: SIERRA, roomOrgId: null, audience: "all", ...over,
 });
 
 describe("a shared system's thread", () => {
@@ -39,6 +46,25 @@ describe("a shared system's thread", () => {
     expect(canSeePost(LABZEN, houseNote)).toBe(false);
     expect(canSeePost(ACME, houseNote)).toBe(false);
   });
+
+  it("keeps it away from the OTHER service company on the same system", () => {
+    // Two service companies work one client's bench, so the system is shared to
+    // Acme Engineering and their staff can open the thread. They are a provider
+    // on it, not its house: Sierra's internal note is not addressed to them.
+    const sierraNote = onSystem({ authorOrgId: null, tenantOrgId: SIERRA, audience: "internal" });
+    expect(canSeePost(OTHER_HOUSE, sierraNote)).toBe(false);
+    // Shared posts still cross, which is the whole point of working together.
+    expect(canSeePost(OTHER_HOUSE, onSystem({ tenantOrgId: SIERRA }))).toBe(true);
+  });
+
+  it("refuses an internal post nobody can attribute", () => {
+    // A staff post with no workspace recorded predates the stamp. The backfill
+    // gives every real row one; if a fresh one ever arrives without, refusing is
+    // the safe direction - the alternative shows one company's notes to another.
+    const orphan = onSystem({ authorOrgId: null, tenantOrgId: null, audience: "internal" });
+    expect(canSeePost(HOUSE, orphan)).toBe(false);
+    expect(canSeePost(OTHER_HOUSE, orphan)).toBe(false);
+  });
 });
 
 describe("the General board is rooms, not a square", () => {
@@ -49,10 +75,20 @@ describe("the General board is rooms, not a square", () => {
     expect(canSeePost(LABZEN, general({ roomOrgId: null }))).toBe(false);
   });
 
-  it("the operator sits in every room", () => {
+  it("a service company sits in every room on its own board", () => {
     expect(canSeePost(HOUSE, general({ roomOrgId: 5 }))).toBe(true);
     expect(canSeePost(HOUSE, general({ roomOrgId: 7 }))).toBe(true);
     expect(canSeePost(HOUSE, general({ roomOrgId: null }))).toBe(true);
+  });
+
+  it("and in none of another service company's", () => {
+    // The leak this closes. Both are staff, so a role comparison put Acme
+    // Engineering in every room Sierra has with every one of its clients.
+    expect(canSeePost(OTHER_HOUSE, general({ roomOrgId: 5, tenantOrgId: SIERRA }))).toBe(false);
+    expect(canSeePost(OTHER_HOUSE, general({ roomOrgId: null, tenantOrgId: SIERRA }))).toBe(false);
+    expect(canSeePost(HOUSE, general({ roomOrgId: 5, tenantOrgId: ACME_ENG }))).toBe(false);
+    // Each still reads its own.
+    expect(canSeePost(OTHER_HOUSE, general({ roomOrgId: 5, tenantOrgId: ACME_ENG }))).toBe(true);
   });
 
   it("internal still wins inside a room", () => {
