@@ -7,6 +7,7 @@ import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/li
 import { createPart, updatePart, setPartStatus, setPartAsset, deletePart, type WorkTarget } from "@/app/actions";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
 import { formatCents, centsToInput } from "@/lib/money";
+import { partGroups, type ServiceEvent } from "@/lib/partGroups";
 
 type Part = {
   id: number; kind: string; assetId: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
@@ -53,8 +54,10 @@ const empty = { kind: "part", assetId: null as number | null, name: "", partNumb
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [] }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [] }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
+  /** Jobs completed, by day, so a visit can be named after the work it was. */
+  serviceEvents?: ServiceEvent[];
   // Cost and PO are the owner's business data: hidden (and blanked by the
   // server before they get here) for providers and other non-owner orgs.
   showCosts: boolean;
@@ -301,15 +304,41 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             </div>
           );
         };
+        // Parts and consumables read as two lists; within each, what is still
+        // coming stays open and what is done folds into the day it happened.
+        const section = (rows: Part[]) => {
+          const { live, visits } = partGroups(rows, serviceEvents);
+          return (
+            <>
+              {live.map(renderRow)}
+              {/* The newest visit stays open: those are the parts in the machine
+                  right now. Everything before it is history, one line each. */}
+              {visits.map((v, i) => (
+                <details key={v.day || "undated"} open={i === 0 && v.day !== ""}
+                  style={{ borderTop: "1px solid var(--line)" }}>
+                  <summary style={{ cursor: "pointer", padding: "7px 2px", fontSize: 12.5 }}>
+                    <b>{v.label}</b>{" "}
+                    <span className="mut">
+                      · {v.parts.length} {v.parts.length === 1 ? "part" : "parts"}
+                      {v.parts.some((r) => r.status === "Removed") && v.parts.every((r) => r.status === "Removed")
+                        ? " pulled" : " fitted"}
+                    </span>
+                  </summary>
+                  {v.parts.map(renderRow)}
+                </details>
+              ))}
+            </>
+          );
+        };
         const proper = parts.filter((p) => p.kind !== "consumable");
         const consumables = parts.filter((p) => p.kind === "consumable");
         const both = proper.length > 0 && consumables.length > 0;
         return (
           <>
             {both && proper.length > 0 && <div className="eyebrow" style={{ margin: "4px 0 6px" }}>Parts</div>}
-            {proper.map(renderRow)}
+            {section(proper)}
             {both && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Consumables</div>}
-            {consumables.map(renderRow)}
+            {section(consumables)}
           </>
         );
       })()}

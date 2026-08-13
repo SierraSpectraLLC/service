@@ -1,0 +1,83 @@
+import { describe, expect, it } from "vitest";
+import { pmActive, pmGroups, pmMonthLabel } from "@/lib/pmGroups";
+
+const TODAY = "2026-08-12";
+const s = (id: number, nextDue: string, over: { paused?: boolean; openTaskId?: number | null } = {}) =>
+  ({ id, nextDue, paused: false, openTaskId: null, ...over });
+
+describe("owed now", () => {
+  it("counts due and overdue", () => {
+    expect(pmActive(s(1, "2026-08-12"), TODAY)).toBe(true);
+    expect(pmActive(s(2, "2026-07-01"), TODAY)).toBe(true);
+    expect(pmActive(s(3, "2026-08-13"), TODAY)).toBe(false);
+  });
+
+  it("counts an open task whatever its date says", () => {
+    // Work somebody has started is outstanding even when the calendar says
+    // next month - folding it away would hide a job in progress.
+    expect(pmActive(s(1, "2026-12-01", { openTaskId: 44 }), TODAY)).toBe(true);
+  });
+
+  it("never counts a paused schedule, however overdue", () => {
+    expect(pmActive(s(1, "2020-01-01", { paused: true }), TODAY)).toBe(false);
+  });
+});
+
+describe("folding the rest into months", () => {
+  it("keeps what's owed and groups the rest, soonest month first", () => {
+    const g = pmGroups([
+      s(1, "2026-07-01"),                       // overdue
+      s(2, "2026-09-04"),
+      s(3, "2026-09-28"),
+      s(4, "2027-01-10"),
+    ], TODAY);
+    expect(g.active.map((r) => r.id)).toEqual([1]);
+    expect(g.months.map((m) => [m.label, m.rows.map((r) => r.id)]))
+      .toEqual([["September 2026", [2, 3]], ["January 2027", [4]]]);
+    expect(g.allClear).toBe(false);
+  });
+
+  it("headlines the month and year of the soonest one still to come", () => {
+    const g = pmGroups([s(1, "2027-03-02"), s(2, "2026-09-04")], TODAY);
+    expect(g.next).toEqual({ key: "2026-09", label: "September 2026" });
+  });
+
+  it("reads as all clear once every cycle is complete", () => {
+    // The state after the last task of the period is ticked off: nothing owed,
+    // one line, and the month it comes back around.
+    const g = pmGroups([s(1, "2026-09-04"), s(2, "2026-09-28")], TODAY);
+    expect(g.allClear).toBe(true);
+    expect(g.active).toEqual([]);
+    expect(g.next?.label).toBe("September 2026");
+  });
+
+  it("sorts within a month by date then id, so the fold is stable", () => {
+    const g = pmGroups([s(9, "2026-09-20"), s(3, "2026-09-04"), s(1, "2026-09-04")], TODAY);
+    expect(g.months[0].rows.map((r) => r.id)).toEqual([1, 3, 9]);
+  });
+
+  it("puts paused schedules on their own, out of the months", () => {
+    const g = pmGroups([s(1, "2026-09-04", { paused: true }), s(2, "2026-10-01")], TODAY);
+    expect(g.paused.map((r) => r.id)).toEqual([1]);
+    expect(g.months.map((m) => m.label)).toEqual(["October 2026"]);
+    expect(g.next?.label).toBe("October 2026");
+  });
+
+  it("has no headline when everything left is paused", () => {
+    const g = pmGroups([s(1, "2026-09-04", { paused: true })], TODAY);
+    expect(g.next).toBeNull();
+    expect(g.allClear).toBe(true);
+  });
+
+  it("handles an empty list", () => {
+    expect(pmGroups([], TODAY)).toEqual({ active: [], months: [], paused: [], next: null, allClear: true });
+  });
+});
+
+describe("month labels", () => {
+  it("names the month from the string, never from a Date", () => {
+    // A Date would shift the month across a timezone at midnight on the 1st.
+    expect(pmMonthLabel("2026-01-01")).toBe("January 2026");
+    expect(pmMonthLabel("2026-12-31")).toBe("December 2026");
+  });
+});

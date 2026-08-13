@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { asc, eq, gte } from "drizzle-orm";
+import { and, asc, eq, gte } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, stageEvents, tasks, timeEntries, parts, queueEvents } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
@@ -12,6 +12,7 @@ import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
 import { addDays } from "@/lib/pm";
 import { shopToday } from "@/lib/shopday";
+import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -30,14 +31,18 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const dayOf = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: tz });
 
   const [rows, events, defs, allInsts, pmTasks, timeRows, partRows] = await Promise.all([
-    db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(instruments)
+      .where(and(eq(instruments.archived, false), forTenant(instruments.tenantOrgId, readTenant(user))))
+      .orderBy(asc(instruments.priority), asc(instruments.externalId)),
     db.select().from(stageEvents).orderBy(asc(stageEvents.at), asc(stageEvents.id)),
-    getStageDefs(),
+    getStageDefs(await viewTenant(user)),
     // Archived systems included: shipped and retired work still counts in a window.
-    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client, createdAt: instruments.createdAt }).from(instruments),
+    db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client, createdAt: instruments.createdAt })
+      .from(instruments).where(forTenant(instruments.tenantOrgId, readTenant(user))),
     db.select({ origin: tasks.origin, dueDate: tasks.dueDate, completedAt: tasks.completedAt, state: tasks.state })
-      .from(tasks).where(eq(tasks.origin, "pm")),
-    db.select().from(timeEntries).where(gte(timeEntries.date, windowStartIso)),
+      .from(tasks).where(and(eq(tasks.origin, "pm"), forTenant(tasks.tenantOrgId, readTenant(user)))),
+    db.select().from(timeEntries)
+      .where(and(gte(timeEntries.date, windowStartIso), forTenant(timeEntries.tenantOrgId, readTenant(user)))),
     db.select({ instrumentId: parts.instrumentId, costCents: parts.costCents, createdAt: parts.createdAt })
       .from(parts).where(gte(parts.createdAt, windowStart)),
   ]);

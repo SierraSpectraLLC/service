@@ -3,7 +3,7 @@
 // is even possible. The DB gates in app/actions wrap these.
 import { normalizePn } from "@/lib/priceBook";
 import type { Role } from "@/lib/authz";
-import { isHouse } from "@/lib/houseRole";
+import { houseOfRecord } from "@/lib/tenants";
 
 export const STOCK_KINDS = ["shop", "client", "mobile"] as const;
 
@@ -84,10 +84,12 @@ export type StockViewer = { role: Role; orgId: number | null };
  */
 export function stockAccess(
   viewer: StockViewer,
-  room: { orgId: number | null },
+  room: { orgId: number | null; tenantOrgId?: number | null },
   share: { access: string } | undefined,
 ): { see: boolean; issue: boolean; manage: boolean } {
-  if (isHouse(viewer.role)) return { see: true, issue: true, manage: true };
+  // The house of the room's own workspace. Another operator's staff get nothing
+  // from being staff: a stockroom is one company's shelf.
+  if (houseOfRecord(viewer, room.tenantOrgId)) return { see: true, issue: true, manage: true };
   const canWrite = viewer.role === "client_editor";
   if (viewer.orgId !== null && room.orgId === viewer.orgId) {
     return { see: true, issue: canWrite, manage: canWrite };

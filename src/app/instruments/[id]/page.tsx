@@ -8,15 +8,16 @@ import {
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
-import { assertSystemVisible, canEditSystem, visibleSystemIds } from "@/lib/tenancy";
+import { assertSystemVisible, canEditSystem, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
+import { scheduleLine } from "@/lib/pmRequest";
 import { getBrand } from "@/lib/brand";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
-import { shopTime, shopToday } from "@/lib/shopday";
+import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
@@ -32,7 +33,7 @@ import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import PushToSheetButton from "@/components/PushToSheetButton";
-import ReportIssueButton from "@/components/ReportIssueButton";
+import ClientRequest from "@/components/ClientRequest";
 import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
@@ -63,12 +64,14 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select().from(parts).where(eq(parts.instrumentId, instId)).orderBy(asc(parts.id)),
     db.select().from(attachments).where(eq(attachments.instrumentId, instId)).orderBy(desc(attachments.createdAt)),
     db.select().from(auditLog).where(eq(auditLog.instrumentId, instId)).orderBy(desc(auditLog.createdAt)).limit(100),
-    getStageDefs(),
+    getStageDefs(await viewTenant(user)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
-    db.select().from(vocabTerms),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
-    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
+    db.select({ name: people.name }).from(people)
+      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
+      .orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     // Shelf stock offered for attaching: the house sees all of it; an org sees
     // only units it owns, never another client's spares. Retired units are
@@ -82,7 +85,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     db.select({ orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
       .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
       .where(eq(systemShares.instrumentId, instId)).orderBy(asc(orgs.name)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    // Only organizations this viewer may know about: the share picker used to
+    // ship the whole instance's list to the browser (see visibleOrgs).
+    visibleOrgs(user),
   ]);
   // Catalog models for THIS system's type, by asset type: adding a detector to
   // a GC-MS should offer FID and TCD, not every detector the shop knows. A model
@@ -96,7 +101,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     (gridModels[v.assetType] ??= []).push({ name: v.name, manufacturer: v.manufacturer });
   }
 
-  const showCosts = canSeeCosts(user, inst.ownerOrgId);
+  const showCosts = canSeeCosts(user, inst.ownerOrgId, inst.tenantOrgId);
+
+  // What closed on each day, so the parts fitted that day read as that job's work
+  // rather than as forty loose rows - see lib/partGroups.
+  const serviceEvents = taskRows
+    .filter((t) => t.completedAt !== null)
+    .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
 
   // Chain of custody, oldest first - it reads as a story. The reader's own
   // panel arrangement rides along, so the page arrives already arranged.
@@ -119,7 +130,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       .where(eq(timeEntries.instrumentId, instId))
       .orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(100),
     showCosts
-      ? db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
+      ? db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents })
+        .from(partPrices).where(forTenant(partPrices.tenantOrgId, inst.tenantOrgId))
       : Promise.resolve([]),
   ]);
 
@@ -197,7 +209,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const pc = modules.remote ? await linkedDevice(inst.id) : null;
   const pcAbility = pc
     ? remoteAbility(user, { moduleOn: true, personaActive: persona !== null },
-      { orgId: pc.orgId }, { remoteAccessEnabled: pc.orgRemote ?? false })
+      { orgId: pc.orgId, tenantOrgId: pc.tenantOrgId }, { remoteAccessEnabled: pc.orgRemote ?? false })
     : null;
   const pcConsent = pc
     ? consentModeFor(
@@ -242,10 +254,17 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         </Link>
         <span style={{ marginLeft: "auto" }} />
 
-        {/* Anybody who can see the system can say something is wrong with it -
-            including a read-only account watching an instrument fail, who should
-            not have to find somebody with more rights first. */}
-        {!inst.archived && <ReportIssueButton instrumentId={inst.id} externalId={inst.externalId} />}
+        {/* Anybody who can see the system can say something is wrong with it, or
+            ask for its upkeep - including a read-only account watching an
+            instrument fail, who should not have to find somebody with more
+            rights first. */}
+        {!inst.archived && (
+          <>
+            <ClientRequest kind="issue" instrumentId={inst.id} externalId={inst.externalId} />
+            <ClientRequest kind="pm" instrumentId={inst.id} externalId={inst.externalId}
+              nextPm={scheduleLine(pmRows, shopToday())} />
+          </>
+        )}
 
         {/* The instrument's own PC. Sits with the other actions on the system
             rather than on a list somewhere else, because it is used in the
@@ -375,9 +394,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ) },
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
-              parts={redactParts(partRows, user, inst.ownerOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
+              parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
-              canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
+              canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
+              serviceEvents={serviceEvents} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
           { key: "custody", label: "Ownership history", node: (

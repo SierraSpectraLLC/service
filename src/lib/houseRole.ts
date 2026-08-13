@@ -17,7 +17,7 @@
 // them, so turning this on breaks nothing and needs no migration.
 
 export type HouseRole = "owner" | "staff";
-export type MemberRow = { email: string; role: string };
+export type MemberRow = { email: string; role: string; orgId?: number | null };
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -53,13 +53,47 @@ export function houseRoleFor(email: string, envStaff: string[], members: MemberR
   return envStaff.map(norm).includes(e) ? "staff" : null;
 }
 
+/**
+ * The house role AND which service company it is held at - the identity a
+ * multi-operator instance needs, where "staff" is meaningless without "of whom".
+ *
+ * A member row names its operator. Anyone resolved from the environment instead
+ * (the root owner, and legacy STAFF_EMAILS entries with no row) falls back to
+ * `rootOrgId`, the operator that runs the instance: those two mechanisms exist as
+ * lockout insurance for that company, and inventing a different answer here would
+ * be a locked-out owner.
+ */
+export function houseIdentityFor(
+  email: string, envStaff: string[], members: MemberRow[], rootOrgId: number | null,
+): { role: HouseRole; orgId: number | null } | null {
+  const role = houseRoleFor(email, envStaff, members);
+  if (!role) return null;
+  const row = members.find((m) => norm(m.email) === norm(email));
+  return { role, orgId: row ? row.orgId ?? null : rootOrgId };
+}
+
 /** Every house email, for digests and staff notifications. */
-export function houseEmailsFrom(envStaff: string[], members: MemberRow[]): string[] {
+export function houseEmailsFrom(
+  envStaff: string[], members: MemberRow[],
+  // One workspace's staff. Null (or omitted) is every staff member on the
+  // instance, which is only ever right for a platform-level message: a fault
+  // reported on one operator's system must not email another operator's
+  // engineers, who cannot even open the link.
+  //
+  // The environment list belongs to the operator that runs the instance (it is
+  // that company's break-glass access), so it is included only when asking for
+  // that workspace or for everybody.
+  orgId?: number | null, rootOrgId?: number | null,
+): string[] {
+  const scoped = orgId !== undefined && orgId !== null;
   const out = new Set<string>();
-  for (const e of envStaff.map(norm).filter(Boolean)) out.add(e);
+  if (!scoped || orgId === rootOrgId) {
+    for (const e of envStaff.map(norm).filter(Boolean)) out.add(e);
+  }
   for (const m of members) {
     const e = norm(m.email);
     if (!e) continue;
+    if (scoped && (m.orgId ?? null) !== orgId) continue;
     if (m.role === "none") out.delete(e); else out.add(e);
   }
   return [...out];

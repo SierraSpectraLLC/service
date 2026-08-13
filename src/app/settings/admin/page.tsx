@@ -4,8 +4,10 @@ import Link from "next/link";
 import { db } from "@/db";
 import { instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
+import { visibleOrgs } from "@/lib/tenancy";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import SettingsTabs from "@/components/SettingsTabs";
@@ -26,10 +28,11 @@ export default async function AdminSettingsPage() {
   if (!user) redirect("/login");
   // Owner only: this page can move ownership of anything.
   if (user.role !== "owner") redirect("/");
+  const isPlatform = isPlatformStaff(tenantViewer(user));
 
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.archived), asc(instruments.externalId)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, sortOrder: assets.sortOrder }).from(assets),
     db.select({ instrumentId: systemShares.instrumentId, orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
       .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId)).orderBy(asc(orgs.name)),
@@ -57,7 +60,7 @@ export default async function AdminSettingsPage() {
 
   return (
     <div className="container page">
-      <SettingsTabs active="admin" />
+      <SettingsTabs active="admin" isPlatform={isPlatform} />
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 

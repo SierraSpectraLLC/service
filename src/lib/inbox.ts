@@ -18,6 +18,7 @@ export const NOTIFY_KINDS = [
   { kind: "queue", label: "A system moves into my queue" },
   { kind: "handoff", label: "A system changes hands" },
   { kind: "issue", label: "A client reports a problem" },
+  { kind: "pm_request", label: "A client asks for maintenance" },
 ] as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];

@@ -1,10 +1,10 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, instrumentGases, parts, auditLog } from "@/db/schema";
+import { auditLog, instrumentGases, instruments, orgs, parts } from "@/db/schema";
 import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -16,11 +16,14 @@ const pill = (text: string, bg: string, fg: string) =>
  * Compose the daily fleet-status email: every system with stages, gas
  * statuses, and open parts; anything needing gas gets called out on top.
  */
-export async function composeDigest(): Promise<{ subject: string; html: string }> {
-  // The digest is the operator's own status report, so it carries the service
-  // organization's name rather than the platform's.
-  const brand = await getBrand();
-  const rows = await db.select().from(instruments).where(eq(instruments.archived, false)).orderBy(asc(instruments.priority), asc(instruments.externalId));
+export async function composeDigest(tenantOrgId: number | null = null): Promise<{ subject: string; html: string }> {
+  // The digest is one service company's own status report, so it carries that
+  // company's name and covers only its fleet - not the instance's.
+  const brand = await brandForTenant(tenantOrgId);
+  const mine = tenantOrgId === null ? undefined : eq(instruments.tenantOrgId, tenantOrgId);
+  const rows = await db.select().from(instruments)
+    .where(and(eq(instruments.archived, false), mine))
+    .orderBy(asc(instruments.priority), asc(instruments.externalId));
   const gases = await db.select().from(instrumentGases);
   const allParts = await db.select().from(parts);
   const recent = await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(300);
@@ -88,10 +91,22 @@ export async function composeDigest(): Promise<{ subject: string; html: string }
 }
 
 /** Compose and email the digest to all staff via Resend. */
-export async function runDailyDigest(): Promise<{ sent: boolean; to: string[]; subject: string }> {
-  const to = await houseEmails();
-  if (!to.length) throw new Error("No house members configured (STAFF_EMAILS or Settings > Admin)");
-  const { subject, html } = await composeDigest();
-  await sendEmail(to, subject, html);
-  return { sent: true, to, subject };
+export async function runDailyDigest(): Promise<{ sent: number; skipped: string[] }> {
+  // One digest per service company on the instance, each to its own staff about
+  // its own fleet. A single instance-wide digest would tell every operator the
+  // state of every other operator's equipment.
+  const operators = await db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(eq(orgs.isOperator, true));
+  const workspaces: (number | null)[] = operators.length ? operators.map((o) => o.id) : [null];
+  let sent = 0;
+  const skipped: string[] = [];
+  for (const tenantOrgId of workspaces) {
+    const to = await houseEmails(tenantOrgId);
+    const who = operators.find((o) => o.id === tenantOrgId)?.name ?? "this instance";
+    if (!to.length) { skipped.push(`${who}: nobody to send to`); continue; }
+    const { subject, html } = await composeDigest(tenantOrgId);
+    await sendEmail(to, subject, html);
+    sent++;
+  }
+  if (!sent && !skipped.length) throw new Error("No house members configured (STAFF_EMAILS or Settings > Admin)");
+  return { sent, skipped };
 }

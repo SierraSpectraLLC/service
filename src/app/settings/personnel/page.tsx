@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { appSettings, clientAllowlist, people, orgs, systemShares } from "@/db/schema";
 import { requireOwner } from "@/lib/authz";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
+import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import PersonnelForm from "@/components/PersonnelForm";
 
@@ -10,18 +12,21 @@ export const dynamic = "force-dynamic";
 
 /** Settings > Personnel: the organizations on this instance and the shop roster. */
 export default async function PersonnelPage() {
-  try { await requireOwner(); } catch { redirect("/"); }
+  let user;
+  try { user = await requireOwner(); } catch { redirect("/"); }
+  const isPlatform = isPlatformStaff(tenantViewer(user));
   const [[s], allowRows, peopleRows, orgRows, shareCounts] = await Promise.all([
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
     db.select().from(clientAllowlist).orderBy(asc(clientAllowlist.entry)),
-    db.select().from(people).orderBy(asc(people.org), asc(people.name)),
-    db.select().from(orgs).orderBy(asc(orgs.kind), asc(orgs.name)),
+    db.select().from(people).where(forTenant(people.tenantOrgId, readTenant(user)))
+      .orderBy(asc(people.org), asc(people.name)),
+    visibleOrgs(user),
     // How much each org can reach, so its row states the consequence of removal.
     db.select({ orgId: systemShares.orgId }).from(systemShares),
   ]);
   return (
     <div className="container page">
-      <SettingsTabs active="personnel" />
+      <SettingsTabs active="personnel" isPlatform={isPlatform} />
       <PersonnelForm
         clientAccessEnabled={s?.clientAccessEnabled ?? false}
         orgs={orgRows.map((o) => ({

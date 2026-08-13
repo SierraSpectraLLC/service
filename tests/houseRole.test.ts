@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  houseRoleFor, houseEmailsFrom, memberGuard, ownerEmails, rootOwner, validHouseEmail,
+  houseIdentityFor, houseRoleFor, houseEmailsFrom, memberGuard, ownerEmails, rootOwner, validHouseEmail,
 } from "@/lib/houseRole";
 
 const ENV = ["joe@x.com", "legacy@x.com"];
@@ -112,5 +112,48 @@ describe("memberGuard", () => {
 
   it("rejects a domain wildcard", () => {
     expect(memberGuard({ ...base, subjectEmail: "@x.com", next: "staff" }).ok).toBe(false);
+  });
+});
+
+describe("houseIdentityFor", () => {
+  // "Staff" says nothing on its own once more than one service company shares the
+  // instance. This is where the second half of the answer comes from.
+  const ROOT = 1, LABZEN = 2;
+  const row = (email: string, role: string, orgId: number | null) => ({ email, role, orgId });
+
+  it("reads the company off the member's own row", () => {
+    expect(houseIdentityFor("tech@labzen.com", ENV, [row("tech@labzen.com", "staff", LABZEN)], ROOT))
+      .toEqual({ role: "staff", orgId: LABZEN });
+  });
+
+  it("puts the root owner at the operator that runs the instance", () => {
+    // The break-glass login belongs to the company running the platform; giving
+    // it any other answer would be a locked-out owner.
+    expect(houseIdentityFor("joe@x.com", ENV, [], ROOT)).toEqual({ role: "owner", orgId: ROOT });
+  });
+
+  it("puts a legacy env-listed staffer there too", () => {
+    expect(houseIdentityFor("legacy@x.com", ENV, [], ROOT)).toEqual({ role: "staff", orgId: ROOT });
+  });
+
+  it("keeps a row's company even when the environment also lists them", () => {
+    expect(houseIdentityFor("legacy@x.com", ENV, [row("legacy@x.com", "staff", LABZEN)], ROOT))
+      .toEqual({ role: "staff", orgId: LABZEN });
+  });
+
+  it("returns a company-less identity for a row that names none", () => {
+    // Not the root's: a row that says nothing about its company must not be
+    // silently adopted by the company running the platform. lib/tenants turns
+    // this into "sees nothing" rather than "sees everything".
+    expect(houseIdentityFor("tech@labzen.com", ENV, [row("tech@labzen.com", "staff", null)], ROOT))
+      .toEqual({ role: "staff", orgId: null });
+  });
+
+  it("is nobody when the role is revoked", () => {
+    expect(houseIdentityFor("tech@labzen.com", ENV, [row("tech@labzen.com", "none", LABZEN)], ROOT)).toBeNull();
+  });
+
+  it("is nobody for a client", () => {
+    expect(houseIdentityFor("lab@acme.com", ENV, [], ROOT)).toBeNull();
   });
 });

@@ -8,13 +8,13 @@ import {
   pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { assetAccess, visibleSystemIds } from "@/lib/tenancy";
+import { assetAccess, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import SharePanel from "@/components/SharePanel";
 import SalePanel from "@/components/SalePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import { getModules } from "@/lib/flags";
-import { shopTime, shopToday } from "@/lib/shopday";
+import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -62,12 +62,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       .where(visibleSystems === null ? undefined : visibleSystems.length ? inArray(instruments.id, visibleSystems) : sql`false`)
       .orderBy(asc(instruments.externalId)),
     db.selectDistinct({ owner: assets.owner }).from(assets),
-    db.select().from(vocabTerms),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(desc(attachments.createdAt)),
     db.select().from(auditLog).where(eq(auditLog.assetId, assetId)).orderBy(desc(auditLog.createdAt)).limit(100),
-    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
+    db.select({ name: people.name }).from(people)
+      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
+      .orderBy(asc(people.org), asc(people.name)),
   ]);
   if (!asset) notFound();
   const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
@@ -102,17 +104,24 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     db.select({ orgId: assetShares.orgId, access: assetShares.access, name: orgs.name, kind: orgs.kind })
       .from(assetShares).innerJoin(orgs, eq(orgs.id, assetShares.orgId))
       .where(eq(assetShares.assetId, assetId)).orderBy(asc(orgs.name)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
   ]);
   // Costs follow the owner of whatever the part sits on: the home system's
   // owning org while installed, the asset's own org on the shelf.
   const [homeOwner] = asset.instrumentId !== null
     ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];
-  const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId);
+  const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId);
+
+  // What closed on each day, so parts fitted during a job read as that job's work
+  // rather than as a growing wall of rows - see lib/partGroups.
+  const serviceEvents = taggedTasks
+    .filter((t) => t.completedAt !== null)
+    .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
   // Vendor offers for the part form - only sent to viewers who can see costs.
   const priceBook = showCosts
-    ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
+    ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents })
+      .from(partPrices).where(forTenant(partPrices.tenantOrgId, asset.tenantOrgId))
     : [];
   // Today's client-facing update for this unit, picked up by the EOD page.
   const modules = await getModules();
@@ -252,9 +261,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           ) },
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={target}
-              parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId)
+              parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId)
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-              systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook} />
+              systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
+              serviceEvents={serviceEvents} />
           ) },
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

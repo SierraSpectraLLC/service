@@ -3,7 +3,7 @@ import { asc, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, vocabTerms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, viewTenant, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { ASSET_COLOR, ASSET_STATES } from "@/lib/stages";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
@@ -25,7 +25,7 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
       .orderBy(asc(assets.kind), asc(assets.model), asc(assets.id)),
     db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client }).from(instruments)
       .where(seeSystems === null ? undefined : seeSystems.length ? inArray(instruments.id, seeSystems) : sql`false`),
-    db.select().from(vocabTerms),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
   ]);
   const home = new Map(insts.map((i) => [i.id, i]));
   // Owner picker options: whoever already owns stock, plus the clients we work for.

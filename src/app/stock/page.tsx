@@ -4,7 +4,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, stockItems, stockrooms, stockroomShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { KIND_LABEL, needsReorder, stockAccess, stockTotals } from "@/lib/stock";
 import NewStockroomForm from "@/components/NewStockroomForm";
 
@@ -20,10 +20,12 @@ export default async function StockPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
 
   const [rooms, myShares, orgRows] = await Promise.all([
-    db.select().from(stockrooms).where(eq(stockrooms.archived, false)).orderBy(asc(stockrooms.name)),
+    db.select().from(stockrooms)
+      .where(and(eq(stockrooms.archived, false), forTenant(stockrooms.tenantOrgId, readTenant(user))))
+      .orderBy(asc(stockrooms.name)),
     user.orgId === null ? Promise.resolve([]) : db.select({ stockroomId: stockroomShares.stockroomId, access: stockroomShares.access })
       .from(stockroomShares).where(eq(stockroomShares.orgId, user.orgId)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
   ]);
 
   const visible = rooms

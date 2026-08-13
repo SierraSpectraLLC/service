@@ -4,7 +4,7 @@ import { and, asc, desc, eq, isNull, isNotNull, inArray, lte, sql } from "drizzl
 import { db } from "@/db";
 import { discussionPosts, instruments, discussionReads, orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { visibleSystemIds } from "@/lib/tenancy";
+import { visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
@@ -41,7 +41,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
     // operator's markers for each organization's room.
     db.select().from(discussionReads)
       .where(and(eq(discussionReads.userEmail, user.email), lte(discussionReads.threadId, 0))),
-    db.select({ id: orgs.id, name: orgs.name }).from(orgs).orderBy(asc(orgs.name)),
+    visibleOrgs(user),
     getBrand(),
   ]);
 

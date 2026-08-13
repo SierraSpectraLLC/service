@@ -43,6 +43,8 @@ export async function createPmTask(
   const parts = schedulePartsOf(s);
   const partLine = parts.length ? `Part${parts.length === 1 ? "" : "s"}: ${parts.map(partLabel).join(", ")}` : "";
   const [t] = await db.insert(tasks).values({
+    // The schedule's workspace, not the cron's: this runs with nobody signed in.
+    tenantOrgId: s.tenantOrgId,
     instrumentId: onSystem, assetId: s.assetId,
     title: s.title, body: [s.body, partLine].filter(Boolean).join("\n"),
     assignee: s.assignee,
@@ -78,6 +80,7 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     ? await db.select({
         id: instruments.id, externalId: instruments.externalId,
         queueOrgId: instruments.queueOrgId, archived: instruments.archived,
+        tenantOrgId: instruments.tenantOrgId,
       }).from(instruments).where(inArray(instruments.id, instIds))
     : [];
   // Who could take the next move on each of these systems. Read once for the
@@ -86,9 +89,6 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     ? await db.select({ instrumentId: systemShares.instrumentId, orgId: orgs.id, kind: orgs.kind })
         .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId))
         .where(inArray(systemShares.instrumentId, instIds))
-    : [];
-  const [settings] = instIds.length
-    ? await db.select({ operatorOrgId: appSettings.operatorOrgId }).from(appSettings).where(eq(appSettings.id, 1))
     : [];
   const handedOff = new Set<number>();
   const labelFor = (s: typeof due[number]) => {
@@ -117,7 +117,7 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     // system per run: three due filters are one handoff, not three.
     if (onSystem !== null && !handedOff.has(onSystem)) {
       handedOff.add(onSystem);
-      await handOffForMaintenance(onSystem, s.title, actor, instRows, shareRows, settings?.operatorOrgId ?? null);
+      await handOffForMaintenance(onSystem, s.title, actor, instRows, shareRows);
     }
   }
   return { created };
@@ -133,15 +133,17 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
  */
 async function handOffForMaintenance(
   instrumentId: number, title: string, actor: string,
-  instRows: { id: number; externalId: string; queueOrgId: number | null; archived: boolean }[],
+  instRows: { id: number; externalId: string; queueOrgId: number | null; archived: boolean; tenantOrgId: number | null }[],
   shareRows: { instrumentId: number; orgId: number; kind: string }[],
-  operatorOrgId: number | null,
 ): Promise<void> {
   const inst = instRows.find((i) => i.id === instrumentId);
   if (!inst) return;
   const decision = pmHandoff({
     queueOrgId: inst.queueOrgId,
-    operatorOrgId,
+    // The workspace this system belongs to IS the service company for it. The
+    // instance-wide "operator org" setting was the single-operator answer to the
+    // same question, and it is the thing a second operator gets wrong.
+    operatorOrgId: inst.tenantOrgId,
     shares: shareRows.filter((s) => s.instrumentId === instrumentId).map((s) => ({ orgId: s.orgId, kind: s.kind })),
     archived: inst.archived,
   });
@@ -184,7 +186,8 @@ export async function applyProcedures(assetId: number, today: string, actor: str
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return { created: 0 };
   const rows = await db.select().from(procedures)
-    .where(and(eq(procedures.assetType, a.kind), isNotNull(procedures.intervalDays)));
+    .where(and(eq(procedures.assetType, a.kind), isNotNull(procedures.intervalDays),
+      a.tenantOrgId === null ? undefined : eq(procedures.tenantOrgId, a.tenantOrgId)));
   const matching = rows.filter((p) => p.modelScope.length === 0 || scopeMatches(p.modelScope, a.model));
   if (!matching.length) return { created: 0 };
 
@@ -200,6 +203,7 @@ export async function applyProcedures(assetId: number, today: string, actor: str
     // line rides along as text.
     const body = [p.kind === "test" ? summarizeItem(p) : "", p.notes].filter(Boolean).join("\n");
     await db.insert(pmSchedules).values({
+      tenantOrgId: a.tenantOrgId,
       instrumentId: null, assetId,
       title: p.name, body, everyDays: p.intervalDays!,
       nextDue: addDays(today, p.intervalDays!),
@@ -231,11 +235,12 @@ export async function applyProcedures(assetId: number, today: string, actor: str
 export async function applySystemProcedures(
   instrumentId: number, today: string, actor: string,
 ): Promise<{ created: number }> {
-  const [inst] = await db.select({ id: instruments.id, externalId: instruments.externalId })
+  const [inst] = await db.select({ id: instruments.id, externalId: instruments.externalId, tenantOrgId: instruments.tenantOrgId })
     .from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { created: 0 };
   const rows = await db.select().from(procedures)
-    .where(and(eq(procedures.assetType, "system"), isNotNull(procedures.intervalDays)));
+    .where(and(eq(procedures.assetType, "system"), isNotNull(procedures.intervalDays),
+      inst.tenantOrgId === null ? undefined : eq(procedures.tenantOrgId, inst.tenantOrgId)));
   if (!rows.length) return { created: 0 };
 
   const existing = await db.select().from(pmSchedules).where(eq(pmSchedules.instrumentId, instrumentId));
@@ -247,6 +252,7 @@ export async function applySystemProcedures(
     if (stamped.has(p.id) || titles.has(p.name.toLowerCase())) continue;
     const body = [p.kind === "test" ? summarizeItem(p) : "", p.notes].filter(Boolean).join("\n");
     await db.insert(pmSchedules).values({
+      tenantOrgId: inst.tenantOrgId,
       instrumentId, assetId: null,
       title: p.name, body, everyDays: p.intervalDays!,
       // A cadence out, not day one: a system being set up was just gone over.
@@ -271,14 +277,23 @@ export async function applySystemProcedures(
  * second half, adding an annual system PM would report that it reached nothing
  * and quietly apply only to systems created afterwards.
  */
-export async function backfillProcedure(assetType: string, today: string, actor: string): Promise<number> {
+export async function backfillProcedure(
+  assetType: string, today: string, actor: string,
+  // Only across the workspace that defined the procedure. A new operator adding
+  // an annual PM must not reach into another operator's fleet.
+  tenantOrgId: number | null,
+): Promise<number> {
+  const sameTenant = (col: typeof instruments.tenantOrgId | typeof assets.tenantOrgId) =>
+    tenantOrgId === null ? undefined : eq(col, tenantOrgId);
   let applied = 0;
   if (assetType === "system") {
-    const fleet = await db.select({ id: instruments.id }).from(instruments).where(eq(instruments.archived, false));
+    const fleet = await db.select({ id: instruments.id }).from(instruments)
+      .where(and(eq(instruments.archived, false), sameTenant(instruments.tenantOrgId)));
     for (const i of fleet) applied += (await applySystemProcedures(i.id, today, actor)).created;
     return applied;
   }
-  const fleet = await db.select({ id: assets.id }).from(assets).where(eq(assets.kind, assetType));
+  const fleet = await db.select({ id: assets.id }).from(assets)
+    .where(and(eq(assets.kind, assetType), sameTenant(assets.tenantOrgId)));
   for (const a of fleet) applied += (await applyProcedures(a.id, today, actor)).created;
   return applied;
 }

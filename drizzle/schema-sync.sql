@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS "sessions" (
   "user_id" text NOT NULL,
   "expires" timestamp NOT NULL
 );
+CREATE TABLE IF NOT EXISTS "login_attempts" (
+  "identifier" text PRIMARY KEY NOT NULL,
+  "attempts" integer NOT NULL DEFAULT 0,
+  "requests" integer NOT NULL DEFAULT 0,
+  "window_start" timestamp NOT NULL DEFAULT now(),
+  "locked_until" timestamp,
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS "verification_tokens" (
   "identifier" text NOT NULL,
   "token" text NOT NULL,
@@ -668,7 +676,123 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "remote_enabled" boolean NOT
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_access_enabled" boolean NOT NULL DEFAULT false;
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_group_id" text NOT NULL DEFAULT '';
 
+-- Many operators on one instance: the org tree, per-operator staff, and the
+-- tenant stamp every top-level record carries. See src/lib/tenants.ts.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "is_operator" boolean NOT NULL DEFAULT false;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "parent_org_id" integer;
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "org_id" integer;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "stage_defs" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "people" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "stockrooms" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "audit_log" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+
+-- Tenancy foreign keys. Cascade means offboarding an operator takes its work
+-- with it; the audit log is set null so history outlives the account.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orgs_parent_org_id_orgs_id_fk') THEN
+    ALTER TABLE "orgs" ADD CONSTRAINT "orgs_parent_org_id_orgs_id_fk"
+      FOREIGN KEY ("parent_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'house_members_org_id_orgs_id_fk') THEN
+    ALTER TABLE "house_members" ADD CONSTRAINT "house_members_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "instruments" ADD CONSTRAINT "instruments_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'assets_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "assets" ADD CONSTRAINT "assets_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "tasks" ADD CONSTRAINT "tasks_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_schedules_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "pm_schedules" ADD CONSTRAINT "pm_schedules_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'time_entries_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "time_entries" ADD CONSTRAINT "time_entries_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'procedures_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "procedures" ADD CONSTRAINT "procedures_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'vocab_terms_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "vocab_terms" ADD CONSTRAINT "vocab_terms_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stage_defs_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "stage_defs" ADD CONSTRAINT "stage_defs_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'people_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "people" ADD CONSTRAINT "people_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'stockrooms_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "stockrooms" ADD CONSTRAINT "stockrooms_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_orders_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "purchase_orders_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'part_prices_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "part_prices" ADD CONSTRAINT "part_prices_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'eod_updates_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "eod_updates" ADD CONSTRAINT "eod_updates_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'remote_devices_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "remote_devices" ADD CONSTRAINT "remote_devices_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'audit_log_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
 -- ── Indexes ───────────────────────────────────────────────────────────────
+
+-- Every tenant-scoped list starts with this filter.
+CREATE INDEX IF NOT EXISTS "instruments_tenant_idx" ON "instruments" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "assets_tenant_idx" ON "assets" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "tasks_tenant_idx" ON "tasks" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "pm_schedules_tenant_idx" ON "pm_schedules" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "time_entries_tenant_idx" ON "time_entries" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "attachments_tenant_idx" ON "attachments" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "procedures_tenant_idx" ON "procedures" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "vocab_terms_tenant_idx" ON "vocab_terms" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "stockrooms_tenant_idx" ON "stockrooms" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "purchase_orders_tenant_idx" ON "purchase_orders" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "part_prices_tenant_idx" ON "part_prices" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "eod_updates_tenant_idx" ON "eod_updates" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "audit_log_tenant_idx" ON "audit_log" ("tenant_org_id");
+CREATE INDEX IF NOT EXISTS "orgs_parent_idx" ON "orgs" ("parent_org_id");
+CREATE INDEX IF NOT EXISTS "house_members_org_idx" ON "house_members" ("org_id");
 CREATE INDEX IF NOT EXISTS "tasks_instrument_idx" ON "tasks" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "checklist_task_idx" ON "checklist_items" ("task_id");
 CREATE INDEX IF NOT EXISTS "item_notes_item_idx" ON "item_notes" ("item_id");
@@ -1556,5 +1680,54 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','org','storage-unlimited-existing',
             'left ' || v_count || ' existing organization(s) on unlimited file storage; new ones start at the 5 GB default');
+  END IF;
+END $$;
+
+-- ── Migration: one instance, many operators ─────────────────────────────────
+-- Until now the instance had one house: whoever was staff saw everything, and
+-- every other organization saw what was shared with it. That is one service
+-- company with many clients. Selling the platform to other service companies
+-- means each of them runs a workspace of its own - their staff, their clients,
+-- their equipment - on the same instance, seeing none of each other.
+--
+-- The existing world becomes the first tenant. The operator org named in
+-- app_settings becomes an operator; every other organization becomes its client;
+-- every staff member becomes its staff; every record is stamped with it. Nothing
+-- changes for anyone signed in today: the operator that runs the instance is the
+-- root, and its staff keep seeing everything, because somebody has to be able to
+-- support the tenants that come next.
+--
+-- An instance that never named an operator org is left alone. lib/tenants treats
+-- a missing root as "one operator, no tenancy", which is exactly what it is.
+DO $$
+DECLARE v_root integer; v_orgs integer; v_rows integer; v_total integer := 0; t text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'org' AND "entity_id" = 'first-tenant') THEN
+    SELECT "operator_org_id" INTO v_root FROM "app_settings" WHERE "id" = 1;
+    IF v_root IS NOT NULL THEN
+      UPDATE "orgs" SET "is_operator" = true WHERE "id" = v_root;
+      UPDATE "orgs" SET "parent_org_id" = v_root WHERE "id" <> v_root AND "parent_org_id" IS NULL;
+      GET DIAGNOSTICS v_orgs = ROW_COUNT;
+      UPDATE "house_members" SET "org_id" = v_root WHERE "org_id" IS NULL;
+
+      FOREACH t IN ARRAY ARRAY['instruments','assets','tasks','pm_schedules','time_entries',
+                               'attachments','procedures','vocab_terms','stage_defs','people',
+                               'stockrooms','purchase_orders','part_prices','eod_updates',
+                               'remote_devices','audit_log'] LOOP
+        EXECUTE format('UPDATE %I SET "tenant_org_id" = $1 WHERE "tenant_org_id" IS NULL', t) USING v_root;
+        GET DIAGNOSTICS v_rows = ROW_COUNT;
+        v_total := v_total + v_rows;
+      END LOOP;
+
+      INSERT INTO "audit_log" ("actor","entity_type","entity_id","action","tenant_org_id")
+      VALUES ('schema-sync','org','first-tenant',
+              'made the operator organization the first tenant: ' || v_orgs || ' organization(s) became its clients and '
+              || v_total || ' record(s) were stamped with it - staff of the operator that runs the instance keep seeing everything',
+              v_root);
+    END IF;
+    -- No sentinel when there was no operator to stamp with: an instance that
+    -- deploys before it names one must still get this backfill on the deploy
+    -- after it does, so the block stays retryable until it has work to do.
   END IF;
 END $$;

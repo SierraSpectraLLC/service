@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { attachments } from "@/db/schema";
 import { requireEditor } from "@/lib/authz";
 import { mayReadAttachment } from "@/lib/fileAccess";
+import { tenantOfAsset, tenantOfSystem } from "@/lib/tenancy";
 import { combinePdfs, looksLikePdf } from "@/lib/pdfCombine";
 import { audit } from "@/lib/audit";
 import { getBrand } from "@/lib/brand";
@@ -89,7 +90,13 @@ export async function POST(req: Request) {
     const { put } = await import("@vercel/blob");
     const fileName = (body.saveAs.fileName || "combined.pdf").replace(/[^\w.\- ]/g, "").slice(0, 80) || "combined.pdf";
     const blob = await put(fileName, Buffer.from(combined), { access: "public", addRandomSuffix: true });
+    // The packet belongs to the workspace of the record it documents, not to
+    // whoever combined it - see lib/tenants.
+    const tenantOrgId = body.saveAs.instrumentId !== null
+      ? await tenantOfSystem(body.saveAs.instrumentId)
+      : await tenantOfAsset(body.saveAs.assetId!);
     const [row] = await db.insert(attachments).values({
+      tenantOrgId,
       instrumentId: body.saveAs.instrumentId, assetId: body.saveAs.assetId,
       fileName, kind: "Report", url: blob.url, size: combined.byteLength,
       uploadedBy: user.email,

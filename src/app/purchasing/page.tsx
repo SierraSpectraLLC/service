@@ -9,6 +9,7 @@ import { stockAccess } from "@/lib/stock";
 import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
 import { formatCents } from "@/lib/money";
 import { canSeeCosts } from "@/lib/redact";
+import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,10 @@ export default async function PurchasingPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
 
   const [rooms, myShares, orgRows] = await Promise.all([
-    db.select().from(stockrooms).orderBy(asc(stockrooms.name)),
+    db.select().from(stockrooms).where(forTenant(stockrooms.tenantOrgId, readTenant(user))).orderBy(asc(stockrooms.name)),
     user.orgId === null ? Promise.resolve([]) : db.select({ stockroomId: stockroomShares.stockroomId, access: stockroomShares.access })
       .from(stockroomShares).where(eq(stockroomShares.orgId, user.orgId)),
-    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+    visibleOrgs(user),
   ]);
   const seeRooms = rooms.filter((r) => stockAccess(user, r, myShares.find((s) => s.stockroomId === r.id)).see);
   const roomIds = seeRooms.map((r) => r.id);
@@ -47,7 +48,7 @@ export default async function PurchasingPage() {
     const mine = lines.filter((l) => l.poId === p.id);
     const t = poTotals(mine);
     // Order value follows the destination room's owner, same rule as part cost.
-    const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null);
+    const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null, p.tenantOrgId);
     return (
       <div key={p.id} style={{ borderTop: "1px solid var(--line)", padding: "9px 0", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <Link href={`/purchasing/${p.id}`} className="mono" style={{ fontSize: 13, fontWeight: 700, textDecoration: "none" }}>

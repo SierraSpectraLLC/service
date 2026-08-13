@@ -34,6 +34,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, remoteDevices } from "@/db/schema";
+import { tenantOfOrg } from "@/lib/tenancy";
 
 /** How long a connect URL is good for. Bounds the START of a session, not its length. */
 export const CONNECT_TTL_SECONDS = 120;
@@ -139,9 +140,13 @@ export function pickExistingGroup(meshes: unknown[], orgName: string): string | 
 export async function ensureOrgGroup(orgId: number): Promise<{ groupId: string } | { error: string }> {
   const cfg = remoteConfig();
   if (!cfg) return { error: NOT_CONFIGURED };
-  const [org] = await db.select({ name: orgs.name, groupId: orgs.remoteGroupId }).from(orgs).where(eq(orgs.id, orgId));
+  const [org] = await db.select({
+    name: orgs.name, groupId: orgs.remoteGroupId,
+    parentOrgId: orgs.parentOrgId, isOperator: orgs.isOperator,
+  }).from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
   if (org.groupId) return { groupId: org.groupId };
+  const groupName = await engineGroupName(orgId, org);
   try {
     // Adopt a group already carrying this organization's name before making a
     // second one. Two ways to arrive here with one sitting there: somebody made
@@ -149,14 +154,14 @@ export async function ensureOrgGroup(orgId: number): Promise<{ groupId: string }
     // and the write of its id didn't - and that second one would otherwise leave
     // a group per attempt, each holding machines the portal can't see.
     const seen = await engineCall(cfg, "meshes", {});
-    const adopted = pickExistingGroup(Array.isArray(seen.meshes) ? seen.meshes : [], org.name);
+    const adopted = pickExistingGroup(Array.isArray(seen.meshes) ? seen.meshes : [], groupName);
     if (adopted) {
       await db.update(orgs).set({ remoteGroupId: adopted }).where(eq(orgs.id, orgId));
       return { groupId: adopted };
     }
     // meshtype 2 is a group of agent-managed machines, as opposed to Intel AMT
     // or agentless ones - the only kind this module deals in.
-    const reply = await engineCall(cfg, "createmesh", { meshname: org.name, meshtype: 2 });
+    const reply = await engineCall(cfg, "createmesh", { meshname: groupName, meshtype: 2 });
     const groupId = typeof reply.meshid === "string" ? reply.meshid : "";
     if (!groupId) return { error: "The remote-support host didn't return a device group id." };
     await db.update(orgs).set({ remoteGroupId: groupId }).where(eq(orgs.id, orgId));
@@ -164,6 +169,28 @@ export async function ensureOrgGroup(orgId: number): Promise<{ groupId: string }
   } catch (e) {
     return { error: `Couldn't reach the remote-support host: ${(e as Error).message}` };
   }
+}
+
+
+/**
+ * What one organization's device group is called on the engine.
+ *
+ * Qualified by the service company that runs it, because the engine has one flat
+ * namespace and groups are matched by name. Two operators each with a client
+ * called "Acme" would otherwise adopt each other's group on first enrollment -
+ * and a device group is exactly the boundary that keeps one client's machines
+ * invisible to another, so that collision would put a lab PC within reach of a
+ * company that has never heard of it.
+ *
+ * An operator's own group keeps its bare name: it is the one at the top.
+ */
+async function engineGroupName(
+  orgId: number, org: { name: string; parentOrgId: number | null; isOperator: boolean },
+): Promise<string> {
+  const tenantId = org.isOperator ? orgId : org.parentOrgId;
+  if (tenantId === null || tenantId === orgId) return org.name;
+  const [tenant] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, tenantId));
+  return tenant?.name ? `${tenant.name} · ${org.name}` : org.name;
 }
 
 /**
@@ -256,6 +283,13 @@ export function connectUrl(nodeId: string, opts: { embedded?: boolean } = {}): s
     login,                                 // the page's parameter; the admin channel uses ?auth=
     node: bareEngineId(nodeId),            // the page prefixes the domain itself
     viewmode: "11",                        // straight to the desktop tab
+    // Never the engine's phone layout. It sniffs the user agent and serves a
+    // different template that has NO support for the hide bitmask at all
+    // (verified against the pinned 1.2.4: default-mobile.handlebars never reads
+    // it), so a phone got the full device tree - every client group by name,
+    // which is a disclosure and not just an eyesore. mobile=0 forces the layout
+    // that honours hide and viewmode (webserver.js:9955).
+    mobile: "0",
   });
   // Inside our own page, strip the engine's furniture: its banner, its tab strip,
   // its footer and its panel headings, all of which duplicate or contradict ours.
@@ -285,6 +319,9 @@ export const NOT_CONFIGURED =
  * opens the page.
  */
 export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): Promise<void> {
+  // A machine belongs to the workspace that runs the organization it enrolled
+  // into, so a device list can be scoped without a join.
+  const tenantOrgId = await tenantOfOrg(orgId);
   const known = await db.select({ id: remoteDevices.id, nodeId: remoteDevices.nodeId })
     .from(remoteDevices).where(eq(remoteDevices.orgId, orgId));
   const byNode = new Map(known.map((k) => [k.nodeId, k.id]));
@@ -293,6 +330,7 @@ export async function reconcileOrgDevices(orgId: number, live: EngineDevice[]): 
     const id = byNode.get(d.nodeId);
     if (id === undefined) {
       await db.insert(remoteDevices).values({
+        tenantOrgId,
         orgId, nodeId: d.nodeId, name: d.name, platform: d.platform || "windows",
         lastSeenAt: d.online ? now : null, enrolledBy: "the agent installer",
       }).onConflictDoNothing({ target: remoteDevices.nodeId });
@@ -312,6 +350,7 @@ export async function linkedDevice(instrumentId: number) {
     id: remoteDevices.id,
     name: remoteDevices.name,
     orgId: remoteDevices.orgId,
+    tenantOrgId: remoteDevices.tenantOrgId,
     lastSeenAt: remoteDevices.lastSeenAt,
     consentOverride: remoteDevices.consentOverride,
     instrumentId: remoteDevices.instrumentId,

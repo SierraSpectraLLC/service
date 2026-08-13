@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/authz";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
 import SignoffPanel, { type SignatureRow } from "@/components/SignoffPanel";
 import SignatureBlock from "@/components/SignatureBlock";
@@ -30,7 +30,6 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const instId = parseInt(id);
   if (isNaN(instId)) notFound();
 
-  const brand = await getBrand();
   const [[inst], taskRows, partRows, attachRows, moduleRows] = await Promise.all([
     db.select().from(instruments).where(eq(instruments.id, instId)),
     db.select().from(tasks).where(eq(tasks.instrumentId, instId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -39,6 +38,8 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
   ]);
   if (!inst) notFound();
+  // The company that signs this is the one whose system it is - see brandForTenant.
+  const brand = await brandForTenant(inst.tenantOrgId);
 
   const taskIds = taskRows.map((t) => t.id);
   const items = taskIds.length

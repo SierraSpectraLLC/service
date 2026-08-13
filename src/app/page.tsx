@@ -10,7 +10,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { requireUser } from "@/lib/authz";
-import { visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { shelveRecords } from "@/lib/records";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
@@ -34,21 +34,24 @@ export default async function Home() {
     db.select().from(instrumentGases).where(mine(instrumentGases.instrumentId)),
     db.select().from(auditLog).where(mine(auditLog.instrumentId)).orderBy(desc(auditLog.createdAt)).limit(200),
     db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
-    getStageDefs(),
-    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
+    getStageDefs(await viewTenant(user)),
+    db.select({ name: people.name }).from(people)
+      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
+      .orderBy(asc(people.org), asc(people.name)),
     db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks).where(mine(tasks.instrumentId)),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
     // Archived systems included, so retiring the last system for a client (or
     // in a category) doesn't drop it out of the pickers.
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
-    db.select({ name: vocabTerms.name }).from(vocabTerms).where(eq(vocabTerms.kind, "category")),
+    db.select({ name: vocabTerms.name }).from(vocabTerms)
+      .where(and(eq(vocabTerms.kind, "category"), forTenant(vocabTerms.tenantOrgId, await viewTenant(user)))),
   ]);
 
   // Queue holders, named for the row badges. The house's own queue is labelled
   // with the operator's name rather than "us", so a client reading their own
   // board sees who they're waiting on.
   const [orgNames, brand] = await Promise.all([
-    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+    visibleOrgs(user),
     getBrand(),
   ]);
   const queueName = (id: number | null) =>

@@ -6,7 +6,7 @@ import { assets, tasks, checklistItems, parts, attachments, instruments, procedu
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
 import SignoffPanel, { type SignatureRow } from "@/components/SignoffPanel";
 import SignatureBlock from "@/components/SignatureBlock";
@@ -34,7 +34,6 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
   const assetId = parseInt(id);
   if (isNaN(assetId)) notFound();
 
-  const brand = await getBrand();
   const [[asset], taskRows, partRows, attachRows] = await Promise.all([
     db.select().from(assets).where(eq(assets.id, assetId)),
     db.select().from(tasks).where(eq(tasks.assetId, assetId)).orderBy(asc(tasks.sortOrder), asc(tasks.id)),
@@ -42,6 +41,8 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(asc(attachments.createdAt)),
   ]);
   if (!asset) notFound();
+  // Signed by the workspace whose unit it is - see brandForTenant.
+  const brand = await brandForTenant(asset.tenantOrgId);
   const [home] = asset.instrumentId !== null
     ? await db.select({ externalId: instruments.externalId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];

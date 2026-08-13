@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { parsePersona, VIEW_AS_COOKIE, type Persona } from "@/lib/viewAs";
+import { isHouseOf, isPlatformStaff, tenantViewer } from "@/lib/tenants";
 
 export type Role = "owner" | "staff" | "client_viewer" | "client_editor";
 
@@ -20,13 +21,25 @@ export type SessionUser = {
   orgId: number | null; orgName: string;
   /** "client" | "provider" | "" for the house. */
   orgKind: string;
+  /**
+   * For staff: the operator whose workspace they run - the tenant they are the
+   * house of, and the tenant new records they create belong to. Null for
+   * organization members, and for staff whose company is missing (which
+   * lib/tenants resolves to seeing nothing, never everything).
+   */
+  operatorOrgId: number | null;
+  /** The operator that runs the instance. Its staff support every tenant. */
+  rootOperatorOrgId: number | null;
 };
 
 /** The signed-in identity, before any "view as" persona is applied. */
 const sessionUser = cache(async (): Promise<SessionUser | null> => {
   const session = await auth();
   if (!session?.user?.email) return null;
-  const su = session.user as { role?: string; orgId?: number | null; orgName?: string; orgKind?: string };
+  const su = session.user as {
+    role?: string; orgId?: number | null; orgName?: string; orgKind?: string;
+    operatorOrgId?: number | null; rootOperatorOrgId?: number | null;
+  };
   return {
     email: session.user.email,
     name: session.user.name || session.user.email.split("@")[0],
@@ -34,6 +47,8 @@ const sessionUser = cache(async (): Promise<SessionUser | null> => {
     orgId: su.orgId ?? null,
     orgName: su.orgName ?? "",
     orgKind: su.orgKind ?? "",
+    operatorOrgId: su.operatorOrgId ?? null,
+    rootOperatorOrgId: su.rootOperatorOrgId ?? null,
   };
 });
 
@@ -74,8 +89,32 @@ export const currentUser = cache(async (): Promise<SessionUser | null> => {
     email: real.email, name: real.name,
     role: persona.role,
     orgId: persona.orgId, orgName: persona.orgName, orgKind: persona.orgKind,
+    // A persona is always an organization member, never staff: standing in a
+    // client's shoes means standing outside the workspace, so the operator is
+    // dropped rather than carried in.
+    operatorOrgId: null,
+    rootOperatorOrgId: real.rootOperatorOrgId,
   };
 });
+
+// The viewer as lib/tenants wants it, re-exported so server code has one import.
+export { tenantViewer };
+
+/**
+ * Is this user the house of a record - the service company whose record it is,
+ * rather than a partner who was let in? Replaces the old isHouse(role) wherever
+ * a record's tenant is in hand. See lib/tenants.isHouseOf.
+ */
+export const houseOf = (u: SessionUser, tenantOrgId: number | null) =>
+  isHouseOf(tenantViewer(u), tenantOrgId);
+
+/**
+ * The tenant a new record this user creates belongs to. Null only on an instance
+ * that has not named its operator, where there is one workspace and nothing to
+ * separate; every stamped write should carry this.
+ */
+export const myTenantOrgId = (u: SessionUser): number | null =>
+  u.operatorOrgId ?? u.rootOperatorOrgId;
 
 /** Throws unless the caller is signed in. Returns the user. */
 export async function requireUser() {
@@ -91,10 +130,20 @@ export async function requireEditor() {
   return u;
 }
 
-/** Throws unless the caller runs the platform - staff or owner. */
+/**
+ * Throws unless the caller is staff of a service company.
+ *
+ * The second check is the multi-operator one: on an instance that names an
+ * operator, a staff account with no company of its own has no workspace to act
+ * in, and letting it write would create records stamped with nobody. It says so
+ * instead of quietly filing work where no one can find it.
+ */
 export async function requireStaff() {
   const u = await requireUser();
   if (u.role !== "owner" && u.role !== "staff") throw new Error("Staff only");
+  if (u.rootOperatorOrgId !== null && u.operatorOrgId === null) {
+    throw new Error("Your staff account isn't attached to a service company yet");
+  }
   return u;
 }
 
@@ -102,6 +151,18 @@ export async function requireStaff() {
 export async function requireOwner() {
   const u = await requireUser();
   if (u.role !== "owner") throw new Error("Owner only");
+  return u;
+}
+
+/**
+ * Throws unless the caller owns the INSTANCE - the operator that runs the
+ * platform. Distinct from requireOwner, which is now "an owner of some service
+ * company": a second operator's owner runs their own workspace and must not be
+ * able to rename the platform, flip its modules, or point the sheet somewhere.
+ */
+export async function requirePlatformOwner() {
+  const u = await requireOwner();
+  if (!isPlatformStaff(tenantViewer(u))) throw new Error("This is a platform setting");
   return u;
 }
 
