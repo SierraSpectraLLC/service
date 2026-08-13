@@ -8,7 +8,7 @@ import {
   pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { assetAccess, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { assetAccess, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import SharePanel from "@/components/SharePanel";
 import SalePanel from "@/components/SalePanel";
@@ -62,12 +62,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       .where(visibleSystems === null ? undefined : visibleSystems.length ? inArray(instruments.id, visibleSystems) : sql`false`)
       .orderBy(asc(instruments.externalId)),
     db.selectDistinct({ owner: assets.owner }).from(assets),
-    db.select().from(vocabTerms),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(desc(attachments.createdAt)),
     db.select().from(auditLog).where(eq(auditLog.assetId, assetId)).orderBy(desc(auditLog.createdAt)).limit(100),
-    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
+    db.select({ name: people.name }).from(people)
+      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
+      .orderBy(asc(people.org), asc(people.name)),
   ]);
   if (!asset) notFound();
   const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
@@ -118,7 +120,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
   // Vendor offers for the part form - only sent to viewers who can see costs.
   const priceBook = showCosts
-    ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
+    ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents })
+      .from(partPrices).where(forTenant(partPrices.tenantOrgId, asset.tenantOrgId))
     : [];
   // Today's client-facing update for this unit, picked up by the EOD page.
   const modules = await getModules();

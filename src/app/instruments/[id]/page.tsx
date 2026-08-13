@@ -8,7 +8,7 @@ import {
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
-import { assertSystemVisible, canEditSystem, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { assertSystemVisible, canEditSystem, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
@@ -67,9 +67,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     getStageDefs(await viewTenant(user)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
-    db.select().from(vocabTerms),
+    db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(discussionPosts).where(eq(discussionPosts.instrumentId, instId)).orderBy(asc(discussionPosts.createdAt)),
-    db.select({ name: people.name }).from(people).orderBy(asc(people.org), asc(people.name)),
+    db.select({ name: people.name }).from(people)
+      .where(forTenant(people.tenantOrgId, await viewTenant(user)))
+      .orderBy(asc(people.org), asc(people.name)),
     db.select().from(assets).where(eq(assets.instrumentId, instId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     // Shelf stock offered for attaching: the house sees all of it; an org sees
     // only units it owns, never another client's spares. Retired units are
@@ -128,7 +130,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       .where(eq(timeEntries.instrumentId, instId))
       .orderBy(desc(timeEntries.date), desc(timeEntries.id)).limit(100),
     showCosts
-      ? db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents }).from(partPrices)
+      ? db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents })
+        .from(partPrices).where(forTenant(partPrices.tenantOrgId, inst.tenantOrgId))
       : Promise.resolve([]),
   ]);
 
