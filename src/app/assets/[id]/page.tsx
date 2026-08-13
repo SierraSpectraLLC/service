@@ -19,10 +19,12 @@ import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
+import { isPhotoFile } from "@/lib/photos";
 import AssetControls from "@/components/AssetControls";
 import GasPanel from "@/components/GasPanel";
 import PartsPanel from "@/components/PartsPanel";
-import PhotoCard from "@/components/PhotoCard";
+import PhotoThumb from "@/components/PhotoThumb";
+import PhotosPanel from "@/components/PhotosPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
@@ -135,6 +137,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const home = asset.instrumentId !== null ? insts.find((i) => i.id === asset.instrumentId) : undefined;
   const totalMinutes = taggedTime.reduce((n, t) => n + t.minutes, 0);
   const target = { instrumentId: null, assetId: asset.id };
+  // Photos are ordinary attachments; which of them is a photograph is a
+  // question about the file, not about what somebody picked in a dropdown.
+  const photoRows = attachRows.filter(isPhotoFile);
+  const coverFraming = photoRows.find((a) => a.id === asset.photoAttachmentId)?.framing ?? "";
   // The unit's own recurring upkeep, wherever it currently sits.
   const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId)).orderBy(asc(pmSchedules.nextDue));
   // This reader's own panel arrangement, so the page arrives already arranged.
@@ -190,23 +196,29 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <PanelLayout
         viewKey="asset"
         saved={panelLayout}
-        defaultRight={["files", "hours", "update", "history", "activity"]}
+        defaultRight={["photos", "files", "hours", "update", "history", "activity"]}
         panels={[
           { key: "unit", label: "Unit", node: (
             <div className="card">
-              {/* This module on its own - the counterpart to the system's photo
-                  of the whole bench. */}
-              <PhotoCard target={target} photoId={asset.photoAttachmentId}
-                alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`} canEdit={canEdit} />
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
-                  {asset.kind} — {asset.model || "(no model)"}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                {/* This module on its own - the counterpart to the system's
+                    photo of the whole bench. The rest are in Photos. */}
+                {asset.photoAttachmentId != null && (
+                  <PhotoThumb attachmentId={asset.photoAttachmentId} framing={coverFraming}
+                    alt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`} width={132} height={99} />
+                )}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
+                      {asset.kind} — {asset.model || "(no model)"}
+                    </div>
+                    {asset.forSale && <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>}
+                  </div>
+                  <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
+                    {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
+                      asset.location && `@ ${asset.location}`].filter(Boolean).join(" · ") || "No identifiers yet."}
+                  </div>
                 </div>
-                {asset.forSale && <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>}
-              </div>
-              <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
-                {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
-                  asset.location && `@ ${asset.location}`].filter(Boolean).join(" · ") || "No identifiers yet."}
               </div>
               <div style={{ fontSize: 13, margin: "8px 0 10px" }}>
                 {home ? (
@@ -270,6 +282,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
               serviceEvents={serviceEvents} />
+          ) },
+          { key: "photos", label: "Photos", node: (
+            <PhotosPanel target={target} coverId={asset.photoAttachmentId}
+              photos={photoRows.map((a) => ({
+                id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+                uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
+              }))}
+              label={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}${asset.serial ? ` SN ${asset.serial}` : ""}`}
+              canEdit={canEdit} storageFull={fileQuota.state === "full"} />
           ) },
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

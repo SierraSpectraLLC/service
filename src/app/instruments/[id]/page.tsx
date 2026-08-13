@@ -21,11 +21,13 @@ import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
+import { isPhotoFile } from "@/lib/photos";
 import SystemPanel from "@/components/SystemPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import PartsPanel from "@/components/PartsPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
+import PhotosPanel from "@/components/PhotosPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
@@ -189,6 +191,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const isStaff = user.role === "owner" || user.role === "staff";
   const modules = await getModules();
   const { persona } = await viewContext();
+  // Photos are ordinary attachments; what makes one a photograph is the file,
+  // not what somebody picked in a dropdown when they filed it.
+  const photoRows = attachRows.filter(isPhotoFile);
+  const coverFraming = photoRows.find((a) => a.id === inst.photoAttachmentId)?.framing ?? "";
+  // Each unit's own cover lives on the unit, so its framing has to be fetched -
+  // otherwise the row of thumbnails is the one place a sideways photo stays
+  // sideways.
+  const assetCoverIds = assetRows.map((a) => a.photoAttachmentId).filter((id): id is number => id != null);
+  const assetFraming = new Map((assetCoverIds.length
+    ? await db.select({ id: attachments.id, framing: attachments.framing })
+        .from(attachments).where(inArray(attachments.id, assetCoverIds))
+    : []).map((a) => [a.id, a.framing]));
   // Today's client-facing update, written here and picked up by the EOD page.
   const ownerIsViewer = inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId;
   const [todayUpdate] = modules.eod && (isStaff || ownerIsViewer)
@@ -311,13 +325,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <PanelLayout
         viewKey="system"
         saved={panelLayout}
-        defaultRight={["custody", "files", "hours", "update", "discussion", "activity"]}
+        defaultRight={["custody", "photos", "files", "hours", "update", "discussion", "activity"]}
         panels={[
           { key: "system", label: "System", node: (
             <SystemPanel
               instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
                 location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
-                photoAttachmentId: inst.photoAttachmentId }}
+                photoAttachmentId: inst.photoAttachmentId, photoFraming: coverFraming }}
               label={systemLabel(inst, assetRows)}
               clients={systemRows.map((c) => c.client)}
               categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
@@ -361,6 +375,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               assets={assetRows.map((a) => ({
                 id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
                 photoAttachmentId: a.photoAttachmentId,
+                photoFraming: a.photoAttachmentId == null ? "" : assetFraming.get(a.photoAttachmentId) ?? "",
                 openItems:
                   taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
                   partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +
@@ -415,6 +430,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               orgOptions={orgRows.filter((o) => o.id !== inst.ownerOrgId)}
               canHandOff={isStaff}
             />
+          ) },
+          { key: "photos", label: "Photos", node: (
+            <PhotosPanel target={{ instrumentId: inst.id, assetId: null }} coverId={inst.photoAttachmentId}
+              photos={photoRows.map((a) => ({
+                id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+                uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
+              }))}
+              label={`${inst.externalId} - ${systemLabel(inst, assetRows) || "the system"}`}
+              canEdit={canEdit} storageFull={fileQuota.state === "full"} />
           ) },
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}

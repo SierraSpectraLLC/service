@@ -1,0 +1,51 @@
+import { frameStyle, parseFrame } from "@/lib/photoFrame";
+
+/**
+ * A photo in a box of a size the page chose.
+ *
+ * Every picture on a record goes through here, and the box is always given a
+ * width and a height, because the alternative is what this replaced: a phone
+ * photo rendered at its natural size, three thousand pixels tall, pushing the
+ * record it illustrates off the screen.
+ *
+ * The stored file is never touched. How the photo sits in the box - turned
+ * upright, zoomed in, nudged over - is the `framing` string that travels beside
+ * it (lib/photoFrame), so the same numbers apply here, in the strip below, on
+ * the assets list and in the gallery. Frame a photo once and it is framed
+ * everywhere.
+ *
+ * Served through /api/files/<id> like every other file, so a photo of a client's
+ * lab is not public just because it happens to be an image.
+ */
+export default function PhotoThumb({
+  attachmentId, framing, alt, width, height, aspect, radius = 10, className, style,
+}: {
+  attachmentId: number;
+  /** "rot,zoom,x,y", or "" for a photo nobody has framed. */
+  framing: string;
+  alt: string;
+  width: number | string;
+  /** A fixed height in pixels. Omit it and pass `aspect` for a tile that flexes. */
+  height?: number;
+  /** Width ÷ height. Required when the box's width is fluid, because the shape of
+   *  the box is what decides how far a quarter turn has to scale to keep covering
+   *  it - guess it and a sideways photo shows bars down both sides. */
+  aspect?: number;
+  radius?: number;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  const shape = aspect ?? (typeof width === "number" && height ? width / height : 4 / 3);
+  const frame = frameStyle(parseFrame(framing), shape);
+  return (
+    <span className={className}
+      style={{
+        display: "block", width, flexShrink: 0, overflow: "hidden",
+        ...(height === undefined ? { aspectRatio: String(shape) } : { height }),
+        borderRadius: radius, border: "1px solid var(--line)", background: "#EEF1F5", ...style,
+      }}>
+      <img src={`/api/files/${attachmentId}`} alt={alt} loading="lazy"
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", ...frame }} />
+    </span>
+  );
+}
