@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/authz";
 import { isHouse, scopeFor, visibleAssetIds } from "@/lib/tenancy";
 import { assetAccess } from "@/lib/tenancy";
 import PdfStudio from "@/components/PdfStudio";
+import { myCloudConnection } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -93,6 +94,8 @@ export default async function PdfStudioPage() {
     if (house || (await assetAccess(user, a.id)).edit) editableShelf.push(a);
   }
 
+  const cloud = await myCloudConnection().catch(() => ({ configured: false, account: "", brokenReason: "" }));
+
   return (
     <div className="container split">
       <PdfStudio
@@ -104,6 +107,10 @@ export default async function PdfStudioPage() {
         // Anyone who may write has a shelf of their own to save to.
         canUseLibrary={canWrite}
         libraryLabel={house ? "Document library" : "Our file shelf"}
+        // This person's own outside file store. Read here so the studio arrives
+        // knowing whether to offer it, rather than flashing a Connect button at
+        // somebody who connected months ago.
+        cloud={cloud}
       />
     </div>
   );

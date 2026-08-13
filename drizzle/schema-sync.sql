@@ -466,6 +466,25 @@ CREATE TABLE IF NOT EXISTS "notification_prefs" (
   "email_on" boolean NOT NULL DEFAULT true,
   CONSTRAINT "notification_prefs_unique" UNIQUE("email","kind")
 );
+-- One person's standing connection to an outside file store. The refresh token
+-- is sealed with CLOUD_TOKEN_KEY (see src/lib/secretBox.ts), so this table on
+-- its own opens nothing.
+CREATE TABLE IF NOT EXISTS "cloud_connections" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "email" text NOT NULL,
+  "provider" text NOT NULL DEFAULT 'microsoft',
+  "account_name" text NOT NULL DEFAULT '',
+  "account_email" text NOT NULL DEFAULT '',
+  "refresh_token" text NOT NULL DEFAULT '',
+  "access_token" text NOT NULL DEFAULT '',
+  "access_expires_at" timestamp,
+  "scopes" text NOT NULL DEFAULT '',
+  "connected_at" timestamp NOT NULL DEFAULT now(),
+  "last_used_at" timestamp,
+  "broken_reason" text NOT NULL DEFAULT '',
+  CONSTRAINT "cloud_connection_unique" UNIQUE("email","provider")
+);
 CREATE TABLE IF NOT EXISTS "part_prices" (
   "id" serial PRIMARY KEY NOT NULL,
   "part_number" text NOT NULL,
@@ -783,6 +802,10 @@ DO $$ BEGIN
     ALTER TABLE "remote_devices" ADD CONSTRAINT "remote_devices_tenant_org_id_orgs_id_fk"
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cloud_connections_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "cloud_connections" ADD CONSTRAINT "cloud_connections_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'audit_log_tenant_org_id_orgs_id_fk') THEN
     ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_tenant_org_id_orgs_id_fk"
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
@@ -865,6 +888,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "stock_items_room_pn" ON "stock_items" ("stock
 CREATE UNIQUE INDEX IF NOT EXISTS "part_prices_pn_vendor" ON "part_prices" (lower("part_number"), lower("vendor"));
 CREATE INDEX IF NOT EXISTS "system_shares_org_idx" ON "system_shares" ("org_id");
 CREATE INDEX IF NOT EXISTS "engagement_records_org_idx" ON "engagement_records" ("org_id");
+CREATE INDEX IF NOT EXISTS "cloud_connections_email_idx" ON "cloud_connections" ("email");
 CREATE INDEX IF NOT EXISTS "remote_devices_org_idx" ON "remote_devices" ("org_id");
 CREATE INDEX IF NOT EXISTS "remote_devices_instrument_idx" ON "remote_devices" ("instrument_id");
 CREATE INDEX IF NOT EXISTS "asset_shares_org_idx" ON "asset_shares" ("org_id");

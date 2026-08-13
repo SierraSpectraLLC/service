@@ -66,8 +66,26 @@ function valueImports(src: string): string[] {
  */
 const isServerModule = (src: string) => /^\s*["']use server["']/.test(src);
 
-/** The import chain from `entry` to src/db, or null when there isn't one. */
-function chainToDb(entry: string): string[] | null {
+/** Every `node:` builtin a module imports for its value. */
+function nodeImports(src: string): string[] {
+  return [...src.matchAll(/import\s+(type\s+)?[\s\S]*?from\s+"(node:[^"]+)"/g)]
+    .filter((m) => !m[1]).map((m) => m[2]);
+}
+
+/**
+ * The import chain from `entry` to something the browser must not have, or null.
+ *
+ * Two forbidden destinations, found the same way:
+ *
+ *  - src/db, which opens a connection at module top level;
+ *  - any `node:` builtin, which webpack refuses outright - and which in practice
+ *    marks a module that also reads secrets. This half was added after a client
+ *    component imported one small arithmetic helper out of lib/msgraph and
+ *    dragged node:crypto, the Microsoft client secret and the whole Graph client
+ *    into the browser graph with it. The build caught that one; the point of a
+ *    test is to catch the next one before a build that takes half a minute.
+ */
+function forbiddenChain(entry: string): string[] | null {
   const seen = new Set<string>();
   const stack: { file: string; path: string[] }[] = [{ file: entry, path: [entry] }];
   while (stack.length) {
@@ -76,6 +94,8 @@ function chainToDb(entry: string): string[] | null {
     seen.add(file);
     const src = read(file);
     if (file !== entry && isServerModule(src)) continue;
+    const node = nodeImports(src);
+    if (node.length) return [...path, node[0]];
     for (const spec of valueImports(src)) {
       if (spec === "@/db" || spec.startsWith("@/db/")) {
         // The schema is only table definitions - importing it costs nothing at
@@ -92,17 +112,17 @@ function chainToDb(entry: string): string[] | null {
 
 const clientFiles = files.filter((f) => /^\s*["']use client["']/.test(read(f)));
 
-describe("client bundle stays off the database", () => {
+describe("client bundle stays off the database and off node builtins", () => {
   it("finds the client components at all (guards against a broken detector)", () => {
     expect(clientFiles.length).toBeGreaterThan(20);
   });
 
   it.each(clientFiles.map((f) => [f.replace(`${process.cwd()}/`, ""), f]))(
-    "%s does not reach src/db",
+    "%s reaches neither src/db nor a node: builtin",
     (_label, file) => {
-      const chain = chainToDb(file);
+      const chain = forbiddenChain(file);
       const pretty = chain?.map((c) => c.replace(`${process.cwd()}/`, "")).join("\n  -> ");
-      expect(chain, `client module reaches the database:\n  ${pretty}`).toBeNull();
+      expect(chain, `client module reaches something server-only:\n  ${pretty}`).toBeNull();
     },
   );
 });

@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { recordAttachments, recordLibraryFiles } from "@/app/actions";
 import type { PageRef } from "@/lib/pdfCombine";
+import { isFileDrag, rejectedMessage, splitDropped } from "@/lib/dropFiles";
+import { chunkRanges } from "@/lib/cloudUpload";
+import type { CloudItem } from "@/lib/cloudItems";
+import { startCloudUpload } from "@/app/actions";
+import CloudBrowser from "./CloudBrowser";
 
 // pdfjs renders thumbnails; pdf-lib assembles the result. Both are loaded on
 // demand so nobody pays for the studio until they open it.
@@ -56,12 +61,16 @@ let uidCounter = 1;
  * streaming bytes instead of redirecting - there is no studio backend to
  * secure beyond the gates that already exist.
  */
-export default function PdfStudio({ sources, destinations, canUseLibrary, libraryLabel = "Document library" }: {
+export default function PdfStudio({
+  sources, destinations, canUseLibrary, libraryLabel = "Document library", cloud,
+}: {
   sources: SourceListing[];
   destinations: Destination[];
   canUseLibrary: boolean;
   /** What this person's own shelf is called - the house's is "the library". */
   libraryLabel?: string;
+  /** The signed-in person's own outside file store, when this instance has one. */
+  cloud?: { configured: boolean; account: string; brokenReason: string };
 }) {
   const [docs, setDocs] = useState<StudioDoc[]>([]);
   const [pages, setPages] = useState<WorkPage[]>([]);
@@ -70,12 +79,21 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
   const [drag, setDrag] = useState<number | null>(null);
   const [over, setOver] = useState<number | "end" | null>(null);
   const [filter, setFilter] = useState("");
+  // A drag from outside the page. Counted rather than flagged: dragenter and
+  // dragleave both fire for every child element the pointer crosses, so a plain
+  // boolean flickers off the moment the cursor moves over a card inside.
+  const [fileOver, setFileOver] = useState(false);
+  const dragDepth = useRef(0);
+  const [dropNote, setDropNote] = useState("");
   const [cover, setCover] = useState("");
   const [numbers, setNumbers] = useState(true);
   const [headers, setHeaders] = useState(true);
   const [bulkTitle, setBulkTitle] = useState("");
   const [moveTo, setMoveTo] = useState("");
   const [dest, setDest] = useState("download");
+  // Where in OneDrive a packet would go. Held apart from `dest` so the label can
+  // name the folder rather than repeat its id.
+  const [cloudFolderName, setCloudFolderName] = useState("");
   const [fileName, setFileName] = useState("packet.pdf");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -178,10 +196,48 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
       return res.arrayBuffer();
     });
 
-  const addLocal = (files: FileList | null) => {
-    for (const f of Array.from(files ?? [])) {
-      void ingest(`local-${uidCounter++}`, titleFrom(f.name), "this device", f.name, () => f.arrayBuffer());
+  /**
+   * A PDF out of somebody's OneDrive.
+   *
+   * Fetched through our own route rather than from Microsoft directly: the
+   * access token belongs on the server, and the studio already knows how to turn
+   * a same-origin URL into bytes. Which drive it came from travels with the id,
+   * because a file in a shared SharePoint library is not on the person's own
+   * drive and cannot be addressed without it.
+   */
+  const addCloud = (item: CloudItem) =>
+    void ingest(`cloud-${item.id}-${uidCounter++}`, titleFrom(item.name), "OneDrive", item.name, async () => {
+      const q = new URLSearchParams({ item: item.id, drive: item.driveId });
+      const res = await fetch(`/api/cloud/file?${q}`);
+      if (!res.ok) throw new Error((await res.text()) || `Couldn't fetch ${item.name}`);
+      return res.arrayBuffer();
+    });
+
+  const addLocal = (files: FileList | null, from = "this device") => {
+    const { pdfs, rejected } = splitDropped(Array.from(files ?? []));
+    for (const f of pdfs) {
+      void ingest(`local-${uidCounter++}`, titleFrom(f.name), from, f.name, () => f.arrayBuffer());
     }
+    // Said out loud rather than swallowed: a packet quietly missing the pages
+    // somebody thought they added is worse than a line of text.
+    setDropNote(rejectedMessage(rejected));
+  };
+
+  /**
+   * Files dragged straight in from a folder window.
+   *
+   * The point of this is the file that is not on the machine yet. A PDF sitting
+   * in OneDrive, SharePoint or any other synced folder appears in Explorer like
+   * any other file, and dragging it here makes the OS fetch it on the spot - so
+   * the "download it first, then upload it" round trip disappears without this
+   * app knowing anything about anybody's cloud storage.
+   */
+  const onFileDrop = (e: React.DragEvent) => {
+    if (!isFileDrag(e.dataTransfer?.types)) return;   // a page tile being reordered
+    e.preventDefault();
+    dragDepth.current = 0;
+    setFileOver(false);
+    addLocal(e.dataTransfer.files, "dropped in");
   };
 
   const removeDoc = (key: string) => {
@@ -280,7 +336,29 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
       );
       const cleanName = (fileName.trim().replace(/[^\w.\- ]/g, "") || "packet.pdf").replace(/(\.pdf)?$/i, ".pdf");
 
-      if (mode === "download" || dest === "download") {
+      if (dest.startsWith("cloud:")) {
+        // Straight to Microsoft, in chunks, off a URL the server minted. The
+        // bytes never enter this app - which is what makes a 60MB packet
+        // possible at all, since a serverless function's request body is capped
+        // well below that.
+        const [, driveId, folderId] = dest.split(":");
+        const started = await startCloudUpload(driveId, folderId, cleanName);
+        if (started.error || !started.uploadUrl) throw new Error(started.error ?? "Microsoft started no upload.");
+        const ranges = chunkRanges(bytes.byteLength);
+        for (const [n, r] of ranges.entries()) {
+          setBusy("store");
+          const put = await fetch(started.uploadUrl, {
+            method: "PUT",
+            headers: { "Content-Range": `bytes ${r.start}-${r.end}/${bytes.byteLength}` },
+            body: bytes.slice(r.start, r.end + 1) as BlobPart,
+          });
+          // 202 means "chunk taken, keep going"; the last one answers 200/201.
+          if (put.status !== 202 && !put.ok) {
+            throw new Error(`Microsoft stopped the upload at part ${n + 1} of ${ranges.length} (${put.status})`);
+          }
+        }
+        setSaved(`${started.name ?? cleanName} saved to ${cloudFolderName || "OneDrive"}`);
+      } else if (mode === "download" || dest === "download") {
         const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }));
         const a = document.createElement("a");
         a.href = url; a.download = cleanName; a.click();
@@ -330,16 +408,50 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
   const canStore = dest !== "download";
 
   return (
-    <div className="pdf-studio">
+    <div className="pdf-studio"
+      onDragEnter={(e) => {
+        if (!isFileDrag(e.dataTransfer?.types)) return;
+        dragDepth.current += 1;
+        setFileOver(true);
+      }}
+      onDragOver={(e) => { if (isFileDrag(e.dataTransfer?.types)) e.preventDefault(); }}
+      onDragLeave={(e) => {
+        if (!isFileDrag(e.dataTransfer?.types)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setFileOver(false);
+      }}
+      onDrop={onFileDrop}
+      style={fileOver ? { outline: "2px dashed var(--sky)", outlineOffset: 6, borderRadius: 10 } : undefined}>
       {/* ── Sources ── */}
       <div>
         <div className="card">
           <div className="card-title" style={{ marginBottom: 6 }}>Sources</div>
-          <label className="btn sm" style={{ display: "inline-block", cursor: "pointer", marginBottom: 8 }}>
+          <label className="btn sm" style={{ display: "inline-block", cursor: "pointer", marginBottom: 4 }}>
             + From this device
             <input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
               onChange={(e) => { addLocal(e.target.files); e.target.value = ""; }} />
           </label>
+          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+            {fileOver ? "Drop to add" : "or drag PDFs in from a folder — OneDrive included"}
+          </div>
+          {dropNote && (
+            <div style={{ fontSize: 11, color: "#8A5410", marginBottom: 8 }}>
+              {dropNote} <button className="btn link" style={{ fontSize: 11 }} onClick={() => setDropNote("")}>dismiss</button>
+            </div>
+          )}
+          {cloud?.configured && (
+            <details style={{ marginBottom: 8 }}>
+              <summary style={{ cursor: "pointer", fontSize: 12, color: "#1D6396" }}>
+                {cloud.account ? `OneDrive · ${cloud.account}` : "OneDrive and SharePoint"}
+              </summary>
+              <CloudBrowser account={cloud.account} brokenReason={cloud.brokenReason}
+                onAdd={addCloud}
+                onPickFolder={(driveId, folderId, name) => {
+                  setDest(`cloud:${driveId}:${folderId}`);
+                  setCloudFolderName(name);
+                }} />
+            </details>
+          )}
           {sources.length > 6 && (
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or record"
               style={{ fontSize: 12, marginBottom: 8 }} />
@@ -514,6 +626,12 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
                 <option value="download">Download only</option>
                 {canUseLibrary && <option value="library">{libraryLabel}</option>}
                 {destinations.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+                {/* Chosen by picking a folder in the browser above rather than
+                    typed here - a drive id and an item id are not something to
+                    put in a dropdown. */}
+                {dest.startsWith("cloud:") && (
+                  <option value={dest}>{cloudFolderName || "OneDrive folder"}</option>
+                )}
               </select>
             </div>
             <div>
@@ -534,7 +652,9 @@ export default function PdfStudio({ sources, destinations, canUseLibrary, librar
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {canStore && (
               <button className="btn sm accent" disabled={!!busy || !pages.length} onClick={() => save("store")}>
-                {busy === "store" ? "Building..." : `Save to ${destinations.find((d) => d.key === dest)?.label ?? "library"}`}
+                {busy === "store" ? "Building..."
+                  : `Save to ${dest.startsWith("cloud:") ? (cloudFolderName || "OneDrive")
+                    : destinations.find((d) => d.key === dest)?.label ?? "library"}`}
               </button>
             )}
             <button className="btn sm" disabled={!!busy || !pages.length} onClick={() => save("download")}>
