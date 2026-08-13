@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { addProcedure, updateProcedure, deleteProcedure, reorderProcedures } from "@/app/actions";
+import { addProcedure, updateProcedure, deleteProcedure, reorderProcedures,
+  copyProcedureToTypes, moveTypeToCategory,
+} from "@/app/actions";
 import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
 import { cadenceLabel } from "@/lib/pm";
 import { describeProcedure, type ProcPart } from "@/lib/procedures";
@@ -123,6 +125,13 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   const [flashId, setFlashId] = useState<number | null>(null);
   const [pending, startTransition] = useTransition();
   const [orderOverride, setOrderOverride] = useState<Record<string, number[]>>({});
+  // Which procedure is being copied to another module type, and which type is
+  // being re-filed under a different system category. One at a time each: both
+  // are corrections somebody makes deliberately, not bulk work.
+  const [copying, setCopying] = useState<ProcedureRow | null>(null);
+  const [copyTo, setCopyTo] = useState<string[]>([]);
+  const [moving, setMoving] = useState<{ assetType: string; from: string } | null>(null);
+  const [moveTo, setMoveTo] = useState("");
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const drag = useRef<{ type: string; ids: number[]; itemId: number; dirty: boolean } | null>(null);
@@ -362,6 +371,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             ))}
           </div>
         </button>
+        {/* The same work on another module type - a leak check is a leak check
+            whether it is a pump or the whole stack. */}
+        <button className="btn link" aria-label={`Copy ${i.name} to another module type`} title="Copy to another type"
+          disabled={pending}
+          onClick={() => { setCopying(i); setCopyTo([]); setSaved(""); setError(""); }}
+          style={{ fontSize: 12, padding: 4 }}>copy</button>
         <button className="btn link" aria-label={`Remove ${i.name}`} title="Remove" disabled={pending}
           onClick={() => {
             if (window.confirm(`Remove "${i.name}"? Tasks and schedules already on units stay.`)) {
@@ -376,6 +391,89 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 8 }}>Procedures</div>
+
+      {/* Copy one procedure onto other module types. Several at once, because
+          "this belongs on the stack and the detector too" is one thought. */}
+      {copying && (
+        <>
+          <div className="scrim" onClick={() => setCopying(null)} />
+          <div className="sheet" role="dialog" aria-modal="true" aria-label={`Copy ${copying.name}`}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Copy &ldquo;{copying.name}&rdquo;</div>
+              <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
+                onClick={() => setCopying(null)}>close</button>
+            </div>
+            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+              From {copying.assetType === "system" ? "System" : copying.assetType}. The timing, parts and notes
+              come across; the model scope does not, since models belong to one type.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
+              {["system", ...assetTypes].filter((t) => t !== copying.assetType).map((t) => (
+                <button key={t} type="button" className="pill"
+                  onClick={() => setCopyTo((c) => (c.includes(t) ? c.filter((x) => x !== t) : [...c, t]))}
+                  style={{
+                    cursor: "pointer", border: "1px solid var(--line)",
+                    background: copyTo.includes(t) ? "#172A4A" : "#fff",
+                    color: copyTo.includes(t) ? "#fff" : "var(--slate)",
+                  }}>{t === "system" ? "System" : t}</button>
+              ))}
+            </div>
+            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn sm" onClick={() => setCopying(null)} disabled={pending}>Cancel</button>
+              <button className="btn sm primary" disabled={pending || !copyTo.length}
+                onClick={() => {
+                  setError("");
+                  startTransition(async () => {
+                    const res = await copyProcedureToTypes(copying.id, copyTo);
+                    if (res?.error) { setError(res.error); return; }
+                    const skipped = res.skipped?.length ? ` (already on ${res.skipped.join(", ")})` : "";
+                    setSaved(`Copied to ${res.copied} type${res.copied === 1 ? "" : "s"}${skipped}`);
+                    setCopying(null);
+                  });
+                }}>{pending ? "Copying..." : "Copy"}</button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Filed under the wrong system type. The models and their makers stay
+          exactly as they are - only the tag that decides where they appear moves. */}
+      {moving && (
+        <>
+          <div className="scrim" onClick={() => setMoving(null)} />
+          <div className="sheet" role="dialog" aria-modal="true" aria-label={`Move ${moving.assetType}`}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>Move {moving.assetType}</div>
+              <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
+                onClick={() => setMoving(null)}>close</button>
+            </div>
+            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+              Out of {moving.from}, into another system type. Every {moving.assetType} model keeps its name and
+              its manufacturer; only where it is filed changes.
+            </div>
+            <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="Move to system type"
+              style={{ marginBottom: 10, fontSize: 13 }}>
+              <option value="">Choose a system type...</option>
+              {categories.filter((c) => c !== moving.from).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn sm" onClick={() => setMoving(null)} disabled={pending}>Cancel</button>
+              <button className="btn sm primary" disabled={pending || !moveTo}
+                onClick={() => {
+                  setError("");
+                  startTransition(async () => {
+                    const res = await moveTypeToCategory(moving.assetType, moving.from, moveTo);
+                    if (res?.error) { setError(res.error); return; }
+                    setSaved(`${moving.assetType} moved to ${moveTo} - ${res.moved} model${res.moved === 1 ? "" : "s"} retagged`);
+                    setMoving(null);
+                  });
+                }}>{pending ? "Moving..." : "Move"}</button>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="seg" role="group" aria-label="Filter procedures" style={{ marginBottom: 10, flexWrap: "wrap" }}>
         {FILTERS.map((f) => (
@@ -423,6 +521,17 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 {g.subtitle && <span className="mut" style={{ fontSize: 11, marginLeft: 8 }}>{g.subtitle}</span>}
               </div>
               <div className="mut" style={{ fontSize: 12, textAlign: "right" }}>{counts}</div>
+              {/* Filed in the wrong place: move the type, keeping its models and
+                  their makers. Only inside a real category - "System" and the
+                  loose band are not places a type can be moved out of. */}
+              {band.key !== "system" && band.key !== "__loose" && g.type !== "system" && (
+                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMoving({ assetType: g.type, from: band.key });
+                    setMoveTo(""); setSaved(""); setError("");
+                  }}>move</button>
+              )}
               <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
             </div>
 

@@ -61,6 +61,7 @@ import { normalizePhone } from "@/lib/sms";
 import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
 import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
+import { alreadyHas, procedureCopy, refilePlan, refileSummary } from "@/lib/procedureMove";
 import { createUploadSession, graphSetupProblem, listFolder, searchFiles } from "@/lib/msgraph";
 import { vaultConfigured, VAULT_UNCONFIGURED } from "@/lib/secretBox";
 import type { CloudItem } from "@/lib/cloudItems";
@@ -2803,6 +2804,104 @@ const procScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", "
 const procTimingLabel = (p: { runsAtIntake: boolean; intervalDays: number | null }) =>
   p.runsAtIntake && p.intervalDays !== null ? `at intake + ${cadenceLabel(p.intervalDays)}`
     : p.runsAtIntake ? "at intake" : cadenceLabel(p.intervalDays!);
+
+/**
+ * The same procedure, on another module type.
+ *
+ * A leak check is a leak check whether the thing being checked is a pump or the
+ * whole LC stack, and writing it out twice produces two subtly different leak
+ * checks. Copying takes the work - the notes, the timing, the parts, whether it
+ * is mandatory - and leaves behind the model scope, which named models of the
+ * type it came from and would match nothing on the new one.
+ *
+ * Several targets in one go, because "this belongs on the stack and on the
+ * detector too" is the same thought twice.
+ */
+export async function copyProcedureToTypes(
+  procedureId: number, assetTypes: string[],
+): Promise<{ error?: string; copied?: number; skipped?: string[] }> {
+  const u = await requireStaff();
+  const [p] = await db.select().from(procedures).where(eq(procedures.id, procedureId));
+  if (!p) return { error: "Not found" };
+  if (readTenant(u) !== null && p.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+
+  const wanted = [...new Set(assetTypes.map((t) => t.trim()).filter(Boolean))]
+    .filter((t) => t.toLowerCase() !== p.assetType.toLowerCase());
+  if (!wanted.length) return { error: "Pick a module type to copy this to." };
+
+  // Only types the catalog knows: a procedure filed against a typo would sit in
+  // a group nothing ever generates work from.
+  const known = await db.select({ name: vocabTerms.name }).from(vocabTerms)
+    .where(and(eq(vocabTerms.kind, "asset_type"), forTenant(vocabTerms.tenantOrgId, readTenant(u))));
+  const byName = new Map(known.map((k) => [k.name.toLowerCase(), k.name]));
+  const targets = wanted.map((t) => byName.get(t.toLowerCase())).filter((t): t is string => !!t);
+  if (!targets.length) return { error: "That module type is not in the catalog." };
+
+  const existing = await db.select({ assetType: procedures.assetType, name: procedures.name, position: procedures.position })
+    .from(procedures).where(forTenant(procedures.tenantOrgId, readTenant(u)));
+
+  const skipped: string[] = [];
+  let copied = 0;
+  for (const to of targets) {
+    if (alreadyHas(existing, to, p.name)) { skipped.push(to); continue; }
+    const after = Math.max(0, ...existing.filter((e) => e.assetType === to).map((e) => e.position));
+    const copy = procedureCopy(p, to, after + 1);
+    await db.insert(procedures).values({ ...copy, tenantOrgId: p.tenantOrgId });
+    existing.push({ assetType: to, name: p.name, position: after + 1 });
+    copied += 1;
+  }
+  if (copied) {
+    await audit({
+      actor: u.email, entityType: "procedure", entityId: procedureId,
+      action: `copied "${p.name}" from ${p.assetType} to ${targets.filter((t) => !skipped.includes(t)).join(", ")}`,
+    });
+    revalidatePath("/settings/procedures");
+    rev();
+  }
+  return { copied, skipped };
+}
+
+/**
+ * Move a module type from one system category to another.
+ *
+ * Correcting a filing mistake - "LC System" entered under UV-Vis when it belongs
+ * under LC-MS - without re-entering the models underneath it.
+ *
+ * There is no row that says a type belongs to a category: the tree is derived
+ * from the tags on that type's MODELS (see lib/procedureMove). So this rewrites
+ * those tags and touches nothing else - every model keeps its name, its
+ * manufacturer, and any other category it was also filed under.
+ */
+export async function moveTypeToCategory(
+  assetType: string, from: string, to: string,
+): Promise<{ error?: string; moved?: number }> {
+  const u = await requireStaff();
+  const t = readTenant(u);
+  const terms = await db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, t));
+
+  const target = terms.find((v) => v.kind === "category" && v.name.trim().toLowerCase() === to.trim().toLowerCase());
+  if (!target) return { error: `"${to}" is not a system type in the catalog.` };
+
+  const plan = refilePlan(
+    terms.filter((v) => v.kind === "model")
+      .map((v) => ({ id: v.id, assetType: v.assetType, name: v.name, categories: v.categories })),
+    assetType, from, target.name,
+  );
+  if (!plan.length) return { error: refileSummary(assetType, from, target.name, 0) };
+
+  for (const row of plan) {
+    await db.update(vocabTerms).set({ categories: row.categories }).where(eq(vocabTerms.id, row.id));
+  }
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: 0,
+    action: refileSummary(assetType, from, target.name, plan.length),
+    field: "categories", oldValue: from, newValue: target.name,
+  });
+  revalidatePath("/settings/procedures");
+  revalidatePath("/settings/catalog");
+  rev();
+  return { moved: plan.length };
+}
 
 export async function addProcedure(data: ProcedureInput): Promise<{ error?: string; applied?: number }> {
   const u = await requireStaff();
