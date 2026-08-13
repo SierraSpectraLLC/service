@@ -6,6 +6,7 @@ import { instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { deviceWithOrg } from "@/lib/remote";
+import { deviceLabel, deviceSubLabel } from "@/lib/deviceName";
 import { connectRemoteDevice } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,11 @@ export const dynamic = "force-dynamic";
  * So: our page, our header, their desktop canvas in a frame with their chrome
  * hidden. Everything that decides whether this is allowed still happens in
  * connectRemoteDevice, once, server-side, before the frame has a URL to load.
+ *
+ * The one page in the app that does NOT use the standard column. Every other
+ * page is text and benefits from a measure; this one is a 16:9 desktop, and a
+ * 760px column rendered it postage-stamp sized with black bars above and below
+ * on a monitor with room for all of it. Here the window is the layout.
  */
 export default async function RemoteSessionPage({ params }: { params: Promise<{ id: string }> }) {
   try { await requireUser(); } catch { redirect("/login"); }
@@ -46,16 +52,20 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
   // empty frame and leaves somebody guessing.
   const opened = await connectRemoteDevice(deviceId, { embedded: true });
 
+  const label = deviceLabel(device.nickname, device.name);
+  const host = deviceSubLabel(device.nickname, device.name);
+
   return (
-    <div className="container page">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+    <div className="fill-window" style={{ padding: "12px 16px", maxWidth: 2200, margin: "0 auto", width: "100%" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <Link href="/remote" className="btn sm" style={{ textDecoration: "none" }}>← Machines</Link>
-        <h1 style={{ fontSize: 20, margin: 0 }}>{device.name || "Remote session"}</h1>
+        <h1 style={{ fontSize: 18, margin: 0 }}>{label}</h1>
+        {host && <span className="mono mut" style={{ fontSize: 11 }}>{host}</span>}
         {row.orgName && (
           <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{row.orgName}</span>
         )}
         {system?.externalId && (
-          <Link href={`/systems/${device.instrumentId}`} className="mut" style={{ fontSize: 12 }}>
+          <Link href={`/instruments/${device.instrumentId}`} className="mut" style={{ fontSize: 12 }}>
             on {system.externalId}
           </Link>
         )}
@@ -74,13 +84,19 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
       {opened.url && (
         <iframe
           src={opened.url}
-          title={`Remote desktop for ${device.name || "this machine"}`}
+          title={`Remote desktop for ${label}`}
           // Full screen and clipboard are the two the desktop viewer actually
           // asks the browser for; without them a copy-paste into an instrument
           // dialog silently does nothing.
           allow="fullscreen; clipboard-read; clipboard-write"
+          // The engine's viewer fits the desktop inside whatever box it is given
+          // and letterboxes the rest, so the box wants to be as close to the far
+          // machine's own shape as the window allows: the full width, and all the
+          // height left over once the header and footer have taken theirs. Taken
+          // from the layout rather than subtracted from 100vh, because the header
+          // wraps and any constant would be wrong at some window width.
           style={{
-            display: "block", width: "100%", height: "max(420px, calc(100vh - 190px))",
+            display: "block", width: "100%", flex: "1 1 auto", minHeight: 420,
             border: "1px solid var(--line)", borderRadius: 6, background: "#101418",
           }}
         />

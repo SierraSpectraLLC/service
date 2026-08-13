@@ -1186,7 +1186,13 @@ export const remoteDevices = pgTable("remote_devices", {
   // survives the system being detached or deleted.
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }),
   nodeId: text("node_id").notNull().default(""),
+  // The Windows hostname, refreshed from the engine on every reconcile - which
+  // is exactly why it cannot hold anything a person typed.
   name: text("name").notNull().default(""),
+  // What to call it instead. "DESKTOP-39VTF39" identifies a machine to a domain
+  // controller; "Altis PC" identifies it to the engineer who has to pick the
+  // right one off a list at eight in the morning.
+  nickname: text("nickname").notNull().default(""),
   platform: text("platform").notNull().default("windows"),
   // Staff's answer to "must somebody be at this machine?", overruling the one
   // derived from custody. Null - the normal state - means derive it.

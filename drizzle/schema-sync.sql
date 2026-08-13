@@ -687,6 +687,9 @@ ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "framing" text NOT NULL DEFAU
 -- Stock photos on the catalog itself: what a model, a module type or a system
 -- type looks like. Not attachments, so they never reach a client's files,
 -- gallery or storage bill - see src/lib/photos.ts.
+-- What a person calls a lab PC, kept apart from the hostname the engine
+-- overwrites on every reconcile. See src/lib/deviceName.ts.
+ALTER TABLE "remote_devices" ADD COLUMN IF NOT EXISTS "nickname" text NOT NULL DEFAULT '';
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "photo_url" text NOT NULL DEFAULT '';
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "photo_framing" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "is_operator" boolean NOT NULL DEFAULT false;

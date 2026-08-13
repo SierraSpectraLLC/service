@@ -8,7 +8,7 @@ import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { mayEnroll } from "@/lib/remoteAccess";
-import { agentDownloads, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured } from "@/lib/remote";
+import { agentBranding, agentDownloads, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured } from "@/lib/remote";
 import RemoteInviteLink from "@/components/RemoteInviteLink";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +53,9 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
   // organization's name.
   const group = await ensureOrgGroup(id);
   const downloads = "groupId" in group ? agentDownloads(group.groupId) : [];
+  // What the client will actually see on their desktop. Asked of the host rather
+  // than assumed, because the branding lives there and nothing here can set it.
+  const branding = downloads.length ? await agentBranding() : null;
   if ("groupId" in group) {
     await audit({
       actor: user.email, entityType: "remote", entityId: id,
@@ -78,11 +81,44 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
               Anything installed from this page joins <b>{org.name}</b>&apos;s machines and nobody else&apos;s.
             </div>
 
-            <ol style={{ fontSize: 13.5, margin: "0 0 16px", paddingLeft: 20, lineHeight: 1.7 }}>
+            <ol style={{ fontSize: 13.5, margin: "0 0 12px", paddingLeft: 20, lineHeight: 1.7 }}>
               <li>Download below and run it on the PC.</li>
               <li>Press <b>Install</b>, not Connect — Connect lasts only until the window closes.</li>
               <li>At the publisher warning, choose <b>More info → Run anyway</b>.</li>
             </ol>
+
+            {/* Windows stops this installer three different ways and they look
+                alike, so all three are here. The real fix is a signing
+                certificate; until then this is the whole of the friction, and
+                somebody standing at a lab PC should not have to guess it. */}
+            <details style={{ fontSize: 12.5, marginBottom: 16 }}>
+              <summary style={{ cursor: "pointer", color: "#1D6396" }}>
+                Windows blocked it and offered no way through
+              </summary>
+              <div className="mut" style={{ marginTop: 8, lineHeight: 1.65 }}>
+                The installer is unsigned, so it has no reputation with Microsoft. Three separate things stop it and
+                they look almost identical:
+                <ul style={{ paddingLeft: 18, margin: "6px 0" }}>
+                  <li>
+                    <b>The browser refused the download</b> — Edge or Chrome says it is not commonly downloaded.
+                    Open the downloads list, find the file, and choose <b>Keep</b> (Chrome:{" "}
+                    <b>⌄ → Keep</b>; Edge: <b>… → Keep → Show more → Keep anyway</b>).
+                  </li>
+                  <li>
+                    <b>The file arrived but will not start</b> — right-click it → <b>Properties</b> → tick{" "}
+                    <b>Unblock</b> at the bottom → <b>OK</b>, then run it again.
+                  </li>
+                  <li>
+                    <b>&quot;Windows protected your PC&quot; with no Run anyway</b> — that button is hidden behind{" "}
+                    <b>More info</b>. If it genuinely is not there, SmartScreen is set to block without a bypass by
+                    policy, and only the site&apos;s own IT can allow it: they can add the file to their allow list, or
+                    install it from an elevated PowerShell.
+                  </li>
+                </ul>
+                A renamed installer starts from zero reputation again, so this comes back for a while after the
+                support host is rebranded. Code signing is what removes it for good.
+              </div>
+            </details>
 
             {downloads.map((d) => (
               <div key={d.url} style={{
@@ -94,6 +130,25 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 <span className="mut" style={{ fontSize: 11.5 }}>{d.note}</span>
               </div>
             ))}
+
+            {/* Not decoration: this is the one place the borrowed branding is
+                catchable before a client's IT sees it on their own desktop. */}
+            {branding && !branding.branded && (
+              <div style={{ background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 10px", marginTop: 12, fontSize: 12 }}>
+                <b style={{ color: "#8A5410" }}>The support host has no agent branding set.</b>{" "}
+                This downloads as <span className="mono">{branding.fileName}</span>, and installs a window and a
+                Windows service under the engine&apos;s name rather than {brand.operatorName || brand.name}&apos;s.
+                Fix it on the host — <span className="mono">agentCustomization</span> in{" "}
+                <span className="mono">meshcentral-data/config.json</span>, §13 of the remote host setup — then
+                restart it. Agents already installed keep the old name until they are reinstalled.
+              </div>
+            )}
+            {branding?.branded && (
+              <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
+                Downloads under your own name — the host is serving{" "}
+                <span className="mono">{branding.fileName}</span>.
+              </div>
+            )}
 
             <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
               Outbound 443 only, nothing listening — a site that filters by destination needs one entry for{" "}
