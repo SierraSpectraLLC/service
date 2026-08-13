@@ -111,9 +111,6 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
           {state === "saving" ? "Saving..." : state === "saved" ? "Saved ✓" : state === "dirty" ? "Unsaved" : "goes on today's client report"}
         </span>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-        What the client reads tonight. Saves itself as you type.
-      </div>
       {/* Never disabled - see the autosave rules above. */}
       <textarea rows={3} value={draft.systemUpdate}
         onChange={(e) => edit({ systemUpdate: e.target.value })}

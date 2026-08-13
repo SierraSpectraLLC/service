@@ -144,9 +144,7 @@ export default function PhotosPanel({
             </div>
           </div>
         ) : (
-          <div className="mut" style={{ fontSize: 13 }}>
-            No photos yet. Phone photos are fine - they can be turned upright and zoomed here.
-          </div>
+          <div className="mut" style={{ fontSize: 13 }}>No photos yet.</div>
         )
       ) : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
