@@ -53,24 +53,24 @@ export default function SignInSettings({ hasPassword, phone, smsConfigured }: {
     <div className="card" style={{ marginTop: 14 }}>
       <div className="card-title" style={{ marginBottom: 6 }}>Signing in</div>
 
-      <form onSubmit={savePhone} style={{ marginBottom: 14 }}>
-        <label htmlFor="tel" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>
-          Mobile number <span className="mut" style={{ fontWeight: 400 }}>for codes by text</span>
-        </label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input id="tel" type="tel" autoComplete="tel" value={tel} disabled={pending}
-            onChange={(e) => setTel(e.target.value)} placeholder="+1 555 123 4567"
-            style={{ flex: "1 1 200px", fontSize: 16 }} />
-          <button className="btn sm" type="submit" disabled={pending || tel === phone}>
-            {pending ? "Saving..." : "Save"}
-          </button>
-        </div>
-        {!smsConfigured && (
-          <div className="mut" style={{ fontSize: 11.5, marginTop: 4 }}>
-            Texting isn&apos;t switched on for this instance yet - the number is stored and works the moment it is.
+      {/* Only once texting actually works. Asking for a number that nothing can
+          send to is a field that does nothing and a promise we haven't kept -
+          set the three Twilio variables and this appears on its own. */}
+      {smsConfigured && (
+        <form onSubmit={savePhone} style={{ marginBottom: 14 }}>
+          <label htmlFor="tel" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>
+            Mobile number <span className="mut" style={{ fontWeight: 400 }}>for codes by text</span>
+          </label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input id="tel" type="tel" autoComplete="tel" value={tel} disabled={pending}
+              onChange={(e) => setTel(e.target.value)} placeholder="+1 555 123 4567"
+              style={{ flex: "1 1 200px", fontSize: 16 }} />
+            <button className="btn sm" type="submit" disabled={pending || tel === phone}>
+              {pending ? "Saving..." : "Save"}
+            </button>
           </div>
-        )}
-      </form>
+        </form>
+      )}
 
       {open ? (
         <form onSubmit={savePassword}>
