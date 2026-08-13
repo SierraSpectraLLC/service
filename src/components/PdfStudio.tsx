@@ -62,7 +62,7 @@ let uidCounter = 1;
  * secure beyond the gates that already exist.
  */
 export default function PdfStudio({
-  sources, destinations, canUseLibrary, libraryLabel = "Document library", cloud,
+  sources, destinations, canUseLibrary, libraryLabel = "Document library", cloud, cloudNote = "",
 }: {
   sources: SourceListing[];
   destinations: Destination[];
@@ -70,7 +70,9 @@ export default function PdfStudio({
   /** What this person's own shelf is called - the house's is "the library". */
   libraryLabel?: string;
   /** The signed-in person's own outside file store, when this instance has one. */
-  cloud?: { configured: boolean; account: string; brokenReason: string };
+  cloud?: { configured: boolean; account: string; brokenReason: string; setupProblem: string };
+  /** What the last OneDrive handshake reported, off the query string. */
+  cloudNote?: string;
 }) {
   const [docs, setDocs] = useState<StudioDoc[]>([]);
   const [pages, setPages] = useState<WorkPage[]>([]);
@@ -431,19 +433,24 @@ export default function PdfStudio({
             <input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
               onChange={(e) => { addLocal(e.target.files); e.target.value = ""; }} />
           </label>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
-            {fileOver ? "Drop to add" : "or drag PDFs in from a folder — OneDrive included"}
-          </div>
+          {fileOver && <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>Drop to add</div>}
           {dropNote && (
             <div style={{ fontSize: 11, color: "#8A5410", marginBottom: 8 }}>
               {dropNote} <button className="btn link" style={{ fontSize: 11 }} onClick={() => setDropNote("")}>dismiss</button>
             </div>
           )}
+          {/* Open when nobody has connected yet, so the way in is visible rather
+              than folded behind a summary somebody has to think to click. */}
           {cloud?.configured && (
-            <details style={{ marginBottom: 8 }}>
+            <details open={!cloud.account} style={{ marginBottom: 8 }}>
               <summary style={{ cursor: "pointer", fontSize: 12, color: "#1D6396" }}>
                 {cloud.account ? `OneDrive · ${cloud.account}` : "OneDrive and SharePoint"}
               </summary>
+              {cloudNote && (
+                <div style={{ fontSize: 11, marginTop: 6, color: cloudNote === "connected" ? "#2E6B2E" : "#A32D2D" }}>
+                  {cloudNote === "connected" ? "Connected ✓" : cloudNote}
+                </div>
+              )}
               <CloudBrowser account={cloud.account} brokenReason={cloud.brokenReason}
                 onAdd={addCloud}
                 onPickFolder={(driveId, folderId, name) => {
@@ -451,6 +458,14 @@ export default function PdfStudio({
                   setCloudFolderName(name);
                 }} />
             </details>
+          )}
+          {/* Half-configured says so instead of vanishing. Staff only - the
+              message names environment variables. */}
+          {cloud && !cloud.configured && cloud.setupProblem && (
+            <div style={{ fontSize: 11, color: "#8A5410", background: "#FAF0DC", border: "1px solid #F0C9A0",
+              borderRadius: 8, padding: "6px 8px", marginBottom: 8 }}>
+              {cloud.setupProblem}
+            </div>
           )}
           {sources.length > 6 && (
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or record"

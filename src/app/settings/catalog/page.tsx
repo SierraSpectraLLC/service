@@ -79,7 +79,7 @@ export default async function CatalogPage() {
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="container page">
+    <div className="container settings">
       <SettingsTabs active="catalog" isOwner={user.role === "owner"} isPlatform={isPlatform} />
       <CatalogForm categories={categories} models={models} types={types} />
       <CatalogPhotosCard entries={terms.map((t) => ({

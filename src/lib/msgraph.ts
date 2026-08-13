@@ -16,6 +16,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { browseListing, searchListing, toCloudItem, type CloudItem } from "@/lib/cloudItems";
 import { safeFileName } from "@/lib/cloudUpload";
+import { appUrl } from "@/lib/appUrl";
 
 export const NOT_CONFIGURED =
   "OneDrive is not set up on this instance yet. An owner adds the Microsoft app registration in the environment.";
@@ -29,6 +30,18 @@ const GRAPH_TIMEOUT_MS = 12_000;
 export type GraphConfig = { clientId: string; clientSecret: string; tenant: string; redirectUri: string };
 
 /**
+ * Where Microsoft sends somebody back to.
+ *
+ * Through the shared appUrl(), which already knows about Vercel's own
+ * production URL - deriving it separately here is what made this feature
+ * silently invisible on an instance that had every Microsoft variable set and no
+ * APP_URL, since a missing redirect URI made the whole config null.
+ */
+export function graphBaseUrl(): string {
+  return (appUrl() || process.env.AUTH_URL || process.env.NEXTAUTH_URL || "").replace(/\/+$/, "");
+}
+
+/**
  * `MS_TENANT` is `common` for "whichever tenant the person signs in to", or a
  * specific tenant id to lock this to one company. Defaulting to `common` is what
  * lets a client's own OneDrive be reachable at all - with a fixed tenant, only
@@ -37,7 +50,7 @@ export type GraphConfig = { clientId: string; clientSecret: string; tenant: stri
 export function graphConfig(): GraphConfig | null {
   const clientId = process.env.MS_CLIENT_ID ?? "";
   const clientSecret = process.env.MS_CLIENT_SECRET ?? "";
-  const base = (process.env.APP_URL || process.env.AUTH_URL || "").replace(/\/+$/, "");
+  const base = graphBaseUrl();
   if (!clientId || !clientSecret || !base) return null;
   return {
     clientId, clientSecret,
@@ -47,6 +60,30 @@ export function graphConfig(): GraphConfig | null {
 }
 
 export const graphConfigured = () => graphConfig() !== null;
+
+/**
+ * Why this is not working, in words, or "" when it is.
+ *
+ * Exists because the first version of this feature simply did not appear when it
+ * was half-configured: somebody set four environment variables, saw nothing at
+ * all, and had no way to tell whether they had missed a step or hit a bug. A
+ * capability that hides its own misconfiguration cannot be set up by anyone but
+ * the person who wrote it.
+ *
+ * Shown to staff only - it names environment variables, which is a debugging
+ * aid for whoever runs the instance and noise to everybody else.
+ */
+export function graphSetupProblem(): string {
+  const missing: string[] = [];
+  if (!process.env.MS_CLIENT_ID) missing.push("MS_CLIENT_ID");
+  if (!process.env.MS_CLIENT_SECRET) missing.push("MS_CLIENT_SECRET");
+  if (missing.length) return `OneDrive needs ${missing.join(" and ")} in the environment.`;
+  if (!graphBaseUrl()) {
+    return "OneDrive is configured, but this instance does not know its own address - "
+      + "set APP_URL to the portal's URL so Microsoft has somewhere to send people back to.";
+  }
+  return "";
+}
 
 // ---------------------------------------------------------------------------
 // The handshake

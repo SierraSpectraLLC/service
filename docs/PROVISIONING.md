@@ -320,6 +320,13 @@ simply never mentions OneDrive.
 | `MS_CLIENT_SECRET` | The secret's **Value** |
 | `MS_TENANT` | Optional. `common` (default) lets any work account connect; a tenant id locks it to one company |
 | `CLOUD_TOKEN_KEY` | 32+ random characters. Seals stored refresh tokens |
+| `APP_URL` | The portal's own URL. Only needed if it isn't already set — on Vercel the project's production URL is used automatically |
+
+**If OneDrive never appears, it is the redirect URI.** Microsoft has to be told
+where to send people back to, which means this instance has to know its own
+address. With none of `APP_URL`, `AUTH_URL` or Vercel's production URL set, the
+feature has nowhere to come back to. The studio now says so in orange to staff
+rather than hiding, so the answer is on the page.
 
 **`CLOUD_TOKEN_KEY` is the one that matters.** Each connection stores a
 Microsoft refresh token — a standing key to somebody's files that does not

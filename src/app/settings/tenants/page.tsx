@@ -69,7 +69,7 @@ export default async function TenantsPage() {
   const unassigned = staffRows.filter((s) => s.orgId === null).map((s) => s.email);
 
   return (
-    <div className="container page">
+    <div className="container settings">
       <SettingsTabs active="tenants" />
       <TenantConsole rows={rows} unassigned={unassigned} rootOrgId={user.rootOperatorOrgId} />
     </div>

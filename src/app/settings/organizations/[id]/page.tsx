@@ -44,7 +44,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
     .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
   return (
-    <div className="container page">
+    <div className="container settings">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {isOwner && (
           <Link href="/settings/personnel" className="btn sm" style={{ textDecoration: "none" }}>← Personnel</Link>

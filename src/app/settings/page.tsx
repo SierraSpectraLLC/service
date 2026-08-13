@@ -23,7 +23,7 @@ export default async function SettingsPage() {
     visibleOrgs(user),
   ]);
   return (
-    <div className="container page">
+    <div className="container settings">
       <SettingsTabs active="configuration" />
       <ConfigurationForm
         stageDefs={stageDefList}
