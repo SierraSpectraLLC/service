@@ -5,6 +5,7 @@ import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, assetShares, orgs, eodUpdates,
+  serviceVisits,
   pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
@@ -125,6 +126,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   const serviceEvents = taggedTasks
     .filter((t) => t.completedAt !== null)
     .map((t) => ({ day: shopDay(t.completedAt!), title: t.title }));
+  // A name somebody gave a day themselves beats any list of procedures.
+  const visitNames = Object.fromEntries((await db.select({ day: serviceVisits.day, title: serviceVisits.title })
+    .from(serviceVisits).where(eq(serviceVisits.assetId, assetId)).catch(() => []))
+    .map((v) => [v.day, v.title]));
   // Vendor offers for the part form - only sent to viewers who can see costs.
   const priceBook = showCosts
     ? await db.select({ partNumber: partPrices.partNumber, vendor: partPrices.vendor, isOem: partPrices.isOem, priceCents: partPrices.priceCents })
@@ -313,7 +318,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId)
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
-              serviceEvents={serviceEvents} />
+              serviceEvents={serviceEvents} visitNames={visitNames} />
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={target} coverId={coverId}

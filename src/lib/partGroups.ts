@@ -77,8 +77,37 @@ export type PartVisit<T> = {
   day: string;
   /** "12 Mar 2026 · Annual PM", or "No date recorded". */
   label: string;
+  /** True when the label is a name somebody gave this day themselves. */
+  named: boolean;
   parts: T[];
 };
+
+/** How many job titles a heading will print before it starts counting them. */
+const NAMES_SHOWN = 2;
+
+/**
+ * What a visit is called.
+ *
+ * A name somebody gave the day wins outright - "Annual PM" is what that day was,
+ * and no list of procedures says it better.
+ *
+ * Failing that the jobs that closed that day name it, and the rule that matters
+ * is the cap. A PM day closes every procedure on the schedule at once, so
+ * joining them produced a heading like "12 Aug 2026 · Perform Baseline Flatness
+ * Check · Replace Deuterium Lamp · Replace Tungsten Lamp · Wavelength Accuracy
+ * 486.0nm · Visual Verification at 550nm · Baseline Flatness · Wavelength
+ * Accuracy 656.10nm" - three lines of heading over two rows of parts. Two names
+ * and a count says the same thing and can be read.
+ */
+export function visitLabel(day: string, names: string[], custom = ""): string {
+  const own = custom.trim();
+  const date = day === "" ? "" : dayLabel(day);
+  if (own) return date ? `${date} · ${own}` : own;
+  if (day === "") return "No date recorded";
+  const kept = names.slice(0, NAMES_SHOWN);
+  const rest = names.length - kept.length;
+  return [date, ...kept, ...(rest > 0 ? [`+${rest} more`] : [])].join(" · ");
+}
 
 export type PartGroups<T> = {
   /** Still coming or still open. Never folded away. */
@@ -89,6 +118,8 @@ export type PartGroups<T> = {
 
 export function partGroups<T extends PartLike>(
   parts: T[], events: ServiceEvent[] = [],
+  /** Names somebody gave a day themselves, keyed YYYY-MM-DD. */
+  names: Record<string, string> = {},
 ): PartGroups<T> {
   const live = parts.filter((p) => !isFinished(p));
   const done = parts.filter(isFinished);
@@ -107,13 +138,12 @@ export function partGroups<T extends PartLike>(
   return {
     live,
     visits: days.map((day) => {
-      // Several jobs can close on one day; name them all rather than pick one.
-      const named = [...new Set(events.filter((e) => e.day === day).map((e) => e.title.trim()).filter(Boolean))];
+      const jobs = [...new Set(events.filter((e) => e.day === day).map((e) => e.title.trim()).filter(Boolean))];
+      const own = (names[day] ?? "").trim();
       return {
         day,
-        label: day === ""
-          ? "No date recorded"
-          : [dayLabel(day), ...named].join(" · "),
+        label: visitLabel(day, jobs, own),
+        named: own !== "",
         parts: byDay.get(day)!,
       };
     }),

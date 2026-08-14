@@ -818,6 +818,28 @@ export const people = pgTable("people", {
   org: text("org").notNull().default("sierra"), // sierra | labzen
 }, (t) => [unique("people_name_unique").on(t.name)]);
 
+// What a day of service was called, when somebody would rather say it than let
+// the procedure list say it. A visit is derived - it is a calendar day with
+// finished work on it, with no row of its own - so this is the one thing about
+// it that has to be stored, and only for the days anybody bothered to name.
+//
+// Keyed by record and day. No unique constraint the database can express
+// cleanly (one of the two ids is always null, and nulls do not collide), so the
+// action reads before it writes.
+export const serviceVisits = pgTable("service_visits", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
+  day: text("day").notNull(),          // YYYY-MM-DD in shop time
+  title: text("title").notNull().default(""),
+  namedBy: text("named_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("service_visits_instrument_idx").on(t.instrumentId),
+  index("service_visits_asset_idx").on(t.assetId),
+]);
+
 // Stage transition history: one row every time a stage is added to or removed
 // from an instrument. Powers the "12d in Checkout" age chips and cycle-time
 // metrics. Written by toggleStage/createInstrument/deleteStage; renaming a

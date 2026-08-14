@@ -670,6 +670,18 @@ ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "author_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "audience" text NOT NULL DEFAULT 'all';
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "room_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+CREATE TABLE IF NOT EXISTS "service_visits" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "instrument_id" integer,
+  "asset_id" integer,
+  "day" text NOT NULL,
+  "title" text NOT NULL DEFAULT '',
+  "named_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "service_visits_instrument_idx" ON "service_visits" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "service_visits_asset_idx" ON "service_visits" ("asset_id");
 ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_name" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "part_number" text NOT NULL DEFAULT '';
@@ -735,6 +747,18 @@ ALTER TABLE "audit_log" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
 -- Tenancy foreign keys. Cascade means offboarding an operator takes its work
 -- with it; the audit log is set null so history outlives the account.
 DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_visits_instrument_id_fk') THEN
+    ALTER TABLE "service_visits" ADD CONSTRAINT "service_visits_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_visits_asset_id_fk') THEN
+    ALTER TABLE "service_visits" ADD CONSTRAINT "service_visits_asset_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'service_visits_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "service_visits" ADD CONSTRAINT "service_visits_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'orgs_parent_org_id_orgs_id_fk') THEN
     ALTER TABLE "orgs" ADD CONSTRAINT "orgs_parent_org_id_orgs_id_fk"
       FOREIGN KEY ("parent_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;

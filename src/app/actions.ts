@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  stageEvents, discussionPosts, assets, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
+  stageEvents, discussionPosts, assets, serviceVisits, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
@@ -1720,6 +1720,52 @@ const partStamps = (
   status: string,
   given: { installedAt?: string; removedAt?: string } = {},
 ) => partDates(before, status, given, today());
+
+/**
+ * Call a day of service what it was.
+ *
+ * A visit has no row of its own - it is a calendar day that has finished work on
+ * it - so this is the only thing about one that gets stored, and only for the
+ * days somebody bothered to name. Blank clears the name and the heading goes
+ * back to naming itself after the jobs that closed.
+ */
+export async function nameServiceVisit(
+  target: WorkTarget, day: string, title: string,
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  if (!isoDay(day)) return { error: "That is not a day." };
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  await assertWorkEditable(u, { instrumentId: t0.instrumentId, assetId: t0.assetId });
+  const name = title.trim().slice(0, 80);
+
+  const where = and(
+    eq(serviceVisits.day, day),
+    t0.instrumentId !== null
+      ? eq(serviceVisits.instrumentId, t0.instrumentId)
+      : eq(serviceVisits.assetId, t0.assetId!),
+  );
+  const [held] = await db.select().from(serviceVisits).where(where);
+  if (!name) {
+    if (held) await db.delete(serviceVisits).where(eq(serviceVisits.id, held.id));
+  } else if (held) {
+    await db.update(serviceVisits).set({ title: name, namedBy: u.name })
+      .where(eq(serviceVisits.id, held.id));
+  } else {
+    await db.insert(serviceVisits).values({
+      tenantOrgId: t0.tenantOrgId,
+      instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+      day, title: name, namedBy: u.name,
+    });
+  }
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "visit", entityId: day,
+    action: name ? `named the work of ${day} "${name}"` : `cleared the name on the work of ${day}`,
+  });
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
 
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
