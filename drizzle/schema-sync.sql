@@ -1198,7 +1198,12 @@ INSERT INTO "stage_defs" ("name","bg","fg","sort_order","builtin") VALUES
   ('Sign-off','#E5F3E5','#2E6B2E',6,true),
   ('Waiting / blocked','#F4CCCC','#B42318',7,true),
   ('Waiting to ship','#D9D2E9','#674EA7',8,true),
-  ('Shipped','#38761D','#D9EAD3',9,true)
+  ('Shipped','#38761D','#D9EAD3',9,true),
+  -- Added to the built-in list in code long after this seed first ran, so every
+  -- instance that had already been seeded carried systems in a stage the
+  -- vocabulary did not contain - and could not take them out of it again.
+  ('In service','#E7F2FA','#1D6396',10,true),
+  ('Maintenance due','#FAF0DC','#8A5410',11,true)
 ON CONFLICT ("name") DO NOTHING;
 -- The engineer's "Basic Testing Results" matrix as starter checkout rules;
 -- fully editable (and extendable per model) on /templates.

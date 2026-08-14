@@ -42,7 +42,7 @@ import {
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen } from "@/lib/stages";
+import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen, stageChange } from "@/lib/stages";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
@@ -179,16 +179,21 @@ const targetLabel = (externalId: string, asset: { kind: string; model: string; s
 
 // ---------------- Instruments ----------------
 
-export async function toggleStage(instrumentId: number, stage: string) {
+export async function toggleStage(instrumentId: number, stage: string): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const defs = await getStageDefs();
-  if (!defs.some((s) => s.name === stage)) throw new Error("Unknown stage");
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
+  if (!inst) return { error: "Not found" };
   await assertSystemEditable(u, instrumentId);
+  // Scoped to the system's own workspace, not to whoever is looking: another
+  // operator working a shared bench must not be offered their own stage names.
+  const defs = await getStageDefs(inst.tenantOrgId);
+  // The rule, and the asymmetry in it, are in lib/stages. Returned rather than
+  // thrown: a throw here reaches the browser as a digest crash page, which is
+  // what a refusal to remove "Maintenance due" looked like.
+  const move = stageChange(inst.stages, stage, defs.map((d) => d.name));
+  if (!move.ok) return { error: move.error };
   const has = inst.stages.includes(stage);
-  if (has && inst.stages.length === 1) return; // keep at least one stage
-  const next = has ? inst.stages.filter((s) => s !== stage) : [...inst.stages, stage];
+  const next = move.next;
   await db.update(instruments).set({ stages: next, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   await db.insert(stageEvents).values({ instrumentId, stage, kind: has ? "removed" : "added" });
   await audit({
@@ -197,6 +202,7 @@ export async function toggleStage(instrumentId: number, stage: string) {
     oldValue: inst.stages.join(", "), newValue: next.join(", "),
   });
   rev(instrumentId);
+  return {};
 }
 
 export async function updateInstrumentNotes(instrumentId: number, notes: string) {
