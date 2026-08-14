@@ -73,6 +73,7 @@ import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/hous
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
+import { ownerFields } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
@@ -653,10 +654,15 @@ export async function updateAsset(assetId: number, data: AssetInput): Promise<{ 
   const acc = await assetAccess(u, assetId);
   if (!acc.see) return { error: "Not found" };
   if (!acc.edit) return { error: "Read-only access to this asset" };
-  await db.update(assets).set(a).where(eq(assets.id, assetId));
+  // Ownership is not edited here. It is one control, in the ownership section,
+  // because it decides who can SEE this unit - and when it was also a free-text
+  // box on this form the two could disagree, which is how a unit came to say
+  // "LabZen" on the row while LabZen could not open it. See lib/owner.
+  const { owner: _ignored, ...fields } = a;
+  await db.update(assets).set(fields).where(eq(assets.id, assetId));
   await audit({
     actor: u.email, instrumentId: before.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
-    action: `edited ${assetLabel({ ...before, ...a })}`,
+    action: `edited ${assetLabel({ ...before, ...fields })}`,
   });
   if (before.instrumentId !== null) rev(before.instrumentId);
   revalidatePath("/assets");
@@ -4323,7 +4329,13 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
  * settles the outgoing owner's access and record. This one is the blunt
  * correction: fixing a mis-assignment, or returning a system to the house.
  */
-export async function setSystemOwner(instrumentId: number, orgId: number | null): Promise<{ error?: string }> {
+export async function setSystemOwner(
+  instrumentId: number, orgId: number | null,
+  // Accepted so this and setAssetOwnerOrg have one shape, and ignored: a
+  // system's free-text label is `client`, and whether that is always the same
+  // fact as its owner is not settled. See lib/owner.
+  _typed = "",
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -4616,23 +4628,36 @@ export async function unshareAsset(assetId: number, orgId: number): Promise<{ er
 }
 
 /** Staff-only owner reassign, matching setSystemOwner. */
-export async function setAssetOwnerOrg(assetId: number, orgId: number | null): Promise<{ error?: string }> {
+/**
+ * Who owns a unit - the link AND the label, written together.
+ *
+ * A unit carried both and let them be set in two different places, so it could
+ * say "LabZen" on the row while LabZen genuinely could not see it. The name now
+ * follows the organization (lib/owner); `typed` is only read when no
+ * organization is chosen, for a company that is not on the platform at all.
+ */
+export async function setAssetOwnerOrg(
+  assetId: number, orgId: number | null, typed = "",
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!asset) return { error: "Not found" };
-  let org: typeof orgs.$inferSelect | undefined;
-  if (orgId !== null) {
-    [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-    if (!org) return { error: "Not found" };
-  }
-  if (asset.ownerOrgId === orgId) return {};
-  await db.update(assets).set({ ownerOrgId: orgId }).where(eq(assets.id, assetId));
+  const visible = await visibleOrgs(u);
+  if (orgId !== null && !visible.some((o) => o.id === orgId)) return { error: "Not found" };
+  const next = ownerFields(orgId, typed, visible.map((o) => ({ id: o.id, name: o.name })));
+  if (asset.ownerOrgId === next.orgId && asset.owner === next.name) return {};
+  await db.update(assets).set({ ownerOrgId: next.orgId, owner: next.name }).where(eq(assets.id, assetId));
   await audit({
     actor: u.email, assetId, entityType: "asset", entityId: assetId,
-    action: org ? `made ${org.name} the owner of ${assetLabel(asset)}` : `returned ${assetLabel(asset)} to house stewardship`,
-    field: "owner", newValue: org?.name ?? "",
+    action: next.orgId !== null
+      ? `made ${next.name} the owner of ${assetLabel(asset)}`
+      : next.name
+        ? `recorded ${next.name} as the owner of ${assetLabel(asset)} (not an organization on this instance)`
+        : `returned ${assetLabel(asset)} to house stewardship`,
+    field: "owner", oldValue: asset.owner, newValue: next.name,
   });
   revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/assets");
   return {};
 }
 

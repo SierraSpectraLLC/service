@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { shareSystem, unshareSystem, setSystemOwner, shareAsset, unshareAsset, setAssetOwnerOrg } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
+import { orgNamed } from "@/lib/owner";
 
 export type ShareEntry = { orgId: number; name: string; kind: string; access: string };
 type OrgOption = { id: number; name: string; kind: string };
@@ -14,16 +15,26 @@ const LEVEL = { view: { label: "can view", bg: "#EEF1F5", fg: "#475569" }, edit:
  * org with edit rights can bring in a service provider (and withdraw one) but
  * never touch its own access - the server enforces the same split.
  */
-export default function SharePanel({ target = "system", targetId, shares, orgOptions, ownerOrgId, canManageAll, canAddProvider }: {
+export default function SharePanel({ target = "system", targetId, shares, orgOptions, ownerOrgId, ownerName = "", canManageAll, canAddProvider }: {
   target?: "system" | "asset"; targetId: number; shares: ShareEntry[]; orgOptions: OrgOption[];
   // Which client org owns it (null = the house stewards it). Owners decide
   // access requests; staff assign ownership - it's also the claim flow.
   ownerOrgId: number | null;
+  /** The stored label. Only ever its own text when no organization is linked. */
+  ownerName?: string;
   canManageAll: boolean; canAddProvider: boolean;
 }) {
   const doShare = target === "asset" ? shareAsset : shareSystem;
   const doUnshare = target === "asset" ? unshareAsset : unshareSystem;
   const doSetOwner = target === "asset" ? setAssetOwnerOrg : setSystemOwner;
+  // Somebody who is not on the platform: a name and nothing else. Open when a
+  // record already carries one, so it is visible rather than hidden behind a
+  // dropdown option somebody has to find.
+  const [offPlatform, setOffPlatform] = useState(
+    target === "asset" && ownerOrgId === null && ownerName !== "");
+  const [typed, setTyped] = useState(ownerName);
+  // The organization somebody clearly meant when they typed the label.
+  const match = ownerOrgId === null ? orgNamed(ownerName, orgOptions) : null;
   const [adding, setAdding] = useState(false);
   const [picked, setPicked] = useState<number[]>([]);
   const [level, setLevel] = useState("view");
@@ -133,14 +144,23 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
           </div>
         </div>
       )}
+      {/* The ONE place ownership is set. It used to be here and in the edit
+          form as free text, so a unit could name one company on its row while
+          another - or nobody - actually owned it. The label now follows the
+          organization; see lib/owner. */}
       {canManageAll && (
-        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           <span className="mut" style={{ fontSize: 12 }}>Owner:</span>
-          <select value={ownerOrgId ?? ""} disabled={pending}
-            onChange={(e) => startTransition(async () => {
-              const res = await doSetOwner(targetId, e.target.value ? parseInt(e.target.value) : null);
-              if (res?.error) setError(res.error);
-            })}
+          <select value={offPlatform ? "other" : ownerOrgId ?? ""} disabled={pending}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "other") { setOffPlatform(true); return; }
+              setOffPlatform(false);
+              startTransition(async () => {
+                const res = await doSetOwner(targetId, v ? parseInt(v) : null, "");
+                if (res?.error) setError(res.error);
+              });
+            }}
             style={{ width: "auto", fontSize: 12 }}>
             <option value="">Unassigned - platform-stewarded</option>
             {/* Any organization can own equipment, providers included - a
@@ -148,7 +168,46 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
             {orgOptions.map((o) => (
               <option key={o.id} value={o.id}>{o.name}{o.kind === "provider" ? " (provider)" : ""}</option>
             ))}
+            {/* Units only for now: a system's label is its CLIENT, which is not
+                certainly the same fact as its owner, so there is nothing safe to
+                write a bare name into yet. */}
+            {target === "asset" && <option value="other">Someone not on this platform...</option>}
           </select>
+          {/* A record written when this was two fields can carry a company's
+              name with no link to it - which is exactly the state that looked
+              like ownership and granted nothing. Offered as one click, never
+              done automatically: linking grants sight of the record, and a
+              permissions change made by comparing two strings is one nobody
+              decided. */}
+          {!offPlatform && ownerOrgId === null && match !== null && (
+            <button className="btn sm" disabled={pending}
+              onClick={() => startTransition(async () => {
+                const res = await doSetOwner(targetId, match.id, "");
+                if (res?.error) setError(res.error);
+              })}>
+              Link to {match.name}
+            </button>
+          )}
+          {!offPlatform && ownerOrgId === null && match !== null && (
+            <span className="mut" style={{ fontSize: 11 }}>
+              Recorded as &ldquo;{ownerName}&rdquo; but owned by nobody here - {match.name} cannot see it.
+            </span>
+          )}
+          {offPlatform && (
+            <>
+              <input value={typed} maxLength={120} disabled={pending} placeholder="Company name"
+                onChange={(e) => setTyped(e.target.value)}
+                style={{ width: "auto", flex: "1 1 160px", fontSize: 12 }} />
+              <button className="btn sm accent" disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const res = await doSetOwner(targetId, null, typed);
+                  if (res?.error) setError(res.error);
+                })}>Save</button>
+              <span className="mut" style={{ fontSize: 11 }}>
+                A name only - nobody gains access from this.
+              </span>
+            </>
+          )}
         </div>
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
