@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { autoFg, partOpen, gasAttention, trackUrl } from "@/lib/stages";
+import { stageChange, autoFg, partOpen, gasAttention, trackUrl } from "@/lib/stages";
 
 describe("autoFg", () => {
   it("returns a dark shade for light backgrounds", () => {
@@ -48,5 +48,41 @@ describe("trackUrl", () => {
   it("returns null without a number or for unlinkable carriers", () => {
     expect(trackUrl("UPS", "")).toBeNull();
     expect(trackUrl("Freight", "99")).toBeNull();
+  });
+});
+
+describe("putting a stage on and taking it off", () => {
+  const KNOWN = ["Intake", "Checkout", "Shipped"];
+
+  it("only adds a stage the workspace has defined", () => {
+    expect(stageChange(["Intake"], "Checkout", KNOWN)).toEqual({ ok: true, next: ["Intake", "Checkout"] });
+    const bad = stageChange(["Intake"], "Chekout", KNOWN);
+    expect(bad.ok).toBe(false);
+    // The rule that stops one stage existing under four spellings.
+    if (!bad.ok) expect(bad.error).toContain("Chekout");
+  });
+
+  it("always lets go of a stage the record already carries", () => {
+    // The bug this closes: "Maintenance due" is put on a system by code - a
+    // client reports a fault, a PM falls due - and it was added to the built-in
+    // list long after the stage table was seeded. So it sat on systems while
+    // being absent from the vocabulary, and taking it off threw "Unknown stage".
+    expect(stageChange(["In service", "Maintenance due"], "Maintenance due", KNOWN))
+      .toEqual({ ok: true, next: ["In service"] });
+  });
+
+  it("keeps a system on at least one stage", () => {
+    const only = stageChange(["Intake"], "Intake", KNOWN);
+    expect(only.ok).toBe(false);
+    if (!only.ok) expect(only.error).toContain("at least one");
+  });
+
+  it("says so in words rather than throwing", () => {
+    // Thrown errors in a server action reach the browser as a digest crash page,
+    // which is what a customer saw for this.
+    for (const r of [stageChange(["Intake"], "Nope", KNOWN), stageChange(["Intake"], "Intake", KNOWN)]) {
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error.length).toBeGreaterThan(10);
+    }
   });
 });

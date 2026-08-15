@@ -670,6 +670,7 @@ ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "author_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "audience" text NOT NULL DEFAULT 'all';
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "room_org_id" integer;
 ALTER TABLE "discussion_posts" ADD COLUMN IF NOT EXISTS "tenant_org_id" integer;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "onboarded_at" timestamp;
 CREATE TABLE IF NOT EXISTS "service_visits" (
   "id" serial PRIMARY KEY NOT NULL,
   "tenant_org_id" integer,
@@ -1198,7 +1199,12 @@ INSERT INTO "stage_defs" ("name","bg","fg","sort_order","builtin") VALUES
   ('Sign-off','#E5F3E5','#2E6B2E',6,true),
   ('Waiting / blocked','#F4CCCC','#B42318',7,true),
   ('Waiting to ship','#D9D2E9','#674EA7',8,true),
-  ('Shipped','#38761D','#D9EAD3',9,true)
+  ('Shipped','#38761D','#D9EAD3',9,true),
+  -- Added to the built-in list in code long after this seed first ran, so every
+  -- instance that had already been seeded carried systems in a stage the
+  -- vocabulary did not contain - and could not take them out of it again.
+  ('In service','#E7F2FA','#1D6396',10,true),
+  ('Maintenance due','#FAF0DC','#8A5410',11,true)
 ON CONFLICT ("name") DO NOTHING;
 -- The engineer's "Basic Testing Results" matrix as starter checkout rules;
 -- fully editable (and extendable per model) on /templates.
@@ -1837,5 +1843,23 @@ BEGIN
     INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
     VALUES ('schema-sync','discussion','tenant-stamp',
             'stamped ' || v_sys || ' system post(s) with their system''s workspace and ' || v_gen || ' other post(s) with the operator whose board they sit on');
+  END IF;
+END $$;
+
+-- ── Migration: everybody already here has finished setting themselves up ─────
+-- The welcome step is for somebody arriving for the first time. Running it at
+-- people who have been using the instance for months would be a form in the way
+-- of their work, so they are stamped as done on the way past. New rows have a
+-- null onboarded_at and get the form.
+DO $$
+DECLARE v_users integer;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'auth' AND "entity_id" = 'welcome-backfill') THEN
+    UPDATE "users" SET "onboarded_at" = now() WHERE "onboarded_at" IS NULL;
+    GET DIAGNOSTICS v_users = ROW_COUNT;
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','auth','welcome-backfill',
+            'marked ' || v_users || ' existing sign-in(s) as already set up, so only new people meet the welcome step');
   END IF;
 END $$;

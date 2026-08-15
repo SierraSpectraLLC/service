@@ -42,7 +42,7 @@ import {
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen } from "@/lib/stages";
+import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen, stageChange } from "@/lib/stages";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
@@ -73,6 +73,7 @@ import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/hous
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
+import { clientAfterHandoff, ownerFields } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
@@ -179,16 +180,21 @@ const targetLabel = (externalId: string, asset: { kind: string; model: string; s
 
 // ---------------- Instruments ----------------
 
-export async function toggleStage(instrumentId: number, stage: string) {
+export async function toggleStage(instrumentId: number, stage: string): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const defs = await getStageDefs();
-  if (!defs.some((s) => s.name === stage)) throw new Error("Unknown stage");
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst) throw new Error("Not found");
+  if (!inst) return { error: "Not found" };
   await assertSystemEditable(u, instrumentId);
+  // Scoped to the system's own workspace, not to whoever is looking: another
+  // operator working a shared bench must not be offered their own stage names.
+  const defs = await getStageDefs(inst.tenantOrgId);
+  // The rule, and the asymmetry in it, are in lib/stages. Returned rather than
+  // thrown: a throw here reaches the browser as a digest crash page, which is
+  // what a refusal to remove "Maintenance due" looked like.
+  const move = stageChange(inst.stages, stage, defs.map((d) => d.name));
+  if (!move.ok) return { error: move.error };
   const has = inst.stages.includes(stage);
-  if (has && inst.stages.length === 1) return; // keep at least one stage
-  const next = has ? inst.stages.filter((s) => s !== stage) : [...inst.stages, stage];
+  const next = move.next;
   await db.update(instruments).set({ stages: next, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   await db.insert(stageEvents).values({ instrumentId, stage, kind: has ? "removed" : "added" });
   await audit({
@@ -197,6 +203,7 @@ export async function toggleStage(instrumentId: number, stage: string) {
     oldValue: inst.stages.join(", "), newValue: next.join(", "),
   });
   rev(instrumentId);
+  return {};
 }
 
 export async function updateInstrumentNotes(instrumentId: number, notes: string) {
@@ -647,10 +654,15 @@ export async function updateAsset(assetId: number, data: AssetInput): Promise<{ 
   const acc = await assetAccess(u, assetId);
   if (!acc.see) return { error: "Not found" };
   if (!acc.edit) return { error: "Read-only access to this asset" };
-  await db.update(assets).set(a).where(eq(assets.id, assetId));
+  // Ownership is not edited here. It is one control, in the ownership section,
+  // because it decides who can SEE this unit - and when it was also a free-text
+  // box on this form the two could disagree, which is how a unit came to say
+  // "LabZen" on the row while LabZen could not open it. See lib/owner.
+  const { owner: _ignored, ...fields } = a;
+  await db.update(assets).set(fields).where(eq(assets.id, assetId));
   await audit({
     actor: u.email, instrumentId: before.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
-    action: `edited ${assetLabel({ ...before, ...a })}`,
+    action: `edited ${assetLabel({ ...before, ...fields })}`,
   });
   if (before.instrumentId !== null) rev(before.instrumentId);
   revalidatePath("/assets");
@@ -4253,7 +4265,12 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
     }
   }
 
-  await db.update(instruments).set({ ownerOrgId: toOrgId }).where(eq(instruments.id, instrumentId));
+  // The client label follows ownership when it WAS ownership, and is left alone
+  // when somebody set it to something else on purpose - see lib/owner. Without
+  // this a transfer moved the owner and left the system reading "Client: LabZen"
+  // to everybody who opened it.
+  const client = clientAfterHandoff(inst.client, from?.name ?? "", to.name);
+  await db.update(instruments).set({ ownerOrgId: toOrgId, client }).where(eq(instruments.id, instrumentId));
   // The new owner needs to be able to see what they now own.
   await db.insert(systemShares)
     .values({ instrumentId, orgId: toOrgId, access: "edit", addedBy: u.email })
@@ -4284,6 +4301,7 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
   await audit({
     actor: u.email, instrumentId, entityType: "custody", entityId: inst.externalId,
     action: `handed ${inst.externalId} from ${from?.name ?? "house stewardship"} to ${to.name}`
+      + (client !== inst.client ? `; client is now ${client}` : "")
       + (from ? `; ${from.name} keeps a frozen record${opts?.keepPreviousAsViewer ? " and read-only access" : " and loses access"}` : "")
       + (remaining.length ? `; still shared with ${remaining.map((r) => r.name).join(", ")}` : "")
       + (note ? ` - ${note}` : ""),
@@ -4317,7 +4335,13 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
  * settles the outgoing owner's access and record. This one is the blunt
  * correction: fixing a mis-assignment, or returning a system to the house.
  */
-export async function setSystemOwner(instrumentId: number, orgId: number | null): Promise<{ error?: string }> {
+export async function setSystemOwner(
+  instrumentId: number, orgId: number | null,
+  // Accepted so this and setAssetOwnerOrg have one shape, and ignored: a
+  // system's free-text label is `client`, and whether that is always the same
+  // fact as its owner is not settled. See lib/owner.
+  _typed = "",
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -4327,7 +4351,12 @@ export async function setSystemOwner(instrumentId: number, orgId: number | null)
     if (!org) return { error: "Not found" };
   }
   if (inst.ownerOrgId === orgId) return {};
-  await db.update(instruments).set({ ownerOrgId: orgId }).where(eq(instruments.id, instrumentId));
+  // Same rule as a handoff: a label that was naming the old owner follows, one
+  // somebody wrote themselves does not. Assigning ownership by hand and moving
+  // it by handoff must not leave the record saying two different things.
+  const [was] = inst.ownerOrgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, inst.ownerOrgId));
+  const client = clientAfterHandoff(inst.client, was?.name ?? "", org?.name ?? "");
+  await db.update(instruments).set({ ownerOrgId: orgId, client }).where(eq(instruments.id, instrumentId));
   // An owner who can't see their own system helps no one: guarantee a share
   // (existing access levels are left alone).
   if (orgId !== null) {
@@ -4610,23 +4639,36 @@ export async function unshareAsset(assetId: number, orgId: number): Promise<{ er
 }
 
 /** Staff-only owner reassign, matching setSystemOwner. */
-export async function setAssetOwnerOrg(assetId: number, orgId: number | null): Promise<{ error?: string }> {
+/**
+ * Who owns a unit - the link AND the label, written together.
+ *
+ * A unit carried both and let them be set in two different places, so it could
+ * say "LabZen" on the row while LabZen genuinely could not see it. The name now
+ * follows the organization (lib/owner); `typed` is only read when no
+ * organization is chosen, for a company that is not on the platform at all.
+ */
+export async function setAssetOwnerOrg(
+  assetId: number, orgId: number | null, typed = "",
+): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!asset) return { error: "Not found" };
-  let org: typeof orgs.$inferSelect | undefined;
-  if (orgId !== null) {
-    [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-    if (!org) return { error: "Not found" };
-  }
-  if (asset.ownerOrgId === orgId) return {};
-  await db.update(assets).set({ ownerOrgId: orgId }).where(eq(assets.id, assetId));
+  const visible = await visibleOrgs(u);
+  if (orgId !== null && !visible.some((o) => o.id === orgId)) return { error: "Not found" };
+  const next = ownerFields(orgId, typed, visible.map((o) => ({ id: o.id, name: o.name })));
+  if (asset.ownerOrgId === next.orgId && asset.owner === next.name) return {};
+  await db.update(assets).set({ ownerOrgId: next.orgId, owner: next.name }).where(eq(assets.id, assetId));
   await audit({
     actor: u.email, assetId, entityType: "asset", entityId: assetId,
-    action: org ? `made ${org.name} the owner of ${assetLabel(asset)}` : `returned ${assetLabel(asset)} to house stewardship`,
-    field: "owner", newValue: org?.name ?? "",
+    action: next.orgId !== null
+      ? `made ${next.name} the owner of ${assetLabel(asset)}`
+      : next.name
+        ? `recorded ${next.name} as the owner of ${assetLabel(asset)} (not an organization on this instance)`
+        : `returned ${assetLabel(asset)} to house stewardship`,
+    field: "owner", oldValue: asset.owner, newValue: next.name,
   });
   revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/assets");
   return {};
 }
 
@@ -5241,6 +5283,55 @@ export async function setMyName(raw: string): Promise<{ error?: string }> {
   });
   // Their name is on assignee pickers and mention lists across the app, and the
   // session carries it - so everything, and it takes effect on the next load.
+  revalidatePath("/", "layout");
+  return {};
+}
+
+/**
+ * Finish setting yourself up. Asked once, on a first sign-in.
+ *
+ * Everything here was already settable somewhere else, and that was the problem:
+ * a new person's first sight of the portal called them by the front of their
+ * email address, emailed them about everything, and left them with no way in if
+ * mail ever stopped arriving - each fixable on a page they had no reason to open.
+ *
+ * The stamp is written LAST and only on success, so a form somebody abandoned
+ * halfway leaves them exactly where they were: asked again next time.
+ */
+export async function completeWelcome(data: {
+  name: string; password?: string; emailOff?: string[];
+}): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const email = u.email.toLowerCase();
+  const name = data.name.trim().replace(/\s+/g, " ").slice(0, 60);
+  if (!name) return { error: "Tell us what to call you." };
+
+  // Optional, and set through the same door as the account page - one place
+  // decides what a usable password is. Done BEFORE the name is written, so a
+  // rejected one does not leave half the form saved.
+  const password = (data.password ?? "").trim();
+  if (password) {
+    const res = await setPasswordFor(email, password);
+    if (res.error) return res;
+  }
+
+  await db.update(users).set({ name }).where(eq(users.email, email));
+
+  // Only the opt-OUTS are stored - no row means email is on - so this writes the
+  // boxes somebody unticked and nothing else. See lib/inbox.
+  const off = (data.emailOff ?? []).filter(isNotifyKind);
+  for (const kind of off) {
+    await db.insert(notificationPrefs).values({ email, kind, emailOn: false })
+      .onConflictDoUpdate({ target: [notificationPrefs.email, notificationPrefs.kind], set: { emailOn: false } });
+  }
+
+  await db.update(users).set({ onboardedAt: new Date() }).where(eq(users.email, email));
+  await audit({
+    actor: email, entityType: "auth", entityId: email,
+    action: `set themselves up as ${name}`
+      + (password ? " with a password" : "")
+      + (off.length ? `, email off for ${off.length} kind${off.length === 1 ? "" : "s"}` : ""),
+  });
   revalidatePath("/", "layout");
   return {};
 }

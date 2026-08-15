@@ -5,15 +5,14 @@ import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_COLOR } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, updateAsset } from "@/app/actions";
 import CatalogSelect from "./CatalogSelect";
-import PickOrAdd from "./PickOrAdd";
 
 type Asset = {
   id: number; kind: string; model: string; serial: string; manufacturer: string;
   owner: string; asFound: string; location: string; note: string; status: string; instrumentId: number | null;
 };
 
-export default function AssetControls({ asset, systems, owners, kinds, models, canEdit, isStaff }: {
-  asset: Asset; systems: { id: number; externalId: string }[]; owners: string[]; kinds: string[];
+export default function AssetControls({ asset, systems, kinds, models, canEdit, isStaff }: {
+  asset: Asset; systems: { id: number; externalId: string }[]; kinds: string[];
   // Catalog models per type; the unit's current values stay selectable even
   // if they've since left the catalog (CatalogSelect handles that).
   models: Record<string, string[]>;
@@ -96,14 +95,18 @@ export default function AssetControls({ asset, systems, owners, kinds, models, c
             </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} /></div>
           </div>
-          <div className="pf3" style={{ marginBottom: 8 }}>
+          <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Manufacturer</label><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} /></div>
-            <div>
-              <label>Owner</label>
-              <PickOrAdd value={draft.owner} options={owners} newLabel="+ New owner..." placeholder="Client name"
-                onChange={(owner) => setDraft({ ...draft, owner })} />
-            </div>
             <div><label>Location (off-system)</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Warehouse, shelf B" /></div>
+          </div>
+          {/* Owner is not edited here any more. It was a free-text box on this
+              form AND a picker in the ownership section, set in two places and
+              able to disagree - a unit could name one company on its row while
+              another, or nobody, could actually open it. It decides visibility,
+              so it belongs with sharing. */}
+          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+            Owner: <b style={{ fontWeight: 700 }}>{asset.owner || "Unassigned"}</b> - set it under Sharing,
+            below, where it also decides who can see this unit.
           </div>
           <div style={{ marginBottom: 8 }}>
             <label>As found (condition on arrival)</label>

@@ -125,3 +125,30 @@ export function roomThreadId(v: Viewer, roomOrgId: number | null): number {
   if (roomOrgId === null) return 0;
   return v.isHouse ? -roomOrgId : 0;
 }
+
+/**
+ * Who a non-internal post on a system actually reaches, as one sentence.
+ *
+ * The service company is on every system in its own workspace whether or not
+ * anybody wrote that down - it is the house. But it can ALSO hold an explicit
+ * share, which is ordinary: a system it does not own, one handed to a client,
+ * one it was given edit rights on. Listing the implicit membership and the
+ * explicit row separately produced "this goes to Sierra Spectra, LabZen, Sierra
+ * Spectra", which reads like a bug because it is one.
+ *
+ * Names are compared case-blind and the first spelling wins, since the two come
+ * from different places - one from the instance's branding, one from the orgs
+ * table - and may not agree about capitals.
+ */
+export function audienceLine(operatorName: string, shareNames: string[]): string {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of [operatorName, ...shareNames]) {
+    const n = name.trim();
+    const key = n.toLowerCase();
+    if (!n || seen.has(key)) continue;
+    seen.add(key);
+    out.push(n);
+  }
+  return out.join(", ");
+}

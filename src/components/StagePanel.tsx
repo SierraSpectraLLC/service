@@ -1,6 +1,6 @@
 "use client";
 
-import { useOptimistic, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { toggleStage } from "@/app/actions";
 
 export type StageDefLite = { name: string; bg: string; fg: string };
@@ -9,11 +9,19 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }:
   instrumentId: number; stages: string[]; stageDefs: StageDefLite[]; canEdit: boolean;
 }) {
   const [, startTransition] = useTransition();
+  const [error, setError] = useState("");
   // Flip the pill immediately; the server action + revalidation reconcile behind it.
   const [optimisticStages, applyToggle] = useOptimistic(stages, (cur: string[], stage: string) =>
     cur.includes(stage) ? cur.filter((s) => s !== stage) : [...cur, stage]
   );
-  const toggle = (s: string) => startTransition(async () => { applyToggle(s); await toggleStage(instrumentId, s); });
+  // The refusal is shown, not thrown. A server action that throws reaches the
+  // browser as a crash page with a digest number and nothing a person can act on.
+  const toggle = (s: string) => startTransition(async () => {
+    setError("");
+    applyToggle(s);
+    const res = await toggleStage(instrumentId, s);
+    if (res?.error) setError(res.error);
+  });
   const color = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
   // Active stages render as pills; the rest live in a compact dropdown so the
   // full stage vocabulary doesn't clutter the page (especially mobile).
@@ -46,6 +54,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }:
           </select>
         )}
       </div>
+      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
     </>
   );
 }

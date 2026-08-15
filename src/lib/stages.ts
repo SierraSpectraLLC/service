@@ -89,6 +89,40 @@ export const ASSET_COLOR: Record<string, { bg: string; fg: string }> = {
   Decommissioned: { bg: "#EEF1F5", fg: "#94A3B8" },
 };
 /** True when an asset status should surface on the system row / dashboard. */
+/**
+ * May this stage be put on, or taken off, a record?
+ *
+ * Asymmetric on purpose. ADDING is restricted to the defined vocabulary, which is
+ * what stops "Chekout" existing beside "Checkout". REMOVING is always allowed for
+ * a stage the record already carries, defined or not - and that asymmetry is the
+ * whole point of this function.
+ *
+ * The bug it closes: "Maintenance due" is put on a system by code, not by a
+ * person - a client reports a fault, or a PM falls due. It was added to the
+ * built-in list long after the stage table had been seeded, so it lived on
+ * systems while being absent from the vocabulary, and taking it off threw
+ * "Unknown stage" - a crash page, on the one stage people most need to clear.
+ *
+ * Seeding the two missing rows fixes today. This fixes it for good: a stage on a
+ * record is evidence that it is a real stage, whatever the table currently says,
+ * and refusing to let go of something you can see is never the right answer.
+ */
+export function stageChange(
+  current: string[], stage: string, known: string[],
+): { ok: true; next: string[] } | { ok: false; error: string } {
+  const has = current.includes(stage);
+  if (has) {
+    if (current.length === 1) {
+      return { ok: false, error: "A system keeps at least one stage - add another first." };
+    }
+    return { ok: true, next: current.filter((s) => s !== stage) };
+  }
+  if (!known.includes(stage)) {
+    return { ok: false, error: `"${stage}" is not one of this workspace's stages.` };
+  }
+  return { ok: true, next: [...current, stage] };
+}
+
 export function assetAttention(status: string): boolean {
   return status === "Needs attention" || status === "Down";
 }

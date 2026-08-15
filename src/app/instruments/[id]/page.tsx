@@ -13,7 +13,7 @@ import {
   assertSystemVisible, canEditSystem, forTenant, readTenant, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
-import { canSeePost, type Audience } from "@/lib/discussionScope";
+import { audienceLine, canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
 import { scheduleLine } from "@/lib/pmRequest";
 import { getBrand } from "@/lib/brand";
@@ -279,7 +279,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // theirs to read. See lib/discussionScope.
   const viewer = { isHouse: isStaff, orgId: user.orgId, houseOrgId: isStaff ? readTenant(user) : null };
   const visiblePosts = discussion.filter((p) => canSeePost(viewer, { ...p, audience: p.audience as Audience }));
-  const sharedWith = [brand.operatorName, ...shareRows.map((s) => s.name)].join(", ");
+  const sharedWith = audienceLine(brand.operatorName, shareRows.map((s) => s.name));
 
   // Pending serial-lookup access requests, for the people who decide them:
   // staff, or the owning organization's editors.

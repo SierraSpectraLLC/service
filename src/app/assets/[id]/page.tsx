@@ -58,7 +58,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // viewer is allowed to know about.
   const visibleSystems = await visibleSystemIds(user);
 
-  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, ownerRows, vocab,
+  const [[asset], events, taggedTasks, taggedParts, taggedTime, insts, vocab,
          gasRows, gasNames, attachRows, activity, peopleRows] = await Promise.all([
     db.select().from(assets).where(eq(assets.id, assetId)),
     db.select().from(assetEvents).where(eq(assetEvents.assetId, assetId)),
@@ -69,7 +69,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       .from(instruments)
       .where(visibleSystems === null ? undefined : visibleSystems.length ? inArray(instruments.id, visibleSystems) : sql`false`)
       .orderBy(asc(instruments.externalId)),
-    db.selectDistinct({ owner: assets.owner }).from(assets),
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user))),
     db.select().from(instrumentGases).where(eq(instrumentGases.assetId, assetId)).orderBy(asc(instrumentGases.id)),
     db.selectDistinct({ gas: instrumentGases.gas }).from(instrumentGases),
@@ -278,7 +277,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <AssetControls
                 asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
                 systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
-                owners={[...new Set([...ownerRows.map((o) => o.owner), ...insts.map((i) => i.client)].filter(Boolean))].sort()}
                 kinds={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
                 models={vocab.reduce<Record<string, string[]>>((acc, v) => {
                   if (v.kind === "model" && v.assetType) (acc[v.assetType] ??= []).push(v.name);
@@ -290,7 +288,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 knownGases={[...new Set([...GASES, ...gasNames.map((g) => g.gas)])]} canEdit={canEdit} isStaff={isStaff} />
               <SharePanel target="asset" targetId={asset.id}
                 shares={shareRows.map((r) => ({ orgId: r.orgId, name: r.name, kind: r.kind, access: r.access }))}
-                orgOptions={orgRows} ownerOrgId={asset.ownerOrgId}
+                orgOptions={orgRows} ownerOrgId={asset.ownerOrgId} ownerName={asset.owner}
                 canManageAll={isStaff} canAddProvider={!isStaff && canSell} />
               {canSell && (
                 <SalePanel target="asset" targetId={asset.id} forSale={asset.forSale}
