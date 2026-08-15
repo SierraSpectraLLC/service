@@ -1863,3 +1863,13 @@ BEGIN
             'marked ' || v_users || ' existing sign-in(s) as already set up, so only new people meet the welcome step');
   END IF;
 END $$;
+
+-- ── Every deploy: claim any stage the seed added after the tenancy backfill ──
+-- The built-in seed runs on every deploy; the backfill that stamps rows with the
+-- operator that owns them is one-shot and ran long ago. So a stage added to the
+-- built-in list later - "In service", "Maintenance due" - lands with no tenant
+-- and belongs to no workspace. Repeatable rather than guarded, so the next
+-- built-in added does not reintroduce this.
+UPDATE "stage_defs" SET "tenant_org_id" = (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1)
+WHERE "tenant_org_id" IS NULL
+  AND (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1) IS NOT NULL;
