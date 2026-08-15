@@ -25,6 +25,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
+import { clientOptions } from "@/lib/clientNames";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
   fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit,
@@ -378,7 +379,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}
               label={systemLabel(inst, assetRows)}
-              clients={systemRows.map((c) => c.client)}
+              // Companies, not just the strings already typed onto systems -
+              // see lib/clientNames for what that was hiding. Staff only: the
+              // workspace's client list is the operator's book of business, and
+              // shipping it to one client's browser so they can relabel their
+              // own system would hand them the names of the others.
+              clients={clientOptions(
+                isStaff ? orgRows.filter((o) => o.kind === "client").map((o) => o.name) : [],
+                systemRows.map((c) => c.client),
+              )}
               categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
               stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
               gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
