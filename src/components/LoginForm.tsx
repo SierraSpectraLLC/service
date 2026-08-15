@@ -20,8 +20,8 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
   send: (email: string, channel?: "email" | "sms") => Promise<{ error?: string } | void>;
   /** Whether this instance can text at all - hides a button that would do nothing. */
   smsOffered?: boolean;
-  /** Server action: signs in with a password, or says why not. */
-  withPassword: (email: string, password: string) => Promise<{ error?: string } | void>;
+  /** Server action: signs in with a password, and says where to go next. */
+  withPassword: (email: string, password: string) => Promise<{ error?: string; to?: string }>;
 }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -50,7 +50,13 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
     const clean = normalizeCode(code);
     if (!isCodeShaped(clean)) { setError(`That should be ${CODE_DIGITS} digits.`); return; }
     setError("");
-    const url = `/api/auth/callback/resend?token=${clean}&email=${encodeURIComponent(email.trim().toLowerCase())}`;
+    // callbackUrl is spelled out rather than left to Auth.js's default. Its
+    // default reads a cookie this flow never sets - the code is asked for from a
+    // server action with redirect:false - so where somebody landed after typing
+    // a code was whatever that fallback happened to be, not the dashboard.
+    const url = `/api/auth/callback/resend?token=${clean}`
+      + `&email=${encodeURIComponent(email.trim().toLowerCase())}`
+      + `&callbackUrl=${encodeURIComponent("/")}`;
     window.location.href = url;
   };
 
@@ -69,7 +75,11 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
     setError(""); setNote("");
     startTransition(async () => {
       const res = await withPassword(email.trim(), password);
-      if (res?.error) { setError(res.error); setPassword(""); }
+      if (res?.error) { setError(res.error); setPassword(""); return; }
+      // A full load, not a router navigation: the session cookie arrived on that
+      // response, and the client router would happily serve the page it already
+      // had - which is this one.
+      window.location.assign(res?.to || "/");
     });
   };
 

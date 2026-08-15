@@ -34,6 +34,16 @@ export const users = pgTable("users", {
    * to get one. Blank means codes go by email as they always have.
    */
   phone: text("phone").notNull().default(""),
+  /**
+   * When this person finished setting themselves up - their name, how they want
+   * to be told things, and a password if they wanted one. Null means they have
+   * never done it, which is what sends a first-time arrival to /welcome instead
+   * of a dashboard they have no name on.
+   *
+   * A timestamp rather than a flag so "when did they join" is answerable, and so
+   * that clearing it is a way to ask somebody to look again.
+   */
+  onboardedAt: timestamp("onboarded_at"),
 });
 
 export const accounts = pgTable("accounts", {

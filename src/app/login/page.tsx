@@ -1,5 +1,8 @@
-import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { landingFor } from "@/lib/welcome";
 import { CHANNEL_COOKIE, signIn, signInAllowed } from "@/auth";
 import { getBrand } from "@/lib/brand";
 import { checkTryAllowed, clearAttempts, recordFailure, takeSendSlot } from "@/lib/loginGate";
@@ -52,7 +55,7 @@ export default async function LoginPage({ searchParams }: {
    * account with that address" and "wrong password" are different answers only
    * to somebody who is guessing.
    */
-  async function withPassword(email: string, password: string): Promise<{ error?: string } | void> {
+  async function withPassword(email: string, password: string): Promise<{ error?: string; to?: string }> {
     "use server";
     const e = email.trim().toLowerCase();
     const gate = await checkTryAllowed(e);
@@ -70,7 +73,13 @@ export default async function LoginPage({ searchParams }: {
     }
     await clearAttempts(e);
     await startSession(found.userId);
-    redirect("/");
+    // Where, rather than a redirect from in here. A server action's redirect is
+    // a client-side navigation, and the session cookie was set on THIS response
+    // - so the router could serve the dashboard it already had, which is the
+    // login page bouncing straight back. The form does a full load instead.
+    const [me] = await db.select({ onboardedAt: users.onboardedAt })
+      .from(users).where(eq(users.id, found.userId)).catch(() => []);
+    return { to: landingFor(me?.onboardedAt ?? null) };
   }
 
   return (

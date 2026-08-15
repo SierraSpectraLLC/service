@@ -4,7 +4,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs, sheetDiffs, notifications, stockrooms, stockroomShares } from "@/db/schema";
 import { and, asc, isNull, or } from "drizzle-orm";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { users } from "@/db/schema";
 import { currentUser, viewContext } from "@/lib/authz";
+import { welcomeRedirect } from "@/lib/welcome";
+import { PATH_HEADER } from "@/middleware";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import NavMore from "@/components/NavMore";
 import AccountMenu from "@/components/AccountMenu";
@@ -31,6 +36,16 @@ const ROLE_LABEL: Record<string, string> = {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const [user, brand, view, modules] = await Promise.all([currentUser(), getBrand(), viewContext(), getModules()]);
+
+  // A first sign-in goes to /welcome once, wherever they were headed - a name,
+  // what to email them about, and a password if they want one. Decided here
+  // rather than in middleware because it takes a database read; see lib/welcome.
+  if (user) {
+    const [me] = await db.select({ onboardedAt: users.onboardedAt })
+      .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => []);
+    const to = welcomeRedirect(true, me?.onboardedAt ?? null, (await headers()).get(PATH_HEADER) ?? "/");
+    if (to) redirect(to);
+  }
   const isStaff = user && (user.role === "owner" || user.role === "staff");
   // Only the real owner is offered the switch, and only once signed in.
   const mayViewAs = view.real?.role === "owner";

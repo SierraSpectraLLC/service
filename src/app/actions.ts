@@ -5287,6 +5287,55 @@ export async function setMyName(raw: string): Promise<{ error?: string }> {
   return {};
 }
 
+/**
+ * Finish setting yourself up. Asked once, on a first sign-in.
+ *
+ * Everything here was already settable somewhere else, and that was the problem:
+ * a new person's first sight of the portal called them by the front of their
+ * email address, emailed them about everything, and left them with no way in if
+ * mail ever stopped arriving - each fixable on a page they had no reason to open.
+ *
+ * The stamp is written LAST and only on success, so a form somebody abandoned
+ * halfway leaves them exactly where they were: asked again next time.
+ */
+export async function completeWelcome(data: {
+  name: string; password?: string; emailOff?: string[];
+}): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const email = u.email.toLowerCase();
+  const name = data.name.trim().replace(/\s+/g, " ").slice(0, 60);
+  if (!name) return { error: "Tell us what to call you." };
+
+  // Optional, and set through the same door as the account page - one place
+  // decides what a usable password is. Done BEFORE the name is written, so a
+  // rejected one does not leave half the form saved.
+  const password = (data.password ?? "").trim();
+  if (password) {
+    const res = await setPasswordFor(email, password);
+    if (res.error) return res;
+  }
+
+  await db.update(users).set({ name }).where(eq(users.email, email));
+
+  // Only the opt-OUTS are stored - no row means email is on - so this writes the
+  // boxes somebody unticked and nothing else. See lib/inbox.
+  const off = (data.emailOff ?? []).filter(isNotifyKind);
+  for (const kind of off) {
+    await db.insert(notificationPrefs).values({ email, kind, emailOn: false })
+      .onConflictDoUpdate({ target: [notificationPrefs.email, notificationPrefs.kind], set: { emailOn: false } });
+  }
+
+  await db.update(users).set({ onboardedAt: new Date() }).where(eq(users.email, email));
+  await audit({
+    actor: email, entityType: "auth", entityId: email,
+    action: `set themselves up as ${name}`
+      + (password ? " with a password" : "")
+      + (off.length ? `, email off for ${off.length} kind${off.length === 1 ? "" : "s"}` : ""),
+  });
+  revalidatePath("/", "layout");
+  return {};
+}
+
 // ---------------- Operators: a service company of their own ----------------
 
 /**

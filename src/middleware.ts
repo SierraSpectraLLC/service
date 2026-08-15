@@ -6,6 +6,8 @@ import type { NextRequest } from "next/server";
  * no session cookie at all, bounce to /login. Real authorization happens in
  * server components (auth()) and server actions (requireEditor etc).
  */
+export const PATH_HEADER = "x-pathname";
+
 export function middleware(req: NextRequest) {
   const hasSession =
     req.cookies.has("authjs.session-token") ||
@@ -16,7 +18,13 @@ export function middleware(req: NextRequest) {
     url.search = "";
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+  // The path, forwarded to the render. A layout is not told where it is, and
+  // the first-sign-in gate (lib/welcome) has to know - it cannot live out here,
+  // because deciding it means asking the database whether this person has been
+  // through it, and the edge cannot.
+  const headers = new Headers(req.headers);
+  headers.set(PATH_HEADER, req.nextUrl.pathname);
+  return NextResponse.next({ request: { headers } });
 }
 
 export const config = {
