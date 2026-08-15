@@ -114,8 +114,13 @@ export default function SystemPanel({ instrument, label, clients, categories, st
           </span>
         )}
         <div style={{ flex: "1 1 190px", minWidth: 0 }}>
+          {/* Each fact holds together on a narrow screen. Left to wrap freely
+              this line broke between "Priority" and its number, which reads as a
+              rendering fault rather than as a line that ran out of room. */}
           <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
-            {instrument.externalId} · {instrument.client} · Priority {instrument.priority}
+            <span style={{ whiteSpace: "nowrap" }}>{instrument.externalId}</span>
+            {instrument.client && <> · <span style={{ whiteSpace: "nowrap" }}>{instrument.client}</span></>}
+            {" · "}<span style={{ whiteSpace: "nowrap" }}>Priority {instrument.priority}</span>
           </div>
           {!editing && (
             <>

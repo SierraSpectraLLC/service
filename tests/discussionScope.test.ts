@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { canSeePost, resolveRoom, roomThreadId, type PostScope, type Viewer } from "@/lib/discussionScope";
+import {
+  audienceLine, canSeePost, resolveRoom, roomThreadId, type PostScope, type Viewer,
+} from "@/lib/discussionScope";
 
 // A discussion leak is not recoverable - once one company has read another's
 // working notes, no fix un-reads them. So the rules get locked down here in both
@@ -127,5 +129,34 @@ describe("read markers", () => {
     expect(roomThreadId(HOUSE, 5)).toBe(-5);
     // An organization has one room, so 0 keeps their existing mark working.
     expect(roomThreadId(LABZEN, 5)).toBe(0);
+  });
+});
+
+describe("who a shared post says it reaches", () => {
+  it("names the service company once, however it got there", () => {
+    // The bug somebody spotted on a system Sierra both houses AND holds an
+    // explicit share on: "this goes to Sierra Spectra, LabZen, Sierra Spectra".
+    expect(audienceLine("Sierra Spectra", ["LabZen", "Sierra Spectra"]))
+      .toBe("Sierra Spectra, LabZen");
+  });
+
+  it("does not care how the two spellings capitalise", () => {
+    // One comes from the instance's branding, the other from the orgs table.
+    expect(audienceLine("Sierra Spectra", ["sierra spectra", "LabZen"]))
+      .toBe("Sierra Spectra, LabZen");
+  });
+
+  it("keeps every organization that really is different", () => {
+    expect(audienceLine("Sierra Spectra", ["LabZen", "Acme Engineering"]))
+      .toBe("Sierra Spectra, LabZen, Acme Engineering");
+  });
+
+  it("is just the service company when nothing is shared", () => {
+    expect(audienceLine("Sierra Spectra", [])).toBe("Sierra Spectra");
+  });
+
+  it("drops blanks rather than printing a stray comma", () => {
+    expect(audienceLine("Sierra Spectra", ["", "  ", "LabZen"]))
+      .toBe("Sierra Spectra, LabZen");
   });
 });
