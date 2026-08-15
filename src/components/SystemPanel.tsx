@@ -159,6 +159,12 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   <label>Client</label>
                   <PickOrAdd value={draft.client} options={clients} newLabel="+ New client..." placeholder="New client name"
                     onChange={(client) => setDraft({ ...draft, client })} />
+                  {/* Two different facts, and the label is the one that does not
+                      grant anything. Said here because "Client" reads like
+                      ownership to anybody who has not been told otherwise. */}
+                  <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+                    Who the work is for. Ownership is under Sharing, and follows a handoff on its own.
+                  </div>
                 </div>
                 <div><label>Priority</label><input value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })} /></div>
               </div>

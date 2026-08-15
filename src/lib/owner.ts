@@ -70,3 +70,31 @@ export function orgNamed(typed: string, orgs: OrgLite[]): OrgLite | null {
   if (!n) return null;
   return orgs.find((o) => o.name.trim().toLowerCase() === n) ?? null;
 }
+
+/**
+ * What a system's CLIENT should say after it changes hands.
+ *
+ * Owner and client are two different facts on a system, deliberately. The owner
+ * is who it belongs to - the link that governs access. The client is who the
+ * work is for, which during a refurbishment is often not the same company: we
+ * own the unit on the bench and it is destined for somebody else.
+ *
+ * They usually track each other anyway, so a transfer that moved the owner and
+ * left the client naming the previous one produced a record that read wrongly to
+ * everybody. The rule:
+ *
+ *  - the label was the outgoing owner's name, or blank - it was tracking
+ *    ownership, so it follows;
+ *  - the label was something else - somebody set it deliberately, and a transfer
+ *    is not the moment to overrule them.
+ *
+ * The second case is the whole reason the two columns exist. Overwriting there
+ * would quietly collapse them back into one field.
+ */
+export function clientAfterHandoff(client: string, fromName: string, toName: string): string {
+  const now = client.trim();
+  const was = fromName.trim();
+  if (!now) return toName.trim();
+  if (was && now.toLowerCase() === was.toLowerCase()) return toName.trim();
+  return now;
+}

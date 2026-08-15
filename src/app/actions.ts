@@ -73,7 +73,7 @@ import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/hous
 import { parseHours, formatHours } from "@/lib/hours";
 import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
-import { ownerFields } from "@/lib/owner";
+import { clientAfterHandoff, ownerFields } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
@@ -4265,7 +4265,12 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
     }
   }
 
-  await db.update(instruments).set({ ownerOrgId: toOrgId }).where(eq(instruments.id, instrumentId));
+  // The client label follows ownership when it WAS ownership, and is left alone
+  // when somebody set it to something else on purpose - see lib/owner. Without
+  // this a transfer moved the owner and left the system reading "Client: LabZen"
+  // to everybody who opened it.
+  const client = clientAfterHandoff(inst.client, from?.name ?? "", to.name);
+  await db.update(instruments).set({ ownerOrgId: toOrgId, client }).where(eq(instruments.id, instrumentId));
   // The new owner needs to be able to see what they now own.
   await db.insert(systemShares)
     .values({ instrumentId, orgId: toOrgId, access: "edit", addedBy: u.email })
@@ -4296,6 +4301,7 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
   await audit({
     actor: u.email, instrumentId, entityType: "custody", entityId: inst.externalId,
     action: `handed ${inst.externalId} from ${from?.name ?? "house stewardship"} to ${to.name}`
+      + (client !== inst.client ? `; client is now ${client}` : "")
       + (from ? `; ${from.name} keeps a frozen record${opts?.keepPreviousAsViewer ? " and read-only access" : " and loses access"}` : "")
       + (remaining.length ? `; still shared with ${remaining.map((r) => r.name).join(", ")}` : "")
       + (note ? ` - ${note}` : ""),
@@ -4345,7 +4351,12 @@ export async function setSystemOwner(
     if (!org) return { error: "Not found" };
   }
   if (inst.ownerOrgId === orgId) return {};
-  await db.update(instruments).set({ ownerOrgId: orgId }).where(eq(instruments.id, instrumentId));
+  // Same rule as a handoff: a label that was naming the old owner follows, one
+  // somebody wrote themselves does not. Assigning ownership by hand and moving
+  // it by handoff must not leave the record saying two different things.
+  const [was] = inst.ownerOrgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, inst.ownerOrgId));
+  const client = clientAfterHandoff(inst.client, was?.name ?? "", org?.name ?? "");
+  await db.update(instruments).set({ ownerOrgId: orgId, client }).where(eq(instruments.id, instrumentId));
   // An owner who can't see their own system helps no one: guarantee a share
   // (existing access levels are left alone).
   if (orgId !== null) {
