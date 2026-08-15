@@ -117,6 +117,16 @@ also the page that organization's own editors get.
   under Tasks immediately; mark it Done → the schedule's next due date moves
   out by one cadence. Open a system's **Label** and scan the QR with a phone →
   it lands on that system's page (after sign-in).
+- Work orders, end to end, because this is the loop a client judges the product
+  on: as a client org, press **Request service** on a shared system → the
+  confirmation names a work order (`WO-1001`) → **Work orders** in the nav lists
+  it, open, with the ask on it. As staff, open it, **Start work**, add a task and
+  log an hour against it, then **Resolve it** with a line about what was done →
+  the close-out appears on the order and as a post on the system's discussion,
+  and the tasks/hours counted in it match what you logged. Back as the client,
+  **That's sorted - close it** → it moves to Finished. Confirm the client is
+  never offered *Resolve*, and that a second service company sharing the system
+  sees the order with no buttons at all.
 - Discussion privacy, worth checking once per instance because it is the thing
   customers ask about: post on a shared system as staff with **Internal** on,
   then view the system as the client org (view-as) → the post is absent, and

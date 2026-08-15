@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  serviceVisits,
+  serviceVisits, workOrders,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -38,6 +38,7 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotosPanel from "@/components/PhotosPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
+import WorkOrdersPanel from "@/components/WorkOrdersPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -122,6 +123,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const visitNames = Object.fromEntries((await db.select({ day: serviceVisits.day, title: serviceVisits.title })
     .from(serviceVisits).where(eq(serviceVisits.instrumentId, inst.id)).catch(() => []))
     .map((v) => [v.day, v.title]));
+
+  // The jobs on this system, newest first - the panel re-sorts what is still
+  // owed to the top and folds the finished ones away.
+  const woRows = await db.select().from(workOrders)
+    .where(eq(workOrders.instrumentId, instId)).orderBy(desc(workOrders.createdAt));
 
   // Chain of custody, oldest first - it reads as a story. The reader's own
   // panel arrangement rides along, so the page arrives already arranged.
@@ -429,6 +435,23 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               catalogModels={catalogModels} gridModels={gridModels}
               owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
             />
+          ) },
+          // What has been asked for and what came of it. Above tasks on purpose:
+          // a task list answers "what is there to do", a work order answers
+          // "what did the client ask us for and is it finished".
+          { key: "workorders", label: "Work orders", node: (
+            <WorkOrdersPanel
+              target={{ instrumentId: inst.id, assetId: null }}
+              today={shopToday()} canEdit={canEdit}
+              orders={woRows.map((w) => {
+                const mine = taskRows.filter((t) => t.workOrderId === w.id);
+                return {
+                  id: w.id, number: w.number, title: w.title, severity: w.severity,
+                  state: w.state, assignee: w.assignee, openedOn: w.openedOn,
+                  askedBy: w.orgId === null ? brand.operatorName : orgName.get(w.orgId) ?? "",
+                  tasks: mine.length, done: mine.filter((t) => t.state === "Done").length,
+                };
+              })} />
           ) },
           { key: "tasks", label: "Tasks", node: (
             <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />

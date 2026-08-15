@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, assetShares, orgs, eodUpdates,
-  serviceVisits,
+  serviceVisits, workOrders,
   pmSchedules, vocabTerms, procedures, partPrices,
 } from "@/db/schema";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
@@ -33,6 +33,7 @@ import PhotosPanel from "@/components/PhotosPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
+import WorkOrdersPanel from "@/components/WorkOrdersPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import HoursPanel from "@/components/HoursPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
@@ -101,6 +102,15 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     const pr = procRows.find((x) => x.id === t.procedureId);
     return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
   });
+
+  // The jobs on this unit itself - not the ones on whatever system it is
+  // installed in, which belong to that system's page.
+  const woRows = await db.select().from(workOrders)
+    .where(eq(workOrders.assetId, assetId)).orderBy(desc(workOrders.createdAt));
+  const woAskedBy = new Map((woRows.some((w) => w.orgId !== null)
+    ? await db.select({ id: orgs.id, name: orgs.name }).from(orgs)
+        .where(inArray(orgs.id, [...new Set(woRows.flatMap((w) => (w.orgId !== null ? [w.orgId] : [])))]))
+    : []).map((o) => [o.id, o.name]));
 
   const canEdit = access.edit;
   const isStaff = user.role === "owner" || user.role === "staff";
@@ -295,6 +305,21 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                   saleNote={asset.saleNote} listingToken={asset.listingToken} />
               )}
             </div>
+          ) },
+          // A unit on the bench takes jobs of its own - a bench-test, a rebuild
+          // before it goes back on a system - and they close like any other.
+          { key: "workorders", label: "Work orders", node: (
+            <WorkOrdersPanel
+              target={target} today={shopToday()} canEdit={canEdit}
+              orders={woRows.map((w) => {
+                const mine = fullTasks.filter((t) => t.workOrderId === w.id);
+                return {
+                  id: w.id, number: w.number, title: w.title, severity: w.severity,
+                  state: w.state, assignee: w.assignee, openedOn: w.openedOn,
+                  askedBy: woAskedBy.get(w.orgId ?? -1) ?? "",
+                  tasks: mine.length, done: mine.filter((t) => t.state === "Done").length,
+                };
+              })} />
           ) },
           { key: "tasks", label: "Tasks", node: (
             <TasksPanel target={target} tasks={fullTasks} people={directoryNames(peopleRows)}

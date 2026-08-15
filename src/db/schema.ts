@@ -501,9 +501,14 @@ export const tasks = pgTable("tasks", {
   // tell which tasks are mandatory without matching on titles.
   procedureId: integer("procedure_id").references(() => procedures.id, { onDelete: "set null" }),
   sortOrder: integer("sort_order").notNull().default(0),
+  // The job this is part of, when it is part of one. Null is the normal state:
+  // most tasks are just the shop's own list. Set null rather than cascade - a
+  // work order is a wrapper around work that happened, and deleting the wrapper
+  // must not delete the record of the work.
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   completedAt: timestamp("completed_at"),
-}, (t) => [index("tasks_instrument_idx").on(t.instrumentId)]);
+}, (t) => [index("tasks_instrument_idx").on(t.instrumentId), index("tasks_work_order_idx").on(t.workOrderId)]);
 
 export const checklistItems = pgTable("checklist_items", {
   id: serial("id").primaryKey(),
@@ -612,6 +617,9 @@ export const attachments = pgTable("attachments", {
   // The task this file is evidence FOR - how a mandatory test proves it
   // passed. Null for general documents (manuals, photos, delivery paperwork).
   taskId: integer("task_id").references(() => tasks.id, { onDelete: "set null" }),
+  // The job this file belongs to - the photo of the error dialog that came with
+  // the request, the report that closed it.
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   // Files are opt-in on a for-sale listing, so no report leaks by accident.
   showOnListing: boolean("show_on_listing").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -722,8 +730,12 @@ export const timeEntries = pgTable("time_entries", {
   minutes: integer("minutes").notNull().default(0),
   note: text("note").notNull().default(""),
   loggedBy: text("logged_by").notNull().default(""),
+  // Which job these hours went into. This is the column an invoice is built
+  // from, so it is set null on delete for the same reason as tasks: the hours
+  // were worked whatever happens to the paperwork around them.
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("time_instrument_idx").on(t.instrumentId)]);
+}, (t) => [index("time_instrument_idx").on(t.instrumentId), index("time_work_order_idx").on(t.workOrderId)]);
 
 // Assets: the individual units systems are built from - an LC stack's pump,
 // autosampler, detector, a GC's headspace unit. First-class citizens: each has
@@ -848,6 +860,57 @@ export const serviceVisits = pgTable("service_visits", {
 }, (t) => [
   index("service_visits_instrument_idx").on(t.instrumentId),
   index("service_visits_asset_idx").on(t.assetId),
+]);
+
+// A work order: one job, from the ask to the close-out.
+//
+// The thing this table adds is not storage - tasks, hours, parts and files were
+// all already recorded - but a PARENT for them, so that a set of rows is one job
+// with a number, a state both sides can read, and an end. Before it, a client's
+// request became a task dated today and the only evidence it had been answered
+// was somebody remembering to tick that task.
+//
+// It hangs off a system, or off a standalone unit, the same "at least one is
+// set" rule tasks use. The lifecycle and who may move it live in
+// lib/workOrders, which is pure - this is only where the state is kept.
+export const workOrders = pgTable("work_orders", {
+  id: serial("id").primaryKey(),
+  // Whose workspace does the work. The number series is per workspace, so two
+  // operators on one instance each count from their own WO-1001.
+  tenantOrgId: tenantStamp(),
+  number: text("number").notNull().default(""),
+  instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
+  assetId: integer("asset_id").references(() => assets.id, { onDelete: "cascade" }),
+  // Who asked. Null = our own staff raised it, which is ordinary: an engineer
+  // who finds a second fault while on site opens one himself.
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  requestedBy: text("requested_by").notNull().default(""),
+  requestedByEmail: text("requested_by_email").notNull().default(""),
+  title: text("title").notNull(),
+  // The ask in the requester's own words, kept unedited. What was DONE goes in
+  // closeSummary; keeping the two apart is what makes the history readable.
+  body: text("body").notNull().default(""),
+  // Down | Degraded | Question | Planned - the words the request form offers.
+  severity: text("severity").notNull().default("Degraded"),
+  // open | active | waiting | resolved | closed | cancelled (lib/workOrders)
+  state: text("state").notNull().default("open"),
+  assignee: text("assignee").notNull().default(""),
+  openedOn: text("opened_on").notNull().default(""),  // YYYY-MM-DD in shop time
+  // '' = raised by hand | 'issue' = the client said something is wrong |
+  // 'pm_request' = the client asked for upkeep
+  origin: text("origin").notNull().default(""),
+  // What was done, written to close it. Required by the action, not by the
+  // column: a job closed with nothing written on it is how service history turns
+  // into a list of dates.
+  closeSummary: text("close_summary").notNull().default(""),
+  closedBy: text("closed_by").notNull().default(""),
+  resolvedAt: timestamp("resolved_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("work_orders_instrument_idx").on(t.instrumentId),
+  index("work_orders_asset_idx").on(t.assetId),
+  index("work_orders_state_idx").on(t.state),
 ]);
 
 // Stage transition history: one row every time a stage is added to or removed

@@ -1873,3 +1873,83 @@ END $$;
 UPDATE "stage_defs" SET "tenant_org_id" = (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1)
 WHERE "tenant_org_id" IS NULL
   AND (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1) IS NOT NULL;
+
+-- ── Work orders: one job, from the ask to the close-out ─────────────────────
+-- The parent that tasks, hours and files were missing. Before it, a client's
+-- request became a task dated today and there was nothing to close, nothing to
+-- report a state on, and no number to quote on the phone.
+--
+-- The three work_order_id columns are ON DELETE SET NULL, not cascade: a work
+-- order is a wrapper around work that actually happened, and deleting the
+-- wrapper must never delete the record of the hours somebody worked.
+CREATE TABLE IF NOT EXISTS "work_orders" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "number" text NOT NULL DEFAULT '',
+  "instrument_id" integer,
+  "asset_id" integer,
+  "org_id" integer,
+  "requested_by" text NOT NULL DEFAULT '',
+  "requested_by_email" text NOT NULL DEFAULT '',
+  "title" text NOT NULL,
+  "body" text NOT NULL DEFAULT '',
+  "severity" text NOT NULL DEFAULT 'Degraded',
+  "state" text NOT NULL DEFAULT 'open',
+  "assignee" text NOT NULL DEFAULT '',
+  "opened_on" text NOT NULL DEFAULT '',
+  "origin" text NOT NULL DEFAULT '',
+  "close_summary" text NOT NULL DEFAULT '',
+  "closed_by" text NOT NULL DEFAULT '',
+  "resolved_at" timestamp,
+  "closed_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "work_orders_instrument_idx" ON "work_orders" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "work_orders_asset_idx" ON "work_orders" ("asset_id");
+CREATE INDEX IF NOT EXISTS "work_orders_state_idx" ON "work_orders" ("state");
+
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+CREATE INDEX IF NOT EXISTS "tasks_work_order_idx" ON "tasks" ("work_order_id");
+CREATE INDEX IF NOT EXISTS "time_work_order_idx" ON "time_entries" ("work_order_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_instrument_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_asset_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_asset_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_org_id_orgs_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_work_order_id_fk') THEN
+    ALTER TABLE "tasks" ADD CONSTRAINT "tasks_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'time_entries_work_order_id_fk') THEN
+    ALTER TABLE "time_entries" ADD CONSTRAINT "time_entries_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_work_order_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- One work-order number per workspace, so the race between reading the highest
+-- number and writing the next one fails loudly instead of quietly handing WO-1042
+-- to two different jobs. Partial, because a blank number is not a number; and
+-- COALESCE, because a NULL tenant is the single-house instance that never
+-- onboarded - one house, one series - and a plain index would treat every one of
+-- its rows as distinct and enforce nothing at all.
+CREATE UNIQUE INDEX IF NOT EXISTS "work_orders_tenant_number_unique"
+  ON "work_orders" (COALESCE("tenant_org_id", 0), "number") WHERE "number" <> '';

@@ -13,7 +13,12 @@ import {
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
+  workOrders,
 } from "@/db/schema";
+import {
+  closeLine, moverOf, nextWoNumber, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
+  type Mover,
+} from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
@@ -99,7 +104,17 @@ const rev = (id?: number | null) => {
  * to both. One target type covers all three so the same panels serve a system
  * page and an asset page.
  */
-export type WorkTarget = { instrumentId: number | null; assetId: number | null };
+export type WorkTarget = {
+  instrumentId: number | null;
+  assetId: number | null;
+  /**
+   * The job this row is part of, when it is filed from a work order's own page.
+   * Optional and normally absent - most work is just the shop's list. Validated
+   * in resolveTarget against the record it claims to belong to, so a hand-edited
+   * id cannot file today's hours onto another client's job.
+   */
+  workOrderId?: number | null;
+};
 
 const revWork = (t: { instrumentId: number | null; assetId?: number | null }) => {
   rev(t.instrumentId);
@@ -117,6 +132,8 @@ async function resolveTarget(t: WorkTarget): Promise<
   { error: string } | {
     instrumentId: number | null; assetId: number | null; externalId: string;
     asset: typeof assets.$inferSelect | null;
+    /** The job this row joins, already checked to be on this record and open. */
+    workOrderId: number | null;
     /**
      * Whose workspace the work belongs to - the RECORD's, not the writer's. An
      * engineer from another operator, invited onto a system, files work that
@@ -155,7 +172,23 @@ async function resolveTarget(t: WorkTarget): Promise<
     if (t.instrumentId === null) tenantOrgId = a.tenantOrgId;
   }
   if (t.instrumentId === null && !asset) return { error: "Not found" };
-  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId };
+
+  // A work order tag is only valid if the order is on THIS record and still
+  // taking work. Both halves matter: the first stops an id from another client's
+  // job being posted from a hand-edited form, the second stops today's hours
+  // landing on a job that closed in March.
+  let workOrderId: number | null = null;
+  if (t.workOrderId) {
+    const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, t.workOrderId));
+    if (!wo) return { error: "Not found" };
+    const onThis = t.instrumentId !== null
+      ? wo.instrumentId === t.instrumentId
+      : wo.assetId === (asset?.id ?? null);
+    if (!onThis) return { error: "That work order is not on this record" };
+    if (!woAcceptsWork(wo.state)) return { error: `${wo.number || "That work order"} is ${WO_LABEL[wo.state]?.toLowerCase() ?? "finished"}.` };
+    workOrderId = wo.id;
+  }
+  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId, workOrderId };
 }
 
 /**
@@ -1033,6 +1066,7 @@ export async function createTask(
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
     dueDate: (data.dueDate ?? "").trim(),
+    workOrderId: t0.workOrderId,
   }).returning();
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "task", entityId: t.id,
@@ -1935,7 +1969,7 @@ export async function recordAttachments(
     .values(files.map((f) => ({
       ...f, description: f.description.trim(), tenantOrgId: t0.tenantOrgId,
       instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
-      uploadedBy: u.name,
+      uploadedBy: u.name, workOrderId: t0.workOrderId,
     })))
     .returning();
   for (const a of rows) {
@@ -3522,6 +3556,315 @@ export async function connectRemoteDevice(
   return { url };
 }
 
+// ---------------- Work orders ----------------
+// One job, from the ask to the close-out.
+//
+// The lifecycle - which states exist and who may move between them - is
+// lib/workOrders and is pure. Everything here is the half that needs a database:
+// who asked, what number it gets, what the audit trail says happened, and the
+// rule that a work order never outranks the tenancy checks the rest of the file
+// already does. An order on a system you cannot see does not exist for you.
+
+const revWo = (wo: { instrumentId: number | null; assetId: number | null }) => {
+  revWork(wo);
+  revalidatePath("/work");
+};
+
+/**
+ * Load an order with everything needed to decide what this viewer may do to it.
+ *
+ * "Not found" rather than "no" when the underlying record is not theirs, which
+ * is the posture every other read path in this file takes: refusing tells
+ * somebody the job exists.
+ */
+async function loadWorkOrder(u: SessionUser, woId: number): Promise<
+  { error: string } | {
+    wo: typeof workOrders.$inferSelect;
+    inst: typeof instruments.$inferSelect | null;
+    /** Which side of the job they are on, or null for neither. */
+    mover: Mover | null;
+  }
+> {
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, woId));
+  if (!wo) return { error: "Not found" };
+
+  let inst: typeof instruments.$inferSelect | null = null;
+  let ownerOrgId: number | null = null;
+  if (wo.instrumentId !== null) {
+    if (!(await canSeeSystemSafe(u, wo.instrumentId))) return { error: "Not found" };
+    [inst] = await db.select().from(instruments).where(eq(instruments.id, wo.instrumentId));
+    ownerOrgId = inst?.ownerOrgId ?? null;
+  } else if (wo.assetId) {
+    if (!(await assetAccess(u, wo.assetId)).see) return { error: "Not found" };
+    const [a] = await db.select().from(assets).where(eq(assets.id, wo.assetId));
+    ownerOrgId = a?.ownerOrgId ?? null;
+  }
+
+  const staff = isHouse(u.role);
+  const mover = moverOf(
+    { isHouse: staff, orgId: u.orgId, houseOrgId: staff ? readTenant(u) : null },
+    wo, ownerOrgId,
+  );
+  return { wo, inst: inst ?? null, mover };
+}
+
+/**
+ * Write the order itself: the number, the row, the audit line.
+ *
+ * Kept separate from the action that calls it because two of its three callers
+ * are not "somebody opened a work order" - they are a client pressing "Request
+ * service", who may have read-only rights and must still be able to ask.
+ *
+ * The number races: two orders filed in the same second both read the same
+ * highest number. The unique index in schema-sync is what makes that a failed
+ * insert rather than two jobs called WO-1042, and this retries a handful of
+ * times, which is enough for a shop and honest about what it is.
+ */
+async function fileWorkOrder(opts: {
+  actorEmail: string;
+  instrumentId: number | null; assetId: number | null; tenantOrgId: number | null;
+  orgId: number | null; requestedBy: string; requestedByEmail: string;
+  title: string; body: string; severity: string; origin: string; assignee: string;
+  externalId: string;
+}): Promise<typeof workOrders.$inferSelect> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: workOrders.number }).from(workOrders)
+      .where(forTenant(workOrders.tenantOrgId, opts.tenantOrgId));
+    const number = nextWoNumber(used.map((r) => r.number));
+    try {
+      const [wo] = await db.insert(workOrders).values({
+        tenantOrgId: opts.tenantOrgId, number,
+        instrumentId: opts.instrumentId,
+        assetId: opts.instrumentId === null ? opts.assetId : null,
+        orgId: opts.orgId, requestedBy: opts.requestedBy, requestedByEmail: opts.requestedByEmail,
+        title: opts.title, body: opts.body, severity: severityOf(opts.severity).key,
+        origin: opts.origin, assignee: opts.assignee, openedOn: shopToday(),
+      }).returning();
+      await audit({
+        actor: opts.actorEmail, instrumentId: opts.instrumentId, assetId: opts.assetId,
+        entityType: "work_order", entityId: wo.id,
+        action: `opened ${wo.number}${opts.externalId ? ` on ${opts.externalId}` : ""}: ${wo.title}`
+          + ` (${severityOf(wo.severity).label.toLowerCase()})`,
+      });
+      return wo;
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/**
+ * Somebody at the shop opens a job. The other way in is a client asking - see
+ * reportIssue and requestPm, which land in the same place.
+ */
+export async function openWorkOrder(
+  target: WorkTarget,
+  data: { title: string; body: string; severity: string; assignee?: string },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireEditor();
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say briefly what the job is" };
+  const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: target.assetId });
+  if ("error" in t0) return t0;
+
+  // Whose job it is: the record's owner, not whoever typed it. An engineer
+  // opening an order on a client's instrument is opening the CLIENT's job.
+  const orgId = t0.instrumentId !== null
+    ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
+        .where(eq(instruments.id, t0.instrumentId)))[0]?.o ?? null
+    : t0.asset?.ownerOrgId ?? null;
+
+  const wo = await fileWorkOrder({
+    actorEmail: u.email,
+    instrumentId: t0.instrumentId, assetId: t0.assetId, tenantOrgId: t0.tenantOrgId,
+    orgId, requestedBy: u.name || u.email, requestedByEmail: u.email,
+    title, body: data.body.trim().slice(0, 4000), severity: data.severity,
+    origin: "", assignee: (data.assignee ?? "").trim(),
+    externalId: targetLabel(t0.externalId, t0.asset),
+  });
+  revWo(wo);
+  return { id: wo.id, number: wo.number };
+}
+
+/** The ask, the urgency and who has it. The house's to edit - it runs the job. */
+export async function updateWorkOrder(
+  woId: number, data: { title: string; body: string; severity: string; assignee: string },
+): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "That is the service team's to change." };
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say briefly what the job is" };
+
+  const next = {
+    title, body: data.body.trim().slice(0, 4000),
+    severity: severityOf(data.severity).key, assignee: data.assignee.trim(),
+  };
+  await db.update(workOrders).set(next).where(eq(workOrders.id, woId));
+
+  // One line per field that moved, because "edited WO-1042" answers nothing
+  // three months later when somebody asks why it stopped being urgent.
+  for (const [field, before, after] of [
+    ["title", wo.title, next.title], ["severity", wo.severity, next.severity],
+    ["assignee", wo.assignee, next.assignee], ["body", wo.body, next.body],
+  ] as const) {
+    if (before === after) continue;
+    await audit({
+      actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+      entityType: "work_order", entityId: wo.id,
+      action: field === "body"
+        ? `rewrote what ${wo.number} asks for`
+        : `set ${wo.number} ${field} to ${after || "(none)"}`,
+      field, oldValue: before, newValue: after,
+    });
+  }
+  if (next.assignee && next.assignee !== wo.assignee && wo.instrumentId !== null) {
+    await notifyTaskAssigned({
+      actorEmail: u.email, actorName: u.name, assignee: next.assignee,
+      taskTitle: `${wo.number} ${next.title}`, instrumentId: wo.instrumentId,
+      externalId: found.inst?.externalId ?? "",
+    });
+  }
+  revWo(wo);
+  return {};
+}
+
+/**
+ * Move an order along. Everything except resolving, which needs a sentence
+ * about what was done and so has its own action.
+ */
+export async function setWorkOrderState(woId: number, state: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover === null) return { error: "This one isn't yours to change." };
+  if (state === "resolved") return { error: "Say what was done to resolve it." };
+  // Closing without a close-out is how service history turns into a list of
+  // dates. A resolved order already has one; anything else has to be resolved
+  // first, which is where the sentence gets written.
+  if (state === "closed" && wo.state !== "resolved") {
+    return { error: "Resolve it first, with a line about what was done." };
+  }
+
+  const move = woMove(wo.state, state, mover);
+  if (!move.ok) return { error: move.error };
+
+  await db.update(workOrders).set({
+    state: move.next,
+    closedAt: move.next === "closed" || move.next === "cancelled" ? new Date() : null,
+    closedBy: move.next === "closed" || move.next === "cancelled" ? (u.name || u.email) : "",
+    // Reopening un-resolves it: a job being worked again has not been finished,
+    // and leaving the stamp would date the finish to the first attempt.
+    resolvedAt: woOpen(move.next) ? null : wo.resolvedAt,
+  }).where(eq(workOrders.id, woId));
+
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `${wo.number} is now ${WO_LABEL[move.next].toLowerCase()}`,
+    field: "state", oldValue: wo.state, newValue: move.next,
+  });
+  revWo(wo);
+  return {};
+}
+
+/**
+ * The close-out: what was actually done, which is the thing the record keeps.
+ *
+ * Counted rather than retyped - the tasks and hours are already on the order, so
+ * the sentence somebody writes is the part only a person can write, and the rest
+ * is added up here.
+ */
+export async function resolveWorkOrder(woId: number, summary: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "The service team marks work resolved." };
+  const move = woMove(wo.state, "resolved", "house");
+  if (!move.ok) return { error: move.error };
+  const said = summary.trim().slice(0, 2000);
+  if (said.length < 3) return { error: "Say what was done - it is what the record keeps." };
+
+  const [doneRows, timeRows, partRows] = await Promise.all([
+    db.select({ state: tasks.state }).from(tasks).where(eq(tasks.workOrderId, woId)),
+    db.select({ minutes: timeEntries.minutes }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
+    // Parts are not tagged to an order (they belong to the system, and a part
+    // fitted is a part fitted whoever asked for it), so this counts what was
+    // fitted while the order was open - which is what a reader means by "what
+    // went into this job".
+    wo.instrumentId === null ? Promise.resolve([]) : db.select({ id: parts.id }).from(parts)
+      .where(and(eq(parts.instrumentId, wo.instrumentId), eq(parts.status, "Installed"),
+        sql`${parts.installedAt} >= ${wo.openedOn}`)),
+  ]);
+  const line = closeLine(said, {
+    tasks: doneRows.filter((t) => t.state === "Done").length,
+    minutes: timeRows.reduce((n, t) => n + t.minutes, 0),
+    parts: partRows.length,
+  });
+
+  await db.update(workOrders)
+    .set({ state: "resolved", closeSummary: line, resolvedAt: new Date() })
+    .where(eq(workOrders.id, woId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `resolved ${wo.number}: ${line}`,
+    field: "state", oldValue: wo.state, newValue: "resolved",
+  });
+
+  // On the system's own conversation, where the client is already looking. The
+  // close-out is the one thing about a job they will read again.
+  if (wo.instrumentId !== null) {
+    await db.insert(discussionPosts).values({
+      tenantOrgId: wo.tenantOrgId, instrumentId: wo.instrumentId,
+      body: `${wo.number} resolved - ${line}`,
+      author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
+    });
+  }
+  revWo(wo);
+  return {};
+}
+
+/**
+ * Put an existing task into a job, or take it out of one.
+ *
+ * The common case is a job that grew: an order was opened, and the three tasks
+ * that answer it were written before anybody thought to file them under it.
+ */
+export async function setTaskWorkOrder(taskId: number, woId: number | null): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t) return { error: "Not found" };
+  await assertWorkEditable(u, t);
+  if (woId === null) {
+    await db.update(tasks).set({ workOrderId: null }).where(eq(tasks.id, taskId));
+    revWork(t);
+    return {};
+  }
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo } = found;
+  // Same two checks resolveTarget makes: on this record, and still taking work.
+  const onThis = t.instrumentId !== null ? wo.instrumentId === t.instrumentId : wo.assetId === t.assetId;
+  if (!onThis) return { error: "That work order is not on this record" };
+  if (!woAcceptsWork(wo.state)) return { error: `${wo.number} is ${WO_LABEL[wo.state].toLowerCase()}.` };
+
+  await db.update(tasks).set({ workOrderId: wo.id }).where(eq(tasks.id, taskId));
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `filed task '${t.title}' under ${wo.number}`,
+  });
+  revWo(wo);
+  return {};
+}
+
 /**
  * Put a system in the queue of whoever services it because the client just asked
  * for something. The rules are the ones the daily generator uses (lib/pmQueue)
@@ -3568,19 +3911,21 @@ async function handOffForClientAsk(
 /**
  * A client says something is wrong with their system.
  *
- * One press, and everything that should follow follows: the system is marked as
- * needing maintenance, it lands in whoever services it's queue, a task exists to
- * work from, the words are on the record as a post the client can add to, and the
- * people who fix things are told. Attachments are uploaded first and passed in, so
- * a photo of an error dialog arrives with the report rather than after it.
+ * One press, and everything that should follow follows: a work order is opened
+ * with a number they can quote, the system is marked as needing maintenance, it
+ * lands in whoever services it's queue, a task exists to work from, the words
+ * are on the record as a post the client can add to, and the people who fix
+ * things are told. Attachments are uploaded first and passed in, so a photo of
+ * an error dialog arrives with the report rather than after it.
  *
- * The alternative was an email to somebody's inbox, which is where the last
- * decade of these went.
+ * The work order is the part that was missing. Before it, the only evidence a
+ * request had been answered was somebody remembering to tick a task, and there
+ * was nothing to close and nothing to report a state on.
  */
 export async function reportIssue(instrumentId: number, data: {
   severity: string; summary: string; details: string;
   files?: { fileName: string; url: string; size: number; kind: string }[];
-}): Promise<{ error?: string; taskId?: number }> {
+}): Promise<{ error?: string; taskId?: number; number?: string; workOrderId?: number }> {
   const u = await requireUser();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -3605,6 +3950,19 @@ export async function reportIssue(instrumentId: number, data: {
     await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
   }
 
+  // The job. Everything below hangs off it, which is what makes those rows one
+  // thing that can be reported on and closed rather than four loose records.
+  const wo = await fileWorkOrder({
+    actorEmail: u.email,
+    instrumentId, assetId: null, tenantOrgId: inst.tenantOrgId,
+    // Whose job it is. The reporter's own organization; for our own staff
+    // reporting on a client's system, the system's owner.
+    orgId: u.orgId ?? inst.ownerOrgId,
+    requestedBy: u.name || u.email, requestedByEmail: u.email,
+    title: summary, body: details, severity, origin: "issue", assignee: "",
+    externalId: inst.externalId,
+  });
+
   // Something to work from, dated today, so it shows up as work rather than as a
   // message somebody has to remember to act on.
   const [task] = await db.insert(tasks).values({
@@ -3612,14 +3970,16 @@ export async function reportIssue(instrumentId: number, data: {
     instrumentId, assetId: null,
     title: `${severity}: ${summary}`,
     body: [details, `Reported by ${u.name || u.email} at ${orgName}.`].filter(Boolean).join("\n\n"),
-    dueDate: shopToday(), origin: "issue",
+    dueDate: shopToday(), origin: "issue", workOrderId: wo.id,
   }).returning();
 
-  // The files, attached to the task so they read as evidence for it.
+  // The files, attached to the task so they read as evidence for it, and to the
+  // order so they are on the job's own page too.
   for (const f of files) {
     await db.insert(attachments).values({
       tenantOrgId: inst.tenantOrgId,
-      instrumentId, taskId: task.id, fileName: f.fileName.slice(0, 200), url: f.url,
+      instrumentId, taskId: task.id, workOrderId: wo.id,
+      fileName: f.fileName.slice(0, 200), url: f.url,
       size: f.size, kind: f.kind || "Other", uploadedBy: u.email,
       description: `Reported with "${summary}"`, orgId: u.orgId,
     });
@@ -3629,7 +3989,7 @@ export async function reportIssue(instrumentId: number, data: {
   // add to it, and so can we, without either side leaving the system.
   await db.insert(discussionPosts).values({
     tenantOrgId: inst.tenantOrgId, instrumentId,
-    body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
+    body: [`${wo.number} · ${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
     author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
   });
 
@@ -3638,17 +3998,19 @@ export async function reportIssue(instrumentId: number, data: {
 
   await audit({
     actor: u.email, instrumentId, entityType: "issue", entityId: inst.externalId,
-    action: `${orgName} reported ${severity.toLowerCase()} on ${inst.externalId}: ${summary}`
+    action: `${orgName} reported ${severity.toLowerCase()} on ${inst.externalId} as ${wo.number}: ${summary}`
       + `${files.length ? ` (${files.length} file${files.length === 1 ? "" : "s"})` : ""}`,
   });
 
   await notifyIssueRaised({
     to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
-    severity, summary, details, reporter: u.name || u.email, files: files.length,
+    severity, summary: `${wo.number} - ${summary}`, details,
+    reporter: u.name || u.email, files: files.length,
   });
 
   rev(instrumentId);
-  return { taskId: task.id };
+  revalidatePath("/work");
+  return { taskId: task.id, number: wo.number, workOrderId: wo.id };
 }
 
 /**
@@ -3666,7 +4028,7 @@ export async function reportIssue(instrumentId: number, data: {
  * open one, which is where a "any update?" belongs.
  */
 export async function requestPm(instrumentId: number, data: { window: string; note: string }):
-Promise<{ error?: string; taskId?: number; already?: boolean }> {
+Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; workOrderId?: number }> {
   const u = await requireUser();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -3719,19 +4081,32 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
   }
 
   const dueDate = pmRequestDue(today, w.key);
+  // Planned, not an emergency - the fourth thing a work order can be. It gets a
+  // number and a close-out like any other job, because "did the PM we asked for
+  // in March ever happen" is exactly the question a work order exists to answer.
+  const wo = await fileWorkOrder({
+    actorEmail: u.email,
+    instrumentId, assetId: null, tenantOrgId: inst.tenantOrgId,
+    orgId: u.orgId ?? inst.ownerOrgId,
+    requestedBy: who, requestedByEmail: u.email,
+    title: pmRequestTitle(note), body: [note, calendar].filter(Boolean).join("\n\n"),
+    severity: "Planned", origin: "pm_request", assignee: "",
+    externalId: inst.externalId,
+  });
+
   const [task] = await db.insert(tasks).values({
     tenantOrgId: inst.tenantOrgId,
     instrumentId, assetId: null,
     title: pmRequestTitle(note),
     body: [note, `Requested by ${who} at ${orgName} - ${w.label.toLowerCase()}.`, calendar].filter(Boolean).join("\n\n"),
-    dueDate, origin: "pm_request",
+    dueDate, origin: "pm_request", workOrderId: wo.id,
   }).returning();
 
-  await post([`Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
+  await post([`${wo.number} · Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
   await handOffForClientAsk(inst, `maintenance requested: ${w.label.toLowerCase()}`, u.email);
   await audit({
     actor: u.email, instrumentId, entityType: "task", entityId: task.id,
-    action: `${orgName} asked for maintenance on ${inst.externalId} - ${w.label.toLowerCase()}, due ${dueDate}`,
+    action: `${orgName} asked for maintenance on ${inst.externalId} as ${wo.number} - ${w.label.toLowerCase()}, due ${dueDate}`,
   });
   await notifyPmRequested({
     to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
@@ -3740,7 +4115,8 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
 
   rev(instrumentId);
   revalidatePath("/maintenance");
-  return { taskId: task.id };
+  revalidatePath("/work");
+  return { taskId: task.id, number: wo.number, workOrderId: wo.id };
 }
 
 /** Point a device at the system it drives, or clear the link. Staff only. */
@@ -4012,6 +4388,7 @@ export async function logTime(
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     person, date, minutes, note: data.note.trim(), loggedBy: u.email,
+    workOrderId: t0.workOrderId,
   }).returning();
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "time", entityId: row.id,
