@@ -2167,3 +2167,33 @@ ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "included_kits" text NOT NULL 
 -- What a kind of equipment needs, so a new system does not have its gases
 -- typed out again: applied to matching units and systems on creation.
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "gases" text[] NOT NULL DEFAULT '{}';
+
+-- ── What a test actually read ───────────────────────────────────────────────
+-- A test used to be completed with a checkbox while the number it produced had
+-- nowhere to live. One row per task: a test task is one performance of a test,
+-- so the history is the tasks rather than versions of a row. The spec is copied
+-- in so re-tuning a target later cannot restate what an old reading meant.
+CREATE TABLE IF NOT EXISTS "task_results" (
+  "id" serial PRIMARY KEY,
+  "task_id" integer NOT NULL,
+  "result_type" text NOT NULL DEFAULT 'pass_fail',
+  "value" text NOT NULL DEFAULT '',
+  "passed" boolean,
+  "target" text NOT NULL DEFAULT '',
+  "tolerance_pct" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "recorded_by" text NOT NULL DEFAULT '',
+  "recorded_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "task_results_task_idx" ON "task_results" ("task_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'task_result_task') THEN
+    ALTER TABLE "task_results" ADD CONSTRAINT "task_result_task" UNIQUE ("task_id");
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'task_results_task_id_fk') THEN
+    ALTER TABLE "task_results" ADD CONSTRAINT "task_results_task_id_fk"
+      FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

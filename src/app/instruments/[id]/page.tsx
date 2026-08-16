@@ -57,6 +57,7 @@ import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
+import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 
 export const dynamic = "force-dynamic";
 
@@ -322,8 +323,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         .orderBy(asc(accessRequests.createdAt))
     : [];
 
+  // Which of these are tests, and what each one read - see lib/taskTests.
+  const taskTests = await loadTaskTests(taskRows);
   const fullTasks = taskRows.map((t) => ({
     ...t,
+    ...testFieldsFor(taskTests, t.id),
     createdAt: t.createdAt.toISOString(),
     completedAt: t.completedAt?.toISOString() ?? null,
     checklist: items.filter((c) => c.taskId === t.id).map((c) => ({

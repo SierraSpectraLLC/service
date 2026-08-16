@@ -85,8 +85,9 @@ describe("summarizeItem", () => {
 
   it("composes measured targets and tolerances", () => {
     expect(summarizeItem(item({ resultType: "measured", tolerancePct: "10" }))).toBe("Target ± 10%");
-    expect(summarizeItem(item({ resultType: "measured", target: "2.0 C" }))).toBe("Target ± 2.0 C");
-    expect(summarizeItem(item({ resultType: "measured", target: "5 mL/min", tolerancePct: "10" }))).toBe("Target ± 5 mL/min ± 10%");
+    // The target is the value it should read, not a band around it.
+    expect(summarizeItem(item({ resultType: "measured", target: "2.0 C" }))).toBe("Target 2.0 C");
+    expect(summarizeItem(item({ resultType: "measured", target: "5 mL/min", tolerancePct: "10" }))).toBe("Target 5 mL/min ± 10%");
     expect(summarizeItem(item({ resultType: "measured" }))).toBe("Measured value");
   });
 

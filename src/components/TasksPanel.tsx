@@ -9,14 +9,23 @@ import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
   toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
   updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, setTaskDue, setTaskAsset, copyTasksTo,
+  recordTaskResult,
 } from "@/app/actions";
+import { RESULT_LABEL } from "@/lib/checkout";
+import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResult";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; thread: Note[] };
+/** The catalog's spec, when the procedure behind this task is a test. */
+type TestSpec = { resultType: string; target: string | null; tolerancePct: string | null };
+type TaskResult = {
+  value: string; passed: boolean | null; note: string; recordedBy: string; recordedAt: string;
+};
 type Task = {
   id: number; title: string; body: string; state: string; assignee: string; dueDate: string;
   assetId: number | null; origin: string;
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
+  test?: TestSpec | null; result?: TaskResult | null;
 };
 type SystemAsset = { id: number; label: string };
 
@@ -53,11 +62,121 @@ function ItemCheckbox({ item, canEdit }: { item: Item; canEdit: boolean }) {
 function TaskStateSelect({ task }: { task: Task }) {
   const [, startTransition] = useTransition();
   const [state, setOptimistic] = useOptimistic(task.state, (_cur: string, next: string) => next);
+  // The server can refuse a Done (a test with no result). Say why, rather than
+  // letting the select snap back on its own and look like a glitch.
+  const [refused, setRefused] = useState("");
   return (
-    <select value={state} onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setTaskState(task.id, e.target.value); })}
-      style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
-      {TASK_STATES.map((s) => <option key={s}>{s}</option>)}
-    </select>
+    <>
+      <select value={state} onChange={(e) => startTransition(async () => {
+        setOptimistic(e.target.value);
+        setRefused("");
+        const res = await setTaskState(task.id, e.target.value);
+        if (res?.error) setRefused(res.error);
+      })} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+        {TASK_STATES.map((s) => <option key={s}>{s}</option>)}
+      </select>
+      {refused && <span style={{ fontSize: 11, color: "#A32D2D", flexBasis: "100%" }}>{refused}</span>}
+    </>
+  );
+}
+
+/**
+ * Where the number goes.
+ *
+ * A test used to be finished with the same checkbox as "tighten the fitting",
+ * with its target sitting in the body as prose. The reading it produced went
+ * into somebody's notebook, or into a file uploaded later, or nowhere. So this
+ * sits above the status control on any task the catalog calls a test: enter
+ * what it read, get the verdict against the band the catalog set, and only then
+ * can the task close.
+ *
+ * A failure records and closes like anything else. The point is the number, and
+ * a task held open by a bad reading just files the failure where nobody looks.
+ */
+function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
+  const spec = task.test!;
+  const [pending, startTransition] = useTransition();
+  const [editing, setEditing] = useState(!task.result);
+  const [value, setValue] = useState(task.result?.value ?? "");
+  const [note, setNote] = useState(task.result?.note ?? "");
+  const [error, setError] = useState("");
+
+  const band = toleranceBand(spec);
+  const live = evaluateResult(spec, value);
+  const r = task.result;
+  const verdictColor = (p: boolean | null) =>
+    p === true ? { background: "#E5F3E5", color: "#2E6B2E" }
+      : p === false ? { background: "#FBE9E9", color: "#A32D2D" }
+      : { background: "#EEF1F5", color: "#475569" };
+
+  const save = () => {
+    setError("");
+    startTransition(async () => {
+      const res = await recordTaskResult(task.id, { value, note });
+      if (res?.error) { setError(res.error); return; }
+      setEditing(false);
+    });
+  };
+
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 10, marginBottom: 12, background: "#fff" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 6 }}>
+        <span className="eyebrow">Result</span>
+        <span className="mut" style={{ fontSize: 11 }}>
+          {RESULT_LABEL[spec.resultType] ?? spec.resultType}
+          {spec.target ? ` · target ${spec.target}` : ""}
+          {band ? ` · passes ${band}` : ""}
+        </span>
+      </div>
+
+      {/* Recorded: the reading, what it means, and who stands behind it. */}
+      {r && !editing && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span className="pill" style={verdictColor(r.passed)}>
+            {r.passed === true ? "Pass" : r.passed === false ? "Fail" : "Recorded"}
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>{r.value}</span>
+          {band && <span className="mut" style={{ fontSize: 11 }}>of {band}</span>}
+          {r.note && <span className="mut" style={{ fontSize: 12 }}>- {r.note}</span>}
+          <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>
+            {r.recordedBy}{r.recordedAt ? ` · ${when(r.recordedAt)}` : ""}
+          </span>
+          {canEdit && <button className="btn link" onClick={() => setEditing(true)}>correct it</button>}
+        </div>
+      )}
+
+      {canEdit && editing && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+          {spec.resultType === "pass_fail" ? (
+            <div className="seg" role="group" aria-label="Result">
+              {["Pass", "Fail"].map((v) => (
+                <button key={v} type="button" aria-pressed={value === v} onClick={() => setValue(v)}>{v}</button>
+              ))}
+            </div>
+          ) : (
+            <input value={value} onChange={(e) => setValue(e.target.value)} aria-label="What it read"
+              placeholder={spec.resultType === "note" ? "What you found" : spec.target ? `e.g. ${spec.target}` : "e.g. 5.2 mL/min"}
+              style={{ width: "auto", flex: "1 1 140px", fontSize: 13 }} />
+          )}
+          <input value={note} onChange={(e) => setNote(e.target.value)} aria-label="Conditions or anything odd"
+            placeholder="Conditions, anything odd (optional)" style={{ width: "auto", flex: "2 1 180px", fontSize: 13 }} />
+          <button className="btn sm accent" disabled={pending || !resultIsRecorded(spec.resultType, value)} onClick={save}>
+            {pending ? "Recording..." : "Record"}
+          </button>
+          {r && <button className="btn sm" onClick={() => { setEditing(false); setValue(r.value); setNote(r.note); setError(""); }}>Cancel</button>}
+          {/* The verdict before it is committed, so a bad reading is obvious
+              while the instrument is still in front of you. */}
+          {live.why && live.passed !== null && (
+            <span className="pill" style={{ ...verdictColor(live.passed), flexShrink: 0 }}>
+              {live.passed ? "in band" : "out of band"}
+            </span>
+          )}
+        </div>
+      )}
+
+      {!canEdit && !r && <div className="mut" style={{ fontSize: 12 }}>Not recorded yet.</div>}
+      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+    </div>
   );
 }
 
@@ -175,6 +294,18 @@ export default function TasksPanel({
           <span className="pill" style={{ background: TASK_COLOR[t.state]?.bg, color: TASK_COLOR[t.state]?.fg }}>{t.state}</span>
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {t.checklist.length > 0 && <span className="mut" style={{ fontSize: 11 }}>{done}/{t.checklist.length}</span>}
+          {/* A test reads as a test in a list of twenty, and carries its verdict
+              once it has one - the reading is the outcome, not the checkbox. */}
+          {t.test && (
+            <span className="pill" style={
+              t.result?.passed === true ? { background: "#E5F3E5", color: "#2E6B2E" }
+              : t.result?.passed === false ? { background: "#FBE9E9", color: "#A32D2D" }
+              : t.result ? { background: "#EEF1F5", color: "#475569" }
+              : { background: "#FAF0DC", color: "#8A5410" }
+            }>
+              {t.result ? (t.result.passed === true ? `pass ${t.result.value}` : t.result.passed === false ? `fail ${t.result.value}` : t.result.value) : "no result"}
+            </span>
+          )}
           {assetLabel(t.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(t.assetId)}</span>}
           {/* Work the client asked for, rather than work we found. Reads differently
               in a list of twenty, and answers "who is waiting on this". */}
@@ -207,6 +338,7 @@ export default function TasksPanel({
             ) : (
               t.body && <div style={{ fontSize: 13, marginBottom: 10 }}>{t.body}</div>
             )}
+            {t.test && <TestResultBlock task={t} canEdit={canEdit} />}
             {canEdit && editing !== t.id && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <span className="mut" style={{ fontSize: 12 }}>Status:</span>

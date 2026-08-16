@@ -44,6 +44,7 @@ import RunCheckoutButton from "@/components/RunCheckoutButton";
 import TrackAsSystem from "@/components/TrackAsSystem";
 import PanelLayout from "@/components/PanelLayout";
 import { getUiLayout } from "@/app/actions";
+import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 
 export const dynamic = "force-dynamic";
 
@@ -195,8 +196,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // This reader's own panel arrangement, so the page arrives already arranged.
   const panelLayout = await getUiLayout("asset");
 
+  // Which of these are tests, and what each one read - see lib/taskTests.
+  const taskTests = await loadTaskTests(taggedTasks);
   const fullTasks = taggedTasks.map((t) => ({
     ...t,
+    ...testFieldsFor(taskTests, t.id),
     createdAt: t.createdAt.toISOString(),
     completedAt: t.completedAt?.toISOString() ?? null,
     checklist: items.filter((c) => c.taskId === t.id).map((c) => ({

@@ -578,6 +578,29 @@ export const taskNotes = pgTable("task_notes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("task_notes_task_idx").on(t.taskId)]);
 
+// What a test actually read. One row per task, because a test task is one
+// performance of one test - a PM that runs twice a year generates a new task
+// each time, so the history is the tasks, not versions of a row.
+//
+// No tenant stamp: it cascades from the task, whose tenant already decides who
+// may see it, the same as checklist_items and task_notes.
+//
+// The spec is copied in rather than read back through procedureId. A result is
+// a claim about a moment - "5.2, within 4.5-5.5 on the 3rd" - and re-tuning the
+// target next year must not silently restate what last year's reading meant.
+export const taskResults = pgTable("task_results", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+  resultType: text("result_type").notNull().default("pass_fail"), // pass_fail | measured | reading | note
+  value: text("value").notNull().default(""),          // as read off the panel, unit and all
+  passed: boolean("passed"),                           // null where the spec supports no verdict
+  target: text("target").notNull().default(""),        // the spec, frozen at the moment of recording
+  tolerancePct: text("tolerance_pct").notNull().default(""),
+  note: text("note").notNull().default(""),            // conditions, what was odd about it
+  recordedBy: text("recorded_by").notNull().default(""),
+  recordedAt: timestamp("recorded_at").notNull().defaultNow(),
+}, (t) => [unique("task_result_task").on(t.taskId), index("task_results_task_idx").on(t.taskId)]);
+
 // Gas requirements per system. One row per (instrument, gas); status vocabulary
 // lives in src/lib/stages.ts. Tank details go in the free-text note - individual
 // tank inventory is deliberately not modeled (yet).

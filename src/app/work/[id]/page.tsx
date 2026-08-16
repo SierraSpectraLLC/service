@@ -25,6 +25,7 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import HoursPanel from "@/components/HoursPanel";
 import TasksPanel from "@/components/TasksPanel";
 import WorkOrderControls from "@/components/WorkOrderControls";
+import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 
 export const dynamic = "force-dynamic";
 
@@ -103,8 +104,11 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await db.select().from(itemNotes).where(inArray(itemNotes.itemId, itemIds)).orderBy(asc(itemNotes.createdAt))
     : [];
 
+  // Which of these are tests, and what each one read - see lib/taskTests.
+  const taskTests = await loadTaskTests(taskRows);
   const fullTasks = taskRows.map((t) => ({
     ...t,
+    ...testFieldsFor(taskTests, t.id),
     createdAt: t.createdAt.toISOString(),
     completedAt: t.completedAt?.toISOString() ?? null,
     checklist: items.filter((c) => c.taskId === t.id).map((c) => ({

@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, tasks, checklistItems, parts, attachments, instruments, procedures, signoffs } from "@/db/schema";
+import { assets, tasks, checklistItems, parts, attachments, instruments, procedures, signoffs, taskResults} from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
@@ -70,6 +70,11 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
     : [];
   const reportsByTask = new Map<number, number>();
   for (const r of reportRows) if (r.taskId !== null) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+  // A recorded reading is evidence, and the packet prints it - see lib/signoff.
+  const resultRows = gateTaskIds.length
+    ? await db.select().from(taskResults).where(inArray(taskResults.taskId, gateTaskIds))
+    : [];
+  for (const r of resultRows) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
   const gate = signoffGate(
     taskRows.map((t) => {
       const pr = gateProcs.find((x) => x.id === t.procedureId);
@@ -137,6 +142,20 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
                 {t.completedAt && <span className="mut" style={{ fontWeight: 400 }}> - {shopMonthDay(t.completedAt)}</span>}
               </div>
               {t.body && <div className="mut" style={{ fontSize: 12 }}>{t.body}</div>}
+              {/* What the test actually read. The criteria above say what was
+                  asked for; this is the evidence the signature rests on. */}
+              {(() => {
+                const r = resultRows.find((x) => x.taskId === t.id);
+                if (!r) return null;
+                return (
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>
+                    {r.passed === true ? "PASS" : r.passed === false ? "FAIL" : "Recorded"}: {r.value}
+                    {r.target ? <span className="mut" style={{ fontWeight: 400 }}> (target {r.target}{r.tolerancePct ? ` ± ${r.tolerancePct}%` : ""})</span> : null}
+                    {r.note ? <span className="mut" style={{ fontWeight: 400 }}> - {r.note}</span> : null}
+                    <span className="mut" style={{ fontWeight: 400 }}> - {r.recordedBy}</span>
+                  </div>
+                );
+              })()}
               {list.map((c) => (
                 <div key={c.id} style={{ fontSize: 12, marginLeft: 16 }}>{c.done ? "☑" : "☐"} {c.text}</div>
               ))}

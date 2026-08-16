@@ -49,10 +49,16 @@ export function matchItems<I extends CheckoutItem>(items: I[], assetType: string
   return picked.sort((a, b) => a.position - b.position || (a.id ?? 0) - (b.id ?? 0));
 }
 
-/** Pretty "± 10%" / "± 2.0 C" suffix for a measured test. */
+/**
+ * Pretty "5 mL/min ± 10%" criteria for a measured test.
+ *
+ * The target is a value, not a band - it used to be printed as "± 5 mL/min",
+ * which read as a tolerance and contradicted the pass band shown next to the
+ * result entry. A target already written as a band ("+/- 2.0 C") is left alone.
+ */
 const measuredSpec = (item: Pick<CheckoutItem, "target" | "tolerancePct">) => {
   const parts: string[] = [];
-  if (item.target) parts.push(item.target.includes("+/-") || item.target.includes("±") ? item.target : `± ${item.target}`);
+  if (item.target) parts.push(item.target);
   if (item.tolerancePct != null && item.tolerancePct !== "") {
     const n = parseFloat(item.tolerancePct);
     parts.push(`± ${Number.isNaN(n) ? item.tolerancePct : n}%`);

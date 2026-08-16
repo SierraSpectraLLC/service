@@ -27,9 +27,15 @@ export type Gate = {
 };
 
 /**
- * `reportsByTask` counts attachments filed against each task id. A mandatory
- * TEST needs at least one - "passing" is a claim that has to be evidenced, and
- * a Done checkbox is not evidence. A mandatory TASK only has to be done.
+ * `reportsByTask` counts the evidence filed against each task id: attachments,
+ * and a recorded test result. A mandatory TEST needs at least one - "passing"
+ * is a claim that has to be evidenced, and a Done checkbox is not evidence. A
+ * mandatory TASK only has to be done.
+ *
+ * A recorded result counts because it is the thing the rule was reaching for.
+ * "5.2 mL/min, within 4.5-5.5, by Joe on the 3rd" is the measurement itself,
+ * attributed and timestamped; a file was only ever the closest thing available
+ * before there was anywhere to put the number.
  */
 export function signoffGate(tasks: GateTask[], reportsByTask: Map<number, number>): Gate {
   const open = tasks.filter((t) => t.state !== "Done");

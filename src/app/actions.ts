@@ -13,7 +13,7 @@ import {
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
-  workOrders, orgSites, partCatalog, partKitLines, agreements, catalogRefs,
+  workOrders, orgSites, partCatalog, partKitLines, agreements, catalogRefs, taskResults,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
@@ -28,6 +28,7 @@ import {
 } from "@/lib/pmGenerate";
 import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
+import { completionBlocked, evaluateResult, resultIsRecorded } from "@/lib/testResult";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
@@ -1332,15 +1333,86 @@ export async function deleteTask(taskId: number, reason: string): Promise<{ erro
   return {};
 }
 
-export async function setTaskState(taskId: number, state: string) {
+/**
+ * The test spec behind a task, or null when it is ordinary work.
+ *
+ * Read from the procedure that generated it, so a hand-made task is never a
+ * test and never gets gated. Copies of tasks deliberately drop procedureId
+ * (see lib/taskCopy), which means a copy is ordinary work - correct, because a
+ * copy is a new job, not a second reading of the original.
+ */
+async function testSpecFor(t: { procedureId: number | null }) {
+  if (t.procedureId === null) return null;
+  const [p] = await db.select({
+    kind: procedures.kind, resultType: procedures.resultType,
+    target: procedures.target, tolerancePct: procedures.tolerancePct,
+  }).from(procedures).where(eq(procedures.id, t.procedureId));
+  return p && p.kind === "test" ? p : null;
+}
+
+/**
+ * Record what a test read.
+ *
+ * The verdict is computed here rather than taken from the browser: a reading is
+ * a claim about an instrument, and whether it passed must not depend on which
+ * side of the wire did the arithmetic. The spec is frozen onto the row for the
+ * same reason - re-tuning the target next year must not restate what this
+ * reading meant.
+ */
+export async function recordTaskResult(
+  taskId: number, data: { value: string; note: string },
+): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
-  if (!t || t.state === state) return;
+  if (!t) return { error: "Not found" };
+  await assertWorkEditable(u, t);
+  const spec = await testSpecFor(t);
+  if (!spec) return { error: "That task isn't a test" };
+
+  const value = data.value.trim();
+  if (!resultIsRecorded(spec.resultType, value)) {
+    return {
+      error: spec.resultType === "pass_fail" ? "Say whether it passed or failed"
+        : spec.resultType === "measured" || spec.resultType === "reading" ? "Enter the number you read"
+        : "Write down what you found",
+    };
+  }
+  const verdict = evaluateResult(spec, value);
+  const row = {
+    resultType: spec.resultType, value, passed: verdict.passed,
+    target: spec.target ?? "", tolerancePct: spec.tolerancePct ?? "",
+    note: data.note.trim(), recordedBy: u.name || u.email, recordedAt: new Date(),
+  };
+  await db.insert(taskResults).values({ taskId, ...row })
+    .onConflictDoUpdate({ target: taskResults.taskId, set: row });
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId, entityType: "task", entityId: taskId,
+    action: `recorded '${t.title}': ${verdict.why}`,
+    field: "result", newValue: value,
+  });
+  revWork(t);
+  return {};
+}
+
+export async function setTaskState(taskId: number, state: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t || t.state === state) return {};
   // Count open checklist items so a premature Done leaves a trace.
   let suffix = "";
   if (state === "Done") {
     const items = await db.select().from(checklistItems).where(and(eq(checklistItems.taskId, taskId), eq(checklistItems.done, false)));
     if (items.length) suffix = ` (closed with ${items.length} checklist item${items.length > 1 ? "s" : ""} incomplete)`;
+    // A test closed with no number is a checkbox claiming to be a measurement.
+    // Only the having of a result is gated, never the passing of one - a failed
+    // test is a finished test, and holding the task open would file the failure
+    // somewhere nobody looks.
+    const spec = await testSpecFor(t);
+    if (spec) {
+      const [r] = await db.select().from(taskResults).where(eq(taskResults.taskId, taskId));
+      const blocked = completionBlocked({ kind: "test", resultType: spec.resultType }, r);
+      if (blocked) return { error: blocked };
+    }
   }
   await assertWorkEditable(u, t);
   await db.update(tasks).set({ state, completedAt: state === "Done" ? new Date() : null }).where(eq(tasks.id, taskId));
@@ -1366,6 +1438,7 @@ export async function setTaskState(taskId: number, state: string) {
     }
   }
   revWork(t);
+  return {};
 }
 
 // ---------------- Maintenance schedules ----------------
@@ -3346,6 +3419,12 @@ async function gateFor(target: WorkTarget) {
   for (const r of reportRows) {
     if (r.taskId !== null) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
   }
+  // A recorded reading is evidence too - see lib/signoff. Before there was
+  // anywhere to put the number, a file was the closest thing available.
+  const resultRows = taskIds.length
+    ? await db.select({ taskId: taskResults.taskId }).from(taskResults).where(inArray(taskResults.taskId, taskIds))
+    : [];
+  for (const r of resultRows) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
   return signoffGate(
     taskRows.map((t) => {
       const p = procRows.find((x) => x.id === t.procedureId);
