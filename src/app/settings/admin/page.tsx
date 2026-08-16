@@ -64,14 +64,6 @@ export default async function AdminSettingsPage() {
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 
-      <div className="card">
-        <div className="card-title">Access &amp; ownership</div>
-        <div className="mut" style={{ fontSize: 12 }}>
-          Every system, who owns it, and who can see it. An ownership claim granted in error is undone by
-          reassigning the owner and withdrawing the share.
-        </div>
-      </div>
-
       {requestRows.length > 0 && (
         <div className="card">
           <div className="card-title">Waiting on a decision ({requestRows.length})</div>
@@ -92,44 +84,61 @@ export default async function AdminSettingsPage() {
         </div>
       )}
 
-      {rows.map((inst) => {
-        const shares = shareRows.filter((s) => s.instrumentId === inst.id);
-        const label = systemLabel(inst, assetRows.filter((a) => a.instrumentId === inst.id));
-        const records = recordRows.filter((r) => r.instrumentId === inst.id);
-        return (
-          <div className="card" key={inst.id}>
-            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <Link href={`/instruments/${inst.id}`} className="mono" style={{ fontSize: 13, fontWeight: 700, textDecoration: "none", color: "var(--navy)" }}>
-                {inst.externalId}
-              </Link>
-              <span style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>
-                {label || <span className="mut" style={{ fontWeight: 400, fontSize: 13 }}>No assets listed</span>}
-              </span>
-              {inst.client && <span className="mut" style={{ fontSize: 12 }}>· {inst.client}</span>}
-              {inst.archived && <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>archived</span>}
-              {inst.ownerOrgId === null && (
-                <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>unclaimed</span>
-              )}
-              {(pendingBySystem.get(inst.id)?.length ?? 0) > 0 && (
-                <span className="pill" style={{ background: "#F2E0CC", color: "#8A5410" }}>
-                  {pendingBySystem.get(inst.id)!.length} waiting
+      {/* One row per system, closed by default: at a dozen systems the old
+          card-per-system layout was three screens of "Not shared with anyone".
+          The summary line answers the audit question - who owns it, who sees
+          it - and the full sharing panel opens only for the row being worked. */}
+      <div className="card">
+        <div className="card-title">Access &amp; ownership</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+          Every system, who owns it, and who can see it. Open a row to reassign the owner or
+          change who it is shared with.
+        </div>
+        {rows.map((inst) => {
+          const shares = shareRows.filter((s) => s.instrumentId === inst.id);
+          const label = systemLabel(inst, assetRows.filter((a) => a.instrumentId === inst.id));
+          const records = recordRows.filter((r) => r.instrumentId === inst.id);
+          const ownerName = inst.ownerOrgId !== null
+            ? orgRows.find((o) => o.id === inst.ownerOrgId)?.name ?? "an organization"
+            : null;
+          return (
+            <details key={inst.id} style={{ borderTop: "1px solid var(--line)" }}>
+              <summary className="row-hover" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "9px 4px", cursor: "pointer", listStyle: "none" }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{inst.externalId}</span>
+                <span style={{ fontSize: 13, flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {label || <span className="mut">No assets listed</span>}
+                  {inst.client && <span className="mut"> · {inst.client}</span>}
                 </span>
-              )}
-            </div>
-            <SharePanel targetId={inst.id} shares={shares.map((s) => ({ orgId: s.orgId, name: s.name, kind: s.kind, access: s.access }))}
-              orgOptions={orgRows} ownerOrgId={inst.ownerOrgId} canManageAll canAddProvider={false} />
-            {records.length > 0 && (
-              <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
-                Frozen records held by: {records.map((r) => `${r.orgName} (${r.kind === "handoff" ? "handed on" : "access ended"} ${shopTime(r.revokedAt)})`).join(", ")}
+                {inst.archived && <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>archived</span>}
+                {(pendingBySystem.get(inst.id)?.length ?? 0) > 0 && (
+                  <span className="pill" style={{ background: "#F2E0CC", color: "#8A5410" }}>
+                    {pendingBySystem.get(inst.id)!.length} waiting
+                  </span>
+                )}
+                <span className="mut" style={{ fontSize: 12 }}>
+                  {ownerName ? `owned by ${ownerName}` : "unclaimed"}
+                  {shares.length > 0 && ` · shared with ${shares.length}`}
+                </span>
+              </summary>
+              <div style={{ padding: "0 4px 10px" }}>
+                <div style={{ marginBottom: 4 }}>
+                  <Link href={`/instruments/${inst.id}`} className="btn link" style={{ fontSize: 12 }}>Open {inst.externalId} →</Link>
+                </div>
+                <SharePanel targetId={inst.id} shares={shares.map((s) => ({ orgId: s.orgId, name: s.name, kind: s.kind, access: s.access }))}
+                  orgOptions={orgRows} ownerOrgId={inst.ownerOrgId} canManageAll canAddProvider={false} />
+                {records.length > 0 && (
+                  <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
+                    Frozen records held by: {records.map((r) => `${r.orgName} (${r.kind === "handoff" ? "handed on" : "access ended"} ${shopTime(r.revokedAt)})`).join(", ")}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        );
-      })}
-
-      {rows.length === 0 && (
-        <div className="card"><div className="mut" style={{ fontSize: 13 }}>No systems yet.</div></div>
-      )}
+            </details>
+          );
+        })}
+        {rows.length === 0 && (
+          <div className="empty"><b>No systems yet</b></div>
+        )}
+      </div>
     </div>
   );
 }

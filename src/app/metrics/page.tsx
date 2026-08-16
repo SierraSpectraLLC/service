@@ -101,7 +101,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
     .filter((x): x is { stage: string; avg: number; n: number } => x !== null);
 
   return (
-    <div className="container page">
+    <div className="container wide">
       <div className="page-head">
         <h1 className="page-title">Metrics</h1>
         <span className="page-actions">
@@ -117,6 +117,12 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         </span>
       </div>
 
+
+      {/* Two independent stacks from 1200px up - six stacked cards made a
+          short report read as a long page. Stacks flatten in DOM order on
+          narrow screens. */}
+      <div className="panel-cols">
+        <div>
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>PM compliance</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
@@ -140,34 +146,6 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           </>
         )}
       </div>
-
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Turnaround</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Days from a system entering the shop to its first Shipped. Days it spent in
-          another organization&apos;s queue are shown separately - the client waited for
-          them, but nobody here could have shortened them.
-        </div>
-        {turnaround.length === 0 ? (
-          <div className="mut" style={{ fontSize: 13 }}>Nothing shipped in this window.</div>
-        ) : (
-          <div style={{ fontSize: 13 }}>
-            <b>{avgTurn} day{avgTurn === 1 ? "" : "s"}</b>
-            <span className="mut"> average across {turnaround.length} system{turnaround.length === 1 ? "" : "s"} · </span>
-            <span className="mut">
-              fastest {Math.min(...turnaround.map((t) => t.gross))}d · slowest {Math.max(...turnaround.map((t) => t.gross))}d
-            </span>
-            {parkedTotal > 0 && (
-              <div style={{ marginTop: 6 }}>
-                <b style={{ color: "#085041" }}>{avgNet} day{avgNet === 1 ? "" : "s"}</b>
-                <span className="mut"> average on our side · {parkedTotal} day{parkedTotal === 1 ? "" : "s"} total
-                  spent in someone else&apos;s queue</span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Hours</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
@@ -199,28 +177,6 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           </div>
         )}
       </div>
-
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Parts spend</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          By client, from parts recorded in the window whose cost parsed as money. Free-text costs
-          (&quot;call for quote&quot;) are counted but not summed, so this is a floor.
-        </div>
-        {spend.length === 0 ? (
-          <div className="mut" style={{ fontSize: 13 }}>No parts recorded in this window.</div>
-        ) : (
-          spend.map(([k, v]) => (
-            <div key={k} style={{ display: "flex", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap" }}>
-              <span style={{ flex: 1, minWidth: 0 }}>{k}</span>
-              <b>{formatCents(v.cents)}</b>
-              <span className="mut" style={{ fontSize: 11 }}>
-                {v.counted} priced{v.unpriced ? ` · ${v.unpriced} unpriced` : ""}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Time in stage</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
@@ -243,7 +199,54 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         ))}
         {active.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No active systems.</div>}
       </div>
-
+        </div>
+        <div>
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 4 }}>Turnaround</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          Days from a system entering the shop to its first Shipped. Days it spent in
+          another organization&apos;s queue are shown separately - the client waited for
+          them, but nobody here could have shortened them.
+        </div>
+        {turnaround.length === 0 ? (
+          <div className="mut" style={{ fontSize: 13 }}>Nothing shipped in this window.</div>
+        ) : (
+          <div style={{ fontSize: 13 }}>
+            <b>{avgTurn} day{avgTurn === 1 ? "" : "s"}</b>
+            <span className="mut"> average across {turnaround.length} system{turnaround.length === 1 ? "" : "s"} · </span>
+            <span className="mut">
+              fastest {Math.min(...turnaround.map((t) => t.gross))}d · slowest {Math.max(...turnaround.map((t) => t.gross))}d
+            </span>
+            {parkedTotal > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <b style={{ color: "#085041" }}>{avgNet} day{avgNet === 1 ? "" : "s"}</b>
+                <span className="mut"> average on our side · {parkedTotal} day{parkedTotal === 1 ? "" : "s"} total
+                  spent in someone else&apos;s queue</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="card">
+        <div className="card-title" style={{ marginBottom: 4 }}>Parts spend</div>
+        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          By client, from parts recorded in the window whose cost parsed as money. Free-text costs
+          (&quot;call for quote&quot;) are counted but not summed, so this is a floor.
+        </div>
+        {spend.length === 0 ? (
+          <div className="mut" style={{ fontSize: 13 }}>No parts recorded in this window.</div>
+        ) : (
+          spend.map(([k, v]) => (
+            <div key={k} style={{ display: "flex", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap" }}>
+              <span style={{ flex: 1, minWidth: 0 }}>{k}</span>
+              <b>{formatCents(v.cents)}</b>
+              <span className="mut" style={{ fontSize: 11 }}>
+                {v.counted} priced{v.unpriced ? ` · ${v.unpriced} unpriced` : ""}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Average days per stage</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
@@ -257,6 +260,8 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           </div>
         ))}
         {avgRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No completed stage transitions recorded yet.</div>}
+      </div>
+        </div>
       </div>
     </div>
   );
