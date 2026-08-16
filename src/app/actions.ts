@@ -1512,6 +1512,76 @@ export async function updatePmSchedule(
 }
 
 /**
+ * Anchor every schedule on a record to one real-world date.
+ *
+ * A new system's schedules anchor to the day the record was created, which is
+ * only right if the PM happened that day. Usually it didn't: the vendor did it
+ * in March, or the visit is booked for January. Fixing that one row at a time
+ * across a dozen schedules is the copy/paste this whole catalog exists to kill.
+ *
+ * Two anchors, because those are the two facts somebody actually knows:
+ *  - "the PM was done on D": lastDone = D and each schedule comes due its OWN
+ *    cadence later - the quarterly work in three months, the annual next year.
+ *  - "the next visit is D": everything falls due together on D, the way a PM
+ *    visit works, and each advances by its own cadence after completion.
+ *
+ * Open generated tasks from the old anchor are removed - they were scheduled
+ * on a premise this action just corrected - but only untouched ones: a task
+ * somebody moved to In progress or Blocked is being worked and stays.
+ */
+export async function alignMaintenance(
+  target: WorkTarget, data: { mode: "lastDone" | "visit"; date: string },
+): Promise<{ error?: string; changed?: number }> {
+  const u = await requireEditor();
+  const date = data.date.trim();
+  if (!isIsoDay(date)) return { error: "Pick a date" };
+
+  let rows: (typeof pmSchedules.$inferSelect)[] = [];
+  if (target.instrumentId !== null) {
+    await assertSystemEditable(u, target.instrumentId);
+    // The system's own schedules and those living on its installed units - one
+    // PM visit covers the stack, so the alignment does too.
+    const unitIds = (await db.select({ id: assets.id }).from(assets)
+      .where(eq(assets.instrumentId, target.instrumentId))).map((a) => a.id);
+    rows = await db.select().from(pmSchedules).where(
+      unitIds.length
+        ? or(eq(pmSchedules.instrumentId, target.instrumentId), inArray(pmSchedules.assetId, unitIds))
+        : eq(pmSchedules.instrumentId, target.instrumentId)
+    );
+  } else if (target.assetId !== null) {
+    if (!(await assetAccess(u, target.assetId)).edit) return { error: "Not found" };
+    rows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, target.assetId));
+  }
+  if (!rows.length) return { error: "Nothing scheduled here yet" };
+
+  for (const s of rows) {
+    const nextDue = data.mode === "lastDone" ? advancePm(date, s.everyDays) : date;
+    const set = data.mode === "lastDone" ? { lastDone: date, nextDue } : { nextDue };
+    if (s.nextDue === nextDue && (data.mode !== "lastDone" || s.lastDone === date)) continue;
+    await db.update(pmSchedules).set(set).where(eq(pmSchedules.id, s.id));
+  }
+  // Tasks generated off the old anchor claim work that this correction says is
+  // not owed yet (or was already done). Only untouched Open ones go.
+  const stale = await db.select().from(tasks).where(and(
+    inArray(tasks.pmScheduleId, rows.map((r) => r.id)),
+    eq(tasks.origin, "pm"), eq(tasks.state, "Open"),
+  ));
+  for (const t of stale) await db.delete(tasks).where(eq(tasks.id, t.id));
+
+  await audit({
+    actor: u.email, instrumentId: target.instrumentId, assetId: target.assetId, entityType: "pm", entityId: 0,
+    action: data.mode === "lastDone"
+      ? `aligned ${rows.length} maintenance schedule${rows.length === 1 ? "" : "s"} to a PM done ${date} - each next due its own cadence later${stale.length ? `; removed ${stale.length} stale generated task${stale.length === 1 ? "" : "s"}` : ""}`
+      : `aligned ${rows.length} maintenance schedule${rows.length === 1 ? "" : "s"} to a PM visit on ${date}${stale.length ? `; removed ${stale.length} stale generated task${stale.length === 1 ? "" : "s"}` : ""}`,
+    field: "nextDue", newValue: date,
+  });
+  // A visit date that is already here should produce its work now, not at 3am.
+  await generateDuePmTasks(shopToday(), u.email);
+  revWork({ instrumentId: target.instrumentId, assetId: target.assetId });
+  return { changed: rows.length };
+}
+
+/**
  * Do a scheduled job now, before it falls due.
  *
  * Without this a schedule was only ever a promise: procedures stamp the first

@@ -5,6 +5,7 @@ import { promptReason } from "@/lib/reason";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
+  alignMaintenance,
 } from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
 import { pmGroups } from "@/lib/pmGroups";
@@ -47,6 +48,8 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string }>>({});
   const [error, setError] = useState("");
   const [showLater, setShowLater] = useState(false);
+  const [aligning, setAligning] = useState(false);
+  const [alignDraft, setAlignDraft] = useState<{ mode: "lastDone" | "visit"; date: string }>({ mode: "lastDone", date: today });
   const [pending, startTransition] = useTransition();
 
   if (!canEdit && schedules.length === 0) return null;
@@ -195,11 +198,52 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Maintenance</div>
         {canEdit && (
-          <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => setOpen((v) => !v)}>
-            {open ? "Cancel" : "+ Schedule"}
-          </button>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {schedules.length > 0 && (
+              <button className="btn sm" onClick={() => { setAligning((v) => !v); setError(""); }}>
+                {aligning ? "Cancel" : "Align dates"}
+              </button>
+            )}
+            <button className="btn sm" onClick={() => setOpen((v) => !v)}>
+              {open ? "Cancel" : "+ Schedule"}
+            </button>
+          </span>
         )}
       </div>
+
+      {/* Every schedule here, anchored to one real date - because a new
+          system's dates anchor to the day the record was made, and the PM
+          almost never happened that day. Two anchors, the two facts somebody
+          actually knows: when it was last done, or when the visit is booked. */}
+      {aligning && (
+        <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 10, background: "#FAFBFD" }}>
+          <div className="seg" role="group" aria-label="Anchor" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+            <button type="button" aria-pressed={alignDraft.mode === "lastDone"}
+              onClick={() => setAlignDraft({ ...alignDraft, mode: "lastDone" })}>PM was done on...</button>
+            <button type="button" aria-pressed={alignDraft.mode === "visit"}
+              onClick={() => setAlignDraft({ ...alignDraft, mode: "visit" })}>Next PM visit is...</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="date" value={alignDraft.date}
+              onChange={(e) => setAlignDraft({ ...alignDraft, date: e.target.value })}
+              style={{ width: "auto", fontSize: 13 }} aria-label="Anchor date" />
+            <button className="btn sm accent" disabled={pending || !alignDraft.date}
+              onClick={() => startTransition(async () => {
+                const res = await alignMaintenance(target, alignDraft);
+                if (res?.error) { setError(res.error); return; }
+                setAligning(false);
+              })}>
+              {pending ? "Aligning..." : `Apply to ${schedules.length} schedule${schedules.length === 1 ? "" : "s"}`}
+            </button>
+          </div>
+          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+            {alignDraft.mode === "lastDone"
+              ? "Marks every schedule last done that day - each comes due its own cadence later (quarterly work in 3 months, annual next year)."
+              : "Everything falls due together on that day, like a PM visit; each advances by its own cadence once completed."}
+            {" "}Generated tasks still sitting Open from the old dates are removed; anything In progress stays.
+          </div>
+        </div>
+      )}
       {/* A hand-made schedule here covers THIS record only. Ten similar systems
           means ten copies - which is exactly what the catalog exists to avoid. */}
       {catalogHint && (
