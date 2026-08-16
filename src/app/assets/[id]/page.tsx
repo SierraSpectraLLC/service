@@ -249,7 +249,19 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <PanelLayout
         viewKey="asset"
         saved={panelLayout}
-        defaultRight={["photos", "files", "reference", "hours", "update", "history", "activity"]}
+        // Balanced per TAB: each tab splits its own panels across the columns.
+        defaultRight={["workorders", "parts", "photos", "reference", "hours", "activity"]}
+        // Same tab shape as the system page, so moving between a system and
+        // one of its units never means relearning where anything lives.
+        pinned={["unit"]}
+        groups={[
+          { key: "work", label: "Work",
+            keys: ["workorders", "tasks", "maintenance", "parts"],
+            badge: taggedTasks.filter((t) => t.state !== "Done").length || undefined,
+            badgeTone: taggedTasks.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < shopToday()) ? "bad" : "info" },
+          { key: "documents", label: "Documents", keys: ["photos", "files", "reference"] },
+          { key: "log", label: "Log", keys: ["hours", "update", "history", "activity"] },
+        ]}
         panels={[
           { key: "unit", label: "Unit", node: (
             <div className="card">

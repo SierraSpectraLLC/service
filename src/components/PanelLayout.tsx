@@ -1,9 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { saveUiLayout, type PanelArrangement } from "@/app/actions";
 
 export type Panel = { key: string; label: string; node: React.ReactNode };
+
+/**
+ * One tab of a record page. `badge` is the tab's reason to be visited now -
+ * open work, unread posts - so flipping between tabs is navigation, not
+ * hunting. Tone colors the badge: "bad" for overdue-grade attention.
+ */
+export type PanelGroup = {
+  key: string; label: string; keys: string[];
+  badge?: number | string; badgeTone?: "info" | "warn" | "bad";
+};
 
 /**
  * Two-column shell for the long record pages, arranged by the person reading.
@@ -20,13 +30,23 @@ export type Panel = { key: string; label: string; node: React.ReactNode };
  * order - left column, then right - so `defaultRight` has to be chosen to read
  * correctly flattened, not just side by side.
  */
-export default function PanelLayout({ viewKey, panels, defaultRight, saved }: {
+export default function PanelLayout({ viewKey, panels, defaultRight, saved, groups, pinned = [] }: {
   viewKey: string;
   panels: Panel[];
   /** Keys that start in the right-hand column. */
   defaultRight: string[];
   /** This person's stored arrangement, or null for the defaults. */
   saved: PanelArrangement | null;
+  /**
+   * Tabs. A record page grew to fifteen panels, which is three screens of
+   * scroll and none of it findable; grouped, each tab is one working context -
+   * the work, the equipment, the paper, the log. Panels stay mounted when
+   * their tab is inactive (hidden, not unmounted), so a half-typed note
+   * survives flipping away and back. Omit for the old single-page layout.
+   */
+  groups?: PanelGroup[];
+  /** Keys that render above the tabs on every tab - the record's identity. */
+  pinned?: string[];
 }) {
   const known = panels.map((p) => p.key);
   const defaults: PanelArrangement = {
@@ -49,6 +69,39 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved }: {
   const [editing, setEditing] = useState(false);
   const [drag, setDrag] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+
+  // The active tab lives in the URL hash, so "the maintenance tab of T-003"
+  // is a link somebody can send. Initialized after mount rather than in state
+  // (the server render has no hash to read), which costs one paint on a
+  // deep-link and nothing otherwise.
+  const [active, setActive] = useState(groups?.[0]?.key ?? "");
+  useEffect(() => {
+    if (!groups?.length) return;
+    const apply = () => {
+      const fromHash = window.location.hash.replace("#", "");
+      if (groups.some((g) => g.key === fromHash)) setActive(fromHash);
+    };
+    apply();
+    // Hash-only navigation (back/forward, a #documents link clicked on the
+    // page itself) never remounts the component, so the listener is the only
+    // thing that hears it.
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const pickTab = (key: string) => {
+    setActive(key);
+    history.replaceState(null, "", `#${key}`);
+  };
+  /** Which tab a panel belongs to; strays land on the first tab, never vanish. */
+  const groupOf = (key: string): string => {
+    if (!groups?.length || pinned.includes(key)) return "";
+    return groups.find((g) => g.keys.includes(key))?.key ?? groups[0].key;
+  };
+  // While arranging, every panel shows - moving a panel you cannot see is a
+  // guessing game - and the tabs read as labels for where things will land.
+  const tabbed = !!groups?.length;
+  const visibleNow = (key: string) => !tabbed || editing || groupOf(key) === "" || groupOf(key) === active;
 
   // Optimistic: the arrangement is already on screen, and a failed save is not
   // worth interrupting anyone over - the next change retries the whole shape.
@@ -126,6 +179,7 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved }: {
     if (!p) return null;
     return (
       <div key={key}
+        style={visibleNow(key) ? undefined : { display: "none" }}
         className={[
           "panel-slot",
           editing ? "editing" : "",
@@ -222,9 +276,38 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved }: {
         </div>
       )}
 
+      {/* The record's identity rides above the tabs - whatever tab is open,
+          you can still see what you're looking at. Same grid, same widths. */}
+      {tabbed && !editing && pinned.length > 0 && (
+        <div className="panel-cols">
+          <div>{left.filter((k) => pinned.includes(k)).map(slot)}</div>
+          <div>{rightCol.filter((k) => pinned.includes(k)).map(slot)}</div>
+        </div>
+      )}
+
+      {tabbed && !editing && (
+        <div className="subtabs" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+          {groups!.map((g) => {
+            const tone = g.badgeTone ?? "info";
+            const badgeStyle = tone === "bad" ? { background: "#FBE9E9", color: "#A32D2D" }
+              : tone === "warn" ? { background: "#FAF0DC", color: "#8A5410" }
+              : { background: "#E7F2FA", color: "#1D6396" };
+            return (
+              <button key={g.key} className={`subtab${active === g.key ? " active" : ""}`}
+                aria-pressed={active === g.key} onClick={() => pickTab(g.key)}>
+                {g.label}
+                {g.badge !== undefined && g.badge !== 0 && (
+                  <span className="pill" style={{ ...badgeStyle, marginLeft: 6 }}>{g.badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="panel-cols">
-        <div>{left.map(slot)}{tail(false)}</div>
-        <div>{rightCol.map(slot)}{tail(true)}</div>
+        <div>{(tabbed && !editing ? left.filter((k) => !pinned.includes(k)) : left).map(slot)}{tail(false)}</div>
+        <div>{(tabbed && !editing ? rightCol.filter((k) => !pinned.includes(k)) : rightCol).map(slot)}{tail(true)}</div>
       </div>
     </>
   );

@@ -434,7 +434,32 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <PanelLayout
         viewKey="system"
         saved={panelLayout}
-        defaultRight={["site", "custody", "photos", "files", "reference", "hours", "update", "discussion", "activity"]}
+        // Balanced per TAB, not per page: each tab splits its own panels
+        // across the two columns, and the queue card rides beside the header
+        // so whose-move-is-it is visible whatever tab is open.
+        defaultRight={["queue", "workorders", "parts", "site", "custody", "photos", "reference", "hours", "update"]}
+        // The identity card stays on screen; the other fourteen panels were
+        // three screens of scroll, so they group into working contexts. Badges
+        // are each tab's reason to be visited now, so flipping is navigation
+        // rather than hunting.
+        pinned={["system", "queue"]}
+        groups={[
+          { key: "work", label: "Work",
+            keys: ["workorders", "tasks", "maintenance", "parts"],
+            badge: taskRows.filter((t) => t.state !== "Done").length || undefined,
+            badgeTone: taskRows.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < shopToday()) ? "bad" : "info" },
+          { key: "equipment", label: "Equipment", keys: ["assets", "site", "custody"] },
+          { key: "documents", label: "Documents",
+            keys: ["validation", "files", "photos", "reference"],
+            badge: gxpStanding && gxpStanding.tone !== "ok" ? "!" : undefined,
+            badgeTone: gxpStanding?.tone === "bad" ? "bad" : "warn" },
+          { key: "log", label: "Log",
+            keys: ["hours", "update", "discussion", "activity"],
+            badge: (() => {
+              const seen = readRows[0]?.lastSeenAt;
+              return visiblePosts.filter((x) => x.authorEmail !== user.email && (!seen || x.createdAt > seen)).length || undefined;
+            })() },
+        ]}
         panels={[
           { key: "system", label: "System", node: (
             <SystemPanel
