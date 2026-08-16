@@ -2,8 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { addCatalogRef, removeCatalogRef } from "@/app/actions";
+import { addCatalogRef, listStoreFilesForRef, removeCatalogRef } from "@/app/actions";
 import { looksLikeImage, refScopeLabel } from "@/lib/catalogRefs";
+import { fmtBytes } from "@/lib/storage";
+
+type PickFile = {
+  id: number; fileName: string; kind: string; description: string; size: number;
+  isPhoto: boolean; where: string;
+};
 
 export type RefRow = {
   id: number; assetType: string; model: string; kind: string;
@@ -31,8 +37,28 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ kind: "link", scope: 0, title: "", url: "", body: "" });
+  // Where the thing being linked lives. "shelf" browses what the shop already
+  // has - the manuals somebody uploaded, the photos already on records - which
+  // is the normal case; "web" is for a manual still on the manufacturer's site.
+  const [source, setSource] = useState<"shelf" | "web">("shelf");
+  const [picked, setPicked] = useState<PickFile | null>(null);
+  const [files, setFiles] = useState<PickFile[] | "loading" | null>(null);
+  const [fileFilter, setFileFilter] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+
+  const loadFiles = () => {
+    if (files !== null) return;
+    setFiles("loading");
+    startTransition(async () => {
+      try { setFiles((await listStoreFilesForRef()).files); }
+      catch { setFiles([]); setError("Couldn't load the file shelf"); }
+    });
+  };
+  const reset = () => {
+    setDraft({ kind: "link", scope: draft.scope, title: "", url: "", body: "" });
+    setPicked(null); setFileFilter("");
+  };
 
   const save = () => {
     const scope = scopes[draft.scope];
@@ -41,10 +67,14 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
     startTransition(async () => {
       const res = await addCatalogRef({
         assetType: scope.assetType, model: scope.model,
-        kind: draft.kind, title: draft.title, url: draft.url, body: draft.body,
+        kind: draft.kind,
+        // A shelf file needs no title typed: its own name is one.
+        title: draft.title || (source === "shelf" ? picked?.fileName ?? "" : ""),
+        url: source === "shelf" ? (picked ? `/api/files/${picked.id}` : "") : draft.url,
+        body: draft.body,
       });
       if (res?.error) { setError(res.error); return; }
-      setDraft({ kind: "link", scope: draft.scope, title: "", url: "", body: "" });
+      reset();
       setOpen(false);
       router.refresh();
     });
@@ -58,7 +88,8 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Reference</div>
         {canEdit && scopes.length > 0 && (
-          <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => { setOpen((v) => !v); setError(""); }}>
+          <button className="btn sm" style={{ marginLeft: "auto" }}
+            onClick={() => { const next = !open; setOpen(next); setError(""); if (next) loadFiles(); }}>
             {open ? "Cancel" : "+ Add"}
           </button>
         )}
@@ -84,13 +115,73 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               {scopes.map((s, i) => <option key={`${s.assetType}|${s.model}`} value={i}>{s.label}</option>)}
             </select>
           </div>
-          <label>Title</label>
+          <label>Title <span className="mut" style={{ fontWeight: 400 }}>(a chosen file names itself)</span></label>
           <input value={draft.title} placeholder={draft.kind === "link" ? "Altis service manual" : "H-ESI needle & seal install"}
             onChange={(e) => setDraft({ ...draft, title: e.target.value })} style={{ marginBottom: 8 }} />
-          <label>{draft.kind === "link" ? "URL *" : "Picture or file URL (optional)"}</label>
-          <input className="mono" value={draft.url}
-            placeholder={draft.kind === "link" ? "https://..." : "Paste a photo's link from the gallery, or any URL"}
-            onChange={(e) => setDraft({ ...draft, url: e.target.value })} style={{ marginBottom: 8 }} />
+
+          {/* Point at a file, don't retype its address. Most of what belongs
+              here is already uploaded - the manuals on the shelf, the photos on
+              records - so browsing them is the default and a web address is
+              the special case, not the other way round. */}
+          <label>{draft.kind === "link" ? "What it points at *" : "Picture or document (optional)"}</label>
+          <div className="seg" role="group" aria-label="Where the file is" style={{ marginBottom: 8 }}>
+            <button type="button" aria-pressed={source === "shelf"}
+              onClick={() => { setSource("shelf"); loadFiles(); }}>Our files</button>
+            <button type="button" aria-pressed={source === "web"}
+              onClick={() => setSource("web")}>Web link</button>
+          </div>
+
+          {source === "web" ? (
+            <input className="mono" value={draft.url} placeholder="https://..."
+              onChange={(e) => setDraft({ ...draft, url: e.target.value })} style={{ marginBottom: 8 }} />
+          ) : picked ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 8,
+              border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
+              <span aria-hidden style={{ fontSize: 13 }}>{picked.isPhoto ? "🖼" : "📄"}</span>
+              <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {picked.fileName}
+              </span>
+              <span className="mut" style={{ fontSize: 11 }}>{picked.where}</span>
+              <button className="btn link" style={{ marginLeft: "auto", fontSize: 11 }}
+                onClick={() => setPicked(null)}>change</button>
+            </div>
+          ) : (
+            <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "#fff", padding: 8, marginBottom: 8 }}>
+              <input value={fileFilter} onChange={(e) => setFileFilter(e.target.value)}
+                placeholder="Filter by name, description or where it lives"
+                style={{ fontSize: 12, marginBottom: 6 }} aria-label="Filter files" />
+              {files === "loading" && <div className="mut" style={{ fontSize: 12 }}>Loading the shelf…</div>}
+              {Array.isArray(files) && files.length === 0 && (
+                <div className="mut" style={{ fontSize: 12 }}>
+                  Nothing stored yet. Upload manuals under Library → Files, then point at them here.
+                </div>
+              )}
+              {Array.isArray(files) && (() => {
+                const needle = fileFilter.trim().toLowerCase();
+                const shown = files.filter((f) => !needle
+                  || `${f.fileName} ${f.description} ${f.where}`.toLowerCase().includes(needle));
+                if (!shown.length) return <div className="mut" style={{ fontSize: 12 }}>Nothing matches that.</div>;
+                return (
+                  <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                    {shown.slice(0, 200).map((f) => (
+                      <button key={f.id} type="button" className="row-hover"
+                        onClick={() => { setPicked(f); setError(""); }}
+                        style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "left",
+                          padding: "5px 4px", border: "none", background: "none", cursor: "pointer",
+                          borderTop: "1px solid var(--line)" }}>
+                        <span aria-hidden style={{ fontSize: 12 }}>{f.isPhoto ? "🖼" : "📄"}</span>
+                        <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {f.fileName}
+                        </span>
+                        <span className="mut" style={{ fontSize: 11 }}>{f.where}</span>
+                        <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{fmtBytes(f.size)}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
           {draft.kind === "note" && (
             <>
               <label>The note *</label>

@@ -42,7 +42,7 @@ import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
-import { storeQuota, storeUsedBytes } from "@/lib/storeUsage";
+import { storeFiles, storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
 import {
   houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
@@ -6961,6 +6961,30 @@ export type CatalogRefInput = {
   assetType: string; model: string; kind: string;
   title: string; url: string; body: string;
 };
+
+/**
+ * The shop's own files, for the catalog reference picker: the manuals already
+ * on the shelf and the photos already on records. Pasting a URL was the wrong
+ * ask - somebody with fifty manuals uploaded should point at one, not copy an
+ * address for it.
+ *
+ * Read through storeFiles, the same primitive Documents and Gallery use, so
+ * this offers exactly the files the viewer can already see and nothing else.
+ */
+export async function listStoreFilesForRef(): Promise<{
+  files: { id: number; fileName: string; kind: string; description: string; size: number; isPhoto: boolean; where: string }[];
+}> {
+  const u = await requireStaff();
+  const rows = await storeFiles(u.orgId ?? null, 500).catch(() => []);
+  return {
+    files: rows.map((r) => ({
+      id: r.id, fileName: r.fileName, kind: r.kind, description: r.description, size: r.size,
+      isPhoto: isPhotoFile(r),
+      // Where it already lives, so two files with the same name are telling apart.
+      where: r.externalId ?? r.assetLabel ?? "on the shelf",
+    })),
+  };
+}
 
 export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
