@@ -8,7 +8,7 @@ const proc = (over: Partial<ProcedureLike> = {}): ProcedureLike => ({
   resultType: "pass_fail", target: null, tolerancePct: null,
   requiresNote: true, consumesPart: false, runsAtIntake: true, intervalDays: 365,
   required: true, parts: '[{"name":"Seal kit","number":"5063-6589"}]',
-  modelScope: ["LC-20AD", "LC-30AD"],
+  modelScope: ["LC-20AD", "LC-30AD"], categoryScope: [],
   ...over,
 });
 
@@ -27,6 +27,11 @@ describe("copying a procedure to another module type", () => {
     // Two Shimadzu pump models mean nothing on an LC System: the copy would
     // apply to no unit at all and look like it had simply stopped working.
     expect(procedureCopy(proc(), "LC System", 0).modelScope).toEqual([]);
+  });
+
+  it("carries the system-type scope, which means the same thing everywhere", () => {
+    // TOC work copied onto another module type is still TOC work.
+    expect(procedureCopy(proc({ categoryScope: ["TOC"] }), "Degasser", 0).categoryScope).toEqual(["TOC"]);
   });
 
   it("spots a duplicate before making one", () => {

@@ -79,7 +79,7 @@ import { coverOf, photoRecord, photoTwin, type PhotoRecord } from "@/lib/photoPa
 import { pmRequestDue, pmRequestTitle, pmWindow, scheduleLine } from "@/lib/pmRequest";
 import { memberGuard, ownerEmails, rootOwner, validHouseEmail } from "@/lib/houseRole";
 import { parseHours, formatHours } from "@/lib/hours";
-import { matchItems, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
+import { matchItems, scopeMatches, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES } from "@/lib/checkout";
 import { systemLabel } from "@/lib/systemLabel";
 import { clientAfterHandoff, ownerFields } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
@@ -556,7 +556,15 @@ async function generateCheckout(
   const items = await db.select().from(procedures)
     .where(and(eq(procedures.assetType, assetType), eq(procedures.runsAtIntake, true),
       forTenant(procedures.tenantOrgId, tenantOrgId)));
-  const picked = matchItems(items, assetType, target.model);
+  // Category scope: the TOC sampler's intake work must not fire on the LC-MS
+  // sampler. A bench checkout (no system) gets only the unscoped procedures.
+  const category = instrumentId !== null
+    ? (await db.select({ category: instruments.category }).from(instruments)
+        .where(eq(instruments.id, instrumentId)))[0]?.category ?? ""
+    : "";
+  const inCategory = items.filter((i) =>
+    i.categoryScope.length === 0 || (category !== "" && scopeMatches(i.categoryScope, category)));
+  const picked = matchItems(inCategory, assetType, target.model);
   if (!picked.length) return 0;
   const existing = target.id !== null
     ? await db.select().from(tasks).where(eq(tasks.assetId, target.id))
@@ -747,6 +755,10 @@ async function attachOne(assetId: number, instrumentId: number, externalId: stri
     action: `installed ${assetLabel(a)}${a.location ? ` (from ${a.location})` : ""}`,
   });
   await generateCheckout(instrumentId, a, u.email, a.tenantOrgId);
+  // Recurring upkeep scoped to the system's type arrives when the unit joins
+  // it - a spare created on the shelf had no system to scope by. Deduped by
+  // procedure and title, so re-installs don't double the schedules.
+  await applyProcedures(assetId, shopToday(), u.email);
   revalidatePath(`/assets/${assetId}`);
   return {};
 }
@@ -878,6 +890,9 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
     action: `installed ${assetLabel(a)}${from ? ` (moved from ${from.externalId})` : ""}`,
   });
   await generateCheckout(toInstrumentId, a, u.email, a.tenantOrgId);
+  // Same as attach: the destination system's type may owe this unit upkeep
+  // the source's didn't.
+  await applyProcedures(assetId, shopToday(), u.email);
   rev(toInstrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -2933,6 +2948,7 @@ type ProcedureInput = {
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | string | null;
+  required?: boolean;
   parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
 };
 
@@ -2942,6 +2958,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null;
+  required: boolean;
   parts: string; modelScope: string[]; categoryScope: string[];
 } {
   if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
@@ -2978,15 +2995,21 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   // A system's scope is its CATEGORY, not a model: a system is not one model, it
   // is a stack of them. Empty means every system, which is what the ones defined
   // before this column meant.
+  //
+  // Module-level procedures carry a category scope too: "Autosampler" is one
+  // module type, but the TOC sampler's procedures are not the LC-MS sampler's.
+  // Empty still means every system type the module serves.
   const modelScope = data.assetType === "system"
     ? [] : [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
-  const categoryScope = data.assetType === "system"
-    ? [...new Set((data.categoryScope ?? []).map((c) => c.trim()).filter(Boolean))] : [];
+  const categoryScope = [...new Set((data.categoryScope ?? []).map((c) => c.trim()).filter(Boolean))];
   return {
     assetType: data.assetType, kind: data.kind, name, notes: data.notes.trim(),
     resultType, target, tolerancePct,
     requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart,
     runsAtIntake: data.runsAtIntake, intervalDays,
+    // Persisted since the sheet grew the checkbox - it used to be silently
+    // dropped here, so "Required for sign-off" never actually saved.
+    required: data.required ?? false,
     parts: serializeProcParts(data.parts), modelScope, categoryScope,
   };
 }
@@ -3002,10 +3025,13 @@ const procScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", "
  */
 const scopeOf = (p: { assetType: string; modelScope: string[]; categoryScope: string[] }) =>
   (p.assetType === "system" ? p.categoryScope : p.modelScope);
+// Module rows compare BOTH scopes: "Replace syringe" under TOC and "Replace
+// syringe" under LC-MS are two jobs, not one typed twice.
 const sameScope = (
   a: { assetType: string; modelScope: string[]; categoryScope: string[] },
   b: { assetType: string; modelScope: string[]; categoryScope: string[] },
-) => scopeOf(a).join("|").toLowerCase() === scopeOf(b).join("|").toLowerCase();
+) => scopeOf(a).join("|").toLowerCase() === scopeOf(b).join("|").toLowerCase()
+  && a.categoryScope.join("|").toLowerCase() === b.categoryScope.join("|").toLowerCase();
 const procTimingLabel = (p: { runsAtIntake: boolean; intervalDays: number | null }) =>
   p.runsAtIntake && p.intervalDays !== null ? `at intake + ${cadenceLabel(p.intervalDays)}`
     : p.runsAtIntake ? "at intake" : cadenceLabel(p.intervalDays!);

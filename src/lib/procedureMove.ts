@@ -26,6 +26,7 @@ export type ProcedureLike = {
   required: boolean;
   parts: string;
   modelScope: string[];
+  categoryScope: string[];
 };
 
 /**
@@ -57,9 +58,10 @@ export function procedureCopy(p: ProcedureLike, toAssetType: string, position: n
     required: p.required,
     parts: p.parts,
     modelScope: [] as string[],
-    // Dropped for the same reason as the model scope: a system procedure's
-    // categories name system types, which mean nothing on a module type.
-    categoryScope: [] as string[],
+    // The system-type scope CARRIES: it names system types (TOC, LC-MS), and
+    // those mean the same thing on the new type as on the old one - a TOC
+    // procedure copied to another module type is still TOC work.
+    categoryScope: [...p.categoryScope],
     position,
   };
 }

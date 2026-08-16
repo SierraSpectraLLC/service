@@ -132,9 +132,14 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   const [copyTo, setCopyTo] = useState<string[]>([]);
   const [moving, setMoving] = useState<{ assetType: string; from: string } | null>(null);
   const [moveTo, setMoveTo] = useState("");
+  // A shared procedure being removed FROM ONE system type's view. Deleting the
+  // row would take it off every system type it serves - which is how "I deleted
+  // the TOC copy and the LC-MS one vanished too" happened - so removal inside a
+  // band offers to narrow the scope instead.
+  const [removing, setRemoving] = useState<{ row: ProcedureRow; band: string; served: string[] } | null>(null);
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const drag = useRef<{ type: string; ids: number[]; itemId: number; dirty: boolean } | null>(null);
+  const drag = useRef<{ listKey: string; assetType: string; ids: number[]; itemId: number; dirty: boolean } | null>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
 
   // System first - instrument-level procedures run once per system. Types with
@@ -172,15 +177,29 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     const by = new Map<string, ProcedureRow[]>();
     for (const g of GROUPS) by.set(g.type, []);
     for (const i of items) by.get(i.assetType)?.push(i);
-    for (const [type, list] of by) {
-      list.sort((a, b) => a.position - b.position || a.id - b.id);
-      const order = orderOverride[type];
-      if (order) list.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-    }
+    for (const [, list] of by) list.sort((a, b) => a.position - b.position || a.id - b.id);
     return by;
     // GROUPS is derived from these:
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, orderOverride, assetTypes]);
+  }, [items, assetTypes]);
+
+  // A type's rows, seen from one band: a module procedure scoped to system
+  // types appears only under those; unscoped ones appear under every band the
+  // type serves. This is what makes TOC's autosampler list and LC-MS's two
+  // different lists instead of one list drawn twice.
+  const rowsIn = (bandKey: string, type: string): ProcedureRow[] => {
+    const all = grouped.get(type) ?? [];
+    if (bandKey === "system" || bandKey === "__loose" || type === "system") return all;
+    return all.filter((p) => p.categoryScope.length === 0
+      || p.categoryScope.some((c) => c.toLowerCase() === bandKey.toLowerCase()));
+  };
+  // The in-flight drag order for one band's view of a type.
+  const applyOrder = (listKey: string, list: ProcedureRow[]): ProcedureRow[] => {
+    const order = orderOverride[listKey];
+    if (!order) return list;
+    const at = (id: number) => { const i = order.indexOf(id); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
+    return [...list].sort((a, b) => at(a.id) - at(b.id));
+  };
 
   // Sheet lifecycle: escape closes, focus moves in and stays trapped.
   useEffect(() => {
@@ -208,8 +227,13 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     return () => clearTimeout(t);
   }, [flashId]);
 
-  const openAdd = (assetType: string) => {
-    setDraft(emptyDraft); // filters never pre-fill the sheet
+  const openAdd = (assetType: string, bandKey?: string) => {
+    // Filters never pre-fill the sheet - but the band does: adding from inside
+    // TOC means a TOC procedure when the type serves more than one system
+    // type. Without this, adding under LC-MS also added it to TOC.
+    const served = categoriesByType[assetType] ?? [];
+    const scoped = bandKey && bandKey !== "system" && bandKey !== "__loose" && served.length > 1;
+    setDraft({ ...emptyDraft, categoryScope: scoped ? [bandKey] : [] });
     setTimingBefore(null);
     setApplyNow(false);
     setError("");
@@ -232,10 +256,11 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     setSheet({ assetType: i.assetType, id: i.id });
   };
   // A new procedure pre-filled from an existing one, on the same type. This is
-  // how "the LC-30 takes a different seal kit than the LC-20" gets its own row:
-  // duplicate, narrow the model scope, swap the part.
+  // how "the LC-30 takes different work than the LC-20" gets its own row:
+  // duplicate, narrow the model scope, change what differs. The system-type
+  // scope carries over - a TOC variant belongs to TOC until said otherwise.
   const openDuplicate = (i: ProcedureRow) => {
-    setDraft({ ...draftFrom(i), modelScope: [], categoryScope: [] });
+    setDraft({ ...draftFrom(i), modelScope: [] });
     setTimingBefore(null);
     setApplyNow(false);
     setError("");
@@ -266,7 +291,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       runsAtIntake: draft.runsAtIntake, required: draft.required,
       intervalDays: draft.repeats ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
-      categoryScope: isSystem ? draft.categoryScope : [],
+      categoryScope: draft.categoryScope,
     };
     startTransition(async () => {
       const res = sheet.id
@@ -287,14 +312,14 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   // Pointer-based reorder (mouse and touch; the handle has touch-action: none
   // so dragging doesn't scroll). Only offered on the unfiltered list - a drag
   // between visible rows with hidden ones between them would lie about order.
-  const startDrag = (e: React.PointerEvent, assetType: string, itemId: number) => {
+  const startDrag = (e: React.PointerEvent, listKey: string, assetType: string, ids: number[], itemId: number) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    drag.current = { type: assetType, ids: (grouped.get(assetType) ?? []).map((i) => i.id), itemId, dirty: false };
+    drag.current = { listKey, assetType, ids, itemId, dirty: false };
   };
   const moveDrag = (e: React.PointerEvent) => {
     const d = drag.current;
-    const wrap = d && listRefs.current[d.type];
+    const wrap = d && listRefs.current[d.listKey];
     if (!d || !wrap) return;
     const rows = [...wrap.children] as HTMLElement[];
     let to = rows.length;
@@ -310,25 +335,32 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     ids.splice(to, 0, d.itemId);
     d.ids = ids;
     d.dirty = true;
-    setOrderOverride((s) => ({ ...s, [d.type]: ids }));
+    setOrderOverride((s) => ({ ...s, [d.listKey]: ids }));
   };
   const endDrag = () => {
     const d = drag.current;
     drag.current = null;
-    if (d?.dirty) startTransition(() => reorderProcedures(d.type, d.ids));
+    // The server re-positions the ids it is given and leaves the rest alone,
+    // so reordering one band's view of a type is safe.
+    if (d?.dirty) startTransition(() => reorderProcedures(d.assetType, d.ids));
   };
 
   const sentence = describeProcedure({
     assetType: sheet?.assetType ?? "", runsAtIntake: draft.runsAtIntake,
     intervalDays: effectiveInterval, modelScope: isSystem ? [] : draft.modelScope,
-    categoryScope: isSystem ? draft.categoryScope : [],
+    categoryScope: draft.categoryScope,
     parts: draft.parts.filter((p) => p.name.trim() || p.number.trim()),
   });
 
-  const renderRow = (i: ProcedureRow, assetType: string) => {
+  const renderRow = (i: ProcedureRow, assetType: string, bandKey: string, listKey: string, listIds: number[]) => {
     const k = KIND_GLYPH[i.kind] ?? KIND_GLYPH.test;
     // A system procedure is narrowed by category, everything else by model.
     const scopeChips = assetType === "system" ? i.categoryScope : i.modelScope;
+    const served = categoriesByType[assetType] ?? [];
+    // Which system types this row effectively belongs to - explicit scope, or
+    // everything the type serves.
+    const effective = i.categoryScope.length ? i.categoryScope : served;
+    const shared = assetType !== "system" && served.length > 1;
     const role = procedureRole(i);
     return (
       <div key={i.id} ref={(el) => { rowRefs.current[i.id] = el; }}
@@ -341,7 +373,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         }}>
         {filter === "all" && (
           <span className="drag-handle mut" aria-label="Drag to reorder" tabIndex={0}
-            onPointerDown={(e) => startDrag(e, assetType, i.id)} onPointerMove={moveDrag}
+            onPointerDown={(e) => startDrag(e, listKey, assetType, listIds, i.id)} onPointerMove={moveDrag}
             onPointerUp={endDrag} onPointerCancel={endDrag}
             style={{ fontSize: 13, userSelect: "none", padding: "2px 2px" }}>⠿</span>
         )}
@@ -385,6 +417,21 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 {assetType === "system" ? "All systems" : "All models"}
               </span>
             )}
+            {/* Which system types this row belongs to. Only said when the type
+                serves several - a row that appears under TOC and LC-MS alike
+                must say so, or deleting it "here" surprises "there". */}
+            {shared && (
+              i.categoryScope.length ? (
+                i.categoryScope.map((c) => (
+                  <span key={c} className="pill" style={{ background: "#E0F0EE", color: "#0F6B5F" }}>{c}</span>
+                ))
+              ) : (
+                <span className="pill" style={{ background: "#E0F0EE", color: "#0F6B5F" }}
+                  title={`Appears under ${served.join(" and ")} alike - edit to scope it to one`}>
+                  all {served.length} system types
+                </span>
+              )
+            )}
             {i.parts.map((pt) => (
               <span key={`${pt.number}|${pt.name}`} className="mono" style={{ fontSize: 11, color: "#8A5410", background: "#FAF0DC", borderRadius: 4, padding: "1px 5px" }}>
                 {pt.number ? `PN ${pt.number}` : pt.name}
@@ -407,6 +454,16 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
           style={{ fontSize: 12, padding: 4 }}>copy</button>
         <button className="btn link" aria-label={`Remove ${i.name}`} title="Remove" disabled={pending}
           onClick={() => {
+            // A row serving several system types, removed from inside one of
+            // them, is a scope question - not a delete. Straight delete only
+            // when the row lives in exactly one place.
+            const scopedHere = bandKey !== "system" && bandKey !== "__loose" && shared
+              && effective.length > 1 && effective.some((c) => c.toLowerCase() === bandKey.toLowerCase());
+            if (scopedHere) {
+              setRemoving({ row: i, band: bandKey, served });
+              setSaved(""); setError("");
+              return;
+            }
             if (window.confirm(`Remove "${i.name}"? Tasks and schedules already on units stay.`)) {
               startTransition(async () => { await deleteProcedure(i.id); });
             }
@@ -512,6 +569,57 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         </>
       )}
 
+      {/* Remove-from-one-place. The row serves several system types; deleting
+          it outright would take it off all of them at once. */}
+      {removing && (() => {
+        const { row, band, served } = removing;
+        const effective = row.categoryScope.length ? row.categoryScope : served;
+        const rest = effective.filter((c) => c.toLowerCase() !== band.toLowerCase());
+        const narrow = () => {
+          setError("");
+          startTransition(async () => {
+            const res = await updateProcedure(row.id, {
+              assetType: row.assetType, kind: row.kind, name: row.name, notes: row.notes,
+              resultType: row.resultType, target: row.target ?? "", tolerancePct: row.tolerancePct ?? "",
+              requiresNote: row.requiresNote, consumesPart: row.consumesPart,
+              runsAtIntake: row.runsAtIntake, required: row.required,
+              intervalDays: row.intervalDays,
+              parts: row.parts, modelScope: row.modelScope, categoryScope: rest,
+            }, false);
+            if (res?.error) { setError(res.error); return; }
+            setSaved(`"${row.name}" no longer applies under ${band}; still on ${rest.join(", ")}`);
+            setRemoving(null);
+          });
+        };
+        return (
+          <>
+            <div className="scrim" onClick={() => setRemoving(null)} />
+            <div className="sheet" role="dialog" aria-modal="true" aria-label={`Remove ${row.name}`}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>Remove &ldquo;{row.name}&rdquo;</div>
+                <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
+                  onClick={() => setRemoving(null)}>close</button>
+              </div>
+              <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
+                This procedure applies under {effective.join(" and ")}. Tasks and schedules
+                already on units stay either way.
+              </div>
+              {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <button className="btn sm" onClick={() => setRemoving(null)} disabled={pending}>Cancel</button>
+                <button className="btn sm" disabled={pending} style={{ color: "#A32D2D" }}
+                  onClick={() => {
+                    startTransition(async () => { await deleteProcedure(row.id); setRemoving(null); });
+                  }}>Delete from all of them</button>
+                <button className="btn sm primary" onClick={narrow} disabled={pending}>
+                  {pending ? "Saving..." : `Remove from ${band} only`}
+                </button>
+              </div>
+            </div>
+          </>
+        );
+      })()}
+
       <div className="seg" role="group" aria-label="Filter procedures" style={{ marginBottom: 10, flexWrap: "wrap" }}>
         {FILTERS.map((f) => (
           <button key={f.key} type="button" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
@@ -526,7 +634,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
           EXPANDED - the old second accordion meant two clicks to see any row,
           which read as an empty page. */}
       {BANDS.map((band) => {
-        const bandRows = band.types.flatMap((ty) => grouped.get(ty) ?? []);
+        const bandRows = band.types.flatMap((ty) => rowsIn(band.key, ty));
         const bandOpen = openBand === band.key;
         const bandRecur = bandRows.filter((i) => i.intervalDays !== null).length;
         return (
@@ -549,7 +657,8 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               {band.subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{band.subtitle}</div>}
               {band.types.map((bandType) => {
                 const g = GROUPS.find((x) => x.type === bandType) ?? { type: bandType, label: bandType, subtitle: undefined };
-                const all = grouped.get(g.type) ?? [];
+                const listKey = `${band.key}::${g.type}`;
+                const all = applyOrder(listKey, rowsIn(band.key, g.type));
                 const list = all.filter((i) => passesFilter(i, filter));
                 const hidden = all.length - list.length;
                 const isSystemBand = band.key === "system";
@@ -579,15 +688,15 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                         {hidden} hidden by the {FILTERS.find((f) => f.key === filter)?.label} filter.
                       </div>
                     )}
-                    <div ref={(el) => { listRefs.current[g.type] = el; }}>
-                      {list.map((i) => renderRow(i, g.type))}
+                    <div ref={(el) => { listRefs.current[listKey] = el; }}>
+                      {list.map((i) => renderRow(i, g.type, band.key, listKey, list.map((x) => x.id)))}
                     </div>
                     {list.length > 0 && hidden > 0 && (
                       <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
                         +{hidden} more hidden by the filter.
                       </div>
                     )}
-                    <button className="btn sm" onClick={() => openAdd(g.type)}
+                    <button className="btn sm" onClick={() => openAdd(g.type, band.key)}
                       style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "#1D6396" }}>
                       ＋ Procedure{isSystemBand ? " · system-wide" : ` · ${g.label}`}
                     </button>
@@ -824,6 +933,21 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                   them and tag each part above with the models it fits. Duplicate the procedure
                   only when the work itself differs by model.
                 </div>
+                {/* Only when the type serves several system types is there a
+                    question to answer - a Degasser only LC-MS uses needs no
+                    scope. This is what keeps the TOC sampler's procedures off
+                    the LC-MS sampler and vice versa. */}
+                {(categoriesByType[sheet.assetType] ?? []).length > 1 && (
+                  <div style={{ marginTop: 10 }}>
+                    <label>System types it belongs to</label>
+                    <ScopeField scope={draft.categoryScope} options={categoriesByType[sheet.assetType] ?? []}
+                      onChange={(next) => setDraft({ ...draft, categoryScope: next })} />
+                    <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                      Empty covers every system type a {sheet.assetType.toLowerCase()} serves
+                      ({(categoriesByType[sheet.assetType] ?? []).join(", ")}).
+                    </div>
+                  </div>
+                )}
               </>
             )}
 

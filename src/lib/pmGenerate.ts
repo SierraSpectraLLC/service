@@ -189,7 +189,17 @@ export async function applyProcedures(assetId: number, today: string, actor: str
   const rows = await db.select().from(procedures)
     .where(and(eq(procedures.assetType, a.kind), isNotNull(procedures.intervalDays),
       a.tenantOrgId === null ? undefined : eq(procedures.tenantOrgId, a.tenantOrgId)));
-  const matching = rows.filter((p) => p.modelScope.length === 0 || scopeMatches(p.modelScope, a.model));
+  // Category scope: which SYSTEM TYPE the unit serves decides which upkeep it
+  // gets - a TOC autosampler must not inherit the LC-MS sampler's procedures.
+  // A shelf spare (no system) gets only the unscoped ones; the scoped ones
+  // arrive when it is installed, because attach re-runs this.
+  const category = a.instrumentId !== null
+    ? (await db.select({ category: instruments.category }).from(instruments)
+        .where(eq(instruments.id, a.instrumentId)))[0]?.category ?? ""
+    : "";
+  const matching = rows.filter((p) =>
+    (p.modelScope.length === 0 || scopeMatches(p.modelScope, a.model))
+    && (p.categoryScope.length === 0 || (category !== "" && scopeMatches(p.categoryScope, category))));
   if (!matching.length) return { created: 0 };
 
   const existing = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId));

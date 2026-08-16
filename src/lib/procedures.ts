@@ -100,9 +100,12 @@ export function describeProcedure(d: ProcedureTiming): string | null {
     // model - it is a stack of them. No categories named means every system,
     // which is what these all meant before the scope existed.
     ? (d.categoryScope?.length ? `on every ${d.categoryScope.join(", ")} system` : "on every system")
-    : d.modelScope.length
+    : (d.modelScope.length
       ? `on ${d.modelScope.join(", ")}`
-      : `on every ${d.assetType.toLowerCase()}`;
+      : `on every ${d.assetType.toLowerCase()}`)
+      // A module procedure can be scoped by system type too: the TOC sampler's
+      // work is not the LC-MS sampler's, even though both are Autosamplers.
+      + (d.categoryScope?.length ? ` in ${d.categoryScope.join(", ")} systems` : "");
   const parts = d.parts.length
     ? ` Takes ${d.parts.map((p) => partLabel(p) + (p.models?.length ? ` (${p.models.join("/")})` : "")).join(", ")}.`
     : "";
