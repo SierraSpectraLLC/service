@@ -9,7 +9,7 @@ import Link from "next/link";
  * and visibility in one place - so it sits last and stays the owner's alone.
  */
 export default function SettingsTabs({ active, isOwner = true, isPlatform = true }: {
-  active: "configuration" | "organizations" | "catalog" | "procedures" | "admin" | "tenants";
+  active: "configuration" | "organizations" | "catalog" | "procedures" | "parts" | "agreements" | "admin" | "tenants";
   isOwner?: boolean;
   /**
    * Staff of the operator that runs the instance. Configuration is the instance's
@@ -23,6 +23,10 @@ export default function SettingsTabs({ active, isOwner = true, isPlatform = true
     { key: "organizations", href: "/settings/organizations", label: "Organizations", ownerOnly: true },
     { key: "catalog", href: "/settings/catalog", label: "Catalog", ownerOnly: false },
     { key: "procedures", href: "/settings/procedures", label: "Procedures", ownerOnly: false },
+    // What each part number IS, and the paper behind the work. Both curated
+    // by staff rather than by the owner alone, like the catalog above them.
+    { key: "parts", href: "/settings/parts", label: "Parts book", ownerOnly: false },
+    { key: "agreements", href: "/agreements", label: "Agreements", ownerOnly: false },
     { key: "admin", href: "/settings/admin", label: "Admin", ownerOnly: true },
     // The instance's tenants - only the company running it has any business here.
     { key: "tenants", href: "/settings/tenants", label: "Service companies", ownerOnly: true, platformOnly: true },

@@ -43,11 +43,12 @@ Settings.
 
 ## 3. Crons
 
-`vercel.json` schedules `api/cron/daily-digest`, `api/cron/sheet-sync` and
-`api/cron/pm-generate`. The first two no-op unless the matching module is
-switched on in Settings. PM generation is core product, not a module: with no
-maintenance schedules defined it does nothing, so it too is safe to leave
-scheduled on every instance.
+`vercel.json` schedules `api/cron/daily-digest`, `api/cron/sheet-sync`,
+`api/cron/pm-generate` and `api/cron/renewals` (weekly). The first two no-op
+unless the matching module is switched on in Settings. PM generation and
+renewal warnings are core product, not modules: with no maintenance schedules
+and no agreements on file they do nothing, so both are safe to leave scheduled
+on every instance.
 
 ## 4. First sign-in checklist (as the owner)
 
@@ -113,10 +114,44 @@ also the page that organization's own editors get.
 - Define a maintenance template on /maintenance for an asset type in the
   fleet → it reports how many existing units it scheduled; add a new asset of
   that type → the schedule is on it from birth.
+- System-level upkeep, which is the one that saves a day per client: in
+  Settings → Procedures open the **System** band, add a procedure with
+  **Repeats** on, a yearly cadence, and one system type in **System types** →
+  it reports how many systems it scheduled, and only systems of that category
+  are among them. Confirm the row reads **Maintenance**, and that a system of
+  another category has no schedule from it. Re-type that system to the scoped
+  category → it picks the schedule up.
 - Add a maintenance schedule due today on a test system → the task appears
   under Tasks immediately; mark it Done → the schedule's next due date moves
   out by one cadence. Open a system's **Label** and scan the QR with a phone →
   it lands on that system's page (after sign-in).
+- Work orders, end to end, because this is the loop a client judges the product
+  on: as a client org, press **Request service** on a shared system → the
+  confirmation names a work order (`WO-1001`) → **Work orders** in the nav lists
+  it, open, with the ask on it. As staff, open it, **Start work**, add a task and
+  log an hour against it, then **Resolve it** with a line about what was done →
+  the close-out appears on the order and as a post on the system's discussion,
+  and the tasks/hours counted in it match what you logged. Back as the client,
+  **That's sorted - close it** → it moves to Finished. Confirm the client is
+  never offered *Resolve*, and that a second service company sharing the system
+  sees the order with no buttons at all.
+- Sites and the parts book, which are the two things a new instance starts
+  empty: on a client's settings page add a **billing address** and a **site**
+  with access notes ("parking garage on Cedar, $30/day") → open one of their
+  systems, set its Site, and confirm the notes show on the system page where a
+  tech will read them. In Settings → **Parts book**, confirm the "used but not
+  described" list offers the numbers already on real work, and name one.
+- The money loop, end to end, because it is what a contract argument turns on:
+  give a client an **agreement** with a $5,000 parts allowance and 4 visits →
+  raise a PO, file it **against a work order** on one of their systems, receive
+  a line → the part appears on that system's parts list and the agreement's
+  parts bar moves. Close the work order → the visits bar moves. Confirm a
+  **Question** work order does NOT count as a visit, and that a part fitted
+  before the term started is not counted.
+- Renewals: set an agreement to end inside its notice window, hit
+  `api/cron/renewals` with the `CRON_SECRET` header → it reports what it sent,
+  and an expired one is chased ahead of an expiring one. A draft is never
+  chased.
 - Discussion privacy, worth checking once per instance because it is the thing
   customers ask about: post on a shared system as staff with **Internal** on,
   then view the system as the client org (view-as) → the post is absent, and

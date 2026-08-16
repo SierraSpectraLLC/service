@@ -13,7 +13,15 @@ import {
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
+  workOrders, orgSites, partCatalog, partKitLines, agreements,
 } from "@/db/schema";
+import { siteLabel } from "@/lib/sites";
+import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
+import { AGREEMENT_KINDS, AGREEMENT_STATES } from "@/lib/agreements";
+import {
+  closeLine, moverOf, nextWoNumber, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
+  type Mover,
+} from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
@@ -99,7 +107,17 @@ const rev = (id?: number | null) => {
  * to both. One target type covers all three so the same panels serve a system
  * page and an asset page.
  */
-export type WorkTarget = { instrumentId: number | null; assetId: number | null };
+export type WorkTarget = {
+  instrumentId: number | null;
+  assetId: number | null;
+  /**
+   * The job this row is part of, when it is filed from a work order's own page.
+   * Optional and normally absent - most work is just the shop's list. Validated
+   * in resolveTarget against the record it claims to belong to, so a hand-edited
+   * id cannot file today's hours onto another client's job.
+   */
+  workOrderId?: number | null;
+};
 
 const revWork = (t: { instrumentId: number | null; assetId?: number | null }) => {
   rev(t.instrumentId);
@@ -117,6 +135,8 @@ async function resolveTarget(t: WorkTarget): Promise<
   { error: string } | {
     instrumentId: number | null; assetId: number | null; externalId: string;
     asset: typeof assets.$inferSelect | null;
+    /** The job this row joins, already checked to be on this record and open. */
+    workOrderId: number | null;
     /**
      * Whose workspace the work belongs to - the RECORD's, not the writer's. An
      * engineer from another operator, invited onto a system, files work that
@@ -155,7 +175,23 @@ async function resolveTarget(t: WorkTarget): Promise<
     if (t.instrumentId === null) tenantOrgId = a.tenantOrgId;
   }
   if (t.instrumentId === null && !asset) return { error: "Not found" };
-  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId };
+
+  // A work order tag is only valid if the order is on THIS record and still
+  // taking work. Both halves matter: the first stops an id from another client's
+  // job being posted from a hand-edited form, the second stops today's hours
+  // landing on a job that closed in March.
+  let workOrderId: number | null = null;
+  if (t.workOrderId) {
+    const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, t.workOrderId));
+    if (!wo) return { error: "Not found" };
+    const onThis = t.instrumentId !== null
+      ? wo.instrumentId === t.instrumentId
+      : wo.assetId === (asset?.id ?? null);
+    if (!onThis) return { error: "That work order is not on this record" };
+    if (!woAcceptsWork(wo.state)) return { error: `${wo.number || "That work order"} is ${WO_LABEL[wo.state]?.toLowerCase() ?? "finished"}.` };
+    workOrderId = wo.id;
+  }
+  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId, workOrderId };
 }
 
 /**
@@ -259,6 +295,13 @@ export async function updateInstrument(
       field, oldValue, newValue,
     });
   }
+  // The category decides which system-level procedures reach this system, so
+  // changing it is the same event as creating it as far as the catalog is
+  // concerned: a GC re-typed as a GC-MS should pick up the GC-MS upkeep without
+  // anybody remembering to go and ask for it. Additive only - schedules the old
+  // category brought stay, because they may have been done since, and taking
+  // work off a system is a decision rather than a side effect.
+  if (category !== inst.category) await applySystemProcedures(instrumentId, shopToday(), u.email);
   rev(instrumentId);
   return {};
 }
@@ -1033,6 +1076,7 @@ export async function createTask(
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
     dueDate: (data.dueDate ?? "").trim(),
+    workOrderId: t0.workOrderId,
   }).returning();
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "task", entityId: t.id,
@@ -1935,7 +1979,7 @@ export async function recordAttachments(
     .values(files.map((f) => ({
       ...f, description: f.description.trim(), tenantOrgId: t0.tenantOrgId,
       instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
-      uploadedBy: u.name,
+      uploadedBy: u.name, workOrderId: t0.workOrderId,
     })))
     .returning();
   for (const a of rows) {
@@ -2887,7 +2931,7 @@ type ProcedureInput = {
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | string | null;
-  parts: ProcPart[]; modelScope: string[];
+  parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
 };
 
 /** Validate + normalize; returns {error} or clean column values. */
@@ -2896,7 +2940,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null;
-  parts: string; modelScope: string[];
+  parts: string; modelScope: string[]; categoryScope: string[];
 } {
   if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
   if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
@@ -2921,24 +2965,45 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   if (!data.runsAtIntake && intervalDays === null) {
     return { error: "Pick when it runs: at intake, on a cadence, or both" };
   }
-  // Recurring work is scheduled per asset; a system has no asset to schedule.
-  if (data.assetType === "system" && intervalDays !== null) {
-    return { error: "System procedures run at intake only - recurring work lives on the modules" };
-  }
-  // System items fire when a system is created, before it has any assets to
-  // scope by, so they always apply to every new system.
+  // A system procedure USED to be refused a cadence here - "recurring work lives
+  // on the modules" - on the reasoning that a schedule needs an asset to hang
+  // off. It doesn't: pm_schedules has an instrument_id, generateDuePmTasks has
+  // always handled it, and applySystemProcedures was written to stamp exactly
+  // these. This one line was what forced a shop to write an annual system PM out
+  // by hand on every system, once per system, forever - and to redo it whenever
+  // the fleet grew. It is gone.
+  //
+  // A system's scope is its CATEGORY, not a model: a system is not one model, it
+  // is a stack of them. Empty means every system, which is what the ones defined
+  // before this column meant.
   const modelScope = data.assetType === "system"
     ? [] : [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
+  const categoryScope = data.assetType === "system"
+    ? [...new Set((data.categoryScope ?? []).map((c) => c.trim()).filter(Boolean))] : [];
   return {
     assetType: data.assetType, kind: data.kind, name, notes: data.notes.trim(),
     resultType, target, tolerancePct,
     requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart,
     runsAtIntake: data.runsAtIntake, intervalDays,
-    parts: serializeProcParts(data.parts), modelScope,
+    parts: serializeProcParts(data.parts), modelScope, categoryScope,
   };
 }
 
+/** Which units or systems a procedure is narrowed to, or nothing when it is all of them. */
 const procScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", ")} only)` : "");
+
+/**
+ * The scope that actually applies to a procedure: categories for a system-level
+ * one, models for everything else. Two procedures with the same name on the same
+ * type are duplicates only if they also cover the same things - "Annual PM
+ * (LC-MS)" and "Annual PM (GC)" are two jobs, not one typed twice.
+ */
+const scopeOf = (p: { assetType: string; modelScope: string[]; categoryScope: string[] }) =>
+  (p.assetType === "system" ? p.categoryScope : p.modelScope);
+const sameScope = (
+  a: { assetType: string; modelScope: string[]; categoryScope: string[] },
+  b: { assetType: string; modelScope: string[]; categoryScope: string[] },
+) => scopeOf(a).join("|").toLowerCase() === scopeOf(b).join("|").toLowerCase();
 const procTimingLabel = (p: { runsAtIntake: boolean; intervalDays: number | null }) =>
   p.runsAtIntake && p.intervalDays !== null ? `at intake + ${cadenceLabel(p.intervalDays)}`
     : p.runsAtIntake ? "at intake" : cadenceLabel(p.intervalDays!);
@@ -3047,13 +3112,13 @@ export async function addProcedure(data: ProcedureInput): Promise<{ error?: stri
   if ("error" in clean) return clean;
   const siblings = await db.select().from(procedures).where(eq(procedures.assetType, clean.assetType));
   if (siblings.some((i) => i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
-      && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
+      && sameScope(i, clean)))
     return { error: `"${clean.name}" already exists for this type` };
   const position = Math.max(0, ...siblings.map((i) => i.position)) + 1;
   const [row] = await db.insert(procedures).values({ ...clean, position, tenantOrgId: myTenantOrgId(u) }).returning();
   await audit({
     actor: u.email, entityType: "procedure", entityId: row.id,
-    action: `added ${clean.kind} procedure "${clean.name}" for ${clean.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
+    action: `added ${clean.kind} procedure "${clean.name}" for ${clean.assetType} - ${procTimingLabel(clean)}${procScopeLabel(scopeOf(clean))}`,
   });
   // A new recurring procedure covers the fleet already on the floor, per unit
   // deduped by title so hand-written schedules block the catalog's copy.
@@ -3079,15 +3144,15 @@ export async function updateProcedure(
   if ("error" in clean) return clean;
   const siblings = await db.select().from(procedures).where(eq(procedures.assetType, before.assetType));
   if (siblings.some((i) => i.id !== procedureId && i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
-      && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
+      && sameScope(i, clean)))
     return { error: `"${clean.name}" already exists for this type` };
   await db.update(procedures).set(clean).where(eq(procedures.id, procedureId));
   await audit({
     actor: u.email, entityType: "procedure", entityId: procedureId,
-    action: `edited ${clean.kind} procedure "${clean.name}" for ${before.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
+    action: `edited ${clean.kind} procedure "${clean.name}" for ${before.assetType} - ${procTimingLabel(clean)}${procScopeLabel(scopeOf(clean))}`,
     field: "procedure",
-    oldValue: `${before.kind} | ${before.name} | ${procTimingLabel(before)} | ${before.modelScope.join(", ")}`,
-    newValue: `${clean.kind} | ${clean.name} | ${procTimingLabel(clean)} | ${clean.modelScope.join(", ")}`,
+    oldValue: `${before.kind} | ${before.name} | ${procTimingLabel(before)} | ${scopeOf(before).join(", ")}`,
+    newValue: `${clean.kind} | ${clean.name} | ${procTimingLabel(clean)} | ${scopeOf(clean).join(", ")}`,
   });
 
   const addedRepeat = before.intervalDays === null && clean.intervalDays !== null;
@@ -3522,6 +3587,315 @@ export async function connectRemoteDevice(
   return { url };
 }
 
+// ---------------- Work orders ----------------
+// One job, from the ask to the close-out.
+//
+// The lifecycle - which states exist and who may move between them - is
+// lib/workOrders and is pure. Everything here is the half that needs a database:
+// who asked, what number it gets, what the audit trail says happened, and the
+// rule that a work order never outranks the tenancy checks the rest of the file
+// already does. An order on a system you cannot see does not exist for you.
+
+const revWo = (wo: { instrumentId: number | null; assetId: number | null }) => {
+  revWork(wo);
+  revalidatePath("/work");
+};
+
+/**
+ * Load an order with everything needed to decide what this viewer may do to it.
+ *
+ * "Not found" rather than "no" when the underlying record is not theirs, which
+ * is the posture every other read path in this file takes: refusing tells
+ * somebody the job exists.
+ */
+async function loadWorkOrder(u: SessionUser, woId: number): Promise<
+  { error: string } | {
+    wo: typeof workOrders.$inferSelect;
+    inst: typeof instruments.$inferSelect | null;
+    /** Which side of the job they are on, or null for neither. */
+    mover: Mover | null;
+  }
+> {
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, woId));
+  if (!wo) return { error: "Not found" };
+
+  let inst: typeof instruments.$inferSelect | null = null;
+  let ownerOrgId: number | null = null;
+  if (wo.instrumentId !== null) {
+    if (!(await canSeeSystemSafe(u, wo.instrumentId))) return { error: "Not found" };
+    [inst] = await db.select().from(instruments).where(eq(instruments.id, wo.instrumentId));
+    ownerOrgId = inst?.ownerOrgId ?? null;
+  } else if (wo.assetId) {
+    if (!(await assetAccess(u, wo.assetId)).see) return { error: "Not found" };
+    const [a] = await db.select().from(assets).where(eq(assets.id, wo.assetId));
+    ownerOrgId = a?.ownerOrgId ?? null;
+  }
+
+  const staff = isHouse(u.role);
+  const mover = moverOf(
+    { isHouse: staff, orgId: u.orgId, houseOrgId: staff ? readTenant(u) : null },
+    wo, ownerOrgId,
+  );
+  return { wo, inst: inst ?? null, mover };
+}
+
+/**
+ * Write the order itself: the number, the row, the audit line.
+ *
+ * Kept separate from the action that calls it because two of its three callers
+ * are not "somebody opened a work order" - they are a client pressing "Request
+ * service", who may have read-only rights and must still be able to ask.
+ *
+ * The number races: two orders filed in the same second both read the same
+ * highest number. The unique index in schema-sync is what makes that a failed
+ * insert rather than two jobs called WO-1042, and this retries a handful of
+ * times, which is enough for a shop and honest about what it is.
+ */
+async function fileWorkOrder(opts: {
+  actorEmail: string;
+  instrumentId: number | null; assetId: number | null; tenantOrgId: number | null;
+  orgId: number | null; requestedBy: string; requestedByEmail: string;
+  title: string; body: string; severity: string; origin: string; assignee: string;
+  externalId: string;
+}): Promise<typeof workOrders.$inferSelect> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: workOrders.number }).from(workOrders)
+      .where(forTenant(workOrders.tenantOrgId, opts.tenantOrgId));
+    const number = nextWoNumber(used.map((r) => r.number));
+    try {
+      const [wo] = await db.insert(workOrders).values({
+        tenantOrgId: opts.tenantOrgId, number,
+        instrumentId: opts.instrumentId,
+        assetId: opts.instrumentId === null ? opts.assetId : null,
+        orgId: opts.orgId, requestedBy: opts.requestedBy, requestedByEmail: opts.requestedByEmail,
+        title: opts.title, body: opts.body, severity: severityOf(opts.severity).key,
+        origin: opts.origin, assignee: opts.assignee, openedOn: shopToday(),
+      }).returning();
+      await audit({
+        actor: opts.actorEmail, instrumentId: opts.instrumentId, assetId: opts.assetId,
+        entityType: "work_order", entityId: wo.id,
+        action: `opened ${wo.number}${opts.externalId ? ` on ${opts.externalId}` : ""}: ${wo.title}`
+          + ` (${severityOf(wo.severity).label.toLowerCase()})`,
+      });
+      return wo;
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/**
+ * Somebody at the shop opens a job. The other way in is a client asking - see
+ * reportIssue and requestPm, which land in the same place.
+ */
+export async function openWorkOrder(
+  target: WorkTarget,
+  data: { title: string; body: string; severity: string; assignee?: string },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireEditor();
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say briefly what the job is" };
+  const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: target.assetId });
+  if ("error" in t0) return t0;
+
+  // Whose job it is: the record's owner, not whoever typed it. An engineer
+  // opening an order on a client's instrument is opening the CLIENT's job.
+  const orgId = t0.instrumentId !== null
+    ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
+        .where(eq(instruments.id, t0.instrumentId)))[0]?.o ?? null
+    : t0.asset?.ownerOrgId ?? null;
+
+  const wo = await fileWorkOrder({
+    actorEmail: u.email,
+    instrumentId: t0.instrumentId, assetId: t0.assetId, tenantOrgId: t0.tenantOrgId,
+    orgId, requestedBy: u.name || u.email, requestedByEmail: u.email,
+    title, body: data.body.trim().slice(0, 4000), severity: data.severity,
+    origin: "", assignee: (data.assignee ?? "").trim(),
+    externalId: targetLabel(t0.externalId, t0.asset),
+  });
+  revWo(wo);
+  return { id: wo.id, number: wo.number };
+}
+
+/** The ask, the urgency and who has it. The house's to edit - it runs the job. */
+export async function updateWorkOrder(
+  woId: number, data: { title: string; body: string; severity: string; assignee: string },
+): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "That is the service team's to change." };
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say briefly what the job is" };
+
+  const next = {
+    title, body: data.body.trim().slice(0, 4000),
+    severity: severityOf(data.severity).key, assignee: data.assignee.trim(),
+  };
+  await db.update(workOrders).set(next).where(eq(workOrders.id, woId));
+
+  // One line per field that moved, because "edited WO-1042" answers nothing
+  // three months later when somebody asks why it stopped being urgent.
+  for (const [field, before, after] of [
+    ["title", wo.title, next.title], ["severity", wo.severity, next.severity],
+    ["assignee", wo.assignee, next.assignee], ["body", wo.body, next.body],
+  ] as const) {
+    if (before === after) continue;
+    await audit({
+      actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+      entityType: "work_order", entityId: wo.id,
+      action: field === "body"
+        ? `rewrote what ${wo.number} asks for`
+        : `set ${wo.number} ${field} to ${after || "(none)"}`,
+      field, oldValue: before, newValue: after,
+    });
+  }
+  if (next.assignee && next.assignee !== wo.assignee && wo.instrumentId !== null) {
+    await notifyTaskAssigned({
+      actorEmail: u.email, actorName: u.name, assignee: next.assignee,
+      taskTitle: `${wo.number} ${next.title}`, instrumentId: wo.instrumentId,
+      externalId: found.inst?.externalId ?? "",
+    });
+  }
+  revWo(wo);
+  return {};
+}
+
+/**
+ * Move an order along. Everything except resolving, which needs a sentence
+ * about what was done and so has its own action.
+ */
+export async function setWorkOrderState(woId: number, state: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover === null) return { error: "This one isn't yours to change." };
+  if (state === "resolved") return { error: "Say what was done to resolve it." };
+  // Closing without a close-out is how service history turns into a list of
+  // dates. A resolved order already has one; anything else has to be resolved
+  // first, which is where the sentence gets written.
+  if (state === "closed" && wo.state !== "resolved") {
+    return { error: "Resolve it first, with a line about what was done." };
+  }
+
+  const move = woMove(wo.state, state, mover);
+  if (!move.ok) return { error: move.error };
+
+  await db.update(workOrders).set({
+    state: move.next,
+    closedAt: move.next === "closed" || move.next === "cancelled" ? new Date() : null,
+    closedBy: move.next === "closed" || move.next === "cancelled" ? (u.name || u.email) : "",
+    // Reopening un-resolves it: a job being worked again has not been finished,
+    // and leaving the stamp would date the finish to the first attempt.
+    resolvedAt: woOpen(move.next) ? null : wo.resolvedAt,
+  }).where(eq(workOrders.id, woId));
+
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `${wo.number} is now ${WO_LABEL[move.next].toLowerCase()}`,
+    field: "state", oldValue: wo.state, newValue: move.next,
+  });
+  revWo(wo);
+  return {};
+}
+
+/**
+ * The close-out: what was actually done, which is the thing the record keeps.
+ *
+ * Counted rather than retyped - the tasks and hours are already on the order, so
+ * the sentence somebody writes is the part only a person can write, and the rest
+ * is added up here.
+ */
+export async function resolveWorkOrder(woId: number, summary: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "The service team marks work resolved." };
+  const move = woMove(wo.state, "resolved", "house");
+  if (!move.ok) return { error: move.error };
+  const said = summary.trim().slice(0, 2000);
+  if (said.length < 3) return { error: "Say what was done - it is what the record keeps." };
+
+  const [doneRows, timeRows, partRows] = await Promise.all([
+    db.select({ state: tasks.state }).from(tasks).where(eq(tasks.workOrderId, woId)),
+    db.select({ minutes: timeEntries.minutes }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
+    // Parts are not tagged to an order (they belong to the system, and a part
+    // fitted is a part fitted whoever asked for it), so this counts what was
+    // fitted while the order was open - which is what a reader means by "what
+    // went into this job".
+    wo.instrumentId === null ? Promise.resolve([]) : db.select({ id: parts.id }).from(parts)
+      .where(and(eq(parts.instrumentId, wo.instrumentId), eq(parts.status, "Installed"),
+        sql`${parts.installedAt} >= ${wo.openedOn}`)),
+  ]);
+  const line = closeLine(said, {
+    tasks: doneRows.filter((t) => t.state === "Done").length,
+    minutes: timeRows.reduce((n, t) => n + t.minutes, 0),
+    parts: partRows.length,
+  });
+
+  await db.update(workOrders)
+    .set({ state: "resolved", closeSummary: line, resolvedAt: new Date() })
+    .where(eq(workOrders.id, woId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `resolved ${wo.number}: ${line}`,
+    field: "state", oldValue: wo.state, newValue: "resolved",
+  });
+
+  // On the system's own conversation, where the client is already looking. The
+  // close-out is the one thing about a job they will read again.
+  if (wo.instrumentId !== null) {
+    await db.insert(discussionPosts).values({
+      tenantOrgId: wo.tenantOrgId, instrumentId: wo.instrumentId,
+      body: `${wo.number} resolved - ${line}`,
+      author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
+    });
+  }
+  revWo(wo);
+  return {};
+}
+
+/**
+ * Put an existing task into a job, or take it out of one.
+ *
+ * The common case is a job that grew: an order was opened, and the three tasks
+ * that answer it were written before anybody thought to file them under it.
+ */
+export async function setTaskWorkOrder(taskId: number, woId: number | null): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
+  if (!t) return { error: "Not found" };
+  await assertWorkEditable(u, t);
+  if (woId === null) {
+    await db.update(tasks).set({ workOrderId: null }).where(eq(tasks.id, taskId));
+    revWork(t);
+    return {};
+  }
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo } = found;
+  // Same two checks resolveTarget makes: on this record, and still taking work.
+  const onThis = t.instrumentId !== null ? wo.instrumentId === t.instrumentId : wo.assetId === t.assetId;
+  if (!onThis) return { error: "That work order is not on this record" };
+  if (!woAcceptsWork(wo.state)) return { error: `${wo.number} is ${WO_LABEL[wo.state].toLowerCase()}.` };
+
+  await db.update(tasks).set({ workOrderId: wo.id }).where(eq(tasks.id, taskId));
+  await audit({
+    actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `filed task '${t.title}' under ${wo.number}`,
+  });
+  revWo(wo);
+  return {};
+}
+
 /**
  * Put a system in the queue of whoever services it because the client just asked
  * for something. The rules are the ones the daily generator uses (lib/pmQueue)
@@ -3568,19 +3942,21 @@ async function handOffForClientAsk(
 /**
  * A client says something is wrong with their system.
  *
- * One press, and everything that should follow follows: the system is marked as
- * needing maintenance, it lands in whoever services it's queue, a task exists to
- * work from, the words are on the record as a post the client can add to, and the
- * people who fix things are told. Attachments are uploaded first and passed in, so
- * a photo of an error dialog arrives with the report rather than after it.
+ * One press, and everything that should follow follows: a work order is opened
+ * with a number they can quote, the system is marked as needing maintenance, it
+ * lands in whoever services it's queue, a task exists to work from, the words
+ * are on the record as a post the client can add to, and the people who fix
+ * things are told. Attachments are uploaded first and passed in, so a photo of
+ * an error dialog arrives with the report rather than after it.
  *
- * The alternative was an email to somebody's inbox, which is where the last
- * decade of these went.
+ * The work order is the part that was missing. Before it, the only evidence a
+ * request had been answered was somebody remembering to tick a task, and there
+ * was nothing to close and nothing to report a state on.
  */
 export async function reportIssue(instrumentId: number, data: {
   severity: string; summary: string; details: string;
   files?: { fileName: string; url: string; size: number; kind: string }[];
-}): Promise<{ error?: string; taskId?: number }> {
+}): Promise<{ error?: string; taskId?: number; number?: string; workOrderId?: number }> {
   const u = await requireUser();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -3605,6 +3981,19 @@ export async function reportIssue(instrumentId: number, data: {
     await db.insert(stageEvents).values({ instrumentId, stage: "Maintenance due", kind: "added" });
   }
 
+  // The job. Everything below hangs off it, which is what makes those rows one
+  // thing that can be reported on and closed rather than four loose records.
+  const wo = await fileWorkOrder({
+    actorEmail: u.email,
+    instrumentId, assetId: null, tenantOrgId: inst.tenantOrgId,
+    // Whose job it is. The reporter's own organization; for our own staff
+    // reporting on a client's system, the system's owner.
+    orgId: u.orgId ?? inst.ownerOrgId,
+    requestedBy: u.name || u.email, requestedByEmail: u.email,
+    title: summary, body: details, severity, origin: "issue", assignee: "",
+    externalId: inst.externalId,
+  });
+
   // Something to work from, dated today, so it shows up as work rather than as a
   // message somebody has to remember to act on.
   const [task] = await db.insert(tasks).values({
@@ -3612,14 +4001,16 @@ export async function reportIssue(instrumentId: number, data: {
     instrumentId, assetId: null,
     title: `${severity}: ${summary}`,
     body: [details, `Reported by ${u.name || u.email} at ${orgName}.`].filter(Boolean).join("\n\n"),
-    dueDate: shopToday(), origin: "issue",
+    dueDate: shopToday(), origin: "issue", workOrderId: wo.id,
   }).returning();
 
-  // The files, attached to the task so they read as evidence for it.
+  // The files, attached to the task so they read as evidence for it, and to the
+  // order so they are on the job's own page too.
   for (const f of files) {
     await db.insert(attachments).values({
       tenantOrgId: inst.tenantOrgId,
-      instrumentId, taskId: task.id, fileName: f.fileName.slice(0, 200), url: f.url,
+      instrumentId, taskId: task.id, workOrderId: wo.id,
+      fileName: f.fileName.slice(0, 200), url: f.url,
       size: f.size, kind: f.kind || "Other", uploadedBy: u.email,
       description: `Reported with "${summary}"`, orgId: u.orgId,
     });
@@ -3629,7 +4020,7 @@ export async function reportIssue(instrumentId: number, data: {
   // add to it, and so can we, without either side leaving the system.
   await db.insert(discussionPosts).values({
     tenantOrgId: inst.tenantOrgId, instrumentId,
-    body: [`${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
+    body: [`${wo.number} · ${severity} - ${summary}`, details].filter(Boolean).join("\n\n"),
     author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
   });
 
@@ -3638,17 +4029,19 @@ export async function reportIssue(instrumentId: number, data: {
 
   await audit({
     actor: u.email, instrumentId, entityType: "issue", entityId: inst.externalId,
-    action: `${orgName} reported ${severity.toLowerCase()} on ${inst.externalId}: ${summary}`
+    action: `${orgName} reported ${severity.toLowerCase()} on ${inst.externalId} as ${wo.number}: ${summary}`
       + `${files.length ? ` (${files.length} file${files.length === 1 ? "" : "s"})` : ""}`,
   });
 
   await notifyIssueRaised({
     to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
-    severity, summary, details, reporter: u.name || u.email, files: files.length,
+    severity, summary: `${wo.number} - ${summary}`, details,
+    reporter: u.name || u.email, files: files.length,
   });
 
   rev(instrumentId);
-  return { taskId: task.id };
+  revalidatePath("/work");
+  return { taskId: task.id, number: wo.number, workOrderId: wo.id };
 }
 
 /**
@@ -3666,7 +4059,7 @@ export async function reportIssue(instrumentId: number, data: {
  * open one, which is where a "any update?" belongs.
  */
 export async function requestPm(instrumentId: number, data: { window: string; note: string }):
-Promise<{ error?: string; taskId?: number; already?: boolean }> {
+Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; workOrderId?: number }> {
   const u = await requireUser();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -3719,19 +4112,32 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
   }
 
   const dueDate = pmRequestDue(today, w.key);
+  // Planned, not an emergency - the fourth thing a work order can be. It gets a
+  // number and a close-out like any other job, because "did the PM we asked for
+  // in March ever happen" is exactly the question a work order exists to answer.
+  const wo = await fileWorkOrder({
+    actorEmail: u.email,
+    instrumentId, assetId: null, tenantOrgId: inst.tenantOrgId,
+    orgId: u.orgId ?? inst.ownerOrgId,
+    requestedBy: who, requestedByEmail: u.email,
+    title: pmRequestTitle(note), body: [note, calendar].filter(Boolean).join("\n\n"),
+    severity: "Planned", origin: "pm_request", assignee: "",
+    externalId: inst.externalId,
+  });
+
   const [task] = await db.insert(tasks).values({
     tenantOrgId: inst.tenantOrgId,
     instrumentId, assetId: null,
     title: pmRequestTitle(note),
     body: [note, `Requested by ${who} at ${orgName} - ${w.label.toLowerCase()}.`, calendar].filter(Boolean).join("\n\n"),
-    dueDate, origin: "pm_request",
+    dueDate, origin: "pm_request", workOrderId: wo.id,
   }).returning();
 
-  await post([`Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
+  await post([`${wo.number} · Maintenance requested - ${w.label.toLowerCase()}.`, note].filter(Boolean).join("\n\n"));
   await handOffForClientAsk(inst, `maintenance requested: ${w.label.toLowerCase()}`, u.email);
   await audit({
     actor: u.email, instrumentId, entityType: "task", entityId: task.id,
-    action: `${orgName} asked for maintenance on ${inst.externalId} - ${w.label.toLowerCase()}, due ${dueDate}`,
+    action: `${orgName} asked for maintenance on ${inst.externalId} as ${wo.number} - ${w.label.toLowerCase()}, due ${dueDate}`,
   });
   await notifyPmRequested({
     to: await houseEmails(inst.tenantOrgId), externalId: inst.externalId, instrumentId, orgName,
@@ -3740,7 +4146,8 @@ Promise<{ error?: string; taskId?: number; already?: boolean }> {
 
   rev(instrumentId);
   revalidatePath("/maintenance");
-  return { taskId: task.id };
+  revalidatePath("/work");
+  return { taskId: task.id, number: wo.number, workOrderId: wo.id };
 }
 
 /** Point a device at the system it drives, or clear the link. Staff only. */
@@ -4012,6 +4419,7 @@ export async function logTime(
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     person, date, minutes, note: data.note.trim(), loggedBy: u.email,
+    workOrderId: t0.workOrderId,
   }).returning();
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "time", entityId: row.id,
@@ -6029,18 +6437,53 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
   }
   // Any open request for this part on any work order is now satisfied - the
   // sticky-note gap between "ordered" and "it's here" is what this closes.
+  // The order id goes on too: "where is the receipt for this part" then has an
+  // answer that survives somebody's typing in the free-text PO field.
   const open = await db.select().from(parts).where(and(
     sql`lower(${parts.partNumber}) = ${line.partNumber.trim().toLowerCase()}`,
     inArray(parts.status, ["Needed", "Ordered", "In transit", "Backordered"]),
   ));
   for (const p of open) {
-    await db.update(parts).set({ status: "Received", receivedAt: shopToday() }).where(eq(parts.id, p.id));
+    await db.update(parts)
+      .set({ status: "Received", receivedAt: shopToday(), poId: p.poId ?? po.id })
+      .where(eq(parts.id, p.id));
     await audit({
       actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: p.id,
       action: `'${p.name}' (PN ${p.partNumber}) arrived on ${po.number} - marked Received`,
       field: "status", oldValue: p.status, newValue: "Received",
     });
     revWork(p);
+  }
+
+  // Bought FOR a job, and nothing on that job was already waiting for it: the
+  // part belongs on the client's system, not only on our shelf. Without this,
+  // ordering a lamp for a client's repair left no trace on their record until
+  // somebody remembered to type it in a second time - and their parts
+  // allowance, which reads the parts on their systems, would never see it.
+  if (po.workOrderId !== null && !open.length) {
+    const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, po.workOrderId));
+    if (wo && wo.instrumentId !== null) {
+      const t0 = { instrumentId: wo.instrumentId, assetId: wo.assetId, asset: null };
+      const [made] = await db.insert(parts).values({
+        instrumentId: wo.instrumentId, assetId: null,
+        name: (line.name || catalogName(
+          await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, po.tenantOrgId)),
+          line.partNumber, line.partNumber,
+        )).slice(0, 160),
+        partNumber: line.partNumber, qty: String(qty), status: "Received",
+        receivedAt: shopToday(), po: po.number, poId: po.id,
+        cost: line.unitCents !== null ? centsToInput(line.unitCents * qty) : "",
+        costCents: line.unitCents !== null ? line.unitCents * qty : null,
+        // Whose money, stamped now for the same reason every other part is.
+        ownerOrgId: await costOwnerOrg(t0),
+        note: `Received on ${po.number} for ${wo.number}`,
+      }).returning();
+      await audit({
+        actor: u.email, instrumentId: wo.instrumentId, entityType: "part", entityId: made.id,
+        action: `${qty} × PN ${line.partNumber} received on ${po.number} and filed against ${wo.number}`,
+      });
+      revWork(made);
+    }
   }
 
   const after = await db.select().from(poLines).where(eq(poLines.poId, line.poId));
@@ -6316,4 +6759,426 @@ export async function updateSettings(data: { clientAccessEnabled: boolean }) {
     action: `client sign-in ${data.clientAccessEnabled ? "on" : "off"}`,
   });
   revalidatePath("/settings");
+}
+
+// ---------------- Sites and addresses ----------------
+// Where a company is, and where its instruments actually are - two different
+// facts, and conflating them is what makes a service business print the wrong
+// thing on paper. Billing is a column on the organization; labs are rows,
+// because a client can have three and a system lives at exactly one. See
+// lib/sites.
+
+/**
+ * Who may set an organization's addresses and sites: the operator's staff (via
+ * mayAdminOrg, which refuses another operator's client however the id arrives),
+ * and the organization's OWN editors - a client should be able to correct their
+ * own lab address without filing a ticket.
+ */
+async function assertOrgConfigurable(u: SessionUser, org: typeof orgs.$inferSelect) {
+  if (mayAdminOrg(tenantViewer(u), org)) return;
+  if (u.role === "client_editor" && u.orgId === org.id) return;
+  throw new Error("Not found");
+}
+
+/** An org's own tenant: itself when it runs a workspace, its operator otherwise. */
+const orgTenant = (org: { id: number; isOperator: boolean; parentOrgId: number | null }) =>
+  (org.isOperator ? org.id : org.parentOrgId);
+
+export async function setOrgBillingAddress(orgId: number, address: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  try { await assertOrgConfigurable(u, org); } catch { return { error: "Not found" }; }
+  const next = address.trim().slice(0, 600);
+  if (next === org.billingAddress) return {};
+  await db.update(orgs).set({ billingAddress: next }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgTenant(org),
+    action: next ? `set ${org.name}'s billing address` : `cleared ${org.name}'s billing address`,
+    field: "billingAddress", oldValue: org.billingAddress, newValue: next,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return {};
+}
+
+export type SiteInput = {
+  name: string; address: string; accessNotes: string; contactName: string; contactPhone: string;
+};
+
+const cleanSite = (d: SiteInput) => ({
+  name: d.name.trim().slice(0, 80),
+  address: d.address.trim().slice(0, 600),
+  accessNotes: d.accessNotes.trim().slice(0, 1000),
+  contactName: d.contactName.trim().slice(0, 80),
+  contactPhone: d.contactPhone.trim().slice(0, 40),
+});
+
+export async function addOrgSite(orgId: number, data: SiteInput): Promise<{ error?: string; id?: number }> {
+  const u = await requireUser();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  try { await assertOrgConfigurable(u, org); } catch { return { error: "Not found" }; }
+  const clean = cleanSite(data);
+  // A site with no name AND no address is a row nobody can pick out of a list.
+  if (!clean.name && !clean.address) return { error: "Give it a name or an address" };
+  const [row] = await db.insert(orgSites).values({
+    ...clean, orgId, tenantOrgId: orgTenant(org), createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "site", entityId: row.id, tenantOrgId: orgTenant(org),
+    action: `added site "${siteLabel(row)}" for ${org.name}`,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  rev();
+  return { id: row.id };
+}
+
+export async function updateOrgSite(siteId: number, data: SiteInput): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
+  if (!site) return { error: "Not found" };
+  const [siteOrg] = await db.select().from(orgs).where(eq(orgs.id, site.orgId));
+  if (!siteOrg) return { error: "Not found" };
+  try { await assertOrgConfigurable(u, siteOrg); } catch { return { error: "Not found" }; }
+  const clean = cleanSite(data);
+  if (!clean.name && !clean.address) return { error: "Give it a name or an address" };
+  await db.update(orgSites).set(clean).where(eq(orgSites.id, siteId));
+  await audit({
+    actor: u.email, entityType: "site", entityId: siteId, tenantOrgId: site.tenantOrgId,
+    action: `edited site "${siteLabel({ ...site, ...clean })}"`,
+  });
+  revalidatePath(`/settings/organizations/${site.orgId}`);
+  rev();
+  return {};
+}
+
+/**
+ * Close a site, or reopen it. Never a delete: a closed lab is still where an
+ * instrument was, and the systems pointing at it are not wrong about their own
+ * history.
+ */
+export async function archiveOrgSite(siteId: number, archived: boolean): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
+  if (!site) return { error: "Not found" };
+  const [siteOrg] = await db.select().from(orgs).where(eq(orgs.id, site.orgId));
+  if (!siteOrg) return { error: "Not found" };
+  try { await assertOrgConfigurable(u, siteOrg); } catch { return { error: "Not found" }; }
+  await db.update(orgSites).set({ archived }).where(eq(orgSites.id, siteId));
+  await audit({
+    actor: u.email, entityType: "site", entityId: siteId, tenantOrgId: site.tenantOrgId,
+    action: `${archived ? "closed" : "reopened"} site "${siteLabel(site)}"`,
+  });
+  revalidatePath(`/settings/organizations/${site.orgId}`);
+  rev();
+  return {};
+}
+
+/** Which of the owner's sites a system sits at. */
+export async function setSystemSite(instrumentId: number, siteId: number | null): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  try { await assertSystemEditable(u, instrumentId); } catch { return { error: "Not found" }; }
+
+  let label = "no site";
+  if (siteId !== null) {
+    const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
+    // The site has to belong to whoever owns the system. Without this check a
+    // hand-edited id would file one client's instrument at another's address,
+    // which is a data leak wearing a dropdown.
+    if (!site || site.orgId !== inst.ownerOrgId) return { error: "That site isn't one of this system's owner's" };
+    label = siteLabel(site);
+  }
+  await db.update(instruments).set({ siteId, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: siteId === null ? "cleared the site" : `set the site to ${label}`,
+    field: "site", newValue: label,
+  });
+  rev(instrumentId);
+  return {};
+}
+
+// ---------------- Part catalog ----------------
+// What a part number IS - the spine the five tables that store part numbers as
+// bare strings were missing. Deliberately not a foreign key from any of them: a
+// part fitted at 2am must land in the record whether or not it is catalogued.
+// See lib/partCatalog.
+
+export type CatalogInput = {
+  partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
+  kind: string; assetTypes: string[]; note: string;
+};
+
+const cleanCatalog = (d: CatalogInput) => ({
+  partNumber: d.partNumber.trim().slice(0, 80),
+  name: d.name.trim().slice(0, 160),
+  manufacturer: d.manufacturer.trim().slice(0, 80),
+  mfrPartNumber: d.mfrPartNumber.trim().slice(0, 80),
+  kind: (PART_KINDS as readonly string[]).includes(d.kind) ? d.kind : "part",
+  assetTypes: [...new Set(d.assetTypes.map((t) => t.trim()).filter(Boolean))],
+  note: d.note.trim().slice(0, 500),
+});
+
+export async function addCatalogPart(data: CatalogInput): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const clean = cleanCatalog(data);
+  if (!clean.partNumber) return { error: "A part number is the one thing this needs" };
+  const tenant = myTenantOrgId(u);
+  const mine = await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, tenant));
+  // Checked here so the answer is a sentence rather than a unique-violation
+  // page; the index in schema-sync is what makes it true under a race.
+  if (catalogEntry(mine, clean.partNumber)) {
+    return { error: `${clean.partNumber} is already in the catalog` };
+  }
+  const [row] = await db.insert(partCatalog).values({
+    ...clean, tenantOrgId: tenant, createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: row.id, tenantOrgId: tenant,
+    action: `catalogued ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""} (${PART_KIND_LABEL[clean.kind].toLowerCase()})`,
+  });
+  revalidatePath("/settings/parts");
+  return { id: row.id };
+}
+
+export async function updateCatalogPart(id: number, data: CatalogInput): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [before] = await db.select().from(partCatalog).where(eq(partCatalog.id, id));
+  if (!before) return { error: "Not found" };
+  if (readTenant(u) !== null && before.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const clean = cleanCatalog(data);
+  if (!clean.partNumber) return { error: "A part number is the one thing this needs" };
+  const mine = await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, before.tenantOrgId));
+  const clash = catalogEntry(mine.filter((c) => c.id !== id), clean.partNumber);
+  if (clash) return { error: `${clean.partNumber} is already in the catalog` };
+  await db.update(partCatalog).set(clean).where(eq(partCatalog.id, id));
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: id, tenantOrgId: before.tenantOrgId,
+    action: `edited catalog entry ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""}`,
+    field: "part", oldValue: `${before.partNumber} ${before.name}`, newValue: `${clean.partNumber} ${clean.name}`,
+  });
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+/**
+ * Retire a catalog entry, or bring it back.
+ *
+ * Never a delete while anything still refers to the number - and something
+ * always does, because the references are text and cannot be found reliably.
+ * Archiving keeps history readable: a part retired last year is still what was
+ * fitted in March.
+ */
+export async function archiveCatalogPart(id: number, archived: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(partCatalog).where(eq(partCatalog.id, id));
+  if (!row) return { error: "Not found" };
+  if (readTenant(u) !== null && row.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  await db.update(partCatalog).set({ archived }).where(eq(partCatalog.id, id));
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `${archived ? "retired" : "un-retired"} ${row.partNumber}${row.name ? ` - ${row.name}` : ""}`,
+  });
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+/**
+ * What is in a kit. Replaces the whole list in one go, because that is how the
+ * editor works - a kit is a short list somebody edits as a block, and diffing
+ * it line by line would buy nothing.
+ */
+export async function setKitLines(
+  kitId: number, lines: { partNumber: string; name: string; qty: number }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [kit] = await db.select().from(partCatalog).where(eq(partCatalog.id, kitId));
+  if (!kit) return { error: "Not found" };
+  if (readTenant(u) !== null && kit.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  if (kit.kind !== "kit") return { error: "Only a kit has contents - change its type first" };
+  const usable = lines
+    .map((l, i) => ({
+      partNumber: l.partNumber.trim().slice(0, 80),
+      name: l.name.trim().slice(0, 160),
+      qty: Number.isFinite(l.qty) && l.qty > 0 ? Math.floor(l.qty) : 1,
+      sortOrder: i,
+    }))
+    .filter((l) => l.partNumber || l.name)
+    .slice(0, 200);
+
+  await db.delete(partKitLines).where(eq(partKitLines.kitId, kitId));
+  if (usable.length) {
+    await db.insert(partKitLines).values(usable.map((l) => ({ ...l, kitId })));
+  }
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: kitId, tenantOrgId: kit.tenantOrgId,
+    action: `set ${kit.partNumber} contents: ${usable.length} line${usable.length === 1 ? "" : "s"}`,
+  });
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+// ---------------- Service agreements ----------------
+// The contract and what it entitles somebody to. What has been DRAWN DOWN is
+// never written here - it is summed from the work in lib/agreementUsage - so
+// the answer is always what the ledger actually says rather than a second copy
+// of it that is free to disagree. See lib/agreements.
+
+export type AgreementInput = {
+  kind: string; number: string; title: string; status: string;
+  startsOn: string; endsOn: string; renewNoticeDays: number | string;
+  visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
+  value: string; note: string;
+};
+
+function cleanAgreement(d: AgreementInput): { error: string } | {
+  kind: string; number: string; title: string; status: string;
+  startsOn: string; endsOn: string; renewNoticeDays: number;
+  visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
+  valueCents: number | null; note: string;
+} {
+  const kind = (AGREEMENT_KINDS as readonly string[]).includes(d.kind) ? d.kind : "contract";
+  const status = (AGREEMENT_STATES as readonly string[]).includes(d.status) ? d.status : "active";
+  const startsOn = d.startsOn.trim();
+  const endsOn = d.endsOn.trim();
+  if (startsOn && !isIsoDay(startsOn)) return { error: "Start date should look like 2026-01-01" };
+  if (endsOn && !isIsoDay(endsOn)) return { error: "End date should look like 2026-12-31" };
+  // Caught here rather than left to produce an agreement that is expired the
+  // day it is written and reads as somebody else's mistake later.
+  if (startsOn && endsOn && endsOn < startsOn) return { error: "It can't end before it starts" };
+  const whole = (v: number | string, max: number) => {
+    const n = typeof v === "number" ? v : parseInt(v.trim() || "0", 10);
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), max) : 0;
+  };
+  return {
+    kind, status,
+    number: d.number.trim().slice(0, 60),
+    title: d.title.trim().slice(0, 160),
+    startsOn, endsOn,
+    renewNoticeDays: whole(d.renewNoticeDays, 3650),
+    visitsIncluded: whole(d.visitsIncluded, 10_000),
+    // parseMoney returns null for "not money-shaped"; an allowance nobody typed
+    // is 0, which lib/agreements reads as "not part of this agreement".
+    partsAllowanceCents: parseMoney(d.partsAllowance) ?? 0,
+    laborIncludedMinutes: Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
+    valueCents: parseMoney(d.value),
+    note: d.note.trim().slice(0, 2000),
+  };
+}
+
+const agreementName = (a: { kind: string; number: string; title: string }) =>
+  [a.number, a.title].filter(Boolean).join(" ") || KIND_LABEL[a.kind] || "agreement";
+
+export async function addAgreement(orgId: number, data: AgreementInput): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  // Staff of the operator the organization belongs to, and nobody else's. A
+  // contract is the commercial relationship; another operator has no business
+  // writing one against this client.
+  if (!mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const clean = cleanAgreement(data);
+  if ("error" in clean) return clean;
+  const [row] = await db.insert(agreements).values({
+    ...clean, orgId, tenantOrgId: orgTenant(org) ?? myTenantOrgId(u), createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: row.id, tenantOrgId: row.tenantOrgId,
+    action: `added ${KIND_LABEL[clean.kind].toLowerCase()} ${agreementName(clean)} for ${org.name}`
+      + `${clean.endsOn ? ` (to ${clean.endsOn})` : ""}`,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  revalidatePath("/agreements");
+  return { id: row.id };
+}
+
+export async function updateAgreement(id: number, data: AgreementInput): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [before] = await db.select().from(agreements).where(eq(agreements.id, id));
+  if (!before) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, before.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const clean = cleanAgreement(data);
+  if ("error" in clean) return clean;
+  await db.update(agreements).set(clean).where(eq(agreements.id, id));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: id, tenantOrgId: before.tenantOrgId,
+    action: `edited ${agreementName(clean)} for ${org.name}`,
+    field: "agreement",
+    oldValue: `${before.status} | ${before.startsOn}-${before.endsOn} | ${before.partsAllowanceCents}`,
+    newValue: `${clean.status} | ${clean.startsOn}-${clean.endsOn} | ${clean.partsAllowanceCents}`,
+  });
+  revalidatePath(`/settings/organizations/${before.orgId}`);
+  revalidatePath("/agreements");
+  return {};
+}
+
+/**
+ * Remove an agreement. Deliberately a real delete rather than an archive,
+ * because "cancelled" is already a status and a piece of paper entered in error
+ * should leave no trace - unlike a cancelled contract, which is history.
+ * Documents filed against it go with it (the attachment cascade).
+ */
+export async function removeAgreement(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [row] = await db.select().from(agreements).where(eq(agreements.id, id));
+  if (!row) return {};
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, row.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  await db.delete(agreements).where(eq(agreements.id, id));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `removed ${agreementName(row)} from ${org.name} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  revalidatePath("/agreements");
+  return {};
+}
+
+// ---------------- Buying for a job ----------------
+// A PO could only ever be raised against a stockroom, so "why did we buy this"
+// was unrecorded. Pointing one at a work order is what makes a client's parts
+// allowance defensible: every dollar drawn down has a receipt behind it.
+
+/**
+ * File an order against the job it was bought for, or unfile it.
+ *
+ * Both records have to be reachable by this person - the order through the room
+ * it draws on, the job through the system it is on - because linking them makes
+ * each visible from the other.
+ */
+export async function setPoWorkOrder(poId: number, workOrderId: number | null): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const { po, manage, see } = await poAccess(u, poId);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't change this order" : "Not found" };
+
+  if (workOrderId === null) {
+    await db.update(purchaseOrders).set({ workOrderId: null }).where(eq(purchaseOrders.id, poId));
+    await audit({
+      actor: u.email, entityType: "po", entityId: poId, tenantOrgId: po.tenantOrgId,
+      action: `${po.number} is no longer against a work order - it is stock`,
+    });
+    revPo(poId);
+    return {};
+  }
+
+  const found = await loadWorkOrder(u, workOrderId);
+  if ("error" in found) return found;
+  const { wo } = found;
+  if (!woAcceptsWork(wo.state)) return { error: `${wo.number} is ${WO_LABEL[wo.state].toLowerCase()}.` };
+  await db.update(purchaseOrders).set({ workOrderId: wo.id }).where(eq(purchaseOrders.id, poId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "po", entityId: poId, tenantOrgId: po.tenantOrgId,
+    action: `${po.number} is against ${wo.number} - ${wo.title}`,
+  });
+  revPo(poId);
+  revWo(wo);
+  return {};
 }

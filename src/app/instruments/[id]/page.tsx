@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  serviceVisits,
+  serviceVisits, workOrders, orgSites,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -25,6 +25,8 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
+import { clientOptions } from "@/lib/clientNames";
+import { sitesFor } from "@/lib/sites";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
   fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit,
@@ -38,6 +40,8 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import PhotosPanel from "@/components/PhotosPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
+import WorkOrdersPanel from "@/components/WorkOrdersPanel";
+import SiteCard from "@/components/SiteCard";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -122,6 +126,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const visitNames = Object.fromEntries((await db.select({ day: serviceVisits.day, title: serviceVisits.title })
     .from(serviceVisits).where(eq(serviceVisits.instrumentId, inst.id)).catch(() => []))
     .map((v) => [v.day, v.title]));
+
+  // Where this instrument physically is. The owner's sites, and the one it sits
+  // at - which the panel needs in full, because the access notes are the part
+  // somebody is actually looking for.
+  const siteRows = inst.ownerOrgId === null ? [] : await db.select().from(orgSites)
+    .where(eq(orgSites.orgId, inst.ownerOrgId)).orderBy(asc(orgSites.name), asc(orgSites.id));
+  const siteNow = siteRows.find((r) => r.id === inst.siteId) ?? null;
+
+  // The jobs on this system, newest first - the panel re-sorts what is still
+  // owed to the top and folds the finished ones away.
+  const woRows = await db.select().from(workOrders)
+    .where(eq(workOrders.instrumentId, instId)).orderBy(desc(workOrders.createdAt));
 
   // Chain of custody, oldest first - it reads as a story. The reader's own
   // panel arrangement rides along, so the page arrives already arranged.
@@ -363,7 +379,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <PanelLayout
         viewKey="system"
         saved={panelLayout}
-        defaultRight={["custody", "photos", "files", "hours", "update", "discussion", "activity"]}
+        defaultRight={["site", "custody", "photos", "files", "hours", "update", "discussion", "activity"]}
         panels={[
           { key: "system", label: "System", node: (
             <SystemPanel
@@ -372,7 +388,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}
               label={systemLabel(inst, assetRows)}
-              clients={systemRows.map((c) => c.client)}
+              // Companies, not just the strings already typed onto systems -
+              // see lib/clientNames for what that was hiding. Staff only: the
+              // workspace's client list is the operator's book of business, and
+              // shipping it to one client's browser so they can relabel their
+              // own system would hand them the names of the others.
+              clients={clientOptions(
+                isStaff ? orgRows.filter((o) => o.kind === "client").map((o) => o.name) : [],
+                systemRows.map((c) => c.client),
+              )}
               categories={[...systemRows.map((c) => c.category), ...vocabRows.filter((v) => v.kind === "category").map((v) => v.name)]}
               stages={inst.stages} stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
               gases={gasRows.map((g) => ({ id: g.id, gas: g.gas, status: g.status, note: g.note }))}
@@ -429,6 +453,35 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               catalogModels={catalogModels} gridModels={gridModels}
               owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
             />
+          ) },
+          // Where it physically is, and what a tech needs before driving there.
+          { key: "site", label: "Site", node: (
+            <SiteCard
+              instrumentId={inst.id} siteId={inst.siteId} ownerOrgId={inst.ownerOrgId}
+              canEdit={canEdit}
+              options={sitesFor(siteRows, inst.ownerOrgId, inst.siteId)
+                .map((r) => ({ id: r.id, name: r.name, address: r.address, archived: r.archived }))}
+              site={siteNow ? {
+                name: siteNow.name, address: siteNow.address, accessNotes: siteNow.accessNotes,
+                contactName: siteNow.contactName, contactPhone: siteNow.contactPhone,
+              } : null} />
+          ) },
+          // What has been asked for and what came of it. Above tasks on purpose:
+          // a task list answers "what is there to do", a work order answers
+          // "what did the client ask us for and is it finished".
+          { key: "workorders", label: "Work orders", node: (
+            <WorkOrdersPanel
+              target={{ instrumentId: inst.id, assetId: null }}
+              today={shopToday()} canEdit={canEdit}
+              orders={woRows.map((w) => {
+                const mine = taskRows.filter((t) => t.workOrderId === w.id);
+                return {
+                  id: w.id, number: w.number, title: w.title, severity: w.severity,
+                  state: w.state, assignee: w.assignee, openedOn: w.openedOn,
+                  askedBy: w.orgId === null ? brand.operatorName : orgName.get(w.orgId) ?? "",
+                  tasks: mine.length, done: mine.filter((t) => t.state === "Done").length,
+                };
+              })} />
           ) },
           { key: "tasks", label: "Tasks", node: (
             <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets} />

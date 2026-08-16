@@ -57,6 +57,9 @@ export function procedureCopy(p: ProcedureLike, toAssetType: string, position: n
     required: p.required,
     parts: p.parts,
     modelScope: [] as string[],
+    // Dropped for the same reason as the model scope: a system procedure's
+    // categories name system types, which mean nothing on a module type.
+    categoryScope: [] as string[],
     position,
   };
 }

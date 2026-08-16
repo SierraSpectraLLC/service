@@ -27,6 +27,7 @@ import { pmHandoff } from "@/lib/pmQueue";
 import { notifyTaskAssigned } from "@/lib/notify";
 import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
+import { coversSystem } from "@/lib/procedureRole";
 import { parseProcParts, partLabel, schedulePartsOf, serializeProcParts } from "@/lib/procedures";
 
 /**
@@ -226,8 +227,15 @@ export async function applyProcedures(assetId: number, today: string, actor: str
  *
  * The counterpart to applyProcedures, for upkeep that belongs to the instrument
  * as a whole rather than to a unit inside it - an annual full-system PM, a
- * quarterly calibration check. Called when a system is created, including when a
- * lone unit is promoted to one.
+ * quarterly calibration check. Called when a system is created, when a lone unit
+ * is promoted to one, and when a system's category changes - because the
+ * category is what decides which of these reach it.
+ *
+ * Scoped by category (lib/procedureRole). Without that these applied to every
+ * system in the workspace, which meant an annual LC-MS PM also landed on every
+ * GC, which meant nobody used them and wrote each system's upkeep out by hand
+ * instead. An empty scope still covers everything, so procedures defined before
+ * the column keep doing exactly what they did.
  *
  * Deduped by procedure and by title, the same way the per-unit version is, so a
  * hand-written schedule blocks the catalog's copy instead of doubling it.
@@ -235,12 +243,15 @@ export async function applyProcedures(assetId: number, today: string, actor: str
 export async function applySystemProcedures(
   instrumentId: number, today: string, actor: string,
 ): Promise<{ created: number }> {
-  const [inst] = await db.select({ id: instruments.id, externalId: instruments.externalId, tenantOrgId: instruments.tenantOrgId })
-    .from(instruments).where(eq(instruments.id, instrumentId));
+  const [inst] = await db.select({
+    id: instruments.id, externalId: instruments.externalId,
+    category: instruments.category, tenantOrgId: instruments.tenantOrgId,
+  }).from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { created: 0 };
-  const rows = await db.select().from(procedures)
+  const all = await db.select().from(procedures)
     .where(and(eq(procedures.assetType, "system"), isNotNull(procedures.intervalDays),
       inst.tenantOrgId === null ? undefined : eq(procedures.tenantOrgId, inst.tenantOrgId)));
+  const rows = all.filter((p) => coversSystem(p.categoryScope, inst.category));
   if (!rows.length) return { created: 0 };
 
   const existing = await db.select().from(pmSchedules).where(eq(pmSchedules.instrumentId, instrumentId));

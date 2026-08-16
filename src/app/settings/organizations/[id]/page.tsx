@@ -1,12 +1,17 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
-import { appSettings, clientAllowlist, orgs, remoteDevices, systemShares } from "@/db/schema";
+import { agreements, appSettings, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { storeQuota } from "@/lib/storeUsage";
 import OrgSettingsForm from "@/components/OrgSettingsForm";
+import SitesCard from "@/components/SitesCard";
+import AgreementsPanel from "@/components/AgreementsPanel";
+import { usageForAll } from "@/lib/agreementUsage";
+import { shopToday } from "@/lib/shopday";
+import { isHouse } from "@/lib/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +43,20 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   ]);
   if (!org) notFound();
   const quota = await storeQuota(orgId);
+
+  // Sites, with how many systems sit at each - which is what makes closing one
+  // a decision rather than a tidy-up.
+  const [siteRows, siteSystems] = await Promise.all([
+    db.select().from(orgSites).where(eq(orgSites.orgId, orgId)).orderBy(asc(orgSites.name), asc(orgSites.id)),
+    db.select({ siteId: instruments.siteId }).from(instruments).where(eq(instruments.ownerOrgId, orgId)),
+  ]);
+
+  // The paper. Staff only: a client sees their own agreement here, which is
+  // theirs to see, but the drawdown query is the same either way.
+  const agreementRows = await db.select().from(agreements)
+    .where(eq(agreements.orgId, orgId)).orderBy(asc(agreements.endsOn), asc(agreements.id));
+  const usage = await usageForAll(agreementRows);
+  const today = shopToday();
   // How many machines this organization has enrolled - the number the remote
   // tier is sold against, and what billing would eventually read.
   const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
@@ -68,6 +87,31 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         showRecipients={s?.eodEnabled ?? false}
         showSheetSync={s?.sheetSyncEnabled ?? false}
         showRemote={s?.remoteEnabled ?? false}
+      />
+
+      <SitesCard
+        orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
+        canEdit={mayConfigure}
+        sites={siteRows.map((r) => ({
+          id: r.id, name: r.name, address: r.address, accessNotes: r.accessNotes,
+          contactName: r.contactName, contactPhone: r.contactPhone, archived: r.archived,
+          systems: siteSystems.filter((i) => i.siteId === r.id).length,
+        }))}
+      />
+
+      <AgreementsPanel
+        rows={agreementRows.map((r) => ({
+          id: r.id, orgId: r.orgId, orgName: org.name,
+          kind: r.kind, number: r.number, title: r.title, status: r.status,
+          startsOn: r.startsOn, endsOn: r.endsOn, renewNoticeDays: r.renewNoticeDays,
+          visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
+          laborIncludedMinutes: r.laborIncludedMinutes, valueCents: r.valueCents, note: r.note,
+          used: usage.get(r.id) ?? { partsCents: 0, visits: 0, laborMinutes: 0 },
+        }))}
+        today={today}
+        orgs={[{ id: org.id, name: org.name }]}
+        // A client reads their own contract; only the service company writes one.
+        canEdit={isHouse(user.role)}
       />
     </div>
   );

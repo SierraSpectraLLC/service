@@ -126,6 +126,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {/* Left of the divide: where the work is. These change with the
                     instance's modules and the viewer's role. */}
                 <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
+                {/* For everyone, not just staff. A work order exists so that both
+                    sides read the same state, and hiding the list from the people
+                    who asked for the work would undo the point of it. */}
+                <Link className="btn sm" href="/work" style={{ textDecoration: "none" }}>Work orders</Link>
                 <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
                 {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Inventory</Link>}
                 {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}

@@ -12,6 +12,7 @@ import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { requireUser } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
@@ -129,7 +130,14 @@ export default async function Home() {
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}
         people={directoryNames(peopleRows)}
-        clients={allSystems.map((c) => c.client).filter(Boolean)}
+        // Organizations tagged as clients, merged with the names already in use
+        // - the picker used to show only the latter, so a client created in
+        // Organizations never appeared here. Staff only, for the same reason the
+        // system page's picker is: this list is the operator's book of business.
+        clients={clientOptions(
+          isStaff ? orgNames.filter((o) => o.kind === "client").map((o) => o.name) : [],
+          allSystems.map((c) => c.client),
+        )}
         categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}

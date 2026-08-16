@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, poLines, purchaseOrders, stockrooms, stockroomShares } from "@/db/schema";
+import { instruments, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
+import { isHouse, visibleSystemIds } from "@/lib/tenancy";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
 import PoPanel from "@/components/PoPanel";
+import PoJobCard from "@/components/PoJobCard";
+import { woOpen } from "@/lib/workOrders";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,29 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
 
   const [org] = po.orgId === null ? [] : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, po.orgId));
 
+  // Which jobs this order could be filed against: the ones on systems this
+  // person can see, still taking work - plus whichever it is already on, so an
+  // order filed against a job that has since closed still names it rather than
+  // silently reading as stock.
+  const visible = await visibleSystemIds(user);
+  const scoped = (col: AnyColumn): SQL | undefined =>
+    visible === null ? undefined : visible.length ? inArray(col, visible) : sql`false`;
+  const woRows = await db.select().from(workOrders)
+    .where(scoped(workOrders.instrumentId)).orderBy(desc(workOrders.createdAt)).limit(200);
+  const woInstIds = [...new Set(woRows.flatMap((w) => (w.instrumentId !== null ? [w.instrumentId] : [])))];
+  const woInsts = woInstIds.length
+    ? await db.select({ id: instruments.id, externalId: instruments.externalId, client: instruments.client })
+        .from(instruments).where(inArray(instruments.id, woInstIds))
+    : [];
+  const jobOf = (w: typeof woRows[number]) => {
+    const i = woInsts.find((x) => x.id === w.instrumentId);
+    return {
+      id: w.id, number: w.number, title: w.title,
+      place: i ? `${i.externalId}${i.client ? ` · ${i.client}` : ""}` : "",
+    };
+  };
+  const onJob = woRows.find((w) => w.id === po.workOrderId) ?? null;
+
   return (
     <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -67,6 +92,10 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
         }))}
         canManage={manage}
       />
+
+      <PoJobCard poId={po.id} canManage={manage}
+        workOrder={onJob ? jobOf(onJob) : null}
+        options={woRows.filter((w) => woOpen(w.state) || w.state === "resolved").map(jobOf)} />
     </div>
   );
 }

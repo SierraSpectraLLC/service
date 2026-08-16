@@ -7,13 +7,14 @@ import { addProcedure, updateProcedure, deleteProcedure, reorderProcedures,
 import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
 import { cadenceLabel } from "@/lib/pm";
 import { describeProcedure, type ProcPart } from "@/lib/procedures";
+import { procedureRole, ROLE_COLOR, ROLE_LABEL } from "@/lib/procedureRole";
 
 export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null; required: boolean;
-  parts: ProcPart[]; modelScope: string[];
+  parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
 };
 
 const KIND_GLYPH: Record<string, { glyph: string; bg: string; fg: string }> = {
@@ -50,7 +51,7 @@ type Draft = {
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; repeats: boolean; intervalDays: string; required: boolean;
-  parts: ProcPart[]; modelScope: string[];
+  parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
 };
 const emptyDraft: Draft = {
   kind: "task", name: "", notes: "",
@@ -58,7 +59,7 @@ const emptyDraft: Draft = {
   requiresNote: false, consumesPart: false,
   // Filters never pre-fill this: a new procedure always starts with both off.
   runsAtIntake: false, repeats: false, intervalDays: "90", required: false,
-  parts: [], modelScope: [],
+  parts: [], modelScope: [], categoryScope: [],
 };
 
 /** Multiselect over catalog models: chips in the field, type-to-filter list below. */
@@ -141,7 +142,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   // rows but no catalog entry still render, so nothing predating the catalog
   // goes invisible. Order is the catalog's; it never reshuffles by content.
   const GROUPS: { type: string; label: string; subtitle?: string }[] = [
-    { type: "system", label: "System", subtitle: "Runs once per instrument, not per asset." },
+    { type: "system", label: "System", subtitle: "The whole instrument, not a unit inside it - at intake, on a schedule, or both." },
     ...[...new Set([...assetTypes, ...items.map((i) => i.assetType)])]
       .filter((t) => t && t !== "system")
       .map((k) => ({ type: k, label: k })),
@@ -158,7 +159,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     const spoken = new Set(categories.flatMap(typesOf));
     const orphans = GROUPS.filter((g) => g.type !== "system" && !spoken.has(g.type)).map((g) => g.type);
     return [
-      { key: "system", label: "System", types: ["system"], subtitle: "Runs once per instrument, not per asset." },
+      { key: "system", label: "System", types: ["system"], subtitle: "The whole instrument, not a unit inside it - at intake, on a schedule, or both." },
       ...categories.map((c) => ({ key: c, label: c, types: typesOf(c), subtitle: "" }))
         .filter((b) => b.types.length),
       ...(orphans.length
@@ -223,6 +224,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
       intervalDays: String(i.intervalDays ?? 90), required: i.required,
       parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
+      categoryScope: i.categoryScope,
     });
     setTimingBefore({ intervalDays: i.intervalDays });
     setApplyNow(false);
@@ -254,6 +256,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       runsAtIntake: draft.runsAtIntake, required: draft.required,
       intervalDays: draft.repeats ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
+      categoryScope: isSystem ? draft.categoryScope : [],
     };
     startTransition(async () => {
       const res = sheet.id
@@ -308,20 +311,23 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   const sentence = describeProcedure({
     assetType: sheet?.assetType ?? "", runsAtIntake: draft.runsAtIntake,
     intervalDays: effectiveInterval, modelScope: isSystem ? [] : draft.modelScope,
+    categoryScope: isSystem ? draft.categoryScope : [],
     parts: draft.parts.filter((p) => p.name.trim() || p.number.trim()),
   });
 
   const renderRow = (i: ProcedureRow, assetType: string) => {
     const k = KIND_GLYPH[i.kind] ?? KIND_GLYPH.test;
-    const scoped = i.modelScope.length > 0;
+    // A system procedure is narrowed by category, everything else by model.
+    const scopeChips = assetType === "system" ? i.categoryScope : i.modelScope;
+    const role = procedureRole(i);
     return (
       <div key={i.id} ref={(el) => { rowRefs.current[i.id] = el; }}
         style={{
           display: "flex", alignItems: "center", gap: 8, padding: "7px 8px",
           border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6,
-          background: flashId === i.id ? "#FDF8EE" : scoped ? "#FBFAFE" : "#fff",
+          background: flashId === i.id ? "#FDF8EE" : scopeChips.length ? "#FBFAFE" : "#fff",
           transition: "background 600ms",
-          boxShadow: scoped ? "inset 3px 0 0 #6B4FA0" : "none",
+          boxShadow: scopeChips.length ? "inset 3px 0 0 #6B4FA0" : "none",
         }}>
         {filter === "all" && (
           <span className="drag-handle mut" aria-label="Drag to reorder" tabIndex={0}
@@ -348,21 +354,26 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}
                 title="Must be done before sign-off; a test also needs a report on file">Required</span>
             )}
-            {i.runsAtIntake && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>At intake</span>}
+            {/* What it IS, in the word the shop uses, before the detail of when.
+                The row used to make the reader assemble "this is a PM" from a
+                cadence pill. See lib/procedureRole. */}
+            <span className="pill" style={{ background: ROLE_COLOR[role].bg, color: ROLE_COLOR[role].fg, fontWeight: 700 }}>{ROLE_LABEL[role]}</span>
             {i.intervalDays !== null && (
               <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{cadenceLabel(i.intervalDays)}</span>
             )}
-            {scoped ? (
+            {scopeChips.length ? (
               <>
-                {i.modelScope.slice(0, 2).map((m) => (
+                {scopeChips.slice(0, 2).map((m) => (
                   <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{m}</span>
                 ))}
-                {i.modelScope.length > 2 && (
-                  <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>+{i.modelScope.length - 2}</span>
+                {scopeChips.length > 2 && (
+                  <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>+{scopeChips.length - 2}</span>
                 )}
               </>
             ) : (
-              assetType !== "system" && <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>All models</span>
+              <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>
+                {assetType === "system" ? "All systems" : "All models"}
+              </span>
             )}
             {i.parts.map((pt) => (
               <span key={`${pt.number}|${pt.name}`} className="mono" style={{ fontSize: 11, color: "#8A5410", background: "#FAF0DC", borderRadius: 4, padding: "1px 5px" }}>
@@ -734,7 +745,17 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               </button>
             </div>
 
-            {!isSystem && (
+            {isSystem ? (
+              <>
+                <label>System types</label>
+                <ScopeField scope={draft.categoryScope} options={categories}
+                  onChange={(next) => setDraft({ ...draft, categoryScope: next })} />
+                <div className="mut" style={{ fontSize: 11, marginTop: -4, marginBottom: 8 }}>
+                  Leave empty and it covers every system in the workspace - which is rarely
+                  what an annual PM means.
+                </div>
+              </>
+            ) : (
               <>
                 <label>Models</label>
                 <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}

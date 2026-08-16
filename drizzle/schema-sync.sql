@@ -1873,3 +1873,240 @@ END $$;
 UPDATE "stage_defs" SET "tenant_org_id" = (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1)
 WHERE "tenant_org_id" IS NULL
   AND (SELECT "operator_org_id" FROM "app_settings" WHERE "id" = 1) IS NOT NULL;
+
+-- ── Work orders: one job, from the ask to the close-out ─────────────────────
+-- The parent that tasks, hours and files were missing. Before it, a client's
+-- request became a task dated today and there was nothing to close, nothing to
+-- report a state on, and no number to quote on the phone.
+--
+-- The three work_order_id columns are ON DELETE SET NULL, not cascade: a work
+-- order is a wrapper around work that actually happened, and deleting the
+-- wrapper must never delete the record of the hours somebody worked.
+CREATE TABLE IF NOT EXISTS "work_orders" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "number" text NOT NULL DEFAULT '',
+  "instrument_id" integer,
+  "asset_id" integer,
+  "org_id" integer,
+  "requested_by" text NOT NULL DEFAULT '',
+  "requested_by_email" text NOT NULL DEFAULT '',
+  "title" text NOT NULL,
+  "body" text NOT NULL DEFAULT '',
+  "severity" text NOT NULL DEFAULT 'Degraded',
+  "state" text NOT NULL DEFAULT 'open',
+  "assignee" text NOT NULL DEFAULT '',
+  "opened_on" text NOT NULL DEFAULT '',
+  "origin" text NOT NULL DEFAULT '',
+  "close_summary" text NOT NULL DEFAULT '',
+  "closed_by" text NOT NULL DEFAULT '',
+  "resolved_at" timestamp,
+  "closed_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "work_orders_instrument_idx" ON "work_orders" ("instrument_id");
+CREATE INDEX IF NOT EXISTS "work_orders_asset_idx" ON "work_orders" ("asset_id");
+CREATE INDEX IF NOT EXISTS "work_orders_state_idx" ON "work_orders" ("state");
+
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+CREATE INDEX IF NOT EXISTS "tasks_work_order_idx" ON "tasks" ("work_order_id");
+CREATE INDEX IF NOT EXISTS "time_work_order_idx" ON "time_entries" ("work_order_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_instrument_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_asset_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_asset_id_fk"
+      FOREIGN KEY ("asset_id") REFERENCES "assets"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_orders_org_id_orgs_id_fk') THEN
+    ALTER TABLE "work_orders" ADD CONSTRAINT "work_orders_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tasks_work_order_id_fk') THEN
+    ALTER TABLE "tasks" ADD CONSTRAINT "tasks_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'time_entries_work_order_id_fk') THEN
+    ALTER TABLE "time_entries" ADD CONSTRAINT "time_entries_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_work_order_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- One work-order number per workspace, so the race between reading the highest
+-- number and writing the next one fails loudly instead of quietly handing WO-1042
+-- to two different jobs. Partial, because a blank number is not a number; and
+-- COALESCE, because a NULL tenant is the single-house instance that never
+-- onboarded - one house, one series - and a plain index would treat every one of
+-- its rows as distinct and enforce nothing at all.
+CREATE UNIQUE INDEX IF NOT EXISTS "work_orders_tenant_number_unique"
+  ON "work_orders" (COALESCE("tenant_org_id", 0), "number") WHERE "number" <> '';
+
+-- ── Scope a system-level procedure to system categories ─────────────────────
+-- System procedures existed but applied to EVERY system in the workspace, so an
+-- annual LC-MS PM would also land on every GC. Nobody could use them, and each
+-- system's upkeep got written out by hand instead. Empty = every system, which
+-- is what the ones already defined meant, so this changes nothing on deploy.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "category_scope" text[] NOT NULL DEFAULT '{}';
+
+-- ── Where a company is, and where its instruments actually are ──────────────
+-- Billing is one per company; labs are not. A client can have three sites and a
+-- system lives at exactly one of them, so the sites are rows and the invoice
+-- address is a column. access_notes is the field that earns the table: the
+-- parking garage, the loading dock, who to ask for - facts about a BUILDING,
+-- which on the company record would be noise and would be wrong the day they
+-- open a second lab.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "billing_address" text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS "org_sites" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "address" text NOT NULL DEFAULT '',
+  "access_notes" text NOT NULL DEFAULT '',
+  "contact_name" text NOT NULL DEFAULT '',
+  "contact_phone" text NOT NULL DEFAULT '',
+  "archived" boolean NOT NULL DEFAULT false,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "org_sites_org_idx" ON "org_sites" ("org_id");
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "site_id" integer;
+
+-- ── The part catalog: what a part number IS ─────────────────────────────────
+-- Part numbers were bare strings in five tables with normalizePn as the only
+-- thing making them agree, so the same number got a different name typed
+-- against it every time and a kit could not say what was in it. Deliberately
+-- not a foreign key from those five: a part fitted at 2am must be recordable
+-- before anybody has catalogued it.
+CREATE TABLE IF NOT EXISTS "part_catalog" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "part_number" text NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "manufacturer" text NOT NULL DEFAULT '',
+  "mfr_part_number" text NOT NULL DEFAULT '',
+  "kind" text NOT NULL DEFAULT 'part',
+  "asset_types" text[] NOT NULL DEFAULT '{}',
+  "note" text NOT NULL DEFAULT '',
+  "archived" boolean NOT NULL DEFAULT false,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "part_catalog_pn_idx" ON "part_catalog" ("part_number");
+-- One row per number per workspace, matched exactly the way lib/priceBook's
+-- normalizePn matches: lowercased, spaces stripped, HYPHENS KEPT. Hyphens are
+-- load-bearing in part numbers - 5181-3323 and 51813-323 are different parts -
+-- so an index that folded them would refuse to store one of the two. COALESCE
+-- for the null tenant, which is the single-house instance and still one catalog.
+CREATE UNIQUE INDEX IF NOT EXISTS "part_catalog_tenant_pn_unique"
+  ON "part_catalog" (COALESCE("tenant_org_id", 0), lower(replace("part_number", ' ', '')));
+
+CREATE TABLE IF NOT EXISTS "part_kit_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "kit_id" integer NOT NULL,
+  "part_number" text NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "qty" integer NOT NULL DEFAULT 1,
+  "sort_order" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "part_kit_lines_kit_idx" ON "part_kit_lines" ("kit_id");
+
+-- ── Service agreements ──────────────────────────────────────────────────────
+-- The contract and what it entitles somebody to. What has been DRAWN DOWN is
+-- deliberately not a column: it is summed from parts.cost_cents and closed work
+-- orders. A stored balance is a second copy of a number the ledger already has,
+-- and the disagreement always surfaces in front of the customer.
+CREATE TABLE IF NOT EXISTS "agreements" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'contract',
+  "number" text NOT NULL DEFAULT '',
+  "title" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'active',
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "renew_notice_days" integer NOT NULL DEFAULT 60,
+  "visits_included" integer NOT NULL DEFAULT 0,
+  "parts_allowance_cents" integer NOT NULL DEFAULT 0,
+  "labor_included_minutes" integer NOT NULL DEFAULT 0,
+  "value_cents" integer,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "agreements_org_idx" ON "agreements" ("org_id");
+CREATE INDEX IF NOT EXISTS "agreements_ends_idx" ON "agreements" ("ends_on");
+
+-- ── Buying for a job rather than for a shelf ────────────────────────────────
+-- A PO could only ever be raised against a stockroom, so "why did we buy this"
+-- was unrecorded. With a work order it is "we bought this to fix THAT" - and it
+-- is what lets a client's parts allowance be defended with a receipt.
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "po_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "agreement_id" integer;
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "po_id" integer;
+CREATE INDEX IF NOT EXISTS "po_work_order_idx" ON "purchase_orders" ("work_order_id");
+CREATE INDEX IF NOT EXISTS "parts_po_idx" ON "parts" ("po_id");
+CREATE INDEX IF NOT EXISTS "attachments_agreement_idx" ON "attachments" ("agreement_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'org_sites_org_id_orgs_id_fk') THEN
+    ALTER TABLE "org_sites" ADD CONSTRAINT "org_sites_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'org_sites_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "org_sites" ADD CONSTRAINT "org_sites_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'instruments_site_id_fk') THEN
+    ALTER TABLE "instruments" ADD CONSTRAINT "instruments_site_id_fk"
+      FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'part_catalog_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "part_catalog" ADD CONSTRAINT "part_catalog_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'part_kit_lines_kit_id_fk') THEN
+    ALTER TABLE "part_kit_lines" ADD CONSTRAINT "part_kit_lines_kit_id_fk"
+      FOREIGN KEY ("kit_id") REFERENCES "part_catalog"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agreements_org_id_orgs_id_fk') THEN
+    ALTER TABLE "agreements" ADD CONSTRAINT "agreements_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agreements_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "agreements" ADD CONSTRAINT "agreements_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'purchase_orders_work_order_id_fk') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "purchase_orders_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parts_po_id_fk') THEN
+    ALTER TABLE "parts" ADD CONSTRAINT "parts_po_id_fk"
+      FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_agreement_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_agreement_id_fk"
+      FOREIGN KEY ("agreement_id") REFERENCES "agreements"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_po_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_po_id_fk"
+      FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

@@ -43,13 +43,16 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState<"" | "filed" | "already">("");
+  // The work order the ask opened. It is the thing to quote on the phone, so it
+  // is shown once, here, rather than only being findable later.
+  const [number, setNumber] = useState("");
   const [pending, startTransition] = useTransition();
 
   const isPm = choice === PM;
   const title = "Request service";
 
   const close = () => {
-    setOpen(false); setError(""); setDone("");
+    setOpen(false); setError(""); setDone(""); setNumber("");
     setSummary(""); setDetails(""); setFiles([]); setChoice("Degraded"); setPmWindow("month");
   };
 
@@ -61,6 +64,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
           setBusy("Sending...");
           const res = await requestPm(instrumentId, { window: pmWindow, note: details });
           if (res?.error) { setError(res.error); return; }
+          setNumber(res?.number ?? "");
           setDone(res?.already ? "already" : "filed");
           return;
         }
@@ -78,6 +82,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
         setBusy("Sending...");
         const res = await reportIssue(instrumentId, { severity: choice, summary, details, files: uploaded });
         if (res?.error) { setError(res.error); return; }
+        setNumber(res?.number ?? "");
         setDone("filed");
       } catch (e) {
         setError((e as Error).message || "Couldn't send that.");
@@ -106,14 +111,14 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
         {done ? (
           <div>
             <div style={{ fontSize: 13, color: "#2E6B2E", fontWeight: 700, marginBottom: 6 }}>
-              {done === "already" ? "Already asked ✓" : "Sent ✓"}
+              {done === "already" ? "Already asked ✓" : number ? `${number} opened ✓` : "Sent ✓"}
             </div>
             <div className="mut" style={{ fontSize: 12.5, marginBottom: 12 }}>
               {done === "already"
                 ? `Maintenance is already requested for ${externalId} and it's with the service team. Your note is on the system's discussion.`
                 : isPm
-                  ? `${externalId} is in the service queue with your request on it. Your note is on the system's discussion, so you can add to it there.`
-                  : `${externalId} is marked as needing maintenance and is in the service queue. Your note is on the system's discussion, so you can add to it there.`}
+                  ? `${externalId} is in the service queue with your request on it. Follow ${number || "the work order"} under Work orders to see what's happening, and add to your note on the system's discussion.`
+                  : `${externalId} is marked as needing maintenance and is in the service queue. Follow ${number || "the work order"} under Work orders to see what's happening, and add to your note on the system's discussion.`}
             </div>
             <button className="btn sm accent" onClick={close}>Done</button>
           </div>
