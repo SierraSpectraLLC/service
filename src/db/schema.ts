@@ -137,8 +137,14 @@ export const orgs = pgTable("orgs", {
   // machine is enrolled for them. One group per org is what keeps one client's
   // machines invisible to another. Blank = no group yet.
   remoteGroupId: text("remote_group_id").notNull().default(""),
+  // Where the invoice goes. One per company, because a company has one accounts
+  // payable department - where the WORK happens is org_sites, of which there can
+  // be several, and conflating the two is what makes a service business print
+  // the wrong thing on paper.
+  billingAddress: text("billing_address").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("org_name_unique").on(t.name)]);
+
 
 /**
  * The tenant stamp.
@@ -192,6 +198,29 @@ export const assetShares = pgTable("asset_shares", {
 ]);
 
 // Stage vocabulary lives in src/lib/stages.ts; stored here as a text array.
+// A place an organization has instruments. A client can have three; a system
+// lives at exactly one.
+//
+// `accessNotes` is the field that earns this table on its own: use the parking
+// garage on Cedar, $30 a day, dock is round the back, ask for Rita. That is a
+// fact about a BUILDING, not about a customer - on the company record it would
+// be noise on the invoice screen and wrong the day they open a second lab.
+export const orgSites = pgTable("org_sites", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default(""),          // "Building 4 lab", "Reno"
+  address: text("address").notNull().default(""),    // as typed, newlines kept
+  accessNotes: text("access_notes").notNull().default(""),
+  contactName: text("contact_name").notNull().default(""),
+  contactPhone: text("contact_phone").notNull().default(""),
+  // Archived rather than deleted: a closed lab is still where an instrument was,
+  // and systems still point at it.
+  archived: boolean("archived").notNull().default(false),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("org_sites_org_idx").on(t.orgId)]);
+
 export const instruments = pgTable("instruments", {
   id: serial("id").primaryKey(),
   /**
@@ -238,6 +267,10 @@ export const instruments = pgTable("instruments", {
   // When it landed in the current queue. Null = never moved, so read it as the
   // system's own createdAt rather than backfilling every row.
   queueSince: timestamp("queue_since"),
+  // Which of the owner's sites it is installed at. Null = nobody has said, which
+  // is every system until somebody does. Set null on delete rather than cascade:
+  // losing the site record must not take the instrument with it.
+  siteId: integer("site_id").references((): AnyPgColumn => orgSites.id, { onDelete: "set null" }),
   // Resale state, set by the owning org (or staff). While for_sale is true the
   // listing_token URL serves a public, heavily redacted view of the system:
   // maintenance history and opted-in reports, never location/client/costs.
@@ -584,6 +617,10 @@ export const parts = pgTable("parts", {
   // paid. Null = pre-handoff rows and house-stewarded work, which fall back to
   // the system's owner (correct, since nothing had changed hands yet).
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // The order this was bought on. `po` above is the free text that predates it
+  // and is still what gets displayed; this is the link, so "where is the
+  // receipt for this part" has an answer that survives somebody's typing.
+  poId: integer("po_id").references((): AnyPgColumn => purchaseOrders.id, { onDelete: "set null" }),
   carrier: text("carrier").notNull().default(""),
   tracking: text("tracking").notNull().default(""),
   orderedAt: text("ordered_at").notNull().default(""),
@@ -629,6 +666,13 @@ export const attachments = pgTable("attachments", {
   // The job this file belongs to - the photo of the error dialog that came with
   // the request, the report that closed it.
   workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  // The piece of paper this file IS - the signed contract, the vendor's
+  // receipt. Cascade: a document filed against an agreement has no life of its
+  // own once the agreement is gone.
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "cascade" }),
+  // The purchase order this file is the paperwork for - the vendor's receipt or
+  // invoice, which is the thing somebody goes looking for at audit time.
+  poId: integer("po_id").references((): AnyPgColumn => purchaseOrders.id, { onDelete: "set null" }),
   // Files are opt-in on a for-sale listing, so no report leaks by accident.
   showOnListing: boolean("show_on_listing").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -922,6 +966,91 @@ export const workOrders = pgTable("work_orders", {
   index("work_orders_state_idx").on(t.state),
 ]);
 
+// ── The part catalog ────────────────────────────────────────────────────────
+// What a part number IS.
+//
+// Part numbers were bare strings in five places - parts, stock_items, po_lines,
+// part_prices, and the parts list on a procedure - and normalizePn was the only
+// thing making them agree. Nothing anywhere said that AGI-7167-PMK is the
+// Agilent 7176 PM kit, so the same number got a different name typed against it
+// every time somebody used it, and a kit had no way to say what was in it.
+//
+// This is the spine those five tables were missing. It is deliberately NOT a
+// foreign key from them: they keep storing the number as text, because a part
+// arriving on a machine at 2am must not fail to be recorded because nobody has
+// catalogued it yet. The catalog resolves a number to a name when it knows one,
+// and shrugs when it doesn't.
+export const partCatalog = pgTable("part_catalog", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  // Your number. The one on the shelf label and the one people quote.
+  partNumber: text("part_number").notNull(),
+  name: text("name").notNull().default(""),
+  manufacturer: text("manufacturer").notNull().default(""),
+  // Their number, when yours is a house number wrapping somebody else's part.
+  mfrPartNumber: text("mfr_part_number").notNull().default(""),
+  // part | consumable | kit - a kit is a bag of other numbers, sold and stocked
+  // as one thing (see partKitLines).
+  kind: text("kind").notNull().default("part"),
+  // Which module types this suits, for the picker. [] = anything.
+  assetTypes: text("asset_types").array().notNull().default([]),
+  note: text("note").notNull().default(""),
+  archived: boolean("archived").notNull().default(false),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("part_catalog_pn_idx").on(t.partNumber)]);
+
+// What is in a kit. Lines are part NUMBERS, not catalog ids, for the same reason
+// the rest of the system keys on numbers: a kit can list a part nobody has
+// catalogued, and should, rather than refusing to be written down.
+export const partKitLines = pgTable("part_kit_lines", {
+  id: serial("id").primaryKey(),
+  kitId: integer("kit_id").notNull().references((): AnyPgColumn => partCatalog.id, { onDelete: "cascade" }),
+  partNumber: text("part_number").notNull(),
+  name: text("name").notNull().default(""),
+  qty: integer("qty").notNull().default(1),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("part_kit_lines_kit_idx").on(t.kitId)]);
+
+// ── Service agreements ──────────────────────────────────────────────────────
+// The contract, and what it entitles somebody to.
+//
+// One row per piece of paper: a service contract, their PO, our quote, an
+// invoice. The entitlements - visits included, parts allowance - live on the
+// contract kind, and what has been DRAWN DOWN against them is never stored here.
+// It is summed from the work: parts.cost_cents for parts installed on their
+// systems inside the term, and closed work orders for visits. A stored balance
+// is a second copy of a number the ledger already has, free to disagree with it,
+// and the disagreement is always discovered in front of the customer.
+export const agreements = pgTable("agreements", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  // contract | po | quote | invoice
+  kind: text("kind").notNull().default("contract"),
+  // Their PO number, our quote number - whatever this piece of paper is called.
+  number: text("number").notNull().default(""),
+  title: text("title").notNull().default(""),
+  // draft | active | expired | cancelled. Expiry is derived from endsOn for
+  // display; this column is what somebody SET, so a contract can be cancelled
+  // early or held in draft while it is being negotiated.
+  status: text("status").notNull().default("active"),
+  startsOn: text("starts_on").notNull().default(""),  // YYYY-MM-DD
+  endsOn: text("ends_on").notNull().default(""),      // blank = open-ended
+  // How long before it ends we want to be told. 0 = never.
+  renewNoticeDays: integer("renew_notice_days").notNull().default(60),
+  // Entitlements. 0 means "not part of this agreement", NOT "zero allowed" -
+  // an unlimited-visits contract and a no-visits contract are both real, and
+  // the one nobody has filled in must not read as the second.
+  visitsIncluded: integer("visits_included").notNull().default(0),
+  partsAllowanceCents: integer("parts_allowance_cents").notNull().default(0),
+  laborIncludedMinutes: integer("labor_included_minutes").notNull().default(0),
+  valueCents: integer("value_cents"),                 // what the paper is worth
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("agreements_org_idx").on(t.orgId), index("agreements_ends_idx").on(t.endsOn)]);
+
 // Stage transition history: one row every time a stage is added to or removed
 // from an instrument. Powers the "12d in Checkout" age chips and cycle-time
 // metrics. Written by toggleStage/createInstrument/deleteStage; renaming a
@@ -1156,6 +1285,12 @@ export const purchaseOrders = pgTable("purchase_orders", {
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
   // draft | sent | partial | received | cancelled
   status: text("status").notNull().default("draft"),
+  // The job this was bought for. Null is the normal case and means stock: a PO
+  // with a destination room and no work order is restocking the shelf. With a
+  // work order it is "we bought this to fix THAT", which is the question the
+  // purchasing records could not answer at all before - and the link that lets
+  // a client's parts allowance be defended with a receipt.
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   reference: text("reference").notNull().default(""), // vendor quote or confirmation number
   note: text("note").notNull().default(""),
   expectedAt: text("expected_at").notNull().default(""), // free text, like parts.eta

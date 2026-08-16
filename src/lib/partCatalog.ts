@@ -1,0 +1,135 @@
+// What a part number IS.
+//
+// Everywhere else in this system a part number is a bare string: on a part
+// fitted to a machine, on a shelf line, on a PO line, in the price book, in the
+// parts list of a procedure. normalizePn was the only thing making those five
+// agree, and nothing anywhere said that AGI-7167-PMK is the Agilent 7176 PM kit.
+// So the same number got a different name typed against it every time somebody
+// used it, and a kit had no way to state what was in it.
+//
+// This module is the lookup those five were missing. What it deliberately is NOT
+// is a foreign key: nothing here can prevent a part being recorded. A part
+// fitted at 2am by somebody holding a box with a number on it must land in the
+// record whether or not the shop has catalogued it - so every function takes the
+// catalog and a number, and shrugs politely when the number is unknown.
+
+import { normalizePn } from "@/lib/priceBook";
+
+export const PART_KINDS = ["part", "consumable", "kit"] as const;
+export type PartKind = (typeof PART_KINDS)[number];
+
+export const PART_KIND_LABEL: Record<string, string> = {
+  part: "Part",
+  consumable: "Consumable",
+  kit: "Kit",
+};
+
+export type CatalogEntry = {
+  id: number;
+  partNumber: string;
+  name: string;
+  manufacturer: string;
+  mfrPartNumber: string;
+  kind: string;
+  archived: boolean;
+};
+
+/**
+ * The catalog row for a number, matched the way the rest of the system matches
+ * part numbers (lib/priceBook): lowercased with spaces stripped, and hyphens
+ * KEPT - "5181-3323" and "51813-323" are different parts, and folding the
+ * punctuation would quietly merge two of them.
+ *
+ * Archived entries still resolve. A part that was retired last year is still
+ * what was fitted in March, and a history that suddenly forgot its name would be
+ * worse than one that never knew it.
+ */
+export function catalogEntry<T extends CatalogEntry>(catalog: T[], partNumber: string): T | null {
+  const pn = normalizePn(partNumber);
+  if (!pn) return null;
+  const hits = catalog.filter((c) => normalizePn(c.partNumber) === pn);
+  // A live entry beats an archived one when both spellings exist, which is what
+  // superseding a number by re-cataloguing it looks like.
+  return hits.find((c) => !c.archived) ?? hits[0] ?? null;
+}
+
+/** The name the catalog knows for a number, or whatever the caller already had. */
+export const catalogName = (catalog: CatalogEntry[], partNumber: string, fallback = ""): string =>
+  catalogEntry(catalog, partNumber)?.name || fallback;
+
+/** "AGI-7167-PMK - Agilent 7176 PM Kit", for a picker or a chip. */
+export function catalogLabel(e: Pick<CatalogEntry, "partNumber" | "name" | "manufacturer">): string {
+  const bits = [e.partNumber.trim(), e.name.trim()].filter(Boolean);
+  const head = bits.join(" - ");
+  return e.manufacturer.trim() ? `${head} (${e.manufacturer.trim()})` : head;
+}
+
+/**
+ * Catalog rows matching what somebody has typed into a picker.
+ *
+ * Searches all four identifying fields, because the number in somebody's hand is
+ * as often the manufacturer's as it is ours - the whole reason a house number
+ * exists is that it wraps somebody else's.
+ */
+export function searchCatalog<T extends CatalogEntry>(catalog: T[], query: string, limit = 20): T[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return catalog.filter((c) => !c.archived).slice(0, limit);
+  const pn = normalizePn(query);
+  const hit = (c: T) =>
+    (pn.length > 0 && normalizePn(c.partNumber).includes(pn))
+    || (pn.length > 0 && normalizePn(c.mfrPartNumber).includes(pn))
+    || c.name.toLowerCase().includes(q)
+    || c.manufacturer.toLowerCase().includes(q);
+  // Live entries first: an archived part is usually not what somebody picking
+  // from a list wants, but it is occasionally exactly what they want.
+  const live = catalog.filter((c) => !c.archived && hit(c));
+  const gone = catalog.filter((c) => c.archived && hit(c));
+  return [...live, ...gone].slice(0, limit);
+}
+
+export type KitLine = { partNumber: string; name: string; qty: number };
+
+/**
+ * What is in a kit, as the lines a person reads.
+ *
+ * A kit is stocked, ordered and issued as ONE thing - the count on the shelf is
+ * a count of sealed kits, and exploding it into its contents when it is issued
+ * would make the inventory claim eleven ferrules are on a shelf when what is
+ * actually there is one bag nobody has opened. So this is for showing, and the
+ * quantities are what the bag contains rather than anything the ledger tracks.
+ */
+export function kitContents(lines: KitLine[]): string {
+  return lines
+    .filter((l) => l.partNumber.trim() || l.name.trim())
+    .map((l) => `${l.qty > 1 ? `${l.qty}x ` : ""}${l.name.trim() || l.partNumber.trim()}`)
+    .join(", ");
+}
+
+/**
+ * Is this catalogued at all?
+ *
+ * Used to show the one thing worth showing next to a part number nobody has
+ * described: an offer to describe it. Everything still works uncatalogued, which
+ * is why this is a hint and never a validation error.
+ */
+export const isCatalogued = (catalog: CatalogEntry[], partNumber: string): boolean =>
+  catalogEntry(catalog, partNumber) !== null;
+
+/**
+ * Part numbers used in the shop that the catalog has never heard of.
+ *
+ * The list that makes cataloguing tractable: rather than asking somebody to type
+ * out their whole parts book, show them the numbers they have actually used and
+ * let them name those. Deduplicated the way part numbers dedupe, with the first
+ * spelling kept - the catalog should be seeded with what people really type.
+ */
+export function uncatalogued(catalog: CatalogEntry[], used: string[]): string[] {
+  const known = new Set(catalog.map((c) => normalizePn(c.partNumber)).filter(Boolean));
+  const out = new Map<string, string>();
+  for (const raw of used) {
+    const pn = normalizePn(raw);
+    if (!pn || known.has(pn) || out.has(pn)) continue;
+    out.set(pn, raw.trim());
+  }
+  return [...out.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}

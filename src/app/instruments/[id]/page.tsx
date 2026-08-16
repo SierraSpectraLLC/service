@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments, auditLog,
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
-  serviceVisits, workOrders,
+  serviceVisits, workOrders, orgSites,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
@@ -26,6 +26,7 @@ import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { clientOptions } from "@/lib/clientNames";
+import { sitesFor } from "@/lib/sites";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
   fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForSystem, stockPhotoForUnit,
@@ -40,6 +41,7 @@ import PhotosPanel from "@/components/PhotosPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
 import WorkOrdersPanel from "@/components/WorkOrdersPanel";
+import SiteCard from "@/components/SiteCard";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
@@ -124,6 +126,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const visitNames = Object.fromEntries((await db.select({ day: serviceVisits.day, title: serviceVisits.title })
     .from(serviceVisits).where(eq(serviceVisits.instrumentId, inst.id)).catch(() => []))
     .map((v) => [v.day, v.title]));
+
+  // Where this instrument physically is. The owner's sites, and the one it sits
+  // at - which the panel needs in full, because the access notes are the part
+  // somebody is actually looking for.
+  const siteRows = inst.ownerOrgId === null ? [] : await db.select().from(orgSites)
+    .where(eq(orgSites.orgId, inst.ownerOrgId)).orderBy(asc(orgSites.name), asc(orgSites.id));
+  const siteNow = siteRows.find((r) => r.id === inst.siteId) ?? null;
 
   // The jobs on this system, newest first - the panel re-sorts what is still
   // owed to the top and folds the finished ones away.
@@ -370,7 +379,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <PanelLayout
         viewKey="system"
         saved={panelLayout}
-        defaultRight={["custody", "photos", "files", "hours", "update", "discussion", "activity"]}
+        defaultRight={["site", "custody", "photos", "files", "hours", "update", "discussion", "activity"]}
         panels={[
           { key: "system", label: "System", node: (
             <SystemPanel
@@ -444,6 +453,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               catalogModels={catalogModels} gridModels={gridModels}
               owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
             />
+          ) },
+          // Where it physically is, and what a tech needs before driving there.
+          { key: "site", label: "Site", node: (
+            <SiteCard
+              instrumentId={inst.id} siteId={inst.siteId} ownerOrgId={inst.ownerOrgId}
+              canEdit={canEdit}
+              options={sitesFor(siteRows, inst.ownerOrgId, inst.siteId)
+                .map((r) => ({ id: r.id, name: r.name, address: r.address, archived: r.archived }))}
+              site={siteNow ? {
+                name: siteNow.name, address: siteNow.address, accessNotes: siteNow.accessNotes,
+                contactName: siteNow.contactName, contactPhone: siteNow.contactPhone,
+              } : null} />
           ) },
           // What has been asked for and what came of it. Above tasks on purpose:
           // a task list answers "what is there to do", a work order answers

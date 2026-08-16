@@ -21,7 +21,7 @@ const STAMPED = [
   "instruments", "assets", "tasks", "pmSchedules", "timeEntries", "attachments",
   "procedures", "vocabTerms", "stageDefs", "people", "stockrooms", "discussionPosts",
   "purchaseOrders", "partPrices", "eodUpdates", "remoteDevices", "auditLog",
-  "cloudConnections", "serviceVisits", "workOrders",
+  "cloudConnections", "serviceVisits", "workOrders", "orgSites", "partCatalog", "agreements",
 ];
 
 const walk = (dir: string): string[] =>

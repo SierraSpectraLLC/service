@@ -3,14 +3,17 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, taskNotes, tasks,
-  timeEntries, workOrders,
+  assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, parts, poLines,
+  purchaseOrders, taskNotes, tasks, timeEntries, workOrders,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, assertSystemVisible, canEditSystem, isHouse, readTenant } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { formatHours } from "@/lib/hours";
+import { formatCents } from "@/lib/money";
+import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
+import { canSeeCosts } from "@/lib/redact";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { systemLabel } from "@/lib/systemLabel";
@@ -111,6 +114,25 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     notes: tNotes.filter((n) => n.taskId === t.id).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
   }));
 
+  // What was bought for this job, and what it cost. Purchasing could never
+  // answer "why did we buy this" before; this is the other end of that link,
+  // and it is what makes a client's parts allowance defensible with a receipt.
+  const poRows = await db.select().from(purchaseOrders)
+    .where(eq(purchaseOrders.workOrderId, woId)).orderBy(desc(purchaseOrders.createdAt));
+  const poLineRows = poRows.length
+    ? await db.select().from(poLines).where(inArray(poLines.poId, poRows.map((p) => p.id)))
+    : [];
+  // Parts fitted on this job's system that came off one of those orders.
+  const partRows = poRows.length && wo.instrumentId !== null
+    ? await db.select().from(parts).where(and(
+        eq(parts.instrumentId, wo.instrumentId),
+        inArray(parts.poId, poRows.map((p) => p.id)),
+      ))
+    : [];
+  // Prices follow the same rule as everywhere else: a partner from another
+  // workspace works the job without seeing what the house paid for the parts.
+  const showCosts = canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId);
+
   const today = shopToday();
   const sev = severityOf(wo.severity);
   const color = WO_COLOR[wo.state] ?? WO_COLOR.open;
@@ -195,6 +217,47 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         canEdit={canAdd} isStaff={staff} listingCuration={false} storage={fileQuota}
         combineTitle={`${wo.number} packet`}
         combineLines={[wo.title, place.label, `Prepared by ${user.name}`].filter(Boolean)} />
+
+      {poRows.length > 0 && (
+        <div className="card">
+          <div className="card-title">Bought for this job</div>
+          {poRows.map((p) => {
+            const mine = poLineRows.filter((l) => l.poId === p.id);
+            const t = poTotals(mine);
+            const receipts = fileRows.filter((f) => f.poId === p.id);
+            return (
+              <div key={p.id} style={{
+                display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
+                padding: "8px 4px", borderTop: "1px solid var(--line)",
+              }}>
+                <Link href={`/purchasing/${p.id}`} className="mono"
+                  style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>
+                  {p.number}
+                </Link>
+                <span style={{ fontSize: 13 }}>{p.vendor}</span>
+                <span className="pill" style={{ background: PO_COLOR[p.status]?.bg, color: PO_COLOR[p.status]?.fg }}>
+                  {PO_LABEL[p.status] ?? p.status}
+                </span>
+                <span className="mut" style={{ fontSize: 11 }}>
+                  {t.received}/{t.ordered} received
+                  {receipts.length ? ` · ${receipts.length} receipt${receipts.length === 1 ? "" : "s"} on file` : ""}
+                </span>
+                {showCosts && t.cents > 0 && (
+                  <span className="mono" style={{ fontSize: 11, marginLeft: "auto", color: "var(--slate)" }}>
+                    {formatCents(t.cents)}{t.unpriced ? ` +${t.unpriced} unpriced` : ""}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {partRows.length > 0 && (
+            <div className="mut" style={{ fontSize: 11.5, marginTop: 8 }}>
+              {partRows.length} part{partRows.length === 1 ? "" : "s"} from these orders {partRows.length === 1 ? "is" : "are"} on
+              the system&apos;s parts list, where the client&apos;s allowance reads them.
+            </div>
+          )}
+        </div>
+      )}
 
       {activity.length > 0 && (
         <div className="card">

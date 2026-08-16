@@ -357,7 +357,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {/* What it IS, in the word the shop uses, before the detail of when.
                 The row used to make the reader assemble "this is a PM" from a
                 cadence pill. See lib/procedureRole. */}
-            <span className="pill" style={{ ...ROLE_COLOR[role], fontWeight: 700 }}>{ROLE_LABEL[role]}</span>
+            <span className="pill" style={{ background: ROLE_COLOR[role].bg, color: ROLE_COLOR[role].fg, fontWeight: 700 }}>{ROLE_LABEL[role]}</span>
             {i.intervalDays !== null && (
               <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{cadenceLabel(i.intervalDays)}</span>
             )}

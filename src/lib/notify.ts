@@ -399,3 +399,34 @@ export async function notifyGasEmpty(opts: { actorEmail: string; actorName: stri
     console.error("[notify] gas-empty email failed:", (e as Error).message);
   }
 }
+
+/**
+ * A contract is running out.
+ *
+ * Sent weekly while an agreement sits inside its notice window, which is a
+ * deliberate repeat rather than a one-shot: the failure this exists to prevent
+ * is a contract lapsing unnoticed, and one email sixty days out that arrives on
+ * a Friday afternoon is exactly how that happens. Weekly rather than daily
+ * because a renewal is a conversation somebody has once, not a task they work
+ * through - and a nag nobody reads protects nothing.
+ */
+export async function notifyRenewalDue(opts: {
+  to: string[]; orgId: number; orgName: string; label: string; line: string;
+  parts: string; visits: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "renewal", href: `/settings/organizations/${opts.orgId}`,
+      title: `${opts.orgName}: ${opts.label} - ${opts.line}`,
+      subject: `Renewal due - ${opts.orgName} ${opts.label}`,
+      html: await wrap(`<b>${esc(opts.orgName)}</b> - ${esc(opts.label)}.
+        <div style="margin-top:8px;">${esc(opts.line)}</div>
+        ${opts.parts || opts.visits ? `<div style="margin-top:8px;">Used so far:
+          ${[opts.parts, opts.visits].filter(Boolean).map(esc).join(" · ")}</div>` : ""}
+        ${url ? `<div style="margin-top:10px;"><a href="${url}/agreements">Open agreements</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] renewal email failed:", (e as Error).message);
+  }
+}
