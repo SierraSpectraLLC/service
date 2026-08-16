@@ -335,7 +335,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   return (
     <div className="container split">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      {/* Wraps: these are four or five buttons that cannot shrink (flexShrink 0
+          keeps their labels whole), so on a phone they have to go onto another
+          line rather than push the page wider than the screen. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
           ← All instruments
         </Link>
