@@ -1,7 +1,7 @@
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { agreements, orgs } from "@/db/schema";
+import { agreements, instruments, orgs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
@@ -32,11 +32,19 @@ export default async function AgreementsPage() {
     .orderBy(asc(agreements.endsOn), desc(agreements.id));
 
   const orgIds = [...new Set(rows.map((r) => r.orgId))];
-  const [orgRows, allOrgs] = await Promise.all([
+  const [orgRows, allOrgs, systemRows] = await Promise.all([
     orgIds.length ? db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, orgIds)) : [],
     visibleOrgs(user),
+    // Every client-owned system, so an assigned contract can name its systems.
+    db.select({
+      id: instruments.id, ownerOrgId: instruments.ownerOrgId,
+      externalId: instruments.externalId, model: instruments.model,
+    }).from(instruments).orderBy(asc(instruments.externalId)),
   ]);
   const name = new Map(orgRows.map((o) => [o.id, o.name]));
+  const systems = systemRows
+    .filter((r) => r.ownerOrgId !== null)
+    .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
 
   // Drawn down from the work itself, every time this page renders. One pass per
   // agreement; a shop with hundreds would want this batched, and would also
@@ -49,7 +57,10 @@ export default async function AgreementsPage() {
     kind: r.kind, number: r.number, title: r.title, status: r.status,
     startsOn: r.startsOn, endsOn: r.endsOn, renewNoticeDays: r.renewNoticeDays,
     visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
-    laborIncludedMinutes: r.laborIncludedMinutes, valueCents: r.valueCents, note: r.note,
+    laborIncludedMinutes: r.laborIncludedMinutes,
+    visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+    hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
+    valueCents: r.valueCents, note: r.note,
     used: usage.get(r.id) ?? nothing,
   }));
 
@@ -61,12 +72,12 @@ export default async function AgreementsPage() {
       <SettingsTabs active="agreements" isOwner={user.role === "owner"} isPlatform={isPlatformStaff(tenantViewer(user))} />
 
       {chase.length > 0 && (
-        <AgreementsPanel rows={chase} today={today}
+        <AgreementsPanel rows={chase} today={today} systems={systems}
           orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
           title={`Needs attention · ${chase.length}`} />
       )}
 
-      <AgreementsPanel rows={rest} today={today}
+      <AgreementsPanel rows={rest} today={today} systems={systems}
         orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
         title={chase.length ? "Everything else" : "Agreements"} />
 

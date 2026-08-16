@@ -994,6 +994,9 @@ export const partCatalog = pgTable("part_catalog", {
   kind: text("kind").notNull().default("part"),
   // Which module types this suits, for the picker. [] = anything.
   assetTypes: text("asset_types").array().notNull().default([]),
+  // Which MODELS it suits, when the number is model-specific - an LC-20 seal
+  // kit is not an LC-30 seal kit. [] = any model of the types above.
+  models: text("models").array().notNull().default([]),
   note: text("note").notNull().default(""),
   archived: boolean("archived").notNull().default(false),
   createdBy: text("created_by").notNull().default(""),
@@ -1045,7 +1048,18 @@ export const agreements = pgTable("agreements", {
   visitsIncluded: integer("visits_included").notNull().default(0),
   partsAllowanceCents: integer("parts_allowance_cents").notNull().default(0),
   laborIncludedMinutes: integer("labor_included_minutes").notNull().default(0),
-  valueCents: integer("value_cents"),                 // what the paper is worth
+  // Unlimited is a third state, distinct from a cap and from "not included":
+  // a full-service contract covers every visit and every part, and usage shows
+  // as information rather than as drawdown against a number.
+  visitsUnlimited: boolean("visits_unlimited").notNull().default(false),
+  partsUnlimited: boolean("parts_unlimited").notNull().default(false),
+  // What an hour beyond the included ones bills at. Null = not set.
+  hourlyRateCents: integer("hourly_rate_cents"),
+  valueCents: integer("value_cents"),                 // the contract's value
+  // Which of the client's systems THIS contract covers. [] = all of them, so a
+  // client can run a full-service contract on one system and a PM-only one on
+  // another, each drawing down separately.
+  instrumentIds: integer("instrument_ids").array().notNull().default([]),
   note: text("note").notNull().default(""),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),

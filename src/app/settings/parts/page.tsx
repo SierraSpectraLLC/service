@@ -29,7 +29,7 @@ export default async function PartsCatalogPage() {
   const [rows, terms, usedParts, usedStock, usedPo] = await Promise.all([
     db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, tenant))
       .orderBy(asc(partCatalog.partNumber)),
-    db.select({ name: vocabTerms.name, kind: vocabTerms.kind }).from(vocabTerms)
+    db.select({ name: vocabTerms.name, kind: vocabTerms.kind, assetType: vocabTerms.assetType }).from(vocabTerms)
       .where(forTenant(vocabTerms.tenantOrgId, tenant)).orderBy(asc(vocabTerms.name)),
     // Every number the shop has actually used. Not tenant-filtered on parts,
     // which carries no stamp of its own - it belongs to whatever system it sits
@@ -54,11 +54,15 @@ export default async function PartsCatalogPage() {
         items={rows.map((r) => ({
           id: r.id, partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
           mfrPartNumber: r.mfrPartNumber, kind: r.kind, assetTypes: r.assetTypes,
-          note: r.note, archived: r.archived,
+          models: r.models, note: r.note, archived: r.archived,
           lines: lines.filter((l) => l.kitId === r.id)
             .map((l) => ({ partNumber: l.partNumber, name: l.name, qty: l.qty })),
         }))}
         assetTypes={terms.filter((t) => t.kind === "asset_type").map((t) => t.name)}
+        modelsByType={terms.reduce<Record<string, string[]>>((acc, t) => {
+          if (t.kind === "model" && t.assetType) (acc[t.assetType] ??= []).push(t.name);
+          return acc;
+        }, {})}
         unnamed={uncatalogued(rows, used)}
       />
     </div>

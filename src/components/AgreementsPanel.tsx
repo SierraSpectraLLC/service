@@ -15,6 +15,10 @@ export type AgreementRow = {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
+  visitsUnlimited: boolean; partsUnlimited: boolean;
+  hourlyRateCents: number | null;
+  /** Which of the client's systems this paper covers. [] = all of them. */
+  instrumentIds: number[];
   valueCents: number | null; note: string;
   /** Summed from the work, never stored - see lib/agreementUsage. */
   used: { partsCents: number; visits: number; laborMinutes: number };
@@ -23,7 +27,10 @@ export type AgreementRow = {
 const emptyDraft = {
   kind: "contract", number: "", title: "", status: "active",
   startsOn: "", endsOn: "", renewNoticeDays: "60",
-  visitsIncluded: "0", partsAllowance: "", laborIncludedHours: "", value: "", note: "",
+  visitsIncluded: "0", partsAllowance: "", laborIncludedHours: "",
+  visitsUnlimited: false, partsUnlimited: false, hourlyRate: "",
+  instrumentIds: [] as number[],
+  value: "", note: "",
 };
 
 const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg });
@@ -35,11 +42,23 @@ const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg
  * not part of this agreement, and drawing an instantly-full bar for it would
  * report every unlimited contract as blown through on day one.
  */
-function Bar({ label, included, used, fmt }: {
-  label: string; included: number; used: number; fmt: (n: number) => string;
+function Bar({ label, included, used, fmt, unlimited = false }: {
+  label: string; included: number; used: number; fmt: (n: number) => string; unlimited?: boolean;
 }) {
-  const a = allowance(included, used);
+  const a = allowance(included, used, unlimited);
   if (!a.tracked) return null;
+  if (a.unlimited) {
+    // Covered with no number to burn: usage is information, not drawdown.
+    return (
+      <div style={{ flex: "1 1 160px", minWidth: 140 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+          <span className="mut">{label}</span>
+          <span style={{ fontWeight: 700 }}>{fmt(a.used)} used</span>
+        </div>
+        <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>unlimited</span>
+      </div>
+    );
+  }
   return (
     <div style={{ flex: "1 1 160px", minWidth: 140 }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
@@ -69,11 +88,13 @@ function Bar({ label, included, used, fmt }: {
  * stored, which is the whole design (see lib/agreements). It costs a query; it
  * buys never having to explain why two screens disagree about the same money.
  */
-export default function AgreementsPanel({ rows, today, orgs, canEdit, title = "Agreements" }: {
+export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, title = "Agreements" }: {
   rows: AgreementRow[];
   today: string;
   /** Organizations an agreement may be written against. Empty = one org page. */
   orgs: { id: number; name: string }[];
+  /** The clients' systems, for assigning a contract to specific ones. */
+  systems?: { id: number; ownerOrgId: number | null; externalId: string; label: string }[];
   canEdit: boolean;
   title?: string;
 }) {
@@ -90,6 +111,9 @@ export default function AgreementsPanel({ rows, today, orgs, canEdit, title = "A
       visitsIncluded: String(r.visitsIncluded),
       partsAllowance: r.partsAllowanceCents ? (r.partsAllowanceCents / 100).toFixed(2) : "",
       laborIncludedHours: r.laborIncludedMinutes ? (r.laborIncludedMinutes / 60).toFixed(1) : "",
+      visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+      hourlyRate: r.hourlyRateCents != null ? (r.hourlyRateCents / 100).toFixed(2) : "",
+      instrumentIds: [...r.instrumentIds],
       value: r.valueCents != null ? (r.valueCents / 100).toFixed(2) : "",
       note: r.note,
     });
@@ -134,7 +158,12 @@ export default function AgreementsPanel({ rows, today, orgs, canEdit, title = "A
               <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[r.kind]}</span>
               {orgs.length !== 1 && <span className="mut" style={{ fontSize: 12 }}>{r.orgName}</span>}
               {r.valueCents != null && (
-                <span className="mono" style={{ fontSize: 11, color: "var(--slate)" }}>{formatCents(r.valueCents)}</span>
+                <span className="mono" style={{ fontSize: 11, color: "var(--slate)" }}
+                  title="Contract value">{formatCents(r.valueCents)}</span>
+              )}
+              {r.hourlyRateCents != null && (
+                <span className="mono" style={{ fontSize: 11, color: "var(--slate)" }}
+                  title="Hourly rate">{formatCents(r.hourlyRateCents)}/hr</span>
               )}
               {canEdit && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
@@ -152,11 +181,28 @@ export default function AgreementsPanel({ rows, today, orgs, canEdit, title = "A
               )}
             </div>
             <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{renewalLine(r, today)}</div>
+            {/* Which systems the paper covers. Silence would read as "all of
+                them", which is true only when nothing is assigned. */}
+            {r.instrumentIds.length > 0 && (
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                <span className="mut" style={{ fontSize: 11 }}>covers</span>
+                {r.instrumentIds.map((id) => {
+                  const sys = systems.find((s2) => s2.id === id);
+                  return (
+                    <span key={id} className="pill mono" style={{ background: "#E7F2FA", color: "#1D6396" }}>
+                      {sys?.externalId ?? `#${id}`}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8 }}>
-              <Bar label="Parts" included={r.partsAllowanceCents} used={r.used.partsCents} fmt={formatCents} />
-              <Bar label="Visits" included={r.visitsIncluded} used={r.used.visits} fmt={(n) => String(n)} />
-              <Bar label="Labour" included={r.laborIncludedMinutes} used={r.used.laborMinutes} fmt={formatHours} />
+              <Bar label="Parts" included={r.partsAllowanceCents} used={r.used.partsCents} fmt={formatCents}
+                unlimited={r.partsUnlimited} />
+              <Bar label="Visits" included={r.visitsIncluded} used={r.used.visits} fmt={(n) => String(n)}
+                unlimited={r.visitsUnlimited} />
+              <Bar label="Labour hours" included={r.laborIncludedMinutes} used={r.used.laborMinutes} fmt={formatHours} />
             </div>
             {r.note && <div className="mut" style={{ fontSize: 11.5, marginTop: 6, whiteSpace: "pre-wrap" }}>{r.note}</div>}
           </div>
@@ -229,28 +275,75 @@ export default function AgreementsPanel({ rows, today, orgs, canEdit, title = "A
             </div>
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
-                <label>Parts allowance</label>
-                <input value={draft.partsAllowance} placeholder="5000"
+                <label>Parts allowance ($)</label>
+                <input value={draft.partsAllowance} placeholder="5000" disabled={draft.partsUnlimited}
                   onChange={(e) => setDraft({ ...draft, partsAllowance: e.target.value })} />
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                  <input type="checkbox" checked={draft.partsUnlimited} style={{ width: 15, height: 15 }}
+                    onChange={(e) => setDraft({ ...draft, partsUnlimited: e.target.checked })} />
+                  Unlimited - parts are covered, spend isn&apos;t tracked against a cap
+                </label>
               </div>
               <div>
-                <label>Visits</label>
-                <input type="number" min={0} value={draft.visitsIncluded}
+                <label>Service visits</label>
+                <input type="number" min={0} value={draft.visitsIncluded} disabled={draft.visitsUnlimited}
                   onChange={(e) => setDraft({ ...draft, visitsIncluded: e.target.value })} />
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                  <input type="checkbox" checked={draft.visitsUnlimited} style={{ width: 15, height: 15 }}
+                    onChange={(e) => setDraft({ ...draft, visitsUnlimited: e.target.checked })} />
+                  Unlimited visits
+                </label>
               </div>
             </div>
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
-                <label>Labour hours</label>
+                <label>Labour hours included</label>
                 <input value={draft.laborIncludedHours} placeholder="40"
                   onChange={(e) => setDraft({ ...draft, laborIncludedHours: e.target.value })} />
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  Hours of work the contract includes; logged time draws it down.
+                </div>
               </div>
               <div>
-                <label>What the paper is worth</label>
-                <input value={draft.value} placeholder="18000"
-                  onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
+                <label>Hourly rate ($/hr)</label>
+                <input value={draft.hourlyRate} placeholder="150"
+                  onChange={(e) => setDraft({ ...draft, hourlyRate: e.target.value })} />
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  What an hour beyond the included ones bills at.
+                </div>
               </div>
             </div>
+            <label>Contract value ($)</label>
+            <input value={draft.value} placeholder="18000" style={{ marginBottom: 8 }}
+              onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
+
+            {/* Which systems this paper covers. The client with a full-service
+                contract on the TOC and a PM-only one on the UV-Vis assigns each
+                system to its contract; none selected = the whole fleet. */}
+            {(() => {
+              const theirs = systems.filter((s2) => s2.ownerOrgId === sheet.orgId);
+              if (theirs.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 8 }}>
+                  <label>Systems it covers <span className="mut" style={{ fontWeight: 400 }}>(none = all of theirs)</span></label>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {theirs.map((s2) => {
+                      const on = draft.instrumentIds.includes(s2.id);
+                      return (
+                        <button key={s2.id} type="button" className={on ? "btn sm primary" : "btn sm"}
+                          style={{ fontSize: 11 }} title={s2.label}
+                          onClick={() => setDraft({
+                            ...draft,
+                            instrumentIds: on ? draft.instrumentIds.filter((x) => x !== s2.id) : [...draft.instrumentIds, s2.id],
+                          })}>
+                          {s2.externalId}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             <label>Note</label>
             <textarea value={draft.note} rows={3} style={{ width: "100%", marginBottom: 8 }}

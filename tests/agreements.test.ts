@@ -98,6 +98,19 @@ describe("an entitlement drawn down", () => {
     expect(a.pct).toBe(0);
   });
 
+  it("unlimited is covered-with-no-cap: usage reports, nothing is ever over", () => {
+    // A full-service contract has no number to burn. Usage still shows - it is
+    // real work - but there is no bar, no remaining, and no overspend.
+    const a = allowance(0, 87_000, true);
+    expect(a.tracked).toBe(true);
+    expect(a.unlimited).toBe(true);
+    expect(a.used).toBe(87_000);
+    expect(a.over).toBe(false);
+    expect(a.pct).toBe(0);
+    // Unlimited wins even when a stale cap is still on the row.
+    expect(allowance(500_000, 900_000, true).over).toBe(false);
+  });
+
   it("does all three at once, in the order a person reads them", () => {
     const d = drawdown(
       ag({ partsAllowanceCents: 500_000, visitsIncluded: 4, laborIncludedMinutes: 0 }),

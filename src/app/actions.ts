@@ -6936,7 +6936,7 @@ export async function setSystemSite(instrumentId: number, siteId: number | null)
 
 export type CatalogInput = {
   partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
-  kind: string; assetTypes: string[]; note: string;
+  kind: string; assetTypes: string[]; models?: string[]; note: string;
 };
 
 const cleanCatalog = (d: CatalogInput) => ({
@@ -6946,6 +6946,7 @@ const cleanCatalog = (d: CatalogInput) => ({
   mfrPartNumber: d.mfrPartNumber.trim().slice(0, 80),
   kind: (PART_KINDS as readonly string[]).includes(d.kind) ? d.kind : "part",
   assetTypes: [...new Set(d.assetTypes.map((t) => t.trim()).filter(Boolean))],
+  models: [...new Set((d.models ?? []).map((m) => m.trim()).filter(Boolean))],
   note: d.note.trim().slice(0, 500),
 });
 
@@ -7058,6 +7059,9 @@ export type AgreementInput = {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number | string;
   visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
+  visitsUnlimited?: boolean; partsUnlimited?: boolean;
+  hourlyRate?: string;
+  instrumentIds?: number[];
   value: string; note: string;
 };
 
@@ -7065,6 +7069,8 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
+  visitsUnlimited: boolean; partsUnlimited: boolean;
+  hourlyRateCents: number | null; instrumentIds: number[];
   valueCents: number | null; note: string;
 } {
   const kind = (AGREEMENT_KINDS as readonly string[]).includes(d.kind) ? d.kind : "contract";
@@ -7086,11 +7092,19 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
     title: d.title.trim().slice(0, 160),
     startsOn, endsOn,
     renewNoticeDays: whole(d.renewNoticeDays, 3650),
-    visitsIncluded: whole(d.visitsIncluded, 10_000),
+    // Unlimited beats a cap: the number is zeroed so nothing reads it as one.
+    visitsIncluded: d.visitsUnlimited ? 0 : whole(d.visitsIncluded, 10_000),
     // parseMoney returns null for "not money-shaped"; an allowance nobody typed
     // is 0, which lib/agreements reads as "not part of this agreement".
-    partsAllowanceCents: parseMoney(d.partsAllowance) ?? 0,
+    partsAllowanceCents: d.partsUnlimited ? 0 : parseMoney(d.partsAllowance) ?? 0,
     laborIncludedMinutes: Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
+    visitsUnlimited: d.visitsUnlimited ?? false,
+    partsUnlimited: d.partsUnlimited ?? false,
+    hourlyRateCents: parseMoney(d.hourlyRate ?? ""),
+    // Which of the client's systems this paper covers; [] = all of them.
+    // Ownership is validated by usage-time scoping, not here - a system that
+    // changes hands stops counting by itself.
+    instrumentIds: [...new Set((d.instrumentIds ?? []).filter((n) => Number.isInteger(n)))],
     valueCents: parseMoney(d.value),
     note: d.note.trim().slice(0, 2000),
   };

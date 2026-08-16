@@ -45,12 +45,16 @@ const within = (col: Parameters<typeof gte>[0], a: Pick<AgreementLike, "startsOn
 };
 
 export async function usageFor(
-  a: Pick<AgreementLike, "startsOn" | "endsOn">, orgId: number,
+  a: Pick<AgreementLike, "startsOn" | "endsOn"> & { instrumentIds?: number[] }, orgId: number,
 ): Promise<Usage> {
   // Their systems: what labour and visits are counted against. Read once.
+  // A contract assigned to specific systems counts only those - that is what
+  // lets one client run a full-service contract on the TOC and a PM-only one
+  // on the UV-Vis, each drawing down its own paper.
+  const scoped = a.instrumentIds ?? [];
   const theirs = await db.select({ id: instruments.id }).from(instruments)
     .where(eq(instruments.ownerOrgId, orgId));
-  const ids = theirs.map((r) => r.id);
+  const ids = theirs.map((r) => r.id).filter((id) => scoped.length === 0 || scoped.includes(id));
 
   const [partRows, woRows, timeRows] = await Promise.all([
     // Whose money bought it, stamped at purchase - never re-derived from who
@@ -63,6 +67,7 @@ export async function usageFor(
       eq(parts.status, "Installed"),
       sql`${parts.installedAt} <> ''`,
       within(parts.installedAt, a),
+      scoped.length ? inArray(parts.instrumentId, scoped) : undefined,
     )),
     db.select({ severity: workOrders.severity, state: workOrders.state, closedAt: workOrders.closedAt })
       .from(workOrders).where(and(
@@ -71,6 +76,7 @@ export async function usageFor(
         // Dated by when it was OPENED rather than closed: a job asked for in
         // December and finished in January belongs to the year they asked.
         within(workOrders.openedOn, a),
+        scoped.length ? inArray(workOrders.instrumentId, scoped) : undefined,
       )),
     ids.length
       ? db.select({ minutes: timeEntries.minutes }).from(timeEntries).where(and(

@@ -39,6 +39,9 @@ export type AgreementLike = {
   visitsIncluded: number;
   partsAllowanceCents: number;
   laborIncludedMinutes: number;
+  /** Unlimited beats any cap: a full-service contract has no number to burn. */
+  visitsUnlimited?: boolean;
+  partsUnlimited?: boolean;
 };
 
 /** draft | cancelled | expired | expiring | active - what it is TODAY. */
@@ -105,10 +108,12 @@ export type Usage = { partsCents: number; visits: number; laborMinutes: number }
 export type Allowance = {
   /** Is this entitlement part of the agreement at all? */
   tracked: boolean;
+  /** No cap to draw down - usage is information, never "over". */
+  unlimited: boolean;
   included: number;
   used: number;
   remaining: number;
-  /** 0-100, clamped, for a bar. 0 when untracked. */
+  /** 0-100, clamped, for a bar. 0 when untracked or unlimited. */
   pct: number;
   over: boolean;
 };
@@ -121,15 +126,22 @@ export type Allowance = {
  * both real things, and the one nobody filled in must not be reported as the
  * second - so an untracked allowance reports `tracked: false` and the UI leaves
  * it out rather than drawing an instantly-full bar.
+ *
+ * Unlimited is the third state: covered with no number to burn. Usage still
+ * reports (it is real work), but there is no bar, no remaining, and no "over".
  */
-export function allowance(included: number, used: number): Allowance {
+export function allowance(included: number, used: number, unlimited = false): Allowance {
   const cap = Math.max(0, included);
   const spent = Math.max(0, used);
+  if (unlimited) {
+    return { tracked: true, unlimited: true, included: 0, used: spent, remaining: 0, pct: 0, over: false };
+  }
   if (cap === 0) {
-    return { tracked: false, included: 0, used: spent, remaining: 0, pct: 0, over: false };
+    return { tracked: false, unlimited: false, included: 0, used: spent, remaining: 0, pct: 0, over: false };
   }
   return {
     tracked: true,
+    unlimited: false,
     included: cap,
     used: spent,
     remaining: cap - spent,          // negative when over, which is the point
@@ -141,8 +153,8 @@ export function allowance(included: number, used: number): Allowance {
 /** All three entitlements at once, in the order a person reads them. */
 export function drawdown(a: AgreementLike, used: Usage) {
   return {
-    parts: allowance(a.partsAllowanceCents, used.partsCents),
-    visits: allowance(a.visitsIncluded, used.visits),
+    parts: allowance(a.partsAllowanceCents, used.partsCents, a.partsUnlimited),
+    visits: allowance(a.visitsIncluded, used.visits, a.visitsUnlimited),
     labor: allowance(a.laborIncludedMinutes, used.laborMinutes),
   };
 }

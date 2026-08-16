@@ -8,7 +8,7 @@ import {
 
 export type CatalogRow = {
   id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
-  kind: string; assetTypes: string[]; note: string; archived: boolean;
+  kind: string; assetTypes: string[]; models: string[]; note: string; archived: boolean;
   lines: { partNumber: string; name: string; qty: number }[];
 };
 
@@ -23,7 +23,7 @@ const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg
 
 const emptyDraft = {
   partNumber: "", name: "", manufacturer: "", mfrPartNumber: "",
-  kind: "part", assetTypes: [] as string[], note: "",
+  kind: "part", assetTypes: [] as string[], models: [] as string[], note: "",
 };
 
 /**
@@ -35,9 +35,11 @@ const emptyDraft = {
  * catalog stays empty; asking them to name the twelve numbers they used last
  * month is a job somebody finishes.
  */
-export default function PartCatalogPanel({ items, assetTypes, unnamed }: {
+export default function PartCatalogPanel({ items, assetTypes, modelsByType, unnamed }: {
   items: CatalogRow[];
   assetTypes: string[];
+  /** Catalog models per module type, for the per-model chips. */
+  modelsByType: Record<string, string[]>;
   /** Part numbers in use on real work that the catalog has never heard of. */
   unnamed: string[];
 }) {
@@ -57,7 +59,8 @@ export default function PartCatalogPanel({ items, assetTypes, unnamed }: {
   const openEdit = (r: CatalogRow) => {
     setDraft({
       partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
-      mfrPartNumber: r.mfrPartNumber, kind: r.kind, assetTypes: r.assetTypes, note: r.note,
+      mfrPartNumber: r.mfrPartNumber, kind: r.kind, assetTypes: r.assetTypes,
+      models: r.models, note: r.note,
     });
     setLines(r.lines.map((l) => ({ ...l })));
     setError(""); setSheet({ id: r.id });
@@ -125,6 +128,7 @@ export default function PartCatalogPanel({ items, assetTypes, unnamed }: {
                 r.manufacturer && `${r.manufacturer}${r.mfrPartNumber ? ` ${r.mfrPartNumber}` : ""}`,
                 r.kind === "kit" && r.lines.length ? kitContents(r.lines) : "",
                 r.assetTypes.length ? r.assetTypes.join(", ") : "",
+                r.models.length ? r.models.join(", ") : "",
               ].filter(Boolean).join(" · ")}
             </div>
           </button>
@@ -241,6 +245,35 @@ export default function PartCatalogPanel({ items, assetTypes, unnamed }: {
               })}
               {assetTypes.length === 0 && <span className="mut" style={{ fontSize: 11 }}>No module types in the catalog yet.</span>}
             </div>
+
+            {/* The models within those types, when the number is model-specific:
+                an LC-20 seal kit is not an LC-30 seal kit. No types picked =
+                offer every model. None selected = suits any model. */}
+            {(() => {
+              const pool = (draft.assetTypes.length ? draft.assetTypes : Object.keys(modelsByType))
+                .flatMap((t) => modelsByType[t] ?? []);
+              const options = [...new Set(pool)];
+              if (options.length === 0) return null;
+              return (
+                <>
+                  <label>Specific models <span className="mut" style={{ fontWeight: 400 }}>(none = any model)</span></label>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+                    {options.map((m) => {
+                      const on = draft.models.includes(m);
+                      return (
+                        <button key={m} type="button" className={on ? "btn sm primary" : "btn sm"} style={{ fontSize: 11 }}
+                          onClick={() => setDraft({
+                            ...draft,
+                            models: on ? draft.models.filter((x) => x !== m) : [...draft.models, m],
+                          })}>
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
 
             <label>Note</label>
             <textarea value={draft.note} rows={2} style={{ width: "100%", marginBottom: 8 }}

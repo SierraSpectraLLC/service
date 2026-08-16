@@ -56,6 +56,12 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   const agreementRows = await db.select().from(agreements)
     .where(eq(agreements.orgId, orgId)).orderBy(asc(agreements.endsOn), asc(agreements.id));
   const usage = await usageForAll(agreementRows);
+  // Their systems, so a contract can be assigned to specific ones.
+  const ownedSystems = (await db.select({
+    id: instruments.id, ownerOrgId: instruments.ownerOrgId,
+    externalId: instruments.externalId, model: instruments.model,
+  }).from(instruments).where(eq(instruments.ownerOrgId, orgId)).orderBy(asc(instruments.externalId)))
+    .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
   const today = shopToday();
   // How many machines this organization has enrolled - the number the remote
   // tier is sold against, and what billing would eventually read.
@@ -105,11 +111,15 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           kind: r.kind, number: r.number, title: r.title, status: r.status,
           startsOn: r.startsOn, endsOn: r.endsOn, renewNoticeDays: r.renewNoticeDays,
           visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
-          laborIncludedMinutes: r.laborIncludedMinutes, valueCents: r.valueCents, note: r.note,
+          laborIncludedMinutes: r.laborIncludedMinutes,
+          visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+          hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
+          valueCents: r.valueCents, note: r.note,
           used: usage.get(r.id) ?? { partsCents: 0, visits: 0, laborMinutes: 0 },
         }))}
         today={today}
         orgs={[{ id: org.id, name: org.name }]}
+        systems={ownedSystems}
         // A client reads their own contract; only the service company writes one.
         canEdit={isHouse(user.role)}
       />
