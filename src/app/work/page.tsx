@@ -98,12 +98,15 @@ export default async function WorkPage() {
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Work orders</h1>
+      </div>
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Work orders</div>
         {live.map(row)}
         {live.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
-            Nothing outstanding. A work order opens when somebody asks for service on a system,
+          <div className="empty">
+            <b>Nothing outstanding</b>
+            A work order opens when somebody asks for service on a system,
             or from the Work orders panel on the system itself.
           </div>
         )}

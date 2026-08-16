@@ -76,6 +76,9 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Discussions</h1>
+      </div>
       {/* Only the operator has more than one room, so only they get a picker. */}
       {rooms.length > 1 && (
         <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>

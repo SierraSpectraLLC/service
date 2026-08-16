@@ -95,14 +95,19 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
 
   return (
     <div className="container wide">
-      <EodDateNav date={date} today={today} dates={dates} />
+      <div className="page-head">
+        <h1 className="page-title">EOD update</h1>
+        <span className="page-actions"><EodDateNav date={date} today={today} dates={dates} /></span>
+      </div>
       {shown.map((g) => (
         <EodPanel key={g.orgId ?? "own"} clientName={g.name} orgId={g.orgId}
           entries={g.entries} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
           canSend={g.canSend} recipientCount={g.recipientCount} sentInfo={g.sentInfo} />
       ))}
       {shown.length === 0 && (
-        <div className="card"><div className="mut" style={{ fontSize: 13 }}>Nothing recorded for this day.</div></div>
+        <div className="card">
+          <div className="empty"><b>Nothing recorded for this day</b></div>
+        </div>
       )}
     </div>
   );

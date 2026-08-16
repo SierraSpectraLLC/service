@@ -208,7 +208,12 @@ export default function AssetRegistryList({ rows, canSelect }: {
           </div>
         );
       })}
-      {rows.length === 0 && <div className="mut" style={{ fontSize: 13, marginTop: 8 }}>No assets match.</div>}
+      {rows.length === 0 && (
+        <div className="empty" style={{ marginTop: 8 }}>
+          <b>No assets match</b>
+          Adjust the filters above, or add the first unit with “+ New asset”.
+        </div>
+      )}
     </div>
   );
 }

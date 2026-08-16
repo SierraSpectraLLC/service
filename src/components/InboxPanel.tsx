@@ -22,23 +22,25 @@ export default function InboxPanel({ items, prefs }: {
 
   return (
     <>
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 10, gap: 8 }}>
-          <div className="card-title">Inbox</div>
-          {unread > 0 && (
-            <>
-              <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D" }}>{unread} unread</span>
-              <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
+      <div className="page-head">
+        <h1 className="page-title">Inbox</h1>
+        {unread > 0 && (
+          <>
+            <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D" }}>{unread} unread</span>
+            <span className="page-actions">
+              <button className="btn sm" disabled={pending}
                 onClick={() => startTransition(async () => { await markAllNotificationsRead(); })}>
                 Mark all read
               </button>
-            </>
-          )}
-        </div>
-
+            </span>
+          </>
+        )}
+      </div>
+      <div className="card">
         {items.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
-            Nothing yet. Assignments, discussion posts, access requests and empty-gas
+          <div className="empty">
+            <b>Nothing yet</b>
+            Assignments, discussion posts, access requests and empty-gas
             flags land here as well as in email.
           </div>
         )}

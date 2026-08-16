@@ -11,7 +11,7 @@ import { currentUser, viewContext } from "@/lib/authz";
 import { welcomeRedirect } from "@/lib/welcome";
 import { PATH_HEADER } from "@/middleware";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
-import NavMore from "@/components/NavMore";
+import HeaderNav from "@/components/HeaderNav";
 import AccountMenu from "@/components/AccountMenu";
 import { NavIcon, SearchIcon, MessagesIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
@@ -108,58 +108,69 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         )}
         <div className="app-header" style={{ background: headerBg, color: headerFg }}>
           <div className="spectrum" />
-          <div className="container" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", paddingTop: 14, paddingBottom: 14 }}>
-            {logoUrl && (
-              // Plain img: the logo lives on Blob, outside next/image's domain allowlist.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={logoUrl} alt={`${user?.orgName || "workspace"} logo`}
-                style={{ height: 26, maxWidth: 120, objectFit: "contain", display: "block" }} />
-            )}
-            <Link href="/" style={{ fontWeight: 700, fontSize: 16, letterSpacing: 0.3, color: headerFg, textDecoration: "none" }}>
-              {brand.name.toUpperCase()}
+          <div className="container wide header-row">
+            <Link href="/" className="brand">
+              {logoUrl && (
+                // Plain img: the logo lives on Blob, outside next/image's domain allowlist.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={logoUrl} alt={`${user?.orgName || "workspace"} logo`}
+                  style={{ height: 26, maxWidth: 120, objectFit: "contain", display: "block" }} />
+              )}
+              <span className="brand-name">{brand.name.toUpperCase()}</span>
+              {user?.orgName && <span className="brand-org">× {user.orgName}</span>}
             </Link>
-            <span style={{ fontSize: 12, opacity: 0.75 }}>
-              {user?.orgName ? `${brand.name} × ${user.orgName} · ${brand.tagline}` : `${brand.name} · ${brand.tagline}`}
-            </span>
             {user && (
-              <nav style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                {/* Left of the divide: where the work is. These change with the
-                    instance's modules and the viewer's role. */}
-                <Link className="btn sm" href="/" style={{ textDecoration: "none" }}>Dashboard</Link>
-                {/* For everyone, not just staff. A work order exists so that both
-                    sides read the same state, and hiding the list from the people
-                    who asked for the work would undo the point of it. */}
-                <Link className="btn sm" href="/work" style={{ textDecoration: "none" }}>Work orders</Link>
-                <Link className="btn sm" href="/assets" style={{ textDecoration: "none" }}>Assets</Link>
-                {hasStock && <Link className="btn sm" href="/stock" style={{ textDecoration: "none" }}>Inventory</Link>}
-                {isStaff && modules.eod && <Link className="btn sm" href="/eod" style={{ textDecoration: "none" }}>EOD update</Link>}
-                {isStaff ? (
-                  <NavMore items={[
-                    { href: "/maintenance", label: "Maintenance" },
-                    { href: "/purchasing", label: "Purchasing" },
-                    { href: "/pdf", label: "PDF studio" },
-                    { href: "/documents", label: "Files" },
-                    { href: "/gallery", label: "Gallery" },
-                    ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
-                    { href: "/metrics", label: "Metrics" },
-                    { href: "/archive", label: "Archived" },
-                    ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
-                    // Settings is in the account menu now, where a person looks
-                    // for their own settings. Staff keep the catalog link here
-                    // because curating it is work, not configuration.
-                    ...(user.role === "owner" ? [] : [{ href: "/settings/catalog", label: "Catalog & procedures" }]),
-                  ]} />
-                ) : (
-                  // An organization's own tools: its file shelf and the studio.
-                  // Both used to be staff-only, which left a client with nowhere
-                  // to keep a document and no way to assemble a packet.
-                  <NavMore items={[
-                    { href: "/documents", label: "Files" },
-                    { href: "/gallery", label: "Gallery" },
-                    { href: "/pdf", label: "PDF studio" },
-                    ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
-                  ]} />
-                )}
+              <nav className="header-nav">
+                {/* The primary links: where the work is. The long tail lives in
+                    two labelled menus - Operations for the shop's rhythms,
+                    Library for files and tools - instead of one flat "More". */}
+                <HeaderNav
+                  links={[
+                    { href: "/", label: "Dashboard" },
+                    /* For everyone, not just staff. A work order exists so that
+                       both sides read the same state, and hiding the list from
+                       the people who asked for the work would undo the point. */
+                    { href: "/work", label: "Work orders" },
+                    { href: "/assets", label: "Assets" },
+                    ...(hasStock ? [{ href: "/stock", label: "Inventory" }] : []),
+                  ]}
+                  groups={isStaff ? [
+                    {
+                      label: "Operations",
+                      items: [
+                        ...(modules.eod ? [{ href: "/eod", label: "EOD update" }] : []),
+                        { href: "/maintenance", label: "Maintenance" },
+                        { href: "/purchasing", label: "Purchasing" },
+                        { href: "/metrics", label: "Metrics" },
+                        ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
+                        { href: "/archive", label: "Archived" },
+                      ],
+                    },
+                    {
+                      label: "Library",
+                      items: [
+                        { href: "/documents", label: "Files" },
+                        { href: "/gallery", label: "Gallery" },
+                        { href: "/pdf", label: "PDF studio" },
+                        { href: "/import", label: "Import spreadsheet" },
+                        ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
+                      ],
+                    },
+                  ] : [
+                    // An organization's own tools: its file shelf and the studio.
+                    // Both used to be staff-only, which left a client with nowhere
+                    // to keep a document and no way to assemble a packet.
+                    {
+                      label: "Library",
+                      items: [
+                        { href: "/documents", label: "Files" },
+                        { href: "/gallery", label: "Gallery" },
+                        { href: "/pdf", label: "PDF studio" },
+                        ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
+                      ],
+                    },
+                  ]}
+                />
 
                 {/* Right of the divide: the furniture. Always these four, always
                     here, small - so the row above can change without the way out

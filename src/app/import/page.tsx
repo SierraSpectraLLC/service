@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { requireUser } from "@/lib/authz";
 import ImportPanel from "@/components/ImportPanel";
 
@@ -13,8 +12,8 @@ export default async function ImportPage() {
 
   return (
     <div className="container wide">
-      <div style={{ marginBottom: 10 }}>
-        <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Dashboard</Link>
+      <div className="page-head">
+        <h1 className="page-title">Import from a spreadsheet</h1>
       </div>
       <ImportPanel />
     </div>

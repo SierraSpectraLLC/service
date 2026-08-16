@@ -15,17 +15,19 @@ export default function AssetGridToggle({ instrumentId, kinds, models, owners }:
   owners: string[];
 }) {
   const [open, setOpen] = useState(false);
+  // A fragment rather than a wrapping div, so the trigger can share a flex row
+  // with the "+ New asset" button; the opened grid takes the full row below.
   return (
-    <div style={{ marginBottom: 10 }}>
+    <>
       <button className="btn sm" onClick={() => setOpen((v) => !v)}>
         {open ? "Close the grid" : "＋ Several at once"}
       </button>
       {open && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: 4, flexBasis: "100%" }}>
           <AssetGrid instrumentId={instrumentId} kinds={kinds} models={models} owners={owners}
             onDone={() => setOpen(false)} />
         </div>
       )}
-    </div>
+    </>
   );
 }

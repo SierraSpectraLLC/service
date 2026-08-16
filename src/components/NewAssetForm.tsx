@@ -39,7 +39,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button className="btn sm primary" onClick={() => { setOpen((v) => !v); setError(""); }}>
           {open ? "Cancel" : "+ New asset"}
         </button>
@@ -47,7 +47,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
       </div>
 
       {open && (
-        <div className="dash-form">
+        <div className="dash-form" style={{ flexBasis: "100%", marginBottom: 0 }}>
           <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
             Goes onto the shelf as a spare - no system needed. Attach it to one whenever it&apos;s used.
           </div>

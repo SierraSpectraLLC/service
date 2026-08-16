@@ -75,6 +75,16 @@ export default async function DocumentsPage(
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Files</h1>
+        <span className="mut" style={{ fontSize: 12 }}>
+          {files.length === 0 ? "nothing stored yet"
+            : `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(shown)}${truncated ? ` (newest ${CAP} rows)` : ""}`}
+        </span>
+        <span className="page-actions">
+          <Link href="/pdf" className="btn sm" style={{ textDecoration: "none" }}>Open PDF studio</Link>
+        </span>
+      </div>
       {orgRows.length > 0 && (
         <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span className="mut" style={{ fontSize: 12, marginRight: 4 }}>Store</span>
@@ -96,16 +106,6 @@ export default async function DocumentsPage(
       </div>
 
       <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-          <div className="card-title">Files</div>
-          <span className="mut" style={{ fontSize: 12 }}>
-            {files.length === 0 ? "nothing stored yet"
-              : `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(shown)}${truncated ? ` (newest ${CAP} rows)` : ""}`}
-          </span>
-          <Link href="/pdf" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
-            Open PDF studio
-          </Link>
-        </div>
         {!isOwnStore && (
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
             Everything {quota.storeName} is storing.

@@ -64,7 +64,7 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
 
   return (
     <div className="card" style={{ marginTop: 14 }}>
-      <div className="card-title" style={{ marginBottom: 6 }}>You</div>
+      <div className="card-title" style={{ marginBottom: 6 }}>Profile & sign-in</div>
 
       {/* Yours to set, not the owner's. This is the name on your assignments,
           your mentions and your hours; before this it was whatever somebody

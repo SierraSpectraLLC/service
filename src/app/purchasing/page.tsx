@@ -75,26 +75,27 @@ export default async function PurchasingPage() {
 
   return (
     <div className="container wide">
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <div className="card-title">Purchasing</div>
-          {open.length > 0 && (
-            <span className="pill" style={{ background: "#E7EFF8", color: "#1D6396", fontWeight: 700 }}>
-              {open.length} open
-            </span>
-          )}
-          <Link href="/stock" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
-            Stock →
-          </Link>
-        </div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="page-head">
+        <h1 className="page-title">Purchasing</h1>
+        {open.length > 0 && (
+          <span className="pill" style={{ background: "#E7EFF8", color: "#1D6396", fontWeight: 700 }}>
+            {open.length} open
+          </span>
+        )}
+        <span className="page-actions">
+          <Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>
+        </span>
+        <p className="page-sub">
           Orders are raised from a stockroom&apos;s reorder list, priced from the price book.
           Receiving here is what puts stock on the shelf, so the count and the paperwork
           can&apos;t drift apart.
-        </div>
+        </p>
+      </div>
+      <div className="card">
         {open.length === 0 && closed.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
-            No orders yet. Open a stockroom and use its <b>Needs ordering</b> list.
+          <div className="empty">
+            <b>No orders yet</b>
+            Open a stockroom and use its <b style={{ display: "inline" }}>Needs ordering</b> list to raise the first one.
           </div>
         )}
         {open.map(row)}

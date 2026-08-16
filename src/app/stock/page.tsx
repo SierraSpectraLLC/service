@@ -43,37 +43,37 @@ export default async function StockPage() {
 
   return (
     <div className="container wide">
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <div className="card-title">Inventory</div>
-          {shortAll > 0 && (
-            <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D", fontWeight: 700 }}>
-              {shortAll} line{shortAll === 1 ? "" : "s"} at or below reorder point
-            </span>
-          )}
-          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {/* Reachable for org editors too, who don't get the staff nav menu. */}
-            {visible.some((v) => v.acc.issue) && (
-              <Link href="/purchasing" className="btn sm" style={{ textDecoration: "none" }}>Purchase orders</Link>
-            )}
-            {(isHouse(user.role) || (user.orgId !== null && user.role === "client_editor")) && (
-              <NewStockroomForm
-                orgOptions={orgRows}
-                isHouse={isHouse(user.role)}
-                myOrgName={user.orgName || "your organization"}
-              />
-            )}
+      <div className="page-head">
+        <h1 className="page-title">Inventory</h1>
+        {shortAll > 0 && (
+          <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D", fontWeight: 700 }}>
+            {shortAll} line{shortAll === 1 ? "" : "s"} at or below reorder point
           </span>
-        </div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+        )}
+        <span className="page-actions">
+          {/* Reachable for org editors too, who don't get the staff nav menu. */}
+          {visible.some((v) => v.acc.issue) && (
+            <Link href="/purchasing" className="btn sm" style={{ textDecoration: "none" }}>Purchase orders</Link>
+          )}
+          {(isHouse(user.role) || (user.orgId !== null && user.role === "client_editor")) && (
+            <NewStockroomForm
+              orgOptions={orgRows}
+              isHouse={isHouse(user.role)}
+              myOrgName={user.orgName || "your organization"}
+            />
+          )}
+        </span>
+        <p className="page-sub">
           Shelves, vans and client cages. A room belongs to one organization and can be
           shared with others - that&apos;s how a provider draws from a client&apos;s spares, or a
           client sees what&apos;s held for them.
-        </div>
-
+        </p>
+      </div>
+      <div className="card">
         {visible.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
-            No stockrooms you can see yet.
+          <div className="empty">
+            <b>No stockrooms yet</b>
+            Create one with “+ New stockroom” to start tracking shelves, vans and cages.
           </div>
         )}
 

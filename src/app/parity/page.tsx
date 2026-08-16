@@ -16,16 +16,12 @@ export default async function ParityPage() {
   const openCount = diffs.filter((d) => !d.resolved).length;
   return (
     <div className="container wide">
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, color: "var(--navy)" }}>Google Sheet parity</div>
-          <span className="mut" style={{ fontSize: 12 }}>
-            {openCount ? `${openCount} open mismatch${openCount === 1 ? "" : "es"}` : "everything matches"}
-          </span>
-        </div>
-        <div className="mut" style={{ fontSize: 13, marginTop: 4 }}>
-          Polled hourly. Nothing is auto-applied - you decide which record wins.
-        </div>
+      <div className="page-head">
+        <h1 className="page-title">Google Sheet parity</h1>
+        <span className="mut" style={{ fontSize: 12 }}>
+          {openCount ? `${openCount} open mismatch${openCount === 1 ? "" : "es"}` : "everything matches"}
+        </span>
+        <p className="page-sub">Polled hourly. Nothing is auto-applied - you decide which record wins.</p>
       </div>
       <ParityList diffs={diffs.map((d) => ({ ...d, runAt: d.runAt.toISOString() }))} />
     </div>

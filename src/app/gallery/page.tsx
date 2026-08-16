@@ -63,6 +63,16 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Gallery</h1>
+        <span className="mut" style={{ fontSize: 12 }}>
+          {photos.length === 0 ? "no photos yet"
+            : `${photos.length} photo${photos.length === 1 ? "" : "s"}${rows.length >= CAP ? ` (newest ${CAP} files)` : ""}`}
+        </span>
+        <span className="page-actions">
+          <Link href="/documents" className="btn sm" style={{ textDecoration: "none" }}>All files</Link>
+        </span>
+      </div>
       {orgRows.length > 0 && (
         <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span className="mut" style={{ fontSize: 12, marginRight: 4 }}>Store</span>
@@ -77,16 +87,6 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
       )}
 
       <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-          <div className="card-title" style={{ marginBottom: 0 }}>Gallery</div>
-          <span className="mut" style={{ fontSize: 12 }}>
-            {photos.length === 0 ? "no photos yet"
-              : `${photos.length} photo${photos.length === 1 ? "" : "s"}${rows.length >= CAP ? ` (newest ${CAP} files)` : ""}`}
-          </span>
-          <Link href="/documents" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
-            All files
-          </Link>
-        </div>
         <GalleryGrid photos={photos.map((p) => ({
           attachmentId: p.newest.id, url: p.url, fileName: p.fileName, description: p.description,
           framing: p.newest.framing, uploadedBy: p.uploadedBy, when: shopTime(p.newest.createdAt),

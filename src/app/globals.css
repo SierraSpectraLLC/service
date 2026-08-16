@@ -1,13 +1,19 @@
 :root {
   --navy: #172A4A;
+  --navy-2: #21395F;      /* hover / raised state of the navy surfaces */
   --coral: #E8613C;
+  --coral-2: #D4532F;     /* hover state of the coral surfaces */
   --sky: #5BA8D9;
   --slate: #64748B;
-  --bg: #F4F6F9;
+  --bg: #F5F6F9;
   --card: #FFFFFF;
-  --line: #E2E8F0;
+  --line: #E4E8EF;
   --ink: #1E293B;
   --mut: #64748B;
+  --link: #1D6396;
+  --radius: 10px;
+  --shadow-sm: 0 1px 2px rgba(23, 42, 74, 0.05);
+  --shadow-md: 0 8px 24px rgba(23, 42, 74, 0.14);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 * { box-sizing: border-box; }
@@ -17,9 +23,12 @@ html, body { margin: 0; padding: 0; }
    the exception that needs it - it holds a live desktop, which should use the
    height the window actually has rather than a number guessed from the header. */
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
   background: var(--bg);
   color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -28,36 +37,63 @@ body {
    minimum is its content, which would push the frame past the bottom instead of
    letting it shrink. */
 .fill-window { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-a { color: #1D6396; }
+a { color: var(--link); }
 input, select, textarea, button { font-family: inherit; font-size: 13px; }
 input, select, textarea {
   padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; width: 100%;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none; border-color: var(--sky); box-shadow: 0 0 0 3px rgba(91, 168, 217, 0.22);
 }
 label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); margin-bottom: 3px; }
 
 /* Page widths are a fixed set, not a per-page guess - blocks lined up
    differently on every route before this existed. Forms and records share one
-   column width; only genuine data grids go wide. */
+   column width; only genuine data grids go wide.
+   The set is deliberately small and the steps deliberately close: 760 to read,
+   1080 for lists and settings, 1200 for the two-column record pages. The old
+   1560px "split" width made the assets list and the PDF studio read as a
+   different product from the page before them. */
 /* `width: 100%` is load-bearing, not decoration. Body is a flex column (for the
    remote session page), and a flex item with auto margins in the cross axis does
    NOT stretch - it shrinks to fit its content and the auto margins centre that.
    Without this every page became as wide as its widest card, so two settings
    screens side by side had visibly different columns. */
 .container { width: 100%; max-width: 960px; margin: 0 auto; padding: 16px; }
-.container.page { max-width: 760px; }   /* records, lists, settings, packets */
+.container.page { max-width: 760px; }   /* records, lists, packets */
 .container.wide { max-width: 1080px; }  /* multi-column grids: import, EOD, parity */
 .container.form { max-width: 420px; }   /* sign-in */
-/* Record pages that carry a dozen panels. One 760px column wasted most of a
-   wide monitor and buried the bottom half of the page below three screens of
-   scrolling; these split into two columns from 1200px up. */
-.container.split { max-width: 1560px; }
+/* Record pages that carry a dozen panels; these split into two columns from
+   1200px up. */
+.container.split { max-width: 1200px; }
 /* Settings. One width for every screen under it - Configuration, Personnel,
    Procedures, the catalog - because moving between them and having the column
-   jump is the kind of small wrongness that reads as a broken page.
-   Roughly three quarters of a desktop window, floored at the reading width so a
-   small laptop does not end up with a narrow strip, and capped so a very wide
-   monitor does not stretch a form to two feet across. */
-.container.settings { max-width: max(760px, min(75vw, 1400px)); }
+   jump is the kind of small wrongness that reads as a broken page. */
+.container.settings { max-width: 1080px; }
+
+/* ── Page header ────────────────────────────────────────────────────────────
+   One pattern for "what page am I on and what can I do here": title on the
+   left, actions on the right, an optional one-line description under the
+   title. Lives OUTSIDE the first card, so the page has a name even when its
+   content is three separate cards. */
+.page-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 4px 0 14px;
+}
+.page-title { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; color: var(--navy); margin: 0; line-height: 1.2; }
+.page-sub { flex-basis: 100%; font-size: 13px; color: var(--mut); margin: -6px 0 0; }
+.page-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── Empty states ───────────────────────────────────────────────────────────
+   A quiet, centred block instead of one stranded sentence: the page still
+   reads as designed when there is nothing in it yet. */
+.empty {
+  border: 1.5px dashed var(--line); border-radius: var(--radius);
+  padding: 28px 20px; text-align: center; color: var(--mut); font-size: 13px;
+  background: transparent;
+}
+.empty b { color: var(--ink); display: block; font-size: 14px; margin-bottom: 4px; }
 
 /* Two independent stacks, so cards pack tightly instead of aligning into rows
    with gaps (CSS grid has no masonry yet). Below the breakpoint the wrappers
@@ -136,7 +172,10 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .reg-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .reg-cell { white-space: normal; }
 }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow-sm);
+}
 /* Section titles used to sit at 14px/700 - the same weight as a bold value
    inside the card, so they read as emphasis rather than as headings. Bigger,
    heavier and slightly tighter separates "what this section is" from "something
@@ -144,16 +183,22 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    is typographic only: a rule under the element would underline just the words
    and float beside whatever sits next to it. */
 .card-title { font-weight: 800; font-size: 16px; line-height: 1.25; letter-spacing: -0.2px; color: var(--navy); }
-.spectrum { height: 4px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }
+.spectrum { height: 3px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }
 .pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
 .btn {
   cursor: pointer; border-radius: 8px; font-weight: 700; font-size: 13px;
   padding: 8px 14px; border: 1px solid var(--line); background: #fff; color: var(--navy);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
+.btn:hover { background: #F4F7FB; border-color: #D3DAE4; }
 .btn.sm { font-size: 12px; padding: 5px 10px; }
 .btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
+.btn.primary:hover { background: var(--navy-2); border-color: var(--navy-2); }
 .btn.accent { background: var(--coral); color: #fff; border-color: var(--coral); }
-.btn.link { border: none; background: none; padding: 0; color: #1D6396; font-size: 11px; }
+.btn.accent:hover { background: var(--coral-2); border-color: var(--coral-2); }
+.btn.link { border: none; background: none; padding: 0; color: var(--link); font-size: 11px; }
+.btn.link:hover { background: none; text-decoration: underline; }
+.btn:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
 .mut { color: var(--mut); }
 .mono { font-family: var(--mono); }
 .eyebrow { font-size: 11px; color: var(--mut); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -174,7 +219,9 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    meaning outranks rhythm. */
 .grid-row.alt { background: #F7F9FC; }
 .grid-row.row-hover:hover, .grid-row.alt.row-hover:hover { background: #EDF3FA; }
-.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+/* Auto-fit rather than a hard 5: six tiles used to leave the sixth stranded on
+   its own row. Now they share the row evenly at any count and any width. */
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 10px; }
 .pf2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .pf3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .pf-ship { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
@@ -186,14 +233,43 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .pf2, .pf3, .pf-ship { grid-template-columns: 1fr; }
 }
 
+/* ── Header ─────────────────────────────────────────────────────────────────
+   One row: identity on the left, navigation and the utility cluster on the
+   right. Nav entries are quiet text links on the header color - the old white
+   pills shouted equally on every page and never said which page you were ON.
+   The active route carries the pill instead, so the answer to "where am I" is
+   the one filled shape in the row. */
+.app-header { position: relative; }
+.header-row {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding-top: 10px; padding-bottom: 10px;
+}
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; }
+.brand-name { font-weight: 800; font-size: 15px; letter-spacing: 0.4px; white-space: nowrap; }
+.brand-org {
+  font-size: 12px; opacity: 0.72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.header-nav { margin-left: auto; display: flex; gap: 2px; flex-wrap: wrap; align-items: center; }
+.nav-link {
+  display: inline-block; padding: 6px 11px; border-radius: 999px;
+  color: inherit; text-decoration: none; font-size: 13px; font-weight: 600;
+  border: none; background: none; cursor: pointer; white-space: nowrap;
+  opacity: 0.85; transition: background 0.12s ease, opacity 0.12s ease;
+}
+.nav-link:hover { background: rgba(255, 255, 255, 0.14); opacity: 1; }
+.nav-link[aria-current="page"], .nav-link.active {
+  background: rgba(255, 255, 255, 0.92); color: var(--navy); opacity: 1; font-weight: 700;
+}
+.nav-link:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+
 /* ── Header utility cluster (search / messages / alerts / account) ──────────
    Transparent and on currentColor, so it reads on the platform navy and on an
    organization's own header color - which may be light - without a second set
-   of rules. Deliberately NOT .btn: these sit apart from the white nav pills, and
+   of rules. Deliberately NOT .btn: these sit apart from the nav links, and
    that separation is the whole point of moving them right. */
 .nav-utility {
   display: flex; align-items: center; gap: 2px;
-  margin-left: auto; padding-left: 11px; position: relative;
+  padding-left: 11px; position: relative;
 }
 /* A hairline between the navigation and the furniture. currentColor so it works
    on a dark platform header and a light themed one alike. */
@@ -231,6 +307,36 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .nav-ico { width: 38px; height: 38px; }
 }
 
+/* ── Tabs (Settings and other sectioned pages) ──────────────────────────────
+   An underline tab row for the top-level groups, and a small pill row for the
+   pages inside the active group. Underline for "which area", pills for "which
+   page" - two weights for two levels, instead of nine identical buttons. */
+.tabs {
+  display: flex; gap: 2px; flex-wrap: wrap; align-items: stretch;
+  border-bottom: 1px solid var(--line); margin-bottom: 12px;
+}
+.tab {
+  padding: 8px 12px 9px; font-size: 13px; font-weight: 600; color: var(--mut);
+  text-decoration: none; border: none; background: none; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+.tab:hover { color: var(--navy); }
+.tab.active, .tab[aria-current="page"] {
+  color: var(--navy); font-weight: 700; border-bottom-color: var(--coral);
+}
+.subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.subtab {
+  padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: var(--slate); background: none; border: 1px solid var(--line);
+  text-decoration: none; white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.subtab:hover { background: #F4F7FB; color: var(--navy); }
+.subtab.active, .subtab[aria-current="page"] {
+  background: var(--navy); border-color: var(--navy); color: #fff;
+}
+
 /* ── Native disclosure menus (components/Dropdown) ──────────────────────────
    The browser opens these, not our JavaScript. The summary is styled as a
    button; the default triangle marker is removed two ways because the older
@@ -249,8 +355,8 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .menu-panel {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
   background: #fff; border: 1px solid var(--line); border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(23, 42, 74, 0.14);
-  padding: 6px; min-width: 170px; max-width: 290px; display: flex; flex-direction: column;
+  box-shadow: var(--shadow-md);
+  padding: 6px; min-width: 190px; max-width: 290px; display: flex; flex-direction: column;
   color: var(--ink);
 }
 .menu-panel.left { right: auto; left: 0; }
@@ -260,6 +366,15 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   font-weight: 400; cursor: pointer;
 }
 .menu-panel a:hover, .menu-panel button:hover { background: #EDF3FA; }
+/* Section label inside a grouped menu: quiet, uppercase, not hoverable. */
+.menu-label {
+  padding: 8px 10px 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase; color: var(--mut);
+}
+.menu-label + .menu-label, .menu-panel a + .menu-label, .menu-panel button + .menu-label {
+  border-top: 1px solid var(--line); margin-top: 4px; padding-top: 8px;
+}
+.menu-panel a[aria-current="page"] { background: #EDF3FA; font-weight: 600; color: var(--navy); }
 
 /* ── PDF studio ─────────────────────────────────────────────────────────────
    Sources beside the working set on a desktop, stacked on a phone. The page

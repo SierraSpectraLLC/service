@@ -29,11 +29,11 @@ export default async function ArchivePage() {
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Archived systems</h1>
+        <p className="page-sub">Retired from the active fleet, kept in full. Open one to restore it.</p>
+      </div>
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Archived systems</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Retired from the active fleet, kept in full. Open one to restore it.
-        </div>
         {rows.map((i) => (
           <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", flexWrap: "wrap" }}>
@@ -49,7 +49,12 @@ export default async function ArchivePage() {
             </span>
           </Link>
         ))}
-        {rows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>Nothing archived.</div>}
+        {rows.length === 0 && (
+          <div className="empty">
+            <b>Nothing archived</b>
+            Systems retired from the dashboard land here, kept in full.
+          </div>
+        )}
       </div>
     </div>
   );

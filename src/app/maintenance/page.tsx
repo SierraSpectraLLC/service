@@ -92,8 +92,10 @@ export default async function MaintenancePage() {
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Maintenance</h1>
+      </div>
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Maintenance calendar</div>
         {active.map(row)}
 
         {/* Nothing owed: the whole shop's upkeep in one line, and when it's back. */}
@@ -122,9 +124,10 @@ export default async function MaintenancePage() {
         )}
 
         {schedules.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
-            Nothing scheduled yet. Define a template below to cover a whole model, or open a system or asset
-            and add its recurring upkeep under Maintenance.
+          <div className="empty">
+            <b>Nothing scheduled yet</b>
+            Define a template in Settings → Procedures to cover a whole model, or open a system
+            or asset and add its recurring upkeep under Maintenance.
           </div>
         )}
       </div>

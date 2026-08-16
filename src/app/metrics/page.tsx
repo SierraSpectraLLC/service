@@ -102,20 +102,23 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="container page">
-      <div className="card" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span className="mut" style={{ fontSize: 12 }}>Window</span>
-        <div className="seg" role="group" aria-label="Report window">
-          {WINDOWS.map((w) => (
-            <Link key={w} href={w === 30 ? "/metrics" : `/metrics?days=${w}`} aria-pressed={days === w}
-              className={days === w ? "btn sm accent" : "btn sm"} style={{ textDecoration: "none" }}>
-              {w} days
-            </Link>
-          ))}
-        </div>
+      <div className="page-head">
+        <h1 className="page-title">Metrics</h1>
+        <span className="page-actions">
+          <span className="mut" style={{ fontSize: 12 }}>Last</span>
+          <div className="seg" role="group" aria-label="Report window">
+            {WINDOWS.map((w) => (
+              <Link key={w} href={w === 30 ? "/metrics" : `/metrics?days=${w}`} aria-pressed={days === w}
+                className={days === w ? "btn sm accent" : "btn sm"} style={{ textDecoration: "none", border: "none" }}>
+                {w} days
+              </Link>
+            ))}
+          </div>
+        </span>
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>PM compliance · last {days} days</div>
+        <div className="card-title" style={{ marginBottom: 4 }}>PM compliance</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           Scheduled maintenance that fell due in the window. A task reopened after being done counts as open -
           the work is not done.
@@ -139,7 +142,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Turnaround · systems shipped in the last {days} days</div>
+        <div className="card-title" style={{ marginBottom: 4 }}>Turnaround</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           Days from a system entering the shop to its first Shipped. Days it spent in
           another organization&apos;s queue are shown separately - the client waited for
@@ -166,7 +169,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Hours · last {days} days</div>
+        <div className="card-title" style={{ marginBottom: 4 }}>Hours</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or
           unit where they happened.
@@ -198,7 +201,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Parts spend · recorded in the last {days} days</div>
+        <div className="card-title" style={{ marginBottom: 4 }}>Parts spend</div>
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           By client, from parts recorded in the window whose cost parsed as money. Free-text costs
           (&quot;call for quote&quot;) are counted but not summed, so this is a floor.

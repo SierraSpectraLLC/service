@@ -146,8 +146,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="container page">
+      <div className="page-head">
+        <h1 className="page-title">Search</h1>
+      </div>
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 8 }}>Search</div>
         <SearchBox initial={q} />
         {q.length >= 2 && (
           <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
