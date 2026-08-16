@@ -48,6 +48,8 @@ export type ProcedureTiming = {
   runsAtIntake: boolean;
   intervalDays: number | null;
   modelScope: string[];
+  /** System-level only: which system categories it covers. [] = all of them. */
+  categoryScope?: string[];
   parts: ProcPart[];
 };
 
@@ -66,7 +68,10 @@ export function describeProcedure(d: ProcedureTiming): string | null {
         : null;
   if (when === null) return null;
   const where = d.assetType === "system"
-    ? "with every new system"
+    // A system procedure is narrowed by CATEGORY, because a system is not one
+    // model - it is a stack of them. No categories named means every system,
+    // which is what these all meant before the scope existed.
+    ? (d.categoryScope?.length ? `on every ${d.categoryScope.join(", ")} system` : "on every system")
     : d.modelScope.length
       ? `on ${d.modelScope.join(", ")}`
       : `on every ${d.assetType.toLowerCase()}`;

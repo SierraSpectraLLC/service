@@ -430,6 +430,15 @@ export const procedures = pgTable("procedures", {
   required: boolean("required").notNull().default(false),
   parts: text("parts").notNull().default(""),       // JSON [{name, number}], "" = none
   modelScope: text("model_scope").array().notNull().default([]), // [] = all models
+  // System-level procedures only: which system CATEGORIES this covers. [] = all
+  // of them, which is what every system procedure meant before this existed.
+  //
+  // Its absence is what made system-level procedures unusable. They applied to
+  // every system in the workspace with no way to narrow them, so an annual LC-MS
+  // PM would also land on every GC - and the only safe move was to not use them
+  // and write each system's upkeep out by hand, once per system. See
+  // lib/procedureRole.
+  categoryScope: text("category_scope").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

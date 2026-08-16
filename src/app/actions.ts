@@ -292,6 +292,13 @@ export async function updateInstrument(
       field, oldValue, newValue,
     });
   }
+  // The category decides which system-level procedures reach this system, so
+  // changing it is the same event as creating it as far as the catalog is
+  // concerned: a GC re-typed as a GC-MS should pick up the GC-MS upkeep without
+  // anybody remembering to go and ask for it. Additive only - schedules the old
+  // category brought stay, because they may have been done since, and taking
+  // work off a system is a decision rather than a side effect.
+  if (category !== inst.category) await applySystemProcedures(instrumentId, shopToday(), u.email);
   rev(instrumentId);
   return {};
 }
@@ -2921,7 +2928,7 @@ type ProcedureInput = {
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | string | null;
-  parts: ProcPart[]; modelScope: string[];
+  parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
 };
 
 /** Validate + normalize; returns {error} or clean column values. */
@@ -2930,7 +2937,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null;
-  parts: string; modelScope: string[];
+  parts: string; modelScope: string[]; categoryScope: string[];
 } {
   if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
   if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
@@ -2955,24 +2962,45 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   if (!data.runsAtIntake && intervalDays === null) {
     return { error: "Pick when it runs: at intake, on a cadence, or both" };
   }
-  // Recurring work is scheduled per asset; a system has no asset to schedule.
-  if (data.assetType === "system" && intervalDays !== null) {
-    return { error: "System procedures run at intake only - recurring work lives on the modules" };
-  }
-  // System items fire when a system is created, before it has any assets to
-  // scope by, so they always apply to every new system.
+  // A system procedure USED to be refused a cadence here - "recurring work lives
+  // on the modules" - on the reasoning that a schedule needs an asset to hang
+  // off. It doesn't: pm_schedules has an instrument_id, generateDuePmTasks has
+  // always handled it, and applySystemProcedures was written to stamp exactly
+  // these. This one line was what forced a shop to write an annual system PM out
+  // by hand on every system, once per system, forever - and to redo it whenever
+  // the fleet grew. It is gone.
+  //
+  // A system's scope is its CATEGORY, not a model: a system is not one model, it
+  // is a stack of them. Empty means every system, which is what the ones defined
+  // before this column meant.
   const modelScope = data.assetType === "system"
     ? [] : [...new Set(data.modelScope.map((m) => m.trim()).filter(Boolean))];
+  const categoryScope = data.assetType === "system"
+    ? [...new Set((data.categoryScope ?? []).map((c) => c.trim()).filter(Boolean))] : [];
   return {
     assetType: data.assetType, kind: data.kind, name, notes: data.notes.trim(),
     resultType, target, tolerancePct,
     requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart,
     runsAtIntake: data.runsAtIntake, intervalDays,
-    parts: serializeProcParts(data.parts), modelScope,
+    parts: serializeProcParts(data.parts), modelScope, categoryScope,
   };
 }
 
+/** Which units or systems a procedure is narrowed to, or nothing when it is all of them. */
 const procScopeLabel = (scope: string[]) => (scope.length ? ` (${scope.join(", ")} only)` : "");
+
+/**
+ * The scope that actually applies to a procedure: categories for a system-level
+ * one, models for everything else. Two procedures with the same name on the same
+ * type are duplicates only if they also cover the same things - "Annual PM
+ * (LC-MS)" and "Annual PM (GC)" are two jobs, not one typed twice.
+ */
+const scopeOf = (p: { assetType: string; modelScope: string[]; categoryScope: string[] }) =>
+  (p.assetType === "system" ? p.categoryScope : p.modelScope);
+const sameScope = (
+  a: { assetType: string; modelScope: string[]; categoryScope: string[] },
+  b: { assetType: string; modelScope: string[]; categoryScope: string[] },
+) => scopeOf(a).join("|").toLowerCase() === scopeOf(b).join("|").toLowerCase();
 const procTimingLabel = (p: { runsAtIntake: boolean; intervalDays: number | null }) =>
   p.runsAtIntake && p.intervalDays !== null ? `at intake + ${cadenceLabel(p.intervalDays)}`
     : p.runsAtIntake ? "at intake" : cadenceLabel(p.intervalDays!);
@@ -3081,13 +3109,13 @@ export async function addProcedure(data: ProcedureInput): Promise<{ error?: stri
   if ("error" in clean) return clean;
   const siblings = await db.select().from(procedures).where(eq(procedures.assetType, clean.assetType));
   if (siblings.some((i) => i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
-      && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
+      && sameScope(i, clean)))
     return { error: `"${clean.name}" already exists for this type` };
   const position = Math.max(0, ...siblings.map((i) => i.position)) + 1;
   const [row] = await db.insert(procedures).values({ ...clean, position, tenantOrgId: myTenantOrgId(u) }).returning();
   await audit({
     actor: u.email, entityType: "procedure", entityId: row.id,
-    action: `added ${clean.kind} procedure "${clean.name}" for ${clean.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
+    action: `added ${clean.kind} procedure "${clean.name}" for ${clean.assetType} - ${procTimingLabel(clean)}${procScopeLabel(scopeOf(clean))}`,
   });
   // A new recurring procedure covers the fleet already on the floor, per unit
   // deduped by title so hand-written schedules block the catalog's copy.
@@ -3113,15 +3141,15 @@ export async function updateProcedure(
   if ("error" in clean) return clean;
   const siblings = await db.select().from(procedures).where(eq(procedures.assetType, before.assetType));
   if (siblings.some((i) => i.id !== procedureId && i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
-      && i.modelScope.join("|").toLowerCase() === clean.modelScope.join("|").toLowerCase()))
+      && sameScope(i, clean)))
     return { error: `"${clean.name}" already exists for this type` };
   await db.update(procedures).set(clean).where(eq(procedures.id, procedureId));
   await audit({
     actor: u.email, entityType: "procedure", entityId: procedureId,
-    action: `edited ${clean.kind} procedure "${clean.name}" for ${before.assetType} - ${procTimingLabel(clean)}${procScopeLabel(clean.modelScope)}`,
+    action: `edited ${clean.kind} procedure "${clean.name}" for ${before.assetType} - ${procTimingLabel(clean)}${procScopeLabel(scopeOf(clean))}`,
     field: "procedure",
-    oldValue: `${before.kind} | ${before.name} | ${procTimingLabel(before)} | ${before.modelScope.join(", ")}`,
-    newValue: `${clean.kind} | ${clean.name} | ${procTimingLabel(clean)} | ${clean.modelScope.join(", ")}`,
+    oldValue: `${before.kind} | ${before.name} | ${procTimingLabel(before)} | ${scopeOf(before).join(", ")}`,
+    newValue: `${clean.kind} | ${clean.name} | ${procTimingLabel(clean)} | ${scopeOf(clean).join(", ")}`,
   });
 
   const addedRepeat = before.intervalDays === null && clean.intervalDays !== null;

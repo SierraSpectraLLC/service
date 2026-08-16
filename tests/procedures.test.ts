@@ -24,7 +24,23 @@ describe("the live sentence", () => {
       parts: [{ name: "Plunger seal kit", number: "228-35145-91" }],
     })).toBe("Runs quarterly on LC-20AD. Takes Plunger seal kit PN 228-35145-91.");
     expect(describeProcedure({ ...base, assetType: "system", runsAtIntake: true }))
-      .toBe("Runs once at intake with every new system.");
+      .toBe("Runs once at intake on every system.");
+  });
+
+  it("narrows a system procedure by category, not by model", () => {
+    // A system is not one model, it is a stack of them - so the thing that
+    // narrows it is the system's category. Without this an annual LC-MS PM
+    // landed on every GC in the workspace.
+    expect(describeProcedure({
+      ...base, assetType: "system", intervalDays: 365, categoryScope: ["LC-MS"],
+    })).toBe("Runs yearly on every LC-MS system.");
+    expect(describeProcedure({
+      ...base, assetType: "system", intervalDays: 365, categoryScope: ["LC-MS", "GC-MS"],
+    })).toBe("Runs yearly on every LC-MS, GC-MS system.");
+    // No categories still means all of them, which is what every system
+    // procedure meant before the scope existed.
+    expect(describeProcedure({ ...base, assetType: "system", intervalDays: 365 }))
+      .toBe("Runs yearly on every system.");
   });
 });
 

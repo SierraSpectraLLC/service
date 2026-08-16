@@ -113,6 +113,13 @@ also the page that organization's own editors get.
 - Define a maintenance template on /maintenance for an asset type in the
   fleet → it reports how many existing units it scheduled; add a new asset of
   that type → the schedule is on it from birth.
+- System-level upkeep, which is the one that saves a day per client: in
+  Settings → Procedures open the **System** band, add a procedure with
+  **Repeats** on, a yearly cadence, and one system type in **System types** →
+  it reports how many systems it scheduled, and only systems of that category
+  are among them. Confirm the row reads **Maintenance**, and that a system of
+  another category has no schedule from it. Re-type that system to the scoped
+  category → it picks the schedule up.
 - Add a maintenance schedule due today on a test system → the task appears
   under Tasks immediately; mark it Done → the schedule's next due date moves
   out by one cadence. Open a system's **Label** and scan the QR with a phone →

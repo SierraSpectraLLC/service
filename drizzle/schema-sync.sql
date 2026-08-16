@@ -1953,3 +1953,10 @@ END $$;
 -- its rows as distinct and enforce nothing at all.
 CREATE UNIQUE INDEX IF NOT EXISTS "work_orders_tenant_number_unique"
   ON "work_orders" (COALESCE("tenant_org_id", 0), "number") WHERE "number" <> '';
+
+-- ── Scope a system-level procedure to system categories ─────────────────────
+-- System procedures existed but applied to EVERY system in the workspace, so an
+-- annual LC-MS PM would also land on every GC. Nobody could use them, and each
+-- system's upkeep got written out by hand instead. Empty = every system, which
+-- is what the ones already defined meant, so this changes nothing on deploy.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "category_scope" text[] NOT NULL DEFAULT '{}';

@@ -58,6 +58,7 @@ export default async function ProceduresPage() {
           resultType: r.resultType, target: r.target, tolerancePct: r.tolerancePct,
           requiresNote: r.requiresNote, consumesPart: r.consumesPart,
           runsAtIntake: r.runsAtIntake, intervalDays: r.intervalDays, required: r.required,
+          categoryScope: r.categoryScope,
           parts: parseProcParts(r.parts), modelScope: r.modelScope,
         }))}
       />
