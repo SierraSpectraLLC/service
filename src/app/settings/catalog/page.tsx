@@ -10,6 +10,7 @@ import CatalogForm from "@/components/CatalogForm";
 import CatalogPhotosCard from "@/components/CatalogPhotosCard";
 import ReferencePanel from "@/components/ReferencePanel";
 import CatalogGasCard from "@/components/CatalogGasCard";
+import CatalogPackageCard from "@/components/CatalogPackageCard";
 import { shopDay } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +91,9 @@ export default async function CatalogPage() {
       }))} />
       <CatalogGasCard entries={terms.map((t) => ({
         id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, gases: t.gases,
+      }))} />
+      <CatalogPackageCard entries={terms.map((t) => ({
+        id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, docTypes: t.docTypes,
       }))} />
       <ReferencePanel canEdit
         sub="Manuals, links and field notes per model or module type. Whatever is filed here shows up on every system and unit with that equipment."

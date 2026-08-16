@@ -13,6 +13,8 @@
 //
 // Pure. Pages hand in rows; this decides what they mean.
 
+import { gasesForSystemWithUnits } from "@/lib/catalogGas";
+
 /** The order they run in, which is also the order the binder prints them. */
 export const QUALIFICATIONS = ["IQ", "OQ", "PQ"] as const;
 
@@ -140,3 +142,121 @@ export const STANDING_COLOR: Record<Standing["tone"], { bg: string; fg: string }
   warn: { bg: "#FAF0DC", fg: "#8A5410" },
   bad: { bg: "#FBE9E9", fg: "#A32D2D" },
 };
+
+// ---------------------------------------------------------------------------
+// Validation documents
+
+/** Binder order, which is also checklist order: plan, protocols, evidence. */
+export const DOC_TYPES = [
+  "URS", "Validation Plan",
+  "IQ Protocol", "IQ Report",
+  "OQ Protocol", "OQ Report",
+  "PQ Protocol", "PQ Report",
+  "Traceability Matrix", "Deviation Report", "Periodic Review",
+  "Calibration Certificate", "Other",
+] as const;
+
+/**
+ * A protocol is approved before it is run; everything else is approved after
+ * it is written. The distinction is what "Executed" exists for.
+ */
+export const isProtocol = (docType: string) => /protocol$/i.test(docType.trim());
+
+export const DOC_STATES = ["Draft", "Approved", "Executed", "Superseded"] as const;
+
+export const DOC_STATE_COLOR: Record<string, { bg: string; fg: string }> = {
+  Draft: { bg: "#EEF1F5", fg: "#475569" },
+  Approved: { bg: "#E5F3E5", fg: "#2E6B2E" },
+  Executed: { bg: "#E7F2FA", fg: "#1D6396" },
+  Superseded: { bg: "#F1F4F8", fg: "#94A3B8" },
+};
+
+/** In signing order. The Approved signature is what moves a Draft forward. */
+export const SIG_ROLES = ["Author", "Reviewed", "Approved"] as const;
+
+export type ValidationDocLike = {
+  docType: string;
+  state: string;
+};
+
+/**
+ * What may happen to a document in its current state. Small and explicit,
+ * because these rules ARE the compliance claim:
+ *
+ *  - only a Draft can be approved (approving Executed paper rewrites history)
+ *  - only an Approved PROTOCOL can be marked executed
+ *  - an approval can be withdrawn while Approved, never once Executed - after
+ *    execution the record moves forward by superseding, not by un-signing
+ *  - only an unsigned Draft may be deleted; everything else supersedes
+ */
+export const canApprove = (d: ValidationDocLike) => d.state === "Draft";
+export const canExecute = (d: ValidationDocLike) => d.state === "Approved" && isProtocol(d.docType);
+export const canRevokeApproval = (d: ValidationDocLike) => d.state === "Approved";
+export const canDelete = (d: ValidationDocLike, signatures: number) => d.state === "Draft" && signatures === 0;
+
+/** A required doc type is satisfied by a current Approved or Executed document. */
+export const docSatisfies = (d: ValidationDocLike) => d.state === "Approved" || d.state === "Executed";
+
+export type PackageRow<D extends ValidationDocLike> = {
+  docType: string;
+  /** Current (non-superseded) documents of this type, newest version first. */
+  docs: D[];
+  satisfied: boolean;
+  required: boolean;
+};
+
+/**
+ * The checklist: required doc types in binder order, each with its current
+ * documents, then whatever else is on file. Superseded revisions are history,
+ * not checklist entries - they live under their successor.
+ */
+export function packageRows<D extends ValidationDocLike & { version: number }>(
+  required: string[], docs: D[],
+): PackageRow<D>[] {
+  const current = docs.filter((d) => d.state !== "Superseded");
+  const typeOrder = (t: string) => {
+    const i = (DOC_TYPES as readonly string[]).findIndex((x) => x.toLowerCase() === t.toLowerCase());
+    return i === -1 ? DOC_TYPES.length : i;
+  };
+  const ofType = (t: string) =>
+    current.filter((d) => d.docType.toLowerCase() === t.toLowerCase()).sort((a, b) => b.version - a.version);
+
+  const rows: PackageRow<D>[] = required.map((t) => ({
+    docType: t, docs: ofType(t), satisfied: ofType(t).some(docSatisfies), required: true,
+  }));
+  const extraTypes = [...new Set(current.map((d) => d.docType))]
+    .filter((t) => !required.some((r) => r.toLowerCase() === t.toLowerCase()))
+    .sort((a, b) => typeOrder(a) - typeOrder(b));
+  rows.push(...extraTypes.map((t) => ({ docType: t, docs: ofType(t), satisfied: true, required: false })));
+  return rows;
+}
+
+/** Null when nothing is required - a shop can run GxP without the doc manager. */
+export function packageComplete(required: string[], docs: ValidationDocLike[]): boolean | null {
+  if (!required.length) return null;
+  return packageRows(required, docs.map((d) => ({ ...d, version: 1 }))).every((r) => !r.required || r.satisfied);
+}
+
+export type PackageTerm = {
+  kind: string; assetType: string; name: string; docTypes: string[];
+};
+
+/**
+ * The package a system owes, from the catalog: its system type's doc types
+ * plus those of every unit installed in it. Same declare-once matching as gas
+ * requirements - gasesForSystemWithUnits IS the matcher, fed docTypes instead
+ * of gases - then sorted into binder order so the checklist reads like the
+ * binder will print.
+ */
+export function packageForSystem(
+  terms: PackageTerm[], category: string, units: { kind: string; model: string }[],
+): string[] {
+  const order = (t: string) => {
+    const i = (DOC_TYPES as readonly string[]).findIndex((x) => x.toLowerCase() === t.toLowerCase());
+    return i === -1 ? DOC_TYPES.length : i;
+  };
+  return gasesForSystemWithUnits(
+    terms.map((t) => ({ kind: t.kind, assetType: t.assetType, name: t.name, gases: t.docTypes })),
+    category, units,
+  ).sort((a, b) => order(a) - order(b));
+}

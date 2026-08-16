@@ -7,7 +7,7 @@ import {
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
   serviceVisits, workOrders, orgSites,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
-  catalogRefs,
+  catalogRefs, validationDocs, validationSignatures,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
 import {
@@ -58,7 +58,8 @@ import PanelLayout from "@/components/PanelLayout";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
-import { expiryAttention, qualsOf, qualStanding } from "@/lib/gxp";
+import { expiryAttention, packageComplete, packageForSystem, qualsOf, qualStanding } from "@/lib/gxp";
+import ValidationPanel from "@/components/ValidationPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -231,10 +232,25 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
   });
 
+  // The validation shelf, regulated systems only: documents with their
+  // signatures, and the package the catalog says this equipment owes.
+  const vDocs = inst.gxp
+    ? await db.select().from(validationDocs).where(eq(validationDocs.instrumentId, instId)).orderBy(asc(validationDocs.id))
+    : [];
+  const vSigs = vDocs.length
+    ? await db.select().from(validationSignatures)
+        .where(inArray(validationSignatures.docId, vDocs.map((d) => d.id))).orderBy(asc(validationSignatures.id))
+    : [];
+  const requiredTypes = inst.gxp ? packageForSystem(vocabRows, inst.category, assetRows) : [];
+
   // A regulated system's standing, derived fresh on every read - the same rule
   // as agreement balances: a stored status is a status that drifts. Unregulated
   // systems skip all of it. See lib/gxp.
-  const expiry = expiryAttention(attachRows, shopToday());
+  const expiry = expiryAttention(
+    // Dated attachments and validation review dates lapse the same way.
+    [...attachRows, ...vDocs.filter((d) => d.state !== "Superseded").map((d) => ({ expiresOn: d.reviewOn }))],
+    shopToday(),
+  );
   const gxpStanding = inst.gxp
     ? qualStanding({
         quals: qualsOf(taskRows.map((t) => ({
@@ -243,7 +259,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         }))),
         expired: expiry.expired.length,
         expiringSoon: expiry.soon.length,
-        packageComplete: null,
+        packageComplete: packageComplete(requiredTypes, vDocs),
       })
     : null;
 
@@ -574,6 +590,25 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               canEdit={canEdit} storageFull={fileQuota.state === "full"}
               shared={soloUnit ? `${soloUnit.kind}${soloUnit.model ? ` ${soloUnit.model}` : ""}` : undefined} />
           ) },
+          // The validation shelf renders only on regulated systems - the GxP
+          // flag gates every compliance surface, so this key simply isn't in
+          // the list otherwise.
+          ...(inst.gxp ? [{ key: "validation", label: "Validation", node: (
+            <ValidationPanel instrumentId={inst.id}
+              docs={vDocs.map((d) => ({
+                id: d.id, docType: d.docType, title: d.title, state: d.state, version: d.version,
+                supersedesId: d.supersedesId, attachmentId: d.attachmentId, reviewOn: d.reviewOn,
+                note: d.note, createdBy: d.createdBy, createdAt: d.createdAt.toISOString(),
+                signatures: vSigs.filter((x) => x.docId === d.id).map((x) => ({
+                  id: x.id, role: x.role, signerName: x.signerName, signerTitle: x.signerTitle, note: x.note,
+                  createdAt: x.createdAt.toISOString(), revokedAt: x.revokedAt?.toISOString() ?? null,
+                  revokeReason: x.revokeReason,
+                })),
+              }))}
+              requiredTypes={requiredTypes}
+              files={attachRows.map((a) => ({ id: a.id, fileName: a.fileName }))}
+              standing={gxpStanding} isStaff={isStaff} today={shopToday()} />
+          ) }] : []),
           { key: "files", label: "Files", node: (
             <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}

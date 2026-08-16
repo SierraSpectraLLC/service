@@ -14,6 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, orgSites, partCatalog, partKitLines, agreements, catalogRefs, taskResults,
+  validationDocs, validationSignatures,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
@@ -29,7 +30,7 @@ import {
 import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, resultIsRecorded } from "@/lib/testResult";
-import { QUALIFICATIONS } from "@/lib/gxp";
+import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
@@ -3554,6 +3555,200 @@ export async function reorderProcedures(assetType: string, orderedIds: number[])
     action: `reordered the ${assetType} procedure list`,
   });
   revalidatePath("/settings/procedures");
+}
+
+// ---------------- Validation documents ----------------
+// The validation shelf of a regulated system. The lifecycle rules live in
+// lib/gxp and are enforced HERE, not just hidden in the UI - "the protocol
+// was approved before it ran" is a server-checked fact or it is nothing.
+
+/** Doc + the caller's right to touch it. Staff manage validation paper. */
+async function validationDocAccess(docId: number) {
+  const u = await requireStaff();
+  const [d] = await db.select().from(validationDocs).where(eq(validationDocs.id, docId));
+  if (!d) return { error: "Not found" as const };
+  await assertSystemVisible(u, d.instrumentId);
+  return { u, d };
+}
+
+const activeSignatures = async (docId: number) =>
+  (await db.select().from(validationSignatures)
+    .where(and(eq(validationSignatures.docId, docId), isNull(validationSignatures.revokedAt))));
+
+export async function addValidationDoc(
+  instrumentId: number,
+  data: { docType: string; title: string; attachmentId: number | null; reviewOn: string; note: string; supersedesId?: number | null },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  await assertSystemVisible(u, instrumentId);
+  const docType = (DOC_TYPES as readonly string[]).find((t) => t.toLowerCase() === data.docType.trim().toLowerCase());
+  if (!docType) return { error: "Pick a document type" };
+  const title = data.title.trim();
+  if (!title || title.length > 160) return { error: "Title must be 1-160 characters" };
+  const reviewOn = isIsoDay(data.reviewOn) ? data.reviewOn : "";
+  if (data.attachmentId !== null) {
+    // A linked file must be this system's own paper.
+    const [a] = await db.select().from(attachments).where(eq(attachments.id, data.attachmentId));
+    if (!a || a.instrumentId !== instrumentId) return { error: "That file belongs to another record" };
+  }
+
+  // A revision supersedes; it never replaces. The old version keeps its state
+  // history under the version number it was approved as.
+  let version = 1;
+  const supersedesId = data.supersedesId ?? null;
+  if (supersedesId !== null) {
+    const [old] = await db.select().from(validationDocs).where(eq(validationDocs.id, supersedesId));
+    if (!old || old.instrumentId !== instrumentId) return { error: "Not found" };
+    if (old.state === "Superseded") return { error: "That version is already superseded - revise the current one" };
+    version = old.version + 1;
+    await db.update(validationDocs).set({ state: "Superseded" }).where(eq(validationDocs.id, supersedesId));
+  }
+
+  const [row] = await db.insert(validationDocs).values({
+    instrumentId, docType, title, state: "Draft", version, supersedesId,
+    attachmentId: data.attachmentId, reviewOn, note: data.note.trim(),
+    createdBy: u.email, tenantOrgId: inst.tenantOrgId,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId, entityType: "validation", entityId: row.id,
+    action: supersedesId !== null
+      ? `revised ${docType} '${title}' to v${version} (v${version - 1} superseded)`
+      : `filed ${docType} '${title}' as Draft`,
+  });
+  revalidatePath(`/instruments/${instrumentId}`);
+  return { id: row.id };
+}
+
+/**
+ * Sign a validation document in a role. Typing your name is the act of
+ * signing. The Approved role is the one with teeth: it is refused anywhere but
+ * Draft, and landing it moves the document to Approved.
+ */
+export async function signValidationDoc(
+  docId: number, data: { role: string; signerName: string; signerTitle: string; note: string },
+): Promise<{ error?: string }> {
+  const acc = await validationDocAccess(docId);
+  if ("error" in acc) return acc;
+  const { u, d } = acc;
+  const role = (SIG_ROLES as readonly string[]).includes(data.role) ? data.role : "Approved";
+  const signerName = data.signerName.trim();
+  if (signerName.length < 2) return { error: "Type your full name to sign" };
+  if (d.state === "Superseded") return { error: "This version is superseded - sign the current one" };
+  if (role === "Approved" && !canApprove(d)) {
+    return { error: `Only a Draft can be approved - this is ${d.state}` };
+  }
+  const sigs = await activeSignatures(docId);
+  if (sigs.some((x) => x.role === role && x.signedBy.toLowerCase() === u.email.toLowerCase())) {
+    return { error: `You have already signed as ${role}` };
+  }
+  await db.insert(validationSignatures).values({
+    docId, role, signedBy: u.email, signerName,
+    signerTitle: data.signerTitle.trim(), note: data.note.trim(),
+  });
+  if (role === "Approved") {
+    await db.update(validationDocs).set({ state: "Approved" }).where(eq(validationDocs.id, docId));
+  }
+  await audit({
+    actor: u.email, instrumentId: d.instrumentId, entityType: "validation", entityId: docId,
+    action: `signed ${d.docType} '${d.title}' v${d.version} as ${role} ("${signerName}")${role === "Approved" ? " - now Approved" : ""}`,
+  });
+  revalidatePath(`/instruments/${d.instrumentId}`);
+  return {};
+}
+
+/**
+ * Withdraw a signature, with a reason, keeping the row - a signature that was
+ * given and taken back is exactly the history this shelf exists to hold.
+ * Pulling the last approval returns the document to Draft; once Executed the
+ * record moves forward by superseding, never by un-signing.
+ */
+export async function revokeValidationSignature(sigId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [sig] = await db.select().from(validationSignatures).where(eq(validationSignatures.id, sigId));
+  if (!sig || sig.revokedAt !== null) return { error: "Not found" };
+  const [d] = await db.select().from(validationDocs).where(eq(validationDocs.id, sig.docId));
+  if (!d) return { error: "Not found" };
+  await assertSystemVisible(u, d.instrumentId);
+  const why = reason.trim();
+  if (!why) return { error: "Say why - a signature withdrawn without a reason is a record with a hole in it" };
+  if (sig.role === "Approved" && !canRevokeApproval(d)) {
+    return { error: "This version has been executed - revise it instead of un-signing it" };
+  }
+  await db.update(validationSignatures).set({ revokedAt: new Date(), revokeReason: why })
+    .where(eq(validationSignatures.id, sigId));
+  if (sig.role === "Approved") {
+    const stillApproved = (await activeSignatures(d.id)).some((x) => x.role === "Approved");
+    if (!stillApproved && d.state === "Approved") {
+      await db.update(validationDocs).set({ state: "Draft" }).where(eq(validationDocs.id, d.id));
+    }
+  }
+  await audit({
+    actor: u.email, instrumentId: d.instrumentId, entityType: "validation", entityId: d.id,
+    action: `withdrew ${sig.role} signature ("${sig.signerName}") from ${d.docType} '${d.title}' v${d.version} - reason: ${why}`,
+  });
+  revalidatePath(`/instruments/${d.instrumentId}`);
+  return {};
+}
+
+/** An approved protocol has been run. The readings and reports are the evidence. */
+export async function markValidationDocExecuted(docId: number): Promise<{ error?: string }> {
+  const acc = await validationDocAccess(docId);
+  if ("error" in acc) return acc;
+  const { u, d } = acc;
+  if (!canExecute(d)) {
+    return { error: isProtocol(d.docType)
+      ? `Approve it first - executing a ${d.state} protocol is the finding auditors look for`
+      : "Only protocols get executed - reports are approved after writing" };
+  }
+  await db.update(validationDocs).set({ state: "Executed" }).where(eq(validationDocs.id, docId));
+  await audit({
+    actor: u.email, instrumentId: d.instrumentId, entityType: "validation", entityId: docId,
+    action: `marked ${d.docType} '${d.title}' v${d.version} executed`,
+  });
+  revalidatePath(`/instruments/${d.instrumentId}`);
+  return {};
+}
+
+/** Only an unsigned Draft. Anything further along supersedes instead. */
+export async function deleteValidationDoc(docId: number, reason: string): Promise<{ error?: string }> {
+  const acc = await validationDocAccess(docId);
+  if ("error" in acc) return acc;
+  const { u, d } = acc;
+  const sigs = await activeSignatures(docId);
+  if (!canDelete(d, sigs.length)) {
+    return { error: "Only an unsigned Draft can be removed - supersede this with a revision instead" };
+  }
+  const why = reason.trim();
+  if (!why) return { error: "Say why" };
+  await db.delete(validationDocs).where(eq(validationDocs.id, docId));
+  await audit({
+    actor: u.email, instrumentId: d.instrumentId, entityType: "validation", entityId: docId,
+    action: `removed draft ${d.docType} '${d.title}' - reason: ${why}`,
+  });
+  revalidatePath(`/instruments/${d.instrumentId}`);
+  return {};
+}
+
+/** Which validation documents a kind of equipment owes - the catalog card. */
+export async function setCatalogDocTypes(termId: number, docTypes: string[]): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!term) return { error: "Not found" };
+  const t = readTenant(u);
+  if (t !== null && term.tenantOrgId !== t) return { error: "Not found" };
+  const clean = docTypes
+    .map((x) => (DOC_TYPES as readonly string[]).find((k) => k.toLowerCase() === x.trim().toLowerCase()))
+    .filter((x): x is string => !!x);
+  await db.update(vocabTerms).set({ docTypes: clean }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId,
+    action: `set validation package for ${term.kind === "category" ? "system type" : term.kind === "asset_type" ? "module type" : "model"} ${term.name}: ${clean.join(", ") || "none"}`,
+    field: "docTypes", oldValue: term.docTypes.join(", "), newValue: clean.join(", "),
+  });
+  revalidatePath("/settings/catalog");
+  return {};
 }
 
 // ---------------- Stage vocabulary ----------------

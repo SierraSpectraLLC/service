@@ -2205,3 +2205,61 @@ END $$;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "gxp" boolean NOT NULL DEFAULT false;
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "qualification" text NOT NULL DEFAULT '';
 ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "expires_on" text NOT NULL DEFAULT '';
+
+-- ── The validation shelf ────────────────────────────────────────────────────
+-- Validation documents with a lifecycle (Draft -> Approved -> Executed ->
+-- Superseded), role signatures behind them, and the package a kind of
+-- equipment owes declared once on the catalog. Nothing current is ever
+-- deleted: revisions supersede, and only an unsigned Draft may be removed.
+CREATE TABLE IF NOT EXISTS "validation_docs" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "instrument_id" integer NOT NULL,
+  "doc_type" text NOT NULL,
+  "title" text NOT NULL,
+  "state" text NOT NULL DEFAULT 'Draft',
+  "version" integer NOT NULL DEFAULT 1,
+  "supersedes_id" integer,
+  "attachment_id" integer,
+  "review_on" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "validation_docs_instrument_idx" ON "validation_docs" ("instrument_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'validation_docs_instrument_id_fk') THEN
+    ALTER TABLE "validation_docs" ADD CONSTRAINT "validation_docs_instrument_id_fk"
+      FOREIGN KEY ("instrument_id") REFERENCES "instruments"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'validation_docs_supersedes_id_fk') THEN
+    ALTER TABLE "validation_docs" ADD CONSTRAINT "validation_docs_supersedes_id_fk"
+      FOREIGN KEY ("supersedes_id") REFERENCES "validation_docs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'validation_docs_attachment_id_fk') THEN
+    ALTER TABLE "validation_docs" ADD CONSTRAINT "validation_docs_attachment_id_fk"
+      FOREIGN KEY ("attachment_id") REFERENCES "attachments"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "validation_signatures" (
+  "id" serial PRIMARY KEY,
+  "doc_id" integer NOT NULL,
+  "role" text NOT NULL DEFAULT 'Approved',
+  "signed_by" text NOT NULL,
+  "signer_name" text NOT NULL,
+  "signer_title" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "revoked_at" timestamp,
+  "revoke_reason" text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "validation_signatures_doc_idx" ON "validation_signatures" ("doc_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'validation_signatures_doc_id_fk') THEN
+    ALTER TABLE "validation_signatures" ADD CONSTRAINT "validation_signatures_doc_id_fk"
+      FOREIGN KEY ("doc_id") REFERENCES "validation_docs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "doc_types" text[] NOT NULL DEFAULT '{}';

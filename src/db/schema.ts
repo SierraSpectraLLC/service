@@ -589,6 +589,54 @@ export const taskNotes = pgTable("task_notes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("task_notes_task_idx").on(t.taskId)]);
 
+// The validation shelf of a regulated system: URS, IQ/OQ/PQ protocols and
+// reports, certs - each a DOCUMENT WITH A LIFECYCLE, not just a file.
+//
+// Two rules carry the whole design. A protocol must be approved BEFORE it is
+// executed and a report after - that ordering is the first thing an auditor
+// checks. And nothing current is ever deleted or overwritten: a revision is a
+// NEW row pointing at the one it supersedes, so v1 stays retrievable forever
+// under the version it was approved as. Only an unsigned Draft may be removed.
+export const validationDocs = pgTable("validation_docs", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  instrumentId: integer("instrument_id").notNull().references(() => instruments.id, { onDelete: "cascade" }),
+  docType: text("doc_type").notNull(),   // vocabulary in lib/gxp DOC_TYPES
+  title: text("title").notNull(),
+  // Draft | Approved | Executed | Superseded. Executed is for protocols only:
+  // "this approved protocol has been run", with the readings and the report
+  // documents as the evidence. See lib/gxp for the transition rules.
+  state: text("state").notNull().default("Draft"),
+  version: integer("version").notNull().default(1),
+  supersedesId: integer("supersedes_id").references((): AnyPgColumn => validationDocs.id, { onDelete: "set null" }),
+  // The file this document IS, when it lives here as a file. Null for a
+  // placeholder row (paper master upstairs) - the lifecycle still applies.
+  attachmentId: integer("attachment_id").references(() => attachments.id, { onDelete: "set null" }),
+  // Periodic review / validity date, shop-day string, blank = none. Feeds the
+  // same expiry attention as dated attachments.
+  reviewOn: text("review_on").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("validation_docs_instrument_idx").on(t.instrumentId)]);
+
+// Who stands behind a validation document, in which capacity. Same philosophy
+// as signoffs: typing your name is the act of signing, a withdrawn signature
+// is kept with its reason, and the "Approved" role is what moves a Draft to
+// Approved. No tenant stamp - cascades from the doc, like task_results.
+export const validationSignatures = pgTable("validation_signatures", {
+  id: serial("id").primaryKey(),
+  docId: integer("doc_id").notNull().references(() => validationDocs.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("Approved"), // Author | Reviewed | Approved
+  signedBy: text("signed_by").notNull(),            // login email
+  signerName: text("signer_name").notNull(),        // typed name - the signature
+  signerTitle: text("signer_title").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+  revokeReason: text("revoke_reason").notNull().default(""),
+}, (t) => [index("validation_signatures_doc_idx").on(t.docId)]);
+
 // What a test actually read. One row per task, because a test task is one
 // performance of one test - a PM that runs twice a year generates a new task
 // each time, so the history is the tasks, not versions of a row.
@@ -1196,6 +1244,13 @@ export const vocabTerms = pgTable("vocab_terms", {
   // typing "Nitrogen, Argon" again. On a model it means units of that model,
   // on a module type any unit of it, on a system type the system itself.
   gases: text("gases").array().notNull().default([]),
+  // The validation package this kind of equipment owes when it lands on a
+  // regulated system: a list of DOC_TYPES (lib/gxp). Same declare-once idea as
+  // gases - "an Altis needs an IQ protocol, an OQ protocol, and their reports"
+  // is said here, and every regulated Altis arrives with the checklist. The
+  // package is derived at read time, never copied onto systems, so refining it
+  // updates every checklist at once.
+  docTypes: text("doc_types").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Unique on identity only, not on categories: FID is one model that happens
   // to apply to several system types, not a row per type.
