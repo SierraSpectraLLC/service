@@ -9,6 +9,7 @@ import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
 import CatalogPhotosCard from "@/components/CatalogPhotosCard";
 import ReferencePanel from "@/components/ReferencePanel";
+import CatalogGasCard from "@/components/CatalogGasCard";
 import { shopDay } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,9 @@ export default async function CatalogPage() {
         // The URL itself never reaches the browser: the photo is fetched through
         // /api/catalog/photo, which checks who is asking.
         hasPhoto: !!t.photoUrl, photoFraming: t.photoFraming,
+      }))} />
+      <CatalogGasCard entries={terms.map((t) => ({
+        id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, gases: t.gases,
       }))} />
       <ReferencePanel canEdit
         sub="Manuals, links and field notes per model or module type. Whatever is filed here shows up on every system and unit with that equipment."

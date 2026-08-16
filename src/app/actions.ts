@@ -51,6 +51,7 @@ import {
 import { getModules } from "@/lib/flags";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen, stageChange } from "@/lib/stages";
+import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
@@ -301,7 +302,11 @@ export async function updateInstrument(
   // anybody remembering to go and ask for it. Additive only - schedules the old
   // category brought stay, because they may have been done since, and taking
   // work off a system is a decision rather than a side effect.
-  if (category !== inst.category) await applySystemProcedures(instrumentId, shopToday(), u.email);
+  if (category !== inst.category) {
+    await applySystemProcedures(instrumentId, shopToday(), u.email);
+    // A system re-typed as an LC-MS needs what an LC-MS needs.
+    await applyCatalogGases({ instrumentId, assetId: null }, inst.tenantOrgId);
+  }
   rev(instrumentId);
   return {};
 }
@@ -470,6 +475,8 @@ export async function createInstrument(
     });
   }
   await generateCheckout(row.id, { id: null, kind: "system", model: "", serial: "" }, u.email, row.tenantOrgId);
+  // Whatever this kind of system needs on the bench, per the catalog.
+  await applyCatalogGases({ instrumentId: row.id, assetId: null }, row.tenantOrgId);
   // Recurring upkeep that belongs to the instrument rather than to a unit in it.
   await applySystemProcedures(row.id, shopToday(), u.email);
   rev(row.id);
@@ -655,6 +662,12 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   // The model's recurring procedures arrive with the unit - CSV imports come
   // through here too, so a migrated fleet lands already scheduled.
   await applyProcedures(row.id, shopToday(), u.email);
+  // And the gases its model calls for, onto the system it joined or onto the
+  // unit itself while it is still a spare.
+  await applyCatalogGases(
+    instrumentId !== null ? { instrumentId, assetId: null } : { instrumentId: null, assetId: row.id },
+    row.tenantOrgId,
+  );
   revalidatePath("/assets");
   revalidatePath(`/assets/${row.id}`);
   return { id: row.id };
@@ -740,6 +753,52 @@ export async function setAssetStatus(assetId: number, status: string) {
   revalidatePath(`/assets/${assetId}`);
 }
 
+/**
+ * Put the gases the catalog says this equipment needs onto the record.
+ *
+ * "Not connected" rather than "Connected": the catalog knows the system NEEDS
+ * nitrogen, it cannot know somebody has hooked it up. That status is the one
+ * the dashboard already flags, so a new arrival shows the real to-do instead of
+ * a green tick nobody earned. Never touches a gas already on the record - a
+ * status somebody set by hand is worth more than a default.
+ */
+async function applyCatalogGases(
+  target: { instrumentId: number | null; assetId: number | null },
+  tenantOrgId: number | null,
+): Promise<number> {
+  const terms = await db.select({
+    kind: vocabTerms.kind, assetType: vocabTerms.assetType, name: vocabTerms.name, gases: vocabTerms.gases,
+  }).from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, tenantOrgId)).catch(() => []);
+  if (!terms.some((t) => t.gases.length)) return 0;
+
+  let required: string[] = [];
+  if (target.instrumentId !== null) {
+    const [inst] = await db.select({ category: instruments.category }).from(instruments)
+      .where(eq(instruments.id, target.instrumentId));
+    const units = await db.select({ kind: assets.kind, model: assets.model }).from(assets)
+      .where(eq(assets.instrumentId, target.instrumentId));
+    required = gasesForSystemWithUnits(terms, inst?.category ?? "", units);
+  } else if (target.assetId !== null) {
+    const [a] = await db.select({ kind: assets.kind, model: assets.model }).from(assets)
+      .where(eq(assets.id, target.assetId));
+    if (a) required = gasesForUnit(terms, a);
+  }
+  if (!required.length) return 0;
+
+  const have = await db.select({ gas: instrumentGases.gas }).from(instrumentGases)
+    .where(target.instrumentId !== null
+      ? eq(instrumentGases.instrumentId, target.instrumentId)
+      : eq(instrumentGases.assetId, target.assetId!));
+  const missing = missingGases(required, have.map((h) => h.gas));
+  for (const gas of missing) {
+    await db.insert(instrumentGases).values({
+      instrumentId: target.instrumentId, assetId: target.assetId,
+      gas, status: "Not connected",
+    }).onConflictDoNothing();
+  }
+  return missing.length;
+}
+
 /** Shared install step, so one asset and a whole batch behave identically. */
 async function attachOne(assetId: number, instrumentId: number, externalId: string, u: SessionUser) {
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
@@ -759,6 +818,8 @@ async function attachOne(assetId: number, instrumentId: number, externalId: stri
   // it - a spare created on the shelf had no system to scope by. Deduped by
   // procedure and title, so re-installs don't double the schedules.
   await applyProcedures(assetId, shopToday(), u.email);
+  // A unit joining a system can bring a gas requirement the system did not have.
+  await applyCatalogGases({ instrumentId, assetId: null }, a.tenantOrgId);
   revalidatePath(`/assets/${assetId}`);
   return {};
 }
@@ -893,6 +954,7 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
   // Same as attach: the destination system's type may owe this unit upkeep
   // the source's didn't.
   await applyProcedures(assetId, shopToday(), u.email);
+  await applyCatalogGases({ instrumentId: toInstrumentId, assetId: null }, a.tenantOrgId);
   rev(toInstrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -6984,6 +7046,29 @@ export async function listStoreFilesForRef(): Promise<{
       where: r.externalId ?? r.assetLabel ?? "on the shelf",
     })),
   };
+}
+
+/**
+ * Declare which gases a catalog entry needs. Applied to equipment created from
+ * here on; existing records keep whatever somebody already set, because a gas
+ * status is shop-floor truth and this is only the default.
+ */
+export async function setCatalogGases(termId: number, gases: string[]): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!term) return { error: "Not found" };
+  if (readTenant(u) !== null && term.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const clean = [...new Set(gases.map((g) => g.trim()).filter((g) => (GASES as readonly string[]).includes(g)))];
+  await db.update(vocabTerms).set({ gases: clean }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: term.tenantOrgId,
+    action: clean.length
+      ? `${term.name} needs ${clean.join(", ")}`
+      : `${term.name} no longer declares a gas requirement`,
+    field: "gases", oldValue: term.gases.join(", "), newValue: clean.join(", "),
+  });
+  revalidatePath("/settings/catalog");
+  return {};
 }
 
 export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: string; id?: number }> {

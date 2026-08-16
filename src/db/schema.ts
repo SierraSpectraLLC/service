@@ -1152,6 +1152,11 @@ export const vocabTerms = pgTable("vocab_terms", {
   // blob URL owned by the catalog row, served through /api/catalog/photo.
   photoUrl: text("photo_url").notNull().default(""),
   photoFraming: text("photo_framing").notNull().default(""),
+  // Which gases this kind of equipment needs. Declared once here, applied to
+  // every unit and system that matches - adding an Altis should not mean
+  // typing "Nitrogen, Argon" again. On a model it means units of that model,
+  // on a module type any unit of it, on a system type the system itself.
+  gases: text("gases").array().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Unique on identity only, not on categories: FID is one model that happens
   // to apply to several system types, not a row per type.

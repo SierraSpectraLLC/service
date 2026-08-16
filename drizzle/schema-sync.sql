@@ -2162,3 +2162,8 @@ END $$;
 -- "Two PMs, each with its kit" is how a PM contract is sold; a dollar figure
 -- is a proxy that drifts the moment a kit's price moves.
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "included_kits" text NOT NULL DEFAULT '';
+
+-- ── Gas requirements declared on the catalog ────────────────────────────────
+-- What a kind of equipment needs, so a new system does not have its gases
+-- typed out again: applied to matching units and systems on creation.
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "gases" text[] NOT NULL DEFAULT '{}';
