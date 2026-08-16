@@ -69,16 +69,27 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
     .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
   return (
-    <div className="container settings">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        {isOwner && (
-          <Link href="/settings/organizations" className="btn sm" style={{ textDecoration: "none" }}>← Organizations</Link>
-        )}
-        <h1 style={{ fontSize: 20, margin: 0 }}>{org.name}</h1>
+    <div className="container split">
+      {isOwner && (
+        <div style={{ marginBottom: 2 }}>
+          <Link href="/settings/organizations" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Organizations</Link>
+        </div>
+      )}
+      <div className="page-head">
+        <h1 className="page-title">{org.name}</h1>
         <span className="pill" style={{ background: org.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: org.kind === "provider" ? "#8A5410" : "#1D6396" }}>
           {org.kind}
         </span>
+        <p className="page-sub">
+          Who signs in, how their workspace looks, where their instruments live, and the
+          paper behind the work.
+        </p>
       </div>
+      {/* Two stacks from 1200px up, like the record pages: this page was nine
+          cards in one long column. Configuration on the left; the business -
+          contracts, sites, billing - on the right. Flattens in this order. */}
+      <div className="panel-cols">
+      <div>
       <OrgSettingsForm
         org={{
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
@@ -94,17 +105,9 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         showSheetSync={s?.sheetSyncEnabled ?? false}
         showRemote={s?.remoteEnabled ?? false}
       />
+      </div>
 
-      <SitesCard
-        orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
-        canEdit={mayConfigure}
-        sites={siteRows.map((r) => ({
-          id: r.id, name: r.name, address: r.address, accessNotes: r.accessNotes,
-          contactName: r.contactName, contactPhone: r.contactPhone, archived: r.archived,
-          systems: siteSystems.filter((i) => i.siteId === r.id).length,
-        }))}
-      />
-
+      <div>
       <AgreementsPanel
         rows={agreementRows.map((r) => ({
           id: r.id, orgId: r.orgId, orgName: org.name,
@@ -123,6 +126,18 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         // A client reads their own contract; only the service company writes one.
         canEdit={isHouse(user.role)}
       />
+      <SitesCard
+        orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
+        canEdit={mayConfigure}
+        sites={siteRows.map((r) => ({
+          id: r.id, name: r.name, address: r.address, accessNotes: r.accessNotes,
+          contactName: r.contactName, contactPhone: r.contactPhone, archived: r.archived,
+          systems: siteSystems.filter((i) => i.siteId === r.id).length,
+        }))}
+      />
+
+      </div>
+      </div>
     </div>
   );
 }
