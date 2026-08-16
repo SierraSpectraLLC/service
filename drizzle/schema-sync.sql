@@ -2143,3 +2143,17 @@ DO $$ BEGIN
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ── PM parts are part of the PM ─────────────────────────────────────────────
+-- A part requested from a maintenance job carries the schedule it came from,
+-- so a contract that includes its PM's parts can keep them off the client's
+-- parts allowance instead of billing the same thing twice.
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "pm_schedule_id" integer;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "pm_parts_included" boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS "parts_pm_schedule_idx" ON "parts" ("pm_schedule_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parts_pm_schedule_id_fk') THEN
+    ALTER TABLE "parts" ADD CONSTRAINT "parts_pm_schedule_id_fk"
+      FOREIGN KEY ("pm_schedule_id") REFERENCES "pm_schedules"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

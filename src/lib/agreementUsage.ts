@@ -25,7 +25,7 @@ import { instruments, parts, timeEntries, workOrders } from "@/db/schema";
 import { type AgreementLike, type Usage } from "@/lib/agreements";
 
 /** An empty result, for an org with nothing on file yet. */
-const NOTHING: Usage = { partsCents: 0, visits: 0, laborMinutes: 0 };
+const NOTHING: Usage = { partsCents: 0, visits: 0, laborMinutes: 0, pmPartsCents: 0 };
 
 /**
  * Bound a YYYY-MM-DD column by the agreement's term.
@@ -45,7 +45,8 @@ const within = (col: Parameters<typeof gte>[0], a: Pick<AgreementLike, "startsOn
 };
 
 export async function usageFor(
-  a: Pick<AgreementLike, "startsOn" | "endsOn"> & { instrumentIds?: number[] }, orgId: number,
+  a: Pick<AgreementLike, "startsOn" | "endsOn"> & { instrumentIds?: number[]; pmPartsIncluded?: boolean },
+  orgId: number,
 ): Promise<Usage> {
   // Their systems: what labour and visits are counted against. Read once.
   // A contract assigned to specific systems counts only those - that is what
@@ -59,7 +60,7 @@ export async function usageFor(
   const [partRows, woRows, timeRows] = await Promise.all([
     // Whose money bought it, stamped at purchase - never re-derived from who
     // owns the system today.
-    db.select({ cents: parts.costCents }).from(parts).where(and(
+    db.select({ cents: parts.costCents, pmScheduleId: parts.pmScheduleId }).from(parts).where(and(
       eq(parts.ownerOrgId, orgId),
       isNotNull(parts.costCents),
       // Fitted, not merely ordered. A part sitting in a box has not been spent
@@ -86,8 +87,19 @@ export async function usageFor(
       : Promise.resolve([]),
   ]);
 
+  // A PM's own parts are part of the PM. When the contract says so, they are
+  // reported but never drawn from the allowance - billing the client for a
+  // kit their included PM already covers is charging twice for one thing.
+  // Split rather than filtered away: a number that silently vanishes is how
+  // two screens end up disagreeing in front of the customer.
+  const pmPartsCents = partRows
+    .filter((r) => r.pmScheduleId !== null)
+    .reduce((n, r) => n + (r.cents ?? 0), 0);
+  const allPartsCents = partRows.reduce((n, r) => n + (r.cents ?? 0), 0);
+
   return {
-    partsCents: partRows.reduce((n, r) => n + (r.cents ?? 0), 0),
+    partsCents: a.pmPartsIncluded ? allPartsCents - pmPartsCents : allPartsCents,
+    pmPartsCents,
     // The severity filter is applied here rather than in SQL so the one rule
     // about what counts lives in lib/agreements and is tested there.
     visits: woRows.filter((w) => w.severity.trim().toLowerCase() !== "question").length,
@@ -96,7 +108,10 @@ export async function usageFor(
 }
 
 /** Usage for several agreements at once, keyed by id. One org, one pass each. */
-export async function usageForAll<T extends { id: number; orgId: number } & Pick<AgreementLike, "startsOn" | "endsOn">>(
+export async function usageForAll<
+  T extends { id: number; orgId: number; instrumentIds?: number[]; pmPartsIncluded?: boolean }
+    & Pick<AgreementLike, "startsOn" | "endsOn">,
+>(
   list: T[],
 ): Promise<Map<number, Usage>> {
   const out = new Map<number, Usage>();

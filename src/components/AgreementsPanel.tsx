@@ -15,20 +15,20 @@ export type AgreementRow = {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
-  visitsUnlimited: boolean; partsUnlimited: boolean;
+  visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
   hourlyRateCents: number | null;
   /** Which of the client's systems this paper covers. [] = all of them. */
   instrumentIds: number[];
   valueCents: number | null; note: string;
   /** Summed from the work, never stored - see lib/agreementUsage. */
-  used: { partsCents: number; visits: number; laborMinutes: number };
+  used: { partsCents: number; visits: number; laborMinutes: number; pmPartsCents?: number };
 };
 
 const emptyDraft = {
   kind: "contract", number: "", title: "", status: "active",
   startsOn: "", endsOn: "", renewNoticeDays: "60",
   visitsIncluded: "0", partsAllowance: "", laborIncludedHours: "",
-  visitsUnlimited: false, partsUnlimited: false, hourlyRate: "",
+  visitsUnlimited: false, partsUnlimited: false, pmPartsIncluded: false, hourlyRate: "",
   instrumentIds: [] as number[],
   value: "", note: "",
 };
@@ -112,6 +112,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       partsAllowance: r.partsAllowanceCents ? (r.partsAllowanceCents / 100).toFixed(2) : "",
       laborIncludedHours: r.laborIncludedMinutes ? (r.laborIncludedMinutes / 60).toFixed(1) : "",
       visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+      pmPartsIncluded: r.pmPartsIncluded,
       hourlyRate: r.hourlyRateCents != null ? (r.hourlyRateCents / 100).toFixed(2) : "",
       instrumentIds: [...r.instrumentIds],
       value: r.valueCents != null ? (r.valueCents / 100).toFixed(2) : "",
@@ -204,6 +205,13 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 unlimited={r.visitsUnlimited} />
               <Bar label="Labour hours" included={r.laborIncludedMinutes} used={r.used.laborMinutes} fmt={formatHours} />
             </div>
+            {/* Reported, never hidden: the money was really spent, the client
+                just isn't being charged for it out of this allowance. */}
+            {r.pmPartsIncluded && (r.used.pmPartsCents ?? 0) > 0 && (
+              <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+                Plus {formatCents(r.used.pmPartsCents ?? 0)} in PM parts, covered by the contract.
+              </div>
+            )}
             {r.note && <div className="mut" style={{ fontSize: 11.5, marginTop: 6, whiteSpace: "pre-wrap" }}>{r.note}</div>}
           </div>
         );
@@ -282,6 +290,19 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   <input type="checkbox" checked={draft.partsUnlimited} style={{ width: 15, height: 15 }}
                     onChange={(e) => setDraft({ ...draft, partsUnlimited: e.target.checked })} />
                   Unlimited - parts are covered, spend isn&apos;t tracked against a cap
+                </label>
+                {/* The PM's own parts are part of the PM. Without this, an
+                    included PM's kit gets billed twice - once in the PM, once
+                    out of the allowance. */}
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                  <input type="checkbox" checked={draft.pmPartsIncluded} style={{ width: 15, height: 15, marginTop: 2 }}
+                    onChange={(e) => setDraft({ ...draft, pmPartsIncluded: e.target.checked })} />
+                  <span>
+                    PM parts are included
+                    <span className="mut" style={{ display: "block", fontSize: 10.5 }}>
+                      Parts fitted on an included PM are reported but never drawn from this allowance.
+                    </span>
+                  </span>
                 </label>
               </div>
               <div>

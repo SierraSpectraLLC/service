@@ -355,6 +355,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={target} coverId={coverId}
+              catalogScopes={isStaff ? [
+                ...(asset.model ? [{ assetType: asset.kind, model: asset.model, label: `${asset.model} (every unit)` }] : []),
+                { assetType: asset.kind, model: "", label: `any ${asset.kind.toLowerCase()}` },
+              ] : []}
               photos={photoRows.map((a) => ({
                 id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
                 uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),

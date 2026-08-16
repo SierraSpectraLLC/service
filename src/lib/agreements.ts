@@ -103,7 +103,15 @@ export function daysLeft(endsOn: string, today: string): number | null {
 export const inTerm = (a: Pick<AgreementLike, "startsOn" | "endsOn">, day: string): boolean =>
   (!a.startsOn || day >= a.startsOn) && (!a.endsOn || day <= a.endsOn);
 
-export type Usage = { partsCents: number; visits: number; laborMinutes: number };
+export type Usage = {
+  /** What draws down the allowance - PM parts already removed when covered. */
+  partsCents: number;
+  visits: number;
+  laborMinutes: number;
+  /** Parts fitted on an included PM. Reported always; drawn down only when the
+      contract does NOT include its PM's parts. */
+  pmPartsCents?: number;
+};
 
 export type Allowance = {
   /** Is this entitlement part of the agreement at all? */

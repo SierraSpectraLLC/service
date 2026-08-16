@@ -1465,6 +1465,9 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
   const [p] = await db.insert(parts).values({
     instrumentId, assetId: s.assetId, name, partNumber: want.number,
     qty: "1", status: "Needed", note: `for maintenance '${s.title}'`,
+    // The queryable version of that note: a contract whose PM includes its
+    // parts reads this to keep them off the parts allowance.
+    pmScheduleId: s.id,
     ownerOrgId: await costOwnerOrg({ instrumentId, assetId: s.assetId }),
     ...(best ? { vendor: best.vendor, cost: centsToInput(best.priceCents), costCents: best.priceCents } : {}),
   }).returning();
@@ -6967,7 +6970,12 @@ export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: st
   const title = data.title.trim().slice(0, 160);
   const url = data.url.trim().slice(0, 1000);
   const body = data.body.trim().slice(0, 4000);
-  if (url && !/^https?:\/\//i.test(url)) return { error: "A link should start with http:// or https://" };
+  // http(s) for an outside manual, or one of our own authorized file routes -
+  // that is how a photo already in the record gets filed by reference rather
+  // than copied, so it costs no storage and stays access-checked.
+  if (url && !/^https?:\/\//i.test(url) && !/^\/api\/(files|catalog)\//.test(url)) {
+    return { error: "A link should start with http:// or https://" };
+  }
   if (kind === "link" && !url) return { error: "A link needs a URL" };
   if (kind === "note" && !body && !url) return { error: "A note needs some text (or at least a picture)" };
   const [row] = await db.insert(catalogRefs).values({
@@ -7106,7 +7114,7 @@ export type AgreementInput = {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number | string;
   visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
-  visitsUnlimited?: boolean; partsUnlimited?: boolean;
+  visitsUnlimited?: boolean; partsUnlimited?: boolean; pmPartsIncluded?: boolean;
   hourlyRate?: string;
   instrumentIds?: number[];
   value: string; note: string;
@@ -7116,7 +7124,7 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
   kind: string; number: string; title: string; status: string;
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
-  visitsUnlimited: boolean; partsUnlimited: boolean;
+  visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
   hourlyRateCents: number | null; instrumentIds: number[];
   valueCents: number | null; note: string;
 } {
@@ -7147,6 +7155,7 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
     laborIncludedMinutes: Math.round((parseFloat(d.laborIncludedHours.trim()) || 0) * 60),
     visitsUnlimited: d.visitsUnlimited ?? false,
     partsUnlimited: d.partsUnlimited ?? false,
+    pmPartsIncluded: d.pmPartsIncluded ?? false,
     hourlyRateCents: parseMoney(d.hourlyRate ?? ""),
     // Which of the client's systems this paper covers; [] = all of them.
     // Ownership is validated by usage-time scoping, not here - a system that

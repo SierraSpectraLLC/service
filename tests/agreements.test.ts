@@ -73,6 +73,29 @@ describe("which work draws down", () => {
   });
 });
 
+describe("a PM's own parts", () => {
+  // The rule this exists for: "1 PM included, parts included" is ONE thing
+  // sold. Billing the kit again out of the parts allowance charges twice.
+  const used = { partsCents: 40_000, visits: 1, laborMinutes: 120, pmPartsCents: 25_000 };
+
+  it("is reported even when it does not draw down", () => {
+    // usageFor has already removed covered PM parts from partsCents; what the
+    // panel needs is that the number is still THERE to show.
+    expect(used.pmPartsCents).toBe(25_000);
+    const a = allowance(150_000, used.partsCents);
+    expect(a.used).toBe(40_000);
+    expect(a.remaining).toBe(110_000);
+  });
+
+  it("would otherwise have eaten the allowance", () => {
+    // The same shop-floor facts with the contract NOT covering PM parts: the
+    // allowance sees the full 65k, which is the difference the toggle makes.
+    const a = allowance(150_000, used.partsCents + used.pmPartsCents);
+    expect(a.used).toBe(65_000);
+    expect(a.remaining).toBe(85_000);
+  });
+});
+
 describe("an entitlement drawn down", () => {
   it("reports what is left and how full the bar is", () => {
     const a = allowance(500_000, 314_000);

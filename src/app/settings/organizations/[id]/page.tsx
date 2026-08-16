@@ -116,6 +116,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
           laborIncludedMinutes: r.laborIncludedMinutes,
           visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+          pmPartsIncluded: r.pmPartsIncluded,
           hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
           valueCents: r.valueCents, note: r.note,
           used: usage.get(r.id) ?? { partsCents: 0, visits: 0, laborMinutes: 0 },

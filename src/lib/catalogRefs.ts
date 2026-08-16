@@ -31,6 +31,13 @@ export function refsForUnits<T extends CatalogRef>(refs: T[], units: UnitLike[])
 export const refScopeLabel = (r: Pick<CatalogRef, "assetType" | "model">): string =>
   r.model.trim() ? r.model : `any ${r.assetType.toLowerCase()}`;
 
-/** Crude but honest: enough to decide between a thumbnail and a plain link. */
-export const looksLikeImage = (url: string): boolean =>
-  /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(url.trim());
+/**
+ * Crude but honest: enough to decide between a thumbnail and a plain link.
+ * Our own file route carries no extension, and everything filed through it
+ * comes from the Photos panel - which only accepts images - so it renders as
+ * one.
+ */
+export const looksLikeImage = (url: string): boolean => {
+  const u = url.trim();
+  return /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(u) || /^\/api\/files\/\d+$/.test(u);
+};

@@ -621,6 +621,11 @@ export const parts = pgTable("parts", {
   // and is still what gets displayed; this is the link, so "where is the
   // receipt for this part" has an answer that survives somebody's typing.
   poId: integer("po_id").references((): AnyPgColumn => purchaseOrders.id, { onDelete: "set null" }),
+  // The maintenance job this part was requested for, stamped by requestPmPart.
+  // The note said so in prose already; this is the queryable version, and it is
+  // what lets a contract whose PM includes its parts stop those parts from
+  // eating the client's parts allowance (see lib/agreementUsage).
+  pmScheduleId: integer("pm_schedule_id").references((): AnyPgColumn => pmSchedules.id, { onDelete: "set null" }),
   carrier: text("carrier").notNull().default(""),
   tracking: text("tracking").notNull().default(""),
   orderedAt: text("ordered_at").notNull().default(""),
@@ -1075,6 +1080,11 @@ export const agreements = pgTable("agreements", {
   // as information rather than as drawdown against a number.
   visitsUnlimited: boolean("visits_unlimited").notNull().default(false),
   partsUnlimited: boolean("parts_unlimited").notNull().default(false),
+  // The PM's own parts are part of the PM, so they must not also be drawn from
+  // the parts allowance - "1 PM included, parts included" is one thing sold,
+  // not two. Off by default: turning it on is a statement about this contract,
+  // and flipping every existing one silently would rewrite their numbers.
+  pmPartsIncluded: boolean("pm_parts_included").notNull().default(false),
   // What an hour beyond the included ones bills at. Null = not set.
   hourlyRateCents: integer("hourly_rate_cents"),
   valueCents: integer("value_cents"),                 // the contract's value

@@ -4,7 +4,8 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import {
-  addPhotos, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming, type WorkTarget,
+  addCatalogRef, addPhotos, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming,
+  type WorkTarget,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import { fmtBytes } from "@/lib/storage";
@@ -48,7 +49,7 @@ export type PhotoRow = {
  * photos somebody took.
  */
 export default function PhotosPanel({
-  target, photos, coverId, label, canEdit, storageFull, shared,
+  target, photos, coverId, label, canEdit, storageFull, shared, catalogScopes = [],
 }: {
   target: WorkTarget;
   photos: PhotoRow[];
@@ -57,6 +58,9 @@ export default function PhotosPanel({
   label: string;
   canEdit: boolean;
   storageFull: boolean;
+  /** Where a photo may be filed in the catalog - this record's equipment.
+      Empty hides the option (nothing to file it against). */
+  catalogScopes?: { assetType: string; model: string; label: string }[];
   /** Set when this record pools its photos with the unit/system it is. */
   shared?: string;
 }) {
@@ -73,6 +77,11 @@ export default function PhotosPanel({
   const [pending, startTransition] = useTransition();
 
   const ordered = orderPhotos(photos, coverId);
+  // Filing a photo to the catalog: the picture stays exactly where it is - the
+  // reference points at it - so what one engineer learned on this unit shows
+  // up on every unit like it without copying a byte or a second storage charge.
+  const [filing, setFiling] = useState<null | { id: number; fileName: string }>(null);
+  const [fileDraft, setFileDraft] = useState({ scope: 0, title: "", body: "" });
   const [lead, ...rest] = ordered;
   const chosen = coverIsChosen(photos, coverId);
 
@@ -233,6 +242,13 @@ export default function PhotosPanel({
             {canEdit && !selecting && (
               <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
                 <button className="btn sm" disabled={pending} onClick={() => setFraming(lead)}>Frame</button>
+                {catalogScopes.length > 0 && (
+                  <button className="btn sm" disabled={pending}
+                    title="File this to the catalog so every unit like this one sees it"
+                    onClick={() => { setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: lead.id, fileName: lead.fileName }); }}>
+                    To catalog
+                  </button>
+                )}
                 <button className="btn sm" disabled={pending} onClick={() => remove(lead)}>Remove</button>
               </div>
             )}
@@ -249,6 +265,13 @@ export default function PhotosPanel({
                         onClick={() => act(() => setCoverPhoto(target, p.id))}>Cover</button>
                       <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                         onClick={() => setFraming(p)}>Frame</button>
+                      {catalogScopes.length > 0 && (
+                        <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                          title="File this to the catalog so every unit like this one sees it"
+                          onClick={() => { setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: p.id, fileName: p.fileName }); }}>
+                          Catalog
+                        </button>
+                      )}
                       <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
                         aria-label={`Remove ${p.fileName}`} onClick={() => remove(p)}>×</button>
                     </div>
@@ -261,6 +284,64 @@ export default function PhotosPanel({
       )}
 
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+
+      {/* File a photo to the catalog's reference shelf. The note is the point:
+          a picture with nothing written on it is a picture nobody can act on. */}
+      {filing && (
+        <>
+          <div className="scrim" onClick={() => setFiling(null)} />
+          <div className="sheet" role="dialog" aria-modal="true" aria-label="File photo to the catalog">
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--navy)" }}>File to the catalog</div>
+              <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
+                onClick={() => setFiling(null)}>close</button>
+            </div>
+            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+              The photo stays on this record; the catalog points at it. Everyone working on
+              equipment like this sees it under Reference.
+            </div>
+            <PhotoThumb src={fileSrc(filing.id)} framing="" alt={filing.fileName}
+              width={160} height={110} radius={8} />
+            <div style={{ marginTop: 10 }}>
+              <label>Filed under</label>
+              <select value={fileDraft.scope} aria-label="Filed under"
+                onChange={(e) => setFileDraft({ ...fileDraft, scope: parseInt(e.target.value) })}
+                style={{ marginBottom: 8 }}>
+                {catalogScopes.map((sc, i) => (
+                  <option key={`${sc.assetType}|${sc.model}`} value={i}>{sc.label}</option>
+                ))}
+              </select>
+              <label>Title</label>
+              <input value={fileDraft.title} placeholder="e.g. H-ESI probe removal"
+                onChange={(e) => setFileDraft({ ...fileDraft, title: e.target.value })}
+                style={{ marginBottom: 8 }} />
+              <label>What the next engineer needs to know</label>
+              <textarea value={fileDraft.body} rows={3} style={{ width: "100%", marginBottom: 8 }}
+                placeholder="The trick this photo shows"
+                onChange={(e) => setFileDraft({ ...fileDraft, body: e.target.value })} />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button className="btn sm" onClick={() => setFiling(null)} disabled={pending}>Cancel</button>
+              <button className="btn sm accent" disabled={pending}
+                onClick={() => {
+                  const sc = catalogScopes[fileDraft.scope];
+                  if (!sc) return;
+                  setError("");
+                  startTransition(async () => {
+                    const res = await addCatalogRef({
+                      assetType: sc.assetType, model: sc.model, kind: "note",
+                      title: fileDraft.title || filing.fileName,
+                      url: fileSrc(filing.id), body: fileDraft.body,
+                    });
+                    if (res?.error) { setError(res.error); return; }
+                    setFiling(null);
+                    router.refresh();
+                  });
+                }}>{pending ? "Filing..." : "File it"}</button>
+            </div>
+          </div>
+        </>
+      )}
 
       {framing && (
         <PhotoFramer src={fileSrc(framing.id)} framing={framing.framing} alt={framing.fileName}

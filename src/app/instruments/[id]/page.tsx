@@ -540,6 +540,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={{ instrumentId: inst.id, assetId: null }} coverId={coverId}
+              catalogScopes={isStaff ? refScopes : []}
               photos={photoRows.map((a) => ({
                 id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
                 uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),

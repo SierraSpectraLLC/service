@@ -50,7 +50,7 @@ export default async function AgreementsPage() {
   // agreement; a shop with hundreds would want this batched, and would also
   // want a different page.
   const usage = await usageForAll(rows);
-  const nothing = { partsCents: 0, visits: 0, laborMinutes: 0 };
+  const nothing = { partsCents: 0, visits: 0, laborMinutes: 0, pmPartsCents: 0 };
 
   const shaped = rows.map((r) => ({
     id: r.id, orgId: r.orgId, orgName: name.get(r.orgId) ?? "an organization",
@@ -59,6 +59,7 @@ export default async function AgreementsPage() {
     visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
     laborIncludedMinutes: r.laborIncludedMinutes,
     visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
+    pmPartsIncluded: r.pmPartsIncluded,
     hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
     valueCents: r.valueCents, note: r.note,
     used: usage.get(r.id) ?? nothing,
