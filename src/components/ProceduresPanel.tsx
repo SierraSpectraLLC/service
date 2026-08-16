@@ -388,6 +388,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {i.parts.map((pt) => (
               <span key={`${pt.number}|${pt.name}`} className="mono" style={{ fontSize: 11, color: "#8A5410", background: "#FAF0DC", borderRadius: 4, padding: "1px 5px" }}>
                 {pt.number ? `PN ${pt.number}` : pt.name}
+                {pt.models?.length ? ` · ${pt.models.join("/")}` : ""}
               </span>
             ))}
           </div>
@@ -749,18 +750,54 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
 
             <label>Parts it takes</label>
             <div style={{ marginBottom: 10 }}>
-              {draft.parts.map((pt, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                  <input className="mono" value={pt.number} placeholder="Part number"
-                    onChange={(e) => setDraft({ ...draft, parts: draft.parts.map((x, i) => (i === idx ? { ...x, number: e.target.value } : x)) })}
-                    style={{ flex: 1, fontSize: 13 }} />
-                  <input value={pt.name} placeholder="Name (optional)"
-                    onChange={(e) => setDraft({ ...draft, parts: draft.parts.map((x, i) => (i === idx ? { ...x, name: e.target.value } : x)) })}
-                    style={{ flex: 1, fontSize: 13 }} />
-                  <button className="btn link" aria-label="Remove part" style={{ color: "#A32D2D", fontSize: 13 }}
-                    onClick={() => setDraft({ ...draft, parts: draft.parts.filter((_, i) => i !== idx) })}>×</button>
+              {draft.parts.map((pt, idx) => {
+                const partModels = pt.models ?? [];
+                const modelPool = (modelOptions[sheet.assetType] ?? []).filter((m) => !partModels.includes(m));
+                const setPart = (patch: Partial<ProcPart>) =>
+                  setDraft({ ...draft, parts: draft.parts.map((x, i) => (i === idx ? { ...x, ...patch } : x)) });
+                return (
+                <div key={idx} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input className="mono" value={pt.number} placeholder="Part number"
+                      onChange={(e) => setPart({ number: e.target.value })}
+                      style={{ flex: 1, fontSize: 13 }} />
+                    <input value={pt.name} placeholder="Name (optional)"
+                      onChange={(e) => setPart({ name: e.target.value })}
+                      style={{ flex: 1, fontSize: 13 }} />
+                    <button className="btn link" aria-label="Remove part" style={{ color: "#A32D2D", fontSize: 13 }}
+                      onClick={() => setDraft({ ...draft, parts: draft.parts.filter((_, i) => i !== idx) })}>×</button>
+                  </div>
+                  {/* Which models take THIS part number. One procedure, one
+                      mapping: seals get inspected on every pump, but the LC-20's
+                      kit isn't the LC-30's - each unit's work carries only the
+                      parts tagged for its model. */}
+                  {!isSystem && (modelOptions[sheet.assetType] ?? []).length > 0 && (
+                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
+                      <span className="mut" style={{ fontSize: 11 }}>fits</span>
+                      {partModels.length === 0 && (
+                        <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>any model</span>
+                      )}
+                      {partModels.map((m) => (
+                        <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          {m}
+                          <button type="button" className="chip-x" aria-label={`This part no longer fits ${m}`}
+                            onClick={() => setPart({ models: partModels.filter((x) => x !== m) })}
+                            style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
+                        </span>
+                      ))}
+                      {modelPool.length > 0 && (
+                        <select value="" aria-label="Limit this part to a model"
+                          onChange={(e) => { if (e.target.value) setPart({ models: [...partModels, e.target.value] }); }}
+                          style={{ width: "auto", fontSize: 11, padding: "2px 6px" }}>
+                          <option value="">+ model...</option>
+                          {modelPool.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  )}
                 </div>
-              ))}
+                );
+              })}
               <button type="button" className="btn sm"
                 onClick={() => setDraft({ ...draft, parts: [...draft.parts, { name: "", number: "" }] })}>
                 ＋ Part
@@ -783,8 +820,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}
                   onChange={(next) => setDraft({ ...draft, modelScope: next })} />
                 <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-                  Models that take different parts get their own copy: save this one narrowed to
-                  its models, then use &ldquo;duplicate&rdquo; on the row for the next variant.
+                  Same work, different part number per model? Keep ONE procedure covering all of
+                  them and tag each part above with the models it fits. Duplicate the procedure
+                  only when the work itself differs by model.
                 </div>
               </>
             )}

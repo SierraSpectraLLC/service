@@ -28,7 +28,7 @@ import { notifyTaskAssigned } from "@/lib/notify";
 import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
 import { coversSystem } from "@/lib/procedureRole";
-import { parseProcParts, partLabel, schedulePartsOf, serializeProcParts } from "@/lib/procedures";
+import { parseProcParts, partLabel, partsForModel, schedulePartsOf, serializeProcParts } from "@/lib/procedures";
 
 /**
  * The task a schedule turns into. Shared by the daily generator and by doing a
@@ -208,7 +208,10 @@ export async function applyProcedures(assetId: number, today: string, actor: str
       instrumentId: null, assetId,
       title: p.name, body, everyDays: p.intervalDays!,
       nextDue: addDays(today, p.intervalDays!),
-      parts: serializeProcParts(parseProcParts(p.parts)),
+      // Only the parts that fit THIS unit's model: the catalog row may map a
+      // different kit per model, and the LC-30's schedule must not carry the
+      // LC-20's part number.
+      parts: serializeProcParts(partsForModel(parseProcParts(p.parts), a.model)),
       procedureId: p.id, createdBy: actor,
     });
     created++;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  describeProcedure, parseProcParts, serializeProcParts, schedulePartsOf, partLabel,
+  describeProcedure, parseProcParts, partsForModel, serializeProcParts, schedulePartsOf, partLabel,
 } from "@/lib/procedures";
 import { matchItems } from "@/lib/checkout";
 
@@ -65,6 +65,39 @@ describe("parts round-trip", () => {
     expect(schedulePartsOf({ parts: "", partName: "", partNumber: "" })).toEqual([]);
     expect(partLabel({ name: "", number: "999" })).toBe("PN 999");
     expect(partLabel({ name: "Ferrule", number: "" })).toBe("Ferrule");
+  });
+});
+
+describe("per-model parts on one procedure", () => {
+  // "Inspect plunger seals" is ONE procedure on every pump; the kit differs by
+  // model. Each part row says which models it fits, and stamp time picks the
+  // right one for the unit in hand.
+  const mapping = [
+    { name: "Seal kit", number: "X-10", models: ["LC-10"] },
+    { name: "Seal kit", number: "Y-20", models: ["LC-20", "LC-20AD"] },
+    { name: "Grease", number: "G-1" }, // untagged = every model
+  ];
+
+  it("round-trips the model tags, omitting empty ones", () => {
+    const round = parseProcParts(serializeProcParts(mapping));
+    expect(round).toEqual(mapping);
+    // No tags = the key is absent, so pre-models data is byte-identical.
+    expect(serializeProcParts([{ name: "Ferrule", number: "F-1", models: [] }]))
+      .toBe('[{"name":"Ferrule","number":"F-1"}]');
+  });
+
+  it("a unit gets the parts tagged for its model, plus the untagged ones", () => {
+    expect(partsForModel(mapping, "LC-20AD").map((p) => p.number)).toEqual(["Y-20", "G-1"]);
+    expect(partsForModel(mapping, "lc-10").map((p) => p.number)).toEqual(["X-10", "G-1"]);
+    // A model in nobody's tags still gets the universal parts.
+    expect(partsForModel(mapping, "LC-30").map((p) => p.number)).toEqual(["G-1"]);
+  });
+
+  it("the live sentence names which models each part fits", () => {
+    expect(describeProcedure({
+      assetType: "Pump", runsAtIntake: false, intervalDays: 180, modelScope: [],
+      parts: [{ name: "Seal kit", number: "X-10", models: ["LC-10"] }],
+    })).toBe("Runs every 6 months on every pump. Takes Seal kit PN X-10 (LC-10).");
   });
 });
 

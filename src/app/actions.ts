@@ -26,7 +26,7 @@ import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } f
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
 } from "@/lib/pmGenerate";
-import { parseProcParts, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
+import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
@@ -569,7 +569,9 @@ async function generateCheckout(
   for (const i of fresh) {
     await db.insert(tasks).values({
       tenantOrgId,
-      instrumentId, title: i.name, body: procedureTaskBody(i, parseProcParts(i.parts)), origin: "checkout",
+      // Parts narrowed to this unit's model - a per-model mapping on the
+      // procedure must not put the LC-20's kit on an LC-30's task.
+      instrumentId, title: i.name, body: procedureTaskBody(i, partsForModel(parseProcParts(i.parts), target.model)), origin: "checkout",
       assetId: target.id, sortOrder: i.position, procedureId: i.id ?? null,
     });
   }

@@ -3,9 +3,19 @@
 // (the parts.specs convention), and the sentence a procedure's editor sees is
 // built here so it can be tested - it is the page's documentation now.
 import { cadenceLabel } from "@/lib/pm";
-import { summarizeItem, type CheckoutItem } from "@/lib/checkout";
+import { scopeMatches, summarizeItem, type CheckoutItem } from "@/lib/checkout";
 
-export type ProcPart = { name: string; number: string };
+/**
+ * One consumable a procedure takes. `models` narrows it to the models that
+ * actually use that part number - "Inspect plunger seals" is ONE procedure on
+ * every pump, but the LC-20's seal kit is not the LC-30's, so each part row
+ * says which models it fits. Absent or empty = fits every model the
+ * procedure covers, which is what every part meant before this existed.
+ */
+export type ProcPart = { name: string; number: string; models?: string[] };
+
+const cleanModels = (v: unknown): string[] =>
+  Array.isArray(v) ? v.map((m) => String(m).trim()).filter(Boolean) : [];
 
 /** Tolerant parse: bad or legacy JSON degrades to "no parts", never a crash. */
 export function parseProcParts(raw: string): ProcPart[] {
@@ -14,7 +24,12 @@ export function parseProcParts(raw: string): ProcPart[] {
     const v = JSON.parse(raw);
     if (!Array.isArray(v)) return [];
     return v
-      .map((p) => ({ name: String(p?.name ?? "").trim(), number: String(p?.number ?? "").trim() }))
+      .map((p) => {
+        const models = cleanModels(p?.models);
+        const part: ProcPart = { name: String(p?.name ?? "").trim(), number: String(p?.number ?? "").trim() };
+        // Key omitted rather than [] so pre-models data round-trips unchanged.
+        return models.length ? { ...part, models } : part;
+      })
       .filter((p) => p.name || p.number);
   } catch {
     return [];
@@ -23,9 +38,22 @@ export function parseProcParts(raw: string): ProcPart[] {
 
 export function serializeProcParts(list: ProcPart[]): string {
   const clean = list
-    .map((p) => ({ name: p.name.trim(), number: p.number.trim() }))
+    .map((p) => {
+      const models = cleanModels(p.models);
+      const part: ProcPart = { name: p.name.trim(), number: p.number.trim() };
+      return models.length ? { ...part, models } : part;
+    })
     .filter((p) => p.name || p.number);
   return clean.length ? JSON.stringify(clean) : "";
+}
+
+/**
+ * The parts that apply to one concrete unit: everything unrestricted, plus
+ * whatever is tagged with this unit's model. Used at stamp time - a schedule
+ * or task on an LC-30 carries the LC-30's kit, not the whole mapping.
+ */
+export function partsForModel(parts: ProcPart[], model: string): ProcPart[] {
+  return parts.filter((p) => !p.models?.length || scopeMatches(p.models, model));
 }
 
 /**
@@ -76,7 +104,7 @@ export function describeProcedure(d: ProcedureTiming): string | null {
       ? `on ${d.modelScope.join(", ")}`
       : `on every ${d.assetType.toLowerCase()}`;
   const parts = d.parts.length
-    ? ` Takes ${d.parts.map(partLabel).join(", ")}.`
+    ? ` Takes ${d.parts.map((p) => partLabel(p) + (p.models?.length ? ` (${p.models.join("/")})` : "")).join(", ")}.`
     : "";
   return `Runs ${when} ${where}.${parts}`;
 }
