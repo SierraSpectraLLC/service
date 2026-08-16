@@ -6,7 +6,7 @@ import {
   assets, assetEvents, tasks, parts, timeEntries, instruments, instrumentGases,
   attachments, checklistItems, itemNotes, taskNotes, auditLog, assetShares, orgs, eodUpdates,
   serviceVisits, workOrders,
-  pmSchedules, vocabTerms, procedures, partPrices,
+  pmSchedules, vocabTerms, procedures, partPrices, catalogRefs,
 } from "@/db/schema";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { requireUser } from "@/lib/authz";
@@ -21,6 +21,8 @@ import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
+import ReferencePanel from "@/components/ReferencePanel";
+import { refsForUnits } from "@/lib/catalogRefs";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import {
   fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
@@ -81,6 +83,13 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   ]);
   if (!asset) notFound();
   const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
+
+  // The reference shelf filed on this unit's model (and its type) in the
+  // catalog - identical on every unit like it, which is the point.
+  const refRowsAll = await db.select().from(catalogRefs)
+    .where(forTenant(catalogRefs.tenantOrgId, asset.tenantOrgId))
+    .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id)).catch(() => []);
+  const refRows = refsForUnits(refRowsAll, [{ kind: asset.kind, model: asset.model }]);
 
   // Checklists and note threads for this asset's tasks (same shape the system page uses).
   const taskIds = taggedTasks.map((t) => t.id);
@@ -236,7 +245,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
       <PanelLayout
         viewKey="asset"
         saved={panelLayout}
-        defaultRight={["photos", "files", "hours", "update", "history", "activity"]}
+        defaultRight={["photos", "files", "reference", "hours", "update", "history", "activity"]}
         panels={[
           { key: "unit", label: "Unit", node: (
             <div className="card">
@@ -361,6 +370,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               storage={fileQuota}
               combineTitle={`${asset.kind}${asset.model ? ` ${asset.model}` : ""} report packet`}
               combineLines={[asset.serial ? `SN ${asset.serial}` : "", asset.owner, `Prepared by ${user.name}`].filter(Boolean)} />
+          ) },
+          // The model's shelf: manuals and field notes filed on the catalog,
+          // identical on every unit of this model.
+          { key: "reference", label: "Reference", node: (
+            <ReferencePanel canEdit={isStaff}
+              scopes={[
+                ...(asset.model ? [{ assetType: asset.kind, model: asset.model, label: `${asset.model} (every unit)` }] : []),
+                { assetType: asset.kind, model: "", label: `any ${asset.kind.toLowerCase()}` },
+              ]}
+              refs={refRows.map((r) => ({
+                id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+                title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
+                when: shopDay(r.createdAt),
+              }))} />
           ) },
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={target}

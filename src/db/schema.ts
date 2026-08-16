@@ -1003,6 +1003,28 @@ export const partCatalog = pgTable("part_catalog", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("part_catalog_pn_idx").on(t.partNumber)]);
 
+// ── Catalog reference library ───────────────────────────────────────────────
+// The knowledge that accumulates about a KIND of equipment, filed on the model
+// (or module type) rather than on any one unit: the service manual's URL, the
+// page about installing the H-ESI needle, the photo of the trick nobody
+// remembers. Filed once, it surfaces on every system and unit with matching
+// equipment - which is the whole point. A note about one specific unit still
+// belongs on that unit's record; this is for what is true of all of them.
+export const catalogRefs = pgTable("catalog_refs", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  assetType: text("asset_type").notNull(),          // catalog module type
+  model: text("model").notNull().default(""),       // "" = every model of the type
+  kind: text("kind").notNull().default("link"),     // 'link' | 'note'
+  title: text("title").notNull().default(""),
+  // The manual's URL on a link; on a note, an optional image or file URL
+  // (a gallery photo, a shelf file) that illustrates it.
+  url: text("url").notNull().default(""),
+  body: text("body").notNull().default(""),         // the note text
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("catalog_refs_type_idx").on(t.assetType)]);
+
 // What is in a kit. Lines are part NUMBERS, not catalog ids, for the same reason
 // the rest of the system keys on numbers: a kit can list a part nobody has
 // catalogued, and should, rather than refusing to be written down.

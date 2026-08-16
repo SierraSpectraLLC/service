@@ -7,6 +7,7 @@ import {
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
   serviceVisits, workOrders, orgSites,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
+  catalogRefs,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
 import {
@@ -43,6 +44,8 @@ import TasksPanel from "@/components/TasksPanel";
 import WorkOrdersPanel from "@/components/WorkOrdersPanel";
 import SiteCard from "@/components/SiteCard";
 import MaintenancePanel from "@/components/MaintenancePanel";
+import ReferencePanel from "@/components/ReferencePanel";
+import { refsForUnits } from "@/lib/catalogRefs";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
@@ -202,13 +205,25 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // Which of this system's tasks a report can be filed against, and which of
   // those are mandatory - the ★ in the attachment picker and the sign-off gate.
   const procIds = [...new Set(taskRows.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
-  const [procRows, signRows] = await Promise.all([
+  const [procRows, signRows, refRowsAll] = await Promise.all([
     procIds.length
       ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
           .from(procedures).where(inArray(procedures.id, procIds))
       : [],
     db.select().from(signoffs).where(and(eq(signoffs.instrumentId, instId), isNull(signoffs.revokedAt))),
+    // The reference shelf: manuals and field notes filed on this system's
+    // modules in the catalog. Filed once, seen on every unit like it.
+    db.select().from(catalogRefs).where(forTenant(catalogRefs.tenantOrgId, inst.tenantOrgId))
+      .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id)).catch(() => []),
   ]);
+  const refRows = refsForUnits(refRowsAll, assetRows.map((a) => ({ kind: a.kind, model: a.model })));
+  // Where a new reference may be filed: each distinct model here, and each type.
+  const refScopes = [
+    ...[...new Map(assetRows.filter((a) => a.model).map((a) => [`${a.kind}|${a.model}`, a])).values()]
+      .map((a) => ({ assetType: a.kind, model: a.model, label: `${a.model} (every unit)` })),
+    ...[...new Set(assetRows.map((a) => a.kind))]
+      .map((k) => ({ assetType: k, model: "", label: `any ${k.toLowerCase()}` })),
+  ];
   const evidenceTasks = taskRows.map((t) => {
     const pr = procRows.find((x) => x.id === t.procedureId);
     return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
@@ -379,7 +394,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
       <PanelLayout
         viewKey="system"
         saved={panelLayout}
-        defaultRight={["site", "custody", "photos", "files", "hours", "update", "discussion", "activity"]}
+        defaultRight={["site", "custody", "photos", "files", "reference", "hours", "update", "discussion", "activity"]}
         panels={[
           { key: "system", label: "System", node: (
             <SystemPanel
@@ -540,6 +555,16 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               storage={fileQuota}
               combineTitle={`${inst.externalId} report packet`}
               combineLines={[systemLabel(inst, assetRows), inst.client, `Prepared by ${user.name}`].filter(Boolean)} />
+          ) },
+          // The model's accumulated knowledge - manuals, field notes - filed on
+          // the catalog, so this panel is identical on every unit like these.
+          { key: "reference", label: "Reference", node: (
+            <ReferencePanel canEdit={isStaff} scopes={refScopes}
+              refs={refRows.map((r) => ({
+                id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+                title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
+                when: shopDay(r.createdAt),
+              }))} />
           ) },
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={{ instrumentId: inst.id, assetId: null }}

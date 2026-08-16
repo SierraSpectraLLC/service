@@ -1,7 +1,7 @@
 import { asc } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { assets, instruments, partPrices, vocabTerms } from "@/db/schema";
+import { assets, catalogRefs, instruments, partPrices, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
@@ -9,6 +9,8 @@ import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
 import CatalogPhotosCard from "@/components/CatalogPhotosCard";
 import PriceBookCard from "@/components/PriceBookCard";
+import ReferencePanel from "@/components/ReferencePanel";
+import { shopDay } from "@/lib/shopday";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +39,9 @@ export default async function CatalogPage() {
     }).from(partPrices).where(forTenant(partPrices.tenantOrgId, readTenant(user)))
       .orderBy(asc(partPrices.partNumber), asc(partPrices.vendor)),
   ]);
+  const refRows = await db.select().from(catalogRefs)
+    .where(forTenant(catalogRefs.tenantOrgId, readTenant(user)))
+    .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id)).catch(() => []);
 
   const defined = terms.filter((t) => t.kind === "category");
   // A category can exist only on systems - typed in before anyone defined it.
@@ -89,6 +94,17 @@ export default async function CatalogPage() {
         hasPhoto: !!t.photoUrl, photoFraming: t.photoFraming,
       }))} />
       <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
+      <ReferencePanel canEdit
+        sub="Manuals, links and field notes per model or module type. Whatever is filed here shows up on every system and unit with that equipment."
+        scopes={[
+          ...models.map((m) => ({ assetType: m.assetType, model: m.name, label: `${m.name} (${m.assetType})` })),
+          ...types.filter((t) => t.id !== null).map((t) => ({ assetType: t.name, model: "", label: `any ${t.name.toLowerCase()}` })),
+        ]}
+        refs={refRows.map((r) => ({
+          id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+          title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
+          when: shopDay(r.createdAt),
+        }))} />
     </div>
   );
 }

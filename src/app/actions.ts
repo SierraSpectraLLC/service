@@ -13,7 +13,7 @@ import {
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
-  workOrders, orgSites, partCatalog, partKitLines, agreements,
+  workOrders, orgSites, partCatalog, partKitLines, agreements, catalogRefs,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
@@ -6949,6 +6949,53 @@ const cleanCatalog = (d: CatalogInput) => ({
   models: [...new Set((d.models ?? []).map((m) => m.trim()).filter(Boolean))],
   note: d.note.trim().slice(0, 500),
 });
+
+// ── Catalog reference library ───────────────────────────────────────────────
+// Manuals, links and field notes filed on a model or module type, surfacing on
+// every unit with matching equipment. See lib/catalogRefs and db catalog_refs.
+
+export type CatalogRefInput = {
+  assetType: string; model: string; kind: string;
+  title: string; url: string; body: string;
+};
+
+export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const assetType = data.assetType.trim().slice(0, 60);
+  if (!assetType) return { error: "Pick which equipment this is about" };
+  const kind = data.kind === "note" ? "note" : "link";
+  const title = data.title.trim().slice(0, 160);
+  const url = data.url.trim().slice(0, 1000);
+  const body = data.body.trim().slice(0, 4000);
+  if (url && !/^https?:\/\//i.test(url)) return { error: "A link should start with http:// or https://" };
+  if (kind === "link" && !url) return { error: "A link needs a URL" };
+  if (kind === "note" && !body && !url) return { error: "A note needs some text (or at least a picture)" };
+  const [row] = await db.insert(catalogRefs).values({
+    tenantOrgId: myTenantOrgId(u),
+    assetType, model: data.model.trim().slice(0, 120), kind, title, url, body,
+    createdBy: u.name || u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "catalog_ref", entityId: row.id, tenantOrgId: row.tenantOrgId,
+    action: `filed ${kind} "${title || url || body.slice(0, 40)}" under ${row.model || `any ${assetType}`}`,
+  });
+  revalidatePath("/settings/catalog");
+  return { id: row.id };
+}
+
+export async function removeCatalogRef(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(catalogRefs).where(eq(catalogRefs.id, id));
+  if (!row) return {};
+  if (readTenant(u) !== null && row.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  await db.delete(catalogRefs).where(eq(catalogRefs.id, id));
+  await audit({
+    actor: u.email, entityType: "catalog_ref", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `removed ${row.kind} "${row.title || row.url || row.body.slice(0, 40)}" from ${row.model || `any ${row.assetType}`}`,
+  });
+  revalidatePath("/settings/catalog");
+  return {};
+}
 
 export async function addCatalogPart(data: CatalogInput): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
