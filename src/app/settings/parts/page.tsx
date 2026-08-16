@@ -1,13 +1,14 @@
 import { asc, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { partCatalog, partKitLines, parts, poLines, stockItems, vocabTerms } from "@/db/schema";
+import { partCatalog, partKitLines, partPrices, parts, poLines, stockItems, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { uncatalogued } from "@/lib/partCatalog";
 import SettingsTabs from "@/components/SettingsTabs";
 import PartCatalogPanel from "@/components/PartCatalogPanel";
+import PriceBookCard from "@/components/PriceBookCard";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,13 @@ export default async function PartsCatalogPage() {
     db.selectDistinct({ pn: stockItems.partNumber }).from(stockItems),
     db.selectDistinct({ pn: poLines.partNumber }).from(poLines),
   ]);
+  // Vendor prices live beside the numbers they price - this page - rather than
+  // dangling off the equipment catalog, where they read as a second parts book.
+  const priceRows = await db.select({
+    id: partPrices.id, partNumber: partPrices.partNumber, vendor: partPrices.vendor,
+    isOem: partPrices.isOem, priceCents: partPrices.priceCents, url: partPrices.url, note: partPrices.note,
+  }).from(partPrices).where(forTenant(partPrices.tenantOrgId, tenant))
+    .orderBy(asc(partPrices.partNumber), asc(partPrices.vendor));
 
   const kitIds = rows.filter((r) => r.kind === "kit").map((r) => r.id);
   const lines = kitIds.length
@@ -65,6 +73,7 @@ export default async function PartsCatalogPage() {
         }, {})}
         unnamed={uncatalogued(rows, used)}
       />
+      <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
     </div>
   );
 }

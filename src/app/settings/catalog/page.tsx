@@ -1,14 +1,13 @@
 import { asc } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { assets, catalogRefs, instruments, partPrices, vocabTerms } from "@/db/schema";
+import { assets, catalogRefs, instruments, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
 import CatalogPhotosCard from "@/components/CatalogPhotosCard";
-import PriceBookCard from "@/components/PriceBookCard";
 import ReferencePanel from "@/components/ReferencePanel";
 import { shopDay } from "@/lib/shopday";
 
@@ -25,7 +24,7 @@ export default async function CatalogPage() {
   try { user = await requireStaff(); } catch { redirect("/"); }
   const isPlatform = isPlatformStaff(tenantViewer(user));
 
-  const [terms, assetRows, systemRows, priceRows] = await Promise.all([
+  const [terms, assetRows, systemRows] = await Promise.all([
     db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, readTenant(user)))
       .orderBy(asc(vocabTerms.assetType), asc(vocabTerms.name)),
     // Usage counts, so removing something can say what it would leave behind.
@@ -33,11 +32,6 @@ export default async function CatalogPage() {
       .where(forTenant(assets.tenantOrgId, readTenant(user))),
     db.select({ category: instruments.category }).from(instruments)
       .where(forTenant(instruments.tenantOrgId, readTenant(user))),
-    db.select({
-      id: partPrices.id, partNumber: partPrices.partNumber, vendor: partPrices.vendor,
-      isOem: partPrices.isOem, priceCents: partPrices.priceCents, url: partPrices.url, note: partPrices.note,
-    }).from(partPrices).where(forTenant(partPrices.tenantOrgId, readTenant(user)))
-      .orderBy(asc(partPrices.partNumber), asc(partPrices.vendor)),
   ]);
   const refRows = await db.select().from(catalogRefs)
     .where(forTenant(catalogRefs.tenantOrgId, readTenant(user)))
@@ -93,7 +87,6 @@ export default async function CatalogPage() {
         // /api/catalog/photo, which checks who is asking.
         hasPhoto: !!t.photoUrl, photoFraming: t.photoFraming,
       }))} />
-      <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
       <ReferencePanel canEdit
         sub="Manuals, links and field notes per model or module type. Whatever is filed here shows up on every system and unit with that equipment."
         scopes={[
