@@ -10,6 +10,7 @@
 import { inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { procedures, taskResults } from "@/db/schema";
+import { needsResult } from "@/lib/testResult";
 
 export type TaskTestSpec = { resultType: string; target: string | null; tolerancePct: string | null };
 export type TaskTestResult = {
@@ -45,7 +46,9 @@ export async function loadTaskTests(
 
   for (const t of rows) {
     const p = procRows.find((x) => x.id === t.procedureId);
-    if (p?.kind === "test") {
+    // Tests, and tasks whose outcome is inspected/replaced - both close by
+    // recording what happened, so both get the result block and the gate.
+    if (p && needsResult(p.kind, p.resultType)) {
       tests.set(t.id, { resultType: p.resultType, target: p.target, tolerancePct: p.tolerancePct });
     }
   }

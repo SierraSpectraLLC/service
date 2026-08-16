@@ -29,7 +29,7 @@ import {
 } from "@/lib/pmGenerate";
 import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
-import { completionBlocked, evaluateResult, resultIsRecorded } from "@/lib/testResult";
+import { completionBlocked, evaluateResult, needsResult, resultIsRecorded } from "@/lib/testResult";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
@@ -1353,7 +1353,7 @@ async function testSpecFor(t: { procedureId: number | null }) {
     kind: procedures.kind, resultType: procedures.resultType,
     target: procedures.target, tolerancePct: procedures.tolerancePct,
   }).from(procedures).where(eq(procedures.id, t.procedureId));
-  return p && p.kind === "test" ? p : null;
+  return p && needsResult(p.kind, p.resultType) ? p : null;
 }
 
 /**
@@ -1379,6 +1379,7 @@ export async function recordTaskResult(
   if (!resultIsRecorded(spec.resultType, value)) {
     return {
       error: spec.resultType === "pass_fail" ? "Say whether it passed or failed"
+        : spec.resultType === "inspect_replace" ? "Say which happened - inspected, or replaced"
         : spec.resultType === "measured" || spec.resultType === "reading" ? "Enter the number you read"
         : "Write down what you found",
     };
@@ -1416,7 +1417,7 @@ export async function setTaskState(taskId: number, state: string): Promise<{ err
     const spec = await testSpecFor(t);
     if (spec) {
       const [r] = await db.select().from(taskResults).where(eq(taskResults.taskId, taskId));
-      const blocked = completionBlocked({ kind: "test", resultType: spec.resultType }, r);
+      const blocked = completionBlocked({ kind: spec.kind, resultType: spec.resultType }, r);
       if (blocked) return { error: blocked };
     }
   }
@@ -3117,7 +3118,11 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   const name = data.name.trim();
   if (!name || name.length > 120) return { error: "Name must be 1-120 characters" };
   const isTest = data.kind === "test";
-  const resultType = isTest && (RESULT_TYPES as readonly string[]).includes(data.resultType) ? data.resultType : "pass_fail";
+  // Tasks carry one meaningful result type: inspect_replace, the outcome gate.
+  // Everything else a task stores as pass_fail, which for a task means "none".
+  const resultType = isTest
+    ? ((RESULT_TYPES as readonly string[]).includes(data.resultType) ? data.resultType : "pass_fail")
+    : (data.resultType === "inspect_replace" ? "inspect_replace" : "pass_fail");
   const target = isTest && (resultType === "measured" || resultType === "note") ? data.target.trim() || null : null;
   let tolerancePct: string | null = null;
   if (isTest && resultType === "measured" && data.tolerancePct.trim()) {

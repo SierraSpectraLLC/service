@@ -393,7 +393,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             <div className="mut" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.notes}</div>
           )}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2, alignItems: "center" }}>
-            {i.kind === "test" && (
+            {/* Tests always summarize; a task only when it has something to
+                say (an outcome, a required note) - "Done / not done" is noise. */}
+            {(i.kind === "test" || summarizeItem({ ...i }) !== "Done / not done") && (
               <span className="mono" style={{ fontSize: 11, color: "var(--slate)", background: "#F1F4F8", borderRadius: 4, padding: "1px 5px" }}>
                 {summarizeItem({ ...i })}
               </span>
@@ -778,17 +780,34 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 )}
               </div>
             ) : (
-              <div style={{ display: "flex", gap: 16, marginBottom: 10, flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
-                  <input type="checkbox" checked={draft.requiresNote} style={{ width: 15, height: 15 }}
-                    onChange={(e) => setDraft({ ...draft, requiresNote: e.target.checked })} />
-                  Require a note
+              <div style={{ marginBottom: 10 }}>
+                {/* "Inspect and/or replace X" has two honest endings and a bare
+                    checkmark records neither. On, the generated task closes only
+                    by recording which happened - like a test records its number. */}
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "0 0 8px", fontWeight: 400, color: "var(--ink)" }}>
+                  <input type="checkbox" checked={draft.resultType === "inspect_replace"} style={{ width: 15, height: 15, marginTop: 2 }}
+                    onChange={(e) => setDraft({ ...draft, resultType: e.target.checked ? "inspect_replace" : "pass_fail" })} />
+                  <span>
+                    Inspect / Replace outcome
+                    <span className="mut" style={{ display: "block", fontSize: 11 }}>
+                      The task can&apos;t be closed until whoever did it records which happened -
+                      inspected (what was found) or replaced (what went in). Both are documented
+                      with name and time, like a test result.
+                    </span>
+                  </span>
                 </label>
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
-                  <input type="checkbox" checked={draft.consumesPart} style={{ width: 15, height: 15 }}
-                    onChange={(e) => setDraft({ ...draft, consumesPart: e.target.checked })} />
-                  Consumes a part
-                </label>
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
+                    <input type="checkbox" checked={draft.requiresNote} style={{ width: 15, height: 15 }}
+                      onChange={(e) => setDraft({ ...draft, requiresNote: e.target.checked })} />
+                    Require a note
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
+                    <input type="checkbox" checked={draft.consumesPart} style={{ width: 15, height: 15 }}
+                      onChange={(e) => setDraft({ ...draft, consumesPart: e.target.checked })} />
+                    Consumes a part
+                  </label>
+                </div>
               </div>
             )}
 

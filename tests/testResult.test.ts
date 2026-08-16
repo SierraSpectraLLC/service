@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  completionBlocked, evaluateResult, firstNumber, resultIsRecorded, toleranceBand,
+  completionBlocked, evaluateResult, firstNumber, needsResult, resultIsRecorded, toleranceBand,
 } from "@/lib/testResult";
 
 const measured = { resultType: "measured", target: "5 mL/min", tolerancePct: "10" };
@@ -61,6 +61,32 @@ describe("the other result types", () => {
     expect(evaluateResult({ resultType: "reading", target: null, tolerancePct: null }, "1240 counts"))
       .toEqual({ passed: null, why: "1240 counts" });
     expect(evaluateResult({ resultType: "note", target: null, tolerancePct: null }, "lamp at 812 h").passed).toBeNull();
+  });
+});
+
+describe("the inspect/replace outcome", () => {
+  const spec = { resultType: "inspect_replace", target: null, tolerancePct: null };
+
+  it("records which happened without judging either - both are fine endings", () => {
+    expect(evaluateResult(spec, "Inspected")).toEqual({ passed: null, why: "Inspected" });
+    expect(evaluateResult(spec, "replaced")).toEqual({ passed: null, why: "Replaced" });
+  });
+
+  it("accepts only the two outcomes as a record", () => {
+    expect(resultIsRecorded("inspect_replace", "Inspected")).toBe(true);
+    expect(resultIsRecorded("inspect_replace", "REPLACED")).toBe(true);
+    expect(resultIsRecorded("inspect_replace", "looked at it")).toBe(false);
+    expect(resultIsRecorded("inspect_replace", "")).toBe(false);
+  });
+
+  it("gates a TASK the way a test is gated - that is the whole point", () => {
+    // "Inspect and/or replace the plunger seal" has two honest endings, and a
+    // bare checkmark records neither.
+    expect(needsResult("task", "inspect_replace")).toBe(true);
+    expect(needsResult("task", "pass_fail")).toBe(false);
+    expect(completionBlocked({ kind: "task", resultType: "inspect_replace" }, null)).toContain("inspected, or replaced");
+    expect(completionBlocked({ kind: "task", resultType: "inspect_replace" }, { value: "Replaced" })).toBe("");
+    expect(completionBlocked({ kind: "task", resultType: "pass_fail" }, null)).toBe("");
   });
 });
 

@@ -50,6 +50,12 @@ export async function createPmTask(
     title: s.title, body: [s.body, partLine].filter(Boolean).join("\n"),
     assignee: s.assignee,
     dueDate, origin: "pm", pmScheduleId: s.id,
+    // The catalog procedure behind the schedule, when there is one. This is
+    // how everything procedure-driven reaches RECURRING work the way it
+    // already reached intake work: the inspect/replace outcome gate, the
+    // IQ/OQ/PQ grouping, the sign-off's mandatory-test check. Without it a
+    // recurring task was an orphan that looked identical but enforced nothing.
+    procedureId: s.procedureId,
   }).returning();
   await audit({
     actor, instrumentId: onSystem, assetId: s.assetId, entityType: "task", entityId: t.id, action,

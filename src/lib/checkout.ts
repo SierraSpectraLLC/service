@@ -16,6 +16,9 @@ export const RESULT_LABEL: Record<string, string> = {
   measured: "Measured value",
   reading: "Reading",
   note: "Note",
+  // Task outcome, not a test type: "inspect and/or replace X" closes as one
+  // or the other, recorded. See lib/testResult.
+  inspect_replace: "Inspected / Replaced",
 };
 
 export type CheckoutItem = {
@@ -80,6 +83,7 @@ export function summarizeItem(item: CheckoutItem): string {
     return RESULT_LABEL[item.resultType] ?? item.resultType;
   }
   const flags: string[] = [];
+  if (item.resultType === "inspect_replace") flags.push("Records inspected / replaced");
   if (item.requiresNote) flags.push("Note required");
   if (item.consumesPart) flags.push("Logs part used");
   return flags.length ? flags.join(" · ") : "Done / not done";

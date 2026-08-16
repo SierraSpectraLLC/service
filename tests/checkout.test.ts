@@ -96,6 +96,7 @@ describe("summarizeItem", () => {
     expect(summarizeItem(item({ kind: "task", requiresNote: true }))).toBe("Note required");
     expect(summarizeItem(item({ kind: "task", consumesPart: true }))).toBe("Logs part used");
     expect(summarizeItem(item({ kind: "task", requiresNote: true, consumesPart: true }))).toBe("Note required · Logs part used");
+    expect(summarizeItem(item({ kind: "task", resultType: "inspect_replace" }))).toBe("Records inspected / replaced");
   });
 });
 

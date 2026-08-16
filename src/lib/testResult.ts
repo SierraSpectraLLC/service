@@ -43,6 +43,7 @@ export function resultIsRecorded(resultType: string, value: string): boolean {
   const v = value.trim();
   if (!v) return false;
   if (resultType === "pass_fail") return /^(pass|fail)$/i.test(v);
+  if (resultType === "inspect_replace") return /^(inspected|replaced)$/i.test(v);
   if (resultType === "measured" || resultType === "reading") return firstNumber(v) !== null;
   return true; // note: any text is the record
 }
@@ -62,6 +63,15 @@ export function evaluateResult(spec: ResultSpec, value: string): Verdict {
   if (spec.resultType === "pass_fail") {
     if (/^pass$/i.test(v)) return { passed: true, why: "Passed" };
     if (/^fail$/i.test(v)) return { passed: false, why: "Failed" };
+    return { passed: null, why: v };
+  }
+
+  // Inspected and Replaced are both fine outcomes of the same job - neither is
+  // a failure, both are facts the record needs. "Inspect and/or replace the
+  // plunger seal" closes as one or the other, never as a bare checkmark.
+  if (spec.resultType === "inspect_replace") {
+    if (/^inspected$/i.test(v)) return { passed: null, why: "Inspected" };
+    if (/^replaced$/i.test(v)) return { passed: null, why: "Replaced" };
     return { passed: null, why: v };
   }
 
@@ -93,18 +103,28 @@ export function toleranceBand(spec: ResultSpec): string {
 }
 
 /**
+ * Whether recording an outcome is what "done" means for this work: every test,
+ * and any task the catalog marked inspect/replace. That marking is why an
+ * ordinary task stays an ordinary checkbox.
+ */
+export const needsResult = (kind: string, resultType: string) =>
+  kind === "test" || resultType === "inspect_replace";
+
+/**
  * Whether a task may be called done.
  *
- * Only tests are gated, and only on having a result - not on passing one. A
- * failed test is a finished test: the number is the point, and refusing to
- * close the task would just get the failure recorded somewhere it cannot be
- * found.
+ * Gated only on HAVING a result, never on it being good news. A failed test
+ * is a finished test and a replaced seal is a finished inspection: the
+ * outcome is the point, and refusing to close the task would just get it
+ * recorded somewhere it cannot be found.
  */
 export function completionBlocked(
   task: { kind: string; resultType: string },
   result: { value: string } | null,
 ): string {
-  if (task.kind !== "test") return "";
+  if (!needsResult(task.kind, task.resultType)) return "";
   if (result && resultIsRecorded(task.resultType, result.value)) return "";
-  return "Record the result first - a test closed without one is a checkbox, not a measurement.";
+  return task.resultType === "inspect_replace"
+    ? "Record what happened first - inspected, or replaced. That record is the point of the task."
+    : "Record the result first - a test closed without one is a checkbox, not a measurement.";
 }

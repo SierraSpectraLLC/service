@@ -132,10 +132,15 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
       {/* Recorded: the reading, what it means, and who stands behind it. */}
       {r && !editing && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span className="pill" style={verdictColor(r.passed)}>
-            {r.passed === true ? "Pass" : r.passed === false ? "Fail" : "Recorded"}
+          <span className="pill" style={
+            /^replaced$/i.test(r.value) ? { background: "#FDF0E7", color: "#9A5B12" }
+              : /^inspected$/i.test(r.value) ? { background: "#E7F2FA", color: "#1D6396" }
+              : verdictColor(r.passed)
+          }>
+            {r.passed === true ? "Pass" : r.passed === false ? "Fail"
+              : /^(inspected|replaced)$/i.test(r.value) ? r.value : "Recorded"}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>{r.value}</span>
+          {!/^(inspected|replaced)$/i.test(r.value) && <span style={{ fontSize: 13, fontWeight: 600 }}>{r.value}</span>}
           {band && <span className="mut" style={{ fontSize: 11 }}>of {band}</span>}
           {r.note && <span className="mut" style={{ fontSize: 12 }}>- {r.note}</span>}
           <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>
@@ -147,9 +152,9 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
 
       {canEdit && editing && (
         <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
-          {spec.resultType === "pass_fail" ? (
+          {spec.resultType === "pass_fail" || spec.resultType === "inspect_replace" ? (
             <div className="seg" role="group" aria-label="Result">
-              {["Pass", "Fail"].map((v) => (
+              {(spec.resultType === "pass_fail" ? ["Pass", "Fail"] : ["Inspected", "Replaced"]).map((v) => (
                 <button key={v} type="button" aria-pressed={value === v} onClick={() => setValue(v)}>{v}</button>
               ))}
             </div>
@@ -159,7 +164,10 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
               style={{ width: "auto", flex: "1 1 140px", fontSize: 13 }} />
           )}
           <input value={note} onChange={(e) => setNote(e.target.value)} aria-label="Conditions or anything odd"
-            placeholder="Conditions, anything odd (optional)" style={{ width: "auto", flex: "2 1 180px", fontSize: 13 }} />
+            placeholder={spec.resultType === "inspect_replace"
+              ? value === "Replaced" ? "What went in - part #, serial (optional)" : "What you found (optional)"
+              : "Conditions, anything odd (optional)"}
+            style={{ width: "auto", flex: "2 1 180px", fontSize: 13 }} />
           <button className="btn sm accent" disabled={pending || !resultIsRecorded(spec.resultType, value)} onClick={save}>
             {pending ? "Recording..." : "Record"}
           </button>
@@ -300,10 +308,13 @@ export default function TasksPanel({
             <span className="pill" style={
               t.result?.passed === true ? { background: "#E5F3E5", color: "#2E6B2E" }
               : t.result?.passed === false ? { background: "#FBE9E9", color: "#A32D2D" }
+              : t.result && /^replaced$/i.test(t.result.value) ? { background: "#FDF0E7", color: "#9A5B12" }
+              : t.result && /^inspected$/i.test(t.result.value) ? { background: "#E7F2FA", color: "#1D6396" }
               : t.result ? { background: "#EEF1F5", color: "#475569" }
               : { background: "#FAF0DC", color: "#8A5410" }
             }>
-              {t.result ? (t.result.passed === true ? `pass ${t.result.value}` : t.result.passed === false ? `fail ${t.result.value}` : t.result.value) : "no result"}
+              {t.result ? (t.result.passed === true ? `pass ${t.result.value}` : t.result.passed === false ? `fail ${t.result.value}` : t.result.value)
+                : t.test.resultType === "inspect_replace" ? "outcome needed" : "no result"}
             </span>
           )}
           {assetLabel(t.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(t.assetId)}</span>}
