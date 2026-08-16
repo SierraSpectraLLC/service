@@ -2110,3 +2110,36 @@ DO $$ BEGIN
       FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- ── Per-model parts, per-system-type procedures, richer contracts ───────────
+-- A part number can name the MODELS it suits (an LC-20 seal kit is not an
+-- LC-30 seal kit); a contract can be unlimited, carry an hourly rate, and
+-- cover specific systems so one client can run several at once.
+ALTER TABLE "part_catalog" ADD COLUMN IF NOT EXISTS "models" text[] NOT NULL DEFAULT '{}';
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "visits_unlimited" boolean NOT NULL DEFAULT false;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "parts_unlimited" boolean NOT NULL DEFAULT false;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "hourly_rate_cents" integer;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "instrument_ids" integer[] NOT NULL DEFAULT '{}';
+
+-- ── Catalog reference library ───────────────────────────────────────────────
+-- Manuals, links and field notes filed on a model or module type, surfacing on
+-- every system and unit with matching equipment. See db/schema catalog_refs.
+CREATE TABLE IF NOT EXISTS "catalog_refs" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "asset_type" text NOT NULL,
+  "model" text NOT NULL DEFAULT '',
+  "kind" text NOT NULL DEFAULT 'link',
+  "title" text NOT NULL DEFAULT '',
+  "url" text NOT NULL DEFAULT '',
+  "body" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "catalog_refs_type_idx" ON "catalog_refs" ("asset_type");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'catalog_refs_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "catalog_refs" ADD CONSTRAINT "catalog_refs_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
