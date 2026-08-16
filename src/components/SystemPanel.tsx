@@ -11,9 +11,11 @@ import PhotoThumb from "./PhotoThumb";
 import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
 import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
+import { STANDING_COLOR } from "@/lib/gxp";
 
 type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
+  gxp: boolean;
   lead: string; notes: string; archived: boolean; archivedBy: string;
   location: string; name: string;
   forSale: boolean; saleNote: string; listingToken: string;
@@ -42,7 +44,7 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
-export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell }: {
+export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell, gxpStanding }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
   instrument: Inst; label: string; clients: string[]; categories: string[];
   stages: string[]; stageDefs: StageDefLite[];
@@ -52,10 +54,12 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   canEdit: boolean; isStaff: boolean; isOwner: boolean;
   /** Staff or the owning org's editors: may list the system for sale. */
   canSell: boolean;
+  /** Derived qualification standing - null on unregulated systems. See lib/gxp. */
+  gxpStanding: { label: string; tone: "ok" | "warn" | "bad"; reasons: string[] } | null;
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "" });
+  const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", notes: "", location: "", name: "", gxp: false });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -63,7 +67,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
     setDraft({
       externalId: instrument.externalId, client: instrument.client, category: instrument.category,
       priority: String(instrument.priority), notes: instrument.notes, location: instrument.location,
-      name: instrument.name,
+      name: instrument.name, gxp: instrument.gxp,
     });
     setError("");
     setEditing(true);
@@ -76,7 +80,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
         const res = await updateInstrument(instrument.id, {
           externalId: draft.externalId, client: draft.client, category: draft.category,
           priority: parseInt(draft.priority) || instrument.priority,
-          location: draft.location, name: draft.name,
+          location: draft.location, name: draft.name, gxp: draft.gxp,
         });
         if (res?.error) { setError(res.error); return; } // keep the form open with the bad value
       }
@@ -130,6 +134,15 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                 </div>
                 {instrument.category && (
                   <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{instrument.category}</span>
+                )}
+                {/* The one-glance answer a regulated system owes: qualified or
+                    not, with the reasons on hover. Unregulated systems show
+                    nothing - the flag gates every compliance surface. */}
+                {instrument.gxp && gxpStanding && (
+                  <span className="pill" title={gxpStanding.reasons.join("; ") || "All qualification work complete, nothing expiring"}
+                    style={{ background: STANDING_COLOR[gxpStanding.tone].bg, color: STANDING_COLOR[gxpStanding.tone].fg }}>
+                    GxP · {gxpStanding.label}
+                  </span>
                 )}
                 {instrument.forSale && (
                   <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
@@ -196,6 +209,14 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   <input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Corner room, bench 3" />
                 </div>
               </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "0 0 8px" }}>
+                <input type="checkbox" checked={draft.gxp} style={{ width: 15, height: 15 }}
+                  onChange={(e) => setDraft({ ...draft, gxp: e.target.checked })} />
+                Regulated (GxP)
+                <span className="mut" style={{ fontWeight: 400 }}>
+                  - tracks qualification standing, validation documents and expiring certs
+                </span>
+              </label>
             </>
           )}
           <div style={{ marginBottom: 10 }}>

@@ -279,6 +279,12 @@ export const instruments = pgTable("instruments", {
   saleNote: text("sale_note").notNull().default(""), // public blurb on the listing
   listingToken: text("listing_token").notNull().default(""),
   priority: integer("priority").notNull().default(99),
+  // Regulated (GxP) system: the one switch every compliance surface hangs off.
+  // Off, the app shows no qualification standing, no validation shelf, no
+  // expiring-cert nagging - a loaner UV-Vis never sees the word "IQ". Opt-in
+  // per system rather than per client, because one client can run a GLP lab
+  // and a non-GLP lab off the same book.
+  gxp: boolean("gxp").notNull().default(false),
   // Who's driving this system - a name from the directory (lib/directory),
   // assignable by either side.
   lead: text("lead").notNull().default(""),
@@ -461,6 +467,11 @@ export const procedures = pgTable("procedures", {
   // Mandatory for sign-off: the work it generates must be Done, and a test
   // must additionally have a report filed against it, before anyone can sign.
   required: boolean("required").notNull().default(false),
+  // Which qualification this belongs to on a regulated system: '' (none) |
+  // IQ | OQ | PQ. Purely a grouping - the work generates and completes the
+  // same either way; the binder and the standing rollup read it, so "the OQ"
+  // is a set of procedures rather than a separate object to maintain.
+  qualification: text("qualification").notNull().default(""),
   parts: text("parts").notNull().default(""),       // JSON [{name, number}], "" = none
   modelScope: text("model_scope").array().notNull().default([]), // [] = all models
   // System-level procedures only: which system CATEGORIES this covers. [] = all
@@ -703,6 +714,11 @@ export const attachments = pgTable("attachments", {
   poId: integer("po_id").references((): AnyPgColumn => purchaseOrders.id, { onDelete: "set null" }),
   // Files are opt-in on a for-sale listing, so no report leaks by accident.
   showOnListing: boolean("show_on_listing").notNull().default(false),
+  // When this document stops being current - a calibration cert, a service
+  // qualification, anything with a validity period. Shop-day string, blank =
+  // never expires. The file is not the problem; nobody noticing it lapsed is,
+  // so anything dated feeds the expiry attention on the dashboard (lib/gxp).
+  expiresOn: text("expires_on").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("attachments_instrument_idx").on(t.instrumentId)]);
 

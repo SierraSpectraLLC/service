@@ -7,7 +7,7 @@ const proc = (over: Partial<ProcedureLike> = {}): ProcedureLike => ({
   assetType: "Pump", kind: "test", name: "Leak Check", notes: "Hold 200 bar for 5 min.",
   resultType: "pass_fail", target: null, tolerancePct: null,
   requiresNote: true, consumesPart: false, runsAtIntake: true, intervalDays: 365,
-  required: true, parts: '[{"name":"Seal kit","number":"5063-6589"}]',
+  required: true, qualification: "OQ", parts: '[{"name":"Seal kit","number":"5063-6589"}]',
   modelScope: ["LC-20AD", "LC-30AD"], categoryScope: [],
   ...over,
 });

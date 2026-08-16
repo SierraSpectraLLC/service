@@ -215,7 +215,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         people={directoryNames(people)} defaultPerson={user.name}
         today={today} canEdit={canAdd} isStaff={staff} />
 
-      <AttachmentsPanel target={target}
+      <AttachmentsPanel target={target} today={shopToday()}
         attachments={fileRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         evidenceTasks={taskRows.map((t) => ({ id: t.id, title: t.title, required: false }))}
         canEdit={canAdd} isStaff={staff} listingCuration={false} storage={fileQuota}

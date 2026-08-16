@@ -2197,3 +2197,11 @@ DO $$ BEGIN
       FOREIGN KEY ("task_id") REFERENCES "tasks"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ── Regulated (GxP) systems ─────────────────────────────────────────────────
+-- One opt-in switch per system that every compliance surface hangs off, an
+-- IQ/OQ/PQ grouping on procedures, and a validity date on documents so an
+-- expiring cert is noticed before an auditor notices it.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "gxp" boolean NOT NULL DEFAULT false;
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "qualification" text NOT NULL DEFAULT '';
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "expires_on" text NOT NULL DEFAULT '';

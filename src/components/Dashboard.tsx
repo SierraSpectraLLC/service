@@ -12,6 +12,8 @@ type StageDefLite = { name: string; bg: string; fg: string };
 type Row = {
   id: number; externalId: string; client: string; category: string; label: string; priority: number; lead: string;
   stages: string[]; notes: string; openParts: number; gasIssues: string[];
+  /** Expired / expiring dated documents - regulated (GxP) systems only. */
+  docIssues: string[];
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
   // Whose move it is. Parked rows stay on the board but read as somebody
   // else's, and "Ours to move" filters them away.
@@ -36,7 +38,11 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", lead: "" });
   const [pending, startTransition] = useTransition();
 
-  const FLAGS = ["Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention", ...(isStaff ? ["Not on sheet"] : [])];
+  // "Docs expiring" appears only when some visible system could raise it -
+  // a fleet with no regulated systems never sees the filter at all.
+  const FLAGS = ["Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention",
+    ...(data.some((i) => i.docIssues.length > 0) ? ["Docs expiring"] : []),
+    ...(isStaff ? ["Not on sheet"] : [])];
   const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
   const CATS = [...new Set(data.map((i) => i.category).filter(Boolean))].sort();
   const catKey = (c: string) => `cat:${c}`;
@@ -50,6 +56,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     : f === "Overdue tasks" ? i.overdue > 0
     : f === "Awaiting parts" ? i.openParts > 0
     : f === "Gas attention" ? i.gasIssues.length > 0
+    : f === "Docs expiring" ? i.docIssues.length > 0
     : f === "Asset attention" ? i.assetIssues.length > 0
     : f === "Not on sheet" ? i.missingFromSheet
     : true;
@@ -68,7 +75,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
-        [i.externalId, i.client, i.category, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "),
+        [i.externalId, i.client, i.category, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "), i.docIssues.join(" "),
           i.missingFromSheet ? "not on sheet" : "", i.lastActivity,
           i.queueMine ? "" : `with ${i.queueWith}`, i.queueReason].join(" ").toLowerCase().includes(s)
       );
@@ -268,7 +275,10 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               {i.gasIssues.map((g) => (
                 <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
               ))}
-              {!i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
+              {i.docIssues.map((d) => (
+                <Pill key={d} bg={d.endsWith("expired") ? "#FBE9E9" : "#FAF0DC"} fg={d.endsWith("expired") ? "#A32D2D" : "#8A5410"}>{d}</Pill>
+              ))}
+              {!i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && i.docIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
             </span>
           </Link>
         ))}

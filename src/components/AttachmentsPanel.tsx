@@ -4,6 +4,7 @@ import { promptReason } from "@/lib/reason";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
+import { daysUntil, expiryLabel } from "@/lib/gxp";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, attachLibraryFile, listLibraryFiles, type WorkTarget } from "@/app/actions";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
@@ -16,6 +17,7 @@ import { isPhotoFile, photoCount } from "@/lib/photos";
 // /api/files/[id], which applies the same authorization as the pages.
 type Attachment = {
   id: number; fileName: string; kind: string; description: string; size: number;
+  expiresOn: string;
   uploadedBy: string; createdAt: string; showOnListing: boolean;
   /** The task this file is evidence for, if any. */
   taskId: number | null;
@@ -161,8 +163,10 @@ async function relayUpload(file: File): Promise<{ url: string }> {
   throw lastErr;
 }
 
-export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [], combineTitle = "", combineLines = [], storage }: {
+export default function AttachmentsPanel({ target, attachments, canEdit, isStaff, listingCuration = false, evidenceTasks = [], combineTitle = "", combineLines = [], storage, today = "" }: {
   target: WorkTarget; attachments: Attachment[]; canEdit: boolean; isStaff: boolean;
+  /** Shop-day for the expiry chips; "" hides them (public/legacy mounts). */
+  today?: string;
   /** The store these files land in - the record owner's. Surfaced when tight. */
   storage?: Quota & { storeName: string };
   /** Prefills for the PDF combiner's cover page. */
@@ -186,7 +190,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
   const [staged, setStaged] = useState<Staged[]>([]);
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState({ fileName: "", kind: "Other", description: "" });
+  const [editDraft, setEditDraft] = useState({ fileName: "", kind: "Other", description: "", expiresOn: "" });
   // null = picker closed. "loading" while the library is being fetched - it is
   // pulled on demand rather than shipped with every record page.
   type LibFile = { id: number; fileName: string; kind: string; description: string; size: number };
@@ -446,6 +450,17 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
                 placeholder='Description... e.g. "post-repair tune, passed at 101% of spec"'
                 style={{ fontSize: 12, padding: "5px 9px", marginBottom: 8 }} />
+              {/* Validity, for paper that goes stale - a calibration cert, a
+                  qualification report. Dated files feed the expiry attention. */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                <span className="mut" style={{ fontSize: 11 }}>Valid until</span>
+                <input type="date" value={editDraft.expiresOn}
+                  onChange={(e) => setEditDraft({ ...editDraft, expiresOn: e.target.value })}
+                  style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
+                {editDraft.expiresOn && (
+                  <button className="btn link" onClick={() => setEditDraft({ ...editDraft, expiresOn: "" })}>never expires</button>
+                )}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn sm accent" disabled={!editDraft.fileName.trim()}
                   onClick={() => startTransition(async () => { await updateAttachment(a.id, editDraft); setEditing(null); })}>
@@ -474,6 +489,17 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               {a.description && <div style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{a.description}</div>}
               <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                 <span className="pill" style={{ background: m.bg, color: m.fg }}>{a.kind}</span>
+                {a.expiresOn && today && (() => {
+                  const days = daysUntil(a.expiresOn, today);
+                  const late = days < 0, soon = days >= 0 && days <= 60;
+                  return (
+                    <span className="pill" title={`Valid until ${a.expiresOn}`} style={{
+                      marginLeft: 4,
+                      background: late ? "#FBE9E9" : soon ? "#FAF0DC" : "#EEF1F5",
+                      color: late ? "#A32D2D" : soon ? "#8A5410" : "#475569",
+                    }}>{expiryLabel(a.expiresOn, today)}</span>
+                  );
+                })()}
                 <span style={{ marginLeft: 6 }}>
                   {fmtSize(a.size)} · {a.uploadedBy} · {fmtWhen(a.createdAt)}
                 </span>
@@ -503,7 +529,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
             <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>download</a>
             {canEdit && (
               <button className="btn link" style={{ fontSize: 12, flexShrink: 0 }}
-                onClick={() => { setEditDraft({ fileName: a.fileName, kind: a.kind, description: a.description }); setEditing(a.id); }}
+                onClick={() => { setEditDraft({ fileName: a.fileName, kind: a.kind, description: a.description, expiresOn: a.expiresOn }); setEditing(a.id); }}
               >edit</button>
             )}
             {isStaff && (

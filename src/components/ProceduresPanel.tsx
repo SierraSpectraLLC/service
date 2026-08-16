@@ -8,12 +8,14 @@ import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
 import { cadenceLabel } from "@/lib/pm";
 import { describeProcedure, type ProcPart } from "@/lib/procedures";
 import { procedureRole, ROLE_COLOR, ROLE_LABEL } from "@/lib/procedureRole";
+import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
 
 export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
   resultType: string; target: string | null; tolerancePct: string | null;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null; required: boolean;
+  qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
 };
 
@@ -51,6 +53,7 @@ type Draft = {
   resultType: string; target: string; tolerancePct: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; repeats: boolean; intervalDays: string; required: boolean;
+  qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
 };
 const emptyDraft: Draft = {
@@ -59,6 +62,7 @@ const emptyDraft: Draft = {
   requiresNote: false, consumesPart: false,
   // Filters never pre-fill this: a new procedure always starts with both off.
   runsAtIntake: false, repeats: false, intervalDays: "90", required: false,
+  qualification: "",
   parts: [], modelScope: [], categoryScope: [],
 };
 
@@ -245,6 +249,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     requiresNote: i.requiresNote, consumesPart: i.consumesPart,
     runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
     intervalDays: String(i.intervalDays ?? 90), required: i.required,
+    qualification: i.qualification,
     parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
     categoryScope: i.categoryScope,
   });
@@ -289,6 +294,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       resultType: draft.resultType, target: draft.target, tolerancePct: draft.tolerancePct,
       requiresNote: draft.requiresNote, consumesPart: draft.consumesPart,
       runsAtIntake: draft.runsAtIntake, required: draft.required,
+      qualification: draft.qualification,
       intervalDays: draft.repeats ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
       categoryScope: draft.categoryScope,
@@ -395,6 +401,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {i.required && (
               <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}
                 title="Must be done before sign-off; a test also needs a report on file">Required</span>
+            )}
+            {i.qualification && (
+              <span className="pill" style={{ background: "#E9E4F5", color: "#5B3E96" }}
+                title={`${QUAL_LABEL[i.qualification] ?? i.qualification} work on regulated (GxP) systems`}>
+                {i.qualification}
+              </span>
             )}
             {/* What it IS, in the word the shop uses, before the detail of when.
                 The row used to make the reader assemble "this is a PM" from a
@@ -827,6 +839,24 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 </span>
               </span>
             </label>
+
+            {/* Which qualification this belongs to, for regulated systems. A
+                grouping, not a behavior change - the work runs the same; the
+                binder and the GxP standing read the tag. */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+              <label style={{ margin: 0 }}>Qualification</label>
+              <div className="seg" role="group" aria-label="Qualification">
+                {["", ...QUALIFICATIONS].map((q) => (
+                  <button key={q || "none"} type="button" aria-pressed={draft.qualification === q}
+                    onClick={() => setDraft({ ...draft, qualification: q })}>
+                    {q || "None"}
+                  </button>
+                ))}
+              </div>
+              <span className="mut" style={{ fontSize: 11 }}>
+                Groups this under IQ/OQ/PQ on regulated (GxP) systems. Others ignore it.
+              </span>
+            </div>
 
             {/* Only on edit, and only when the timing actually changed: what
                 happens to existing units, with the opt-in to apply it now. */}

@@ -24,6 +24,7 @@ export type ProcedureLike = {
   runsAtIntake: boolean;
   intervalDays: number | null;
   required: boolean;
+  qualification: string;
   parts: string;
   modelScope: string[];
   categoryScope: string[];
@@ -56,6 +57,8 @@ export function procedureCopy(p: ProcedureLike, toAssetType: string, position: n
     runsAtIntake: p.runsAtIntake,
     intervalDays: p.intervalDays,
     required: p.required,
+    // A leak check that is OQ work on one module type is OQ work on the next.
+    qualification: p.qualification,
     parts: p.parts,
     modelScope: [] as string[],
     // The system-type scope CARRIES: it names system types (TOC, LC-MS), and

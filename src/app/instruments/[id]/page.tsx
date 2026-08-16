@@ -58,6 +58,7 @@ import PanelLayout from "@/components/PanelLayout";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
+import { expiryAttention, qualsOf, qualStanding } from "@/lib/gxp";
 
 export const dynamic = "force-dynamic";
 
@@ -208,7 +209,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const procIds = [...new Set(taskRows.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
   const [procRows, signRows, refRowsAll] = await Promise.all([
     procIds.length
-      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required, qualification: procedures.qualification })
           .from(procedures).where(inArray(procedures.id, procIds))
       : [],
     db.select().from(signoffs).where(and(eq(signoffs.instrumentId, instId), isNull(signoffs.revokedAt))),
@@ -229,6 +230,22 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     const pr = procRows.find((x) => x.id === t.procedureId);
     return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
   });
+
+  // A regulated system's standing, derived fresh on every read - the same rule
+  // as agreement balances: a stored status is a status that drifts. Unregulated
+  // systems skip all of it. See lib/gxp.
+  const expiry = expiryAttention(attachRows, shopToday());
+  const gxpStanding = inst.gxp
+    ? qualStanding({
+        quals: qualsOf(taskRows.map((t) => ({
+          qualification: procRows.find((x) => x.id === t.procedureId)?.qualification ?? "",
+          state: t.state,
+        }))),
+        expired: expiry.expired.length,
+        expiringSoon: expiry.soon.length,
+        packageComplete: null,
+      })
+    : null;
 
   // A view-level share is read-only even for an org whose role can edit.
   const canEdit = await canEditSystem(user, instId);
@@ -405,10 +422,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         panels={[
           { key: "system", label: "System", node: (
             <SystemPanel
-              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
+              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name,
                 location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}
+              gxpStanding={gxpStanding}
               label={systemLabel(inst, assetRows)}
               // Companies, not just the strings already typed onto systems -
               // see lib/clientNames for what that was hiding. Staff only: the
@@ -557,7 +575,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               shared={soloUnit ? `${soloUnit.kind}${soloUnit.model ? ` ${soloUnit.model}` : ""}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
-            <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+            <AttachmentsPanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks} canEdit={canEdit} isStaff={isStaff}
               listingCuration={inst.forSale && (isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor"))}
               storage={fileQuota}

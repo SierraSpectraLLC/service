@@ -1,11 +1,12 @@
-import { and, asc, eq, desc, inArray, isNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments } from "@/db/schema";
 import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
+import { expiryAttention, expiryLabel } from "@/lib/gxp";
 import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
@@ -48,6 +49,13 @@ export default async function Home() {
     db.select({ name: vocabTerms.name }).from(vocabTerms)
       .where(and(eq(vocabTerms.kind, "category"), forTenant(vocabTerms.tenantOrgId, await viewTenant(user)))),
   ]);
+  // Dated paper on regulated systems only - the whole point of the GxP flag is
+  // that a loaner's expired delivery note never nags anybody.
+  const gxpIds = rows.filter((i) => i.gxp).map((i) => i.id);
+  const datedDocs = gxpIds.length
+    ? await db.select({ instrumentId: attachments.instrumentId, fileName: attachments.fileName, expiresOn: attachments.expiresOn })
+        .from(attachments).where(and(inArray(attachments.instrumentId, gxpIds), ne(attachments.expiresOn, "")))
+    : [];
 
   // Queue holders, named for the row badges. The house's own queue is labelled
   // with the operator's name rather than "us", so a client reading their own
@@ -93,6 +101,12 @@ export default async function Home() {
     const gasIssues = allGases
       .filter((g) => g.instrumentId === i.id && gasAttention(g.status))
       .map((g) => `${GAS_SYMBOL[g.gas] || g.gas} ${g.status === "Not connected" ? "n/c" : g.status.toLowerCase()}`);
+    // Regulated systems: certs lapsed or lapsing. See lib/gxp.
+    const dated = expiryAttention(datedDocs.filter((d) => d.instrumentId === i.id), today);
+    const docIssues = [
+      ...dated.expired.map((d) => `${d.fileName} expired`),
+      ...dated.soon.map((d) => `${d.fileName} ${expiryLabel(d.expiresOn, today)}`),
+    ];
     const last = recent.find((a) => a.instrumentId === i.id);
     return {
       id: i.id,
@@ -108,6 +122,7 @@ export default async function Home() {
       notes: i.notes,
       openParts,
       gasIssues,
+      docIssues,
       overdue: overdueBy.get(i.id) ?? 0,
       assetIssues: assetRows
         .filter((a) => a.instrumentId === i.id && assetAttention(a.status))

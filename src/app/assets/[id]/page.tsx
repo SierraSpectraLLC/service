@@ -372,7 +372,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               shared={soloSystem ? `system ${soloSystem.externalId}` : undefined} />
           ) },
           { key: "files", label: "Files", node: (
-            <AttachmentsPanel target={target} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
+            <AttachmentsPanel target={target} today={shopToday()} attachments={attachRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
               evidenceTasks={evidenceTasks}
               canEdit={canEdit} isStaff={isStaff} listingCuration={asset.forSale && canSell}
               storage={fileQuota}

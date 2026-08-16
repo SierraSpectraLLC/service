@@ -29,6 +29,7 @@ import {
 import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, resultIsRecorded } from "@/lib/testResult";
+import { QUALIFICATIONS } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
 import {
@@ -259,7 +260,7 @@ export async function updateInstrumentNotes(instrumentId: number, notes: string)
 
 export async function updateInstrument(
   instrumentId: number,
-  data: { externalId?: string; client: string; category?: string; priority: number; location?: string; name?: string },
+  data: { externalId?: string; client: string; category?: string; priority: number; location?: string; name?: string; gxp?: boolean },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -287,8 +288,12 @@ export async function updateInstrument(
   if (client !== inst.client) changed.push(["client", inst.client, client]);
   if (category !== inst.category) changed.push(["category", inst.category, category]);
   if (priority !== inst.priority) changed.push(["priority", String(inst.priority), String(priority)]);
+  // Turning regulation ON or OFF is a statement about the record, so it audits
+  // like one - "marked regulated (GxP)" is a line an auditor will look for.
+  const gxp = data.gxp ?? inst.gxp;
+  if (gxp !== inst.gxp) changed.push(["gxp", inst.gxp ? "regulated" : "not regulated", gxp ? "regulated" : "not regulated"]);
   if (!changed.length) return {};
-  await db.update(instruments).set({ externalId, client, category, priority, location, name, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  await db.update(instruments).set({ externalId, client, category, priority, location, name, gxp, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
   for (const [field, oldValue, newValue] of changed) {
     await audit({
       // Log under the new ID so the entry is findable, but the old value is in the row.
@@ -2355,20 +2360,25 @@ export async function recordLibraryFiles(
   return {};
 }
 
-export async function updateAttachment(attachmentId: number, data: { fileName: string; kind: string; description: string }) {
+export async function updateAttachment(attachmentId: number, data: { fileName: string; kind: string; description: string; expiresOn?: string }) {
   const u = await requireEditor();
   const fileName = data.fileName.trim();
   if (!fileName) throw new Error("File name required");
   const kind = (ATTACH_KINDS as readonly string[]).includes(data.kind) ? data.kind : "Other";
   const description = data.description.trim();
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
-  if (!a || (a.fileName === fileName && a.kind === kind && a.description === description)) return;
+  if (!a) return;
+  // A validity date only sticks when it IS a date - a typo'd expiry that can
+  // never fire is worse than none, because somebody believes it is being watched.
+  const expiresOn = data.expiresOn !== undefined && isIsoDay(data.expiresOn) ? data.expiresOn : (data.expiresOn === "" ? "" : a.expiresOn);
+  if (a.fileName === fileName && a.kind === kind && a.description === description && a.expiresOn === expiresOn) return;
   await assertWorkEditable(u, a);
-  await db.update(attachments).set({ fileName, kind, description }).where(eq(attachments.id, attachmentId));
+  await db.update(attachments).set({ fileName, kind, description, expiresOn }).where(eq(attachments.id, attachmentId));
   const changes: string[] = [];
   if (a.fileName !== fileName) changes.push(`renamed to '${fileName}'`);
   if (a.kind !== kind) changes.push(`${a.kind} -> ${kind}`);
   if (a.description !== description) changes.push("description updated");
+  if (a.expiresOn !== expiresOn) changes.push(expiresOn ? `expires ${expiresOn}` : "expiry cleared");
   await audit({
     actor: u.email, instrumentId: a.instrumentId, assetId: a.assetId, entityType: "attachment", entityId: attachmentId,
     action: `edited attachment '${a.fileName}': ${changes.join(", ")}`,
@@ -3087,6 +3097,7 @@ type ProcedureInput = {
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | string | null;
   required?: boolean;
+  qualification?: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
 };
 
@@ -3097,6 +3108,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null;
   required: boolean;
+  qualification: string;
   parts: string; modelScope: string[]; categoryScope: string[];
 } {
   if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
@@ -3148,6 +3160,10 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
     // Persisted since the sheet grew the checkbox - it used to be silently
     // dropped here, so "Required for sign-off" never actually saved.
     required: data.required ?? false,
+    // '' when the tag isn't one of ours - an unknown value silently becoming a
+    // qualification is exactly the kind of surprise a regulated record can't have.
+    qualification: (QUALIFICATIONS as readonly string[]).includes(data.qualification ?? "")
+      ? data.qualification! : "",
     parts: serializeProcParts(data.parts), modelScope, categoryScope,
   };
 }
