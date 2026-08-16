@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/money";
 import {
   catalogLabel, kitContents, PART_KINDS, PART_KIND_LABEL, searchCatalog,
 } from "@/lib/partCatalog";
+import type { UncataloguedPart } from "@/lib/partCatalog";
 
 export type CatalogRow = {
   id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
@@ -49,7 +50,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
   /** The price book's rows, so vendors and prices are set right here. */
   prices?: VendorPrice[];
   /** Part numbers in use on real work that the catalog has never heard of. */
-  unnamed: string[];
+  unnamed: UncataloguedPart[];
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -64,6 +65,12 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
 
   const openAdd = (partNumber = "") => {
     setDraft({ ...emptyDraft, partNumber });
+    setLines([]); setError(""); setSheet({});
+  };
+  // Describing a part maintenance already knows is confirming, not typing:
+  // the PM procedure carried its name, module type and models here.
+  const openDescribe = (u: UncataloguedPart) => {
+    setDraft({ ...emptyDraft, partNumber: u.partNumber, name: u.name, assetTypes: u.assetTypes, models: u.models });
     setLines([]); setError(""); setSheet({});
   };
   const openEdit = (r: CatalogRow) => {
@@ -161,21 +168,34 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       )}
 
       {/* The list that makes this tractable: numbers the shop has really used
-          that nothing describes. One click each, rather than a blank book. */}
+          that nothing describes. Maintenance parts arrive with their name and
+          fit already known, so describing one is a click, not a form. */}
       {unnamed.length > 0 && (
         <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
           <div className="eyebrow" style={{ marginBottom: 4 }}>Used but not described</div>
           <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
-            {unnamed.length} number{unnamed.length === 1 ? "" : "s"} on real work with nothing to say what they are.
+            {unnamed.length} number{unnamed.length === 1 ? "" : "s"} on real work - fitted, stocked, ordered, or
+            named by a maintenance task - with no catalog entry yet. Describing one keeps everything
+            maintenance already said about it.
           </div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {unnamed.slice(0, 40).map((pn) => (
-              <button key={pn} className="btn sm mono" style={{ fontSize: 11 }} onClick={() => openAdd(pn)}>
-                {pn} +
-              </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {unnamed.slice(0, 40).map((u) => (
+              <div key={u.partNumber} className="row-hover" onClick={() => openDescribe(u)}
+                style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "5px 6px", borderRadius: 8, cursor: "pointer" }}>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{u.partNumber}</span>
+                <span style={{ fontSize: 12, minWidth: 0 }}>{u.name || <span className="mut">unnamed</span>}</span>
+                {u.sources.includes("maintenance") && (
+                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}
+                    title="Named by a maintenance task or PM schedule">maintenance</span>
+                )}
+                {u.models.slice(0, 3).map((m) => (
+                  <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{m}</span>
+                ))}
+                <span className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}>describe</span>
+              </div>
             ))}
             {unnamed.length > 40 && (
-              <span className="mut" style={{ fontSize: 11, alignSelf: "center" }}>+{unnamed.length - 40} more</span>
+              <span className="mut" style={{ fontSize: 11 }}>+{unnamed.length - 40} more</span>
             )}
           </div>
         </div>

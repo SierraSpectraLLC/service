@@ -1,11 +1,12 @@
 import { asc, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { partCatalog, partKitLines, partPrices, parts, poLines, stockItems, vocabTerms } from "@/db/schema";
+import { partCatalog, partKitLines, partPrices, parts, pmSchedules, poLines, procedures, stockItems, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
-import { uncatalogued } from "@/lib/partCatalog";
+import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
+import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
 import SettingsTabs from "@/components/SettingsTabs";
 import PartCatalogPanel from "@/components/PartCatalogPanel";
 import PriceBookCard from "@/components/PriceBookCard";
@@ -40,6 +41,28 @@ export default async function PartsCatalogPage() {
     db.selectDistinct({ pn: stockItems.partNumber }).from(stockItems),
     db.selectDistinct({ pn: poLines.partNumber }).from(poLines),
   ]);
+  // The parts maintenance says it will use - the PM checklist's consumables
+  // list, typed once onto procedures and schedules. Unlike a number fitted at
+  // 2am these arrive with a name, a module type and models, so describing one
+  // is confirming a prefilled sheet rather than starting from a bare number.
+  const [procRows, schedRows] = await Promise.all([
+    db.select({ assetType: procedures.assetType, modelScope: procedures.modelScope, parts: procedures.parts })
+      .from(procedures).where(forTenant(procedures.tenantOrgId, tenant)),
+    db.select({ partName: pmSchedules.partName, partNumber: pmSchedules.partNumber, parts: pmSchedules.parts })
+      .from(pmSchedules).where(forTenant(pmSchedules.tenantOrgId, tenant)),
+  ]);
+  const maintenanceParts: UsedPart[] = [
+    ...procRows.flatMap((r) => parseProcParts(r.parts).map((pp) => ({
+      partNumber: pp.number, name: pp.name,
+      assetType: r.assetType === "system" ? "" : r.assetType,
+      // The part's own model list when it has one, the procedure's scope when not.
+      models: pp.models?.length ? pp.models : r.modelScope,
+      source: "maintenance",
+    }))),
+    ...schedRows.flatMap((r) => schedulePartsOf(r).map((pp) => ({
+      partNumber: pp.number, name: pp.name, source: "maintenance",
+    }))),
+  ].filter((u) => u.partNumber.trim());
   // Vendor prices live beside the numbers they price - this page - rather than
   // dangling off the equipment catalog, where they read as a second parts book.
   const priceRows = await db.select({
@@ -54,7 +77,12 @@ export default async function PartsCatalogPage() {
         .orderBy(asc(partKitLines.sortOrder), asc(partKitLines.id))
     : [];
 
-  const used = [...usedParts, ...usedStock, ...usedPo].map((r) => r.pn);
+  const used: (string | UsedPart)[] = [
+    ...usedParts.map((r) => ({ partNumber: r.pn, source: "fitted" })),
+    ...usedStock.map((r) => ({ partNumber: r.pn, source: "stock" })),
+    ...usedPo.map((r) => ({ partNumber: r.pn, source: "purchasing" })),
+    ...maintenanceParts,
+  ];
 
   return (
     <div className="container settings">

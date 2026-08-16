@@ -116,20 +116,52 @@ export const isCatalogued = (catalog: CatalogEntry[], partNumber: string): boole
   catalogEntry(catalog, partNumber) !== null;
 
 /**
+ * A part number seen on real work, with whatever that work already knows about
+ * it. A number fitted at 2am arrives bare; the same number typed onto a PM
+ * procedure arrives with its name, its module type and its models - the whole
+ * TOC-VW consumables list, ready to describe in one click each.
+ */
+export type UsedPart = {
+  partNumber: string;
+  name?: string;
+  assetType?: string;
+  models?: string[];
+  /** Where it was seen - "maintenance", "fitted", "stock", "purchasing". */
+  source?: string;
+};
+
+export type UncataloguedPart = {
+  partNumber: string;
+  name: string;
+  assetTypes: string[];
+  models: string[];
+  sources: string[];
+};
+
+/**
  * Part numbers used in the shop that the catalog has never heard of.
  *
  * The list that makes cataloguing tractable: rather than asking somebody to type
  * out their whole parts book, show them the numbers they have actually used and
  * let them name those. Deduplicated the way part numbers dedupe, with the first
- * spelling kept - the catalog should be seeded with what people really type.
+ * spelling kept - the catalog should be seeded with what people really type -
+ * and enriched across sources: the name comes from whichever mention had one.
  */
-export function uncatalogued(catalog: CatalogEntry[], used: string[]): string[] {
+export function uncatalogued(catalog: CatalogEntry[], used: (string | UsedPart)[]): UncataloguedPart[] {
   const known = new Set(catalog.map((c) => normalizePn(c.partNumber)).filter(Boolean));
-  const out = new Map<string, string>();
+  const out = new Map<string, UncataloguedPart>();
   for (const raw of used) {
-    const pn = normalizePn(raw);
-    if (!pn || known.has(pn) || out.has(pn)) continue;
-    out.set(pn, raw.trim());
+    const u: UsedPart = typeof raw === "string" ? { partNumber: raw } : raw;
+    const pn = normalizePn(u.partNumber);
+    if (!pn || known.has(pn)) continue;
+    const cur = out.get(pn) ?? { partNumber: u.partNumber.trim(), name: "", assetTypes: [], models: [], sources: [] };
+    if (!cur.name && u.name?.trim()) cur.name = u.name.trim();
+    if (u.assetType?.trim() && !cur.assetTypes.includes(u.assetType.trim())) cur.assetTypes.push(u.assetType.trim());
+    for (const m of u.models ?? []) {
+      if (m.trim() && !cur.models.some((x) => x.toLowerCase() === m.trim().toLowerCase())) cur.models.push(m.trim());
+    }
+    if (u.source && !cur.sources.includes(u.source)) cur.sources.push(u.source);
+    out.set(pn, cur);
   }
-  return [...out.values()].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return [...out.values()].sort((a, b) => a.partNumber.localeCompare(b.partNumber, undefined, { sensitivity: "base" }));
 }

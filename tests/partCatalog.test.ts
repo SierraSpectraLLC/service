@@ -102,18 +102,37 @@ describe("what is in a kit", () => {
 });
 
 describe("seeding the catalog from what the shop actually uses", () => {
+  const pns = (used: Parameters<typeof uncatalogued>[1]) =>
+    uncatalogued(catalog, used).map((u) => u.partNumber);
+
   it("lists the numbers in use that nothing describes", () => {
     // Asking somebody to type out their whole parts book is how a catalog stays
     // empty. Asking them to name the twelve numbers they already used is not.
-    expect(uncatalogued(catalog, ["AGI-7167-PMK", "NEW-1", "5181-3323", "NEW-2"]))
-      .toEqual(["NEW-1", "NEW-2"]);
+    expect(pns(["AGI-7167-PMK", "NEW-1", "5181-3323", "NEW-2"])).toEqual(["NEW-1", "NEW-2"]);
   });
 
   it("dedupes the way part numbers dedupe, keeping the first spelling", () => {
-    expect(uncatalogued(catalog, ["new-1", "NEW-1 ", " New-1"])).toEqual(["new-1"]);
+    expect(pns(["new-1", "NEW-1 ", " New-1"])).toEqual(["new-1"]);
   });
 
   it("ignores blanks", () => {
-    expect(uncatalogued(catalog, ["", "   ", "NEW-1"])).toEqual(["NEW-1"]);
+    expect(pns(["", "   ", "NEW-1"])).toEqual(["NEW-1"]);
+  });
+
+  it("keeps what maintenance already said about a number", () => {
+    // The PM checklist's consumables arrive with a name and a fit; a bare
+    // mention of the same number from stock must not blank them out.
+    const [u] = uncatalogued(catalog, [
+      { partNumber: "638-59300-00", source: "stock" },
+      { partNumber: "638-59300-00", name: "2500 ml Syringe", assetType: "TOC", models: ["TOC-VW"], source: "maintenance" },
+    ]);
+    expect(u).toEqual({
+      partNumber: "638-59300-00", name: "2500 ml Syringe",
+      assetTypes: ["TOC"], models: ["TOC-VW"], sources: ["stock", "maintenance"],
+    });
+  });
+
+  it("never lists a number the catalog already describes, whatever the source", () => {
+    expect(uncatalogued(catalog, [{ partNumber: "agi-7167-pmk", name: "x", source: "maintenance" }])).toEqual([]);
   });
 });
