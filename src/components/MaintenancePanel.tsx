@@ -36,8 +36,10 @@ const mdy = (iso: string) => {
  * ordinary task in the Tasks panel; completing that task books the next cycle.
  * This panel is the calendar, not the work.
  */
-export default function MaintenancePanel({ target, schedules, people, today, canEdit }: {
+export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false }: {
   target: WorkTarget; schedules: PmRow[]; people: string[]; today: string; canEdit: boolean;
+  /** Staff only: point at the catalog, where per-model upkeep is defined ONCE. */
+  catalogHint?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "90", firstDue: today, partName: "", partNumber: "" });
@@ -198,6 +200,16 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           </button>
         )}
       </div>
+      {/* A hand-made schedule here covers THIS record only. Ten similar systems
+          means ten copies - which is exactly what the catalog exists to avoid. */}
+      {catalogHint && (
+        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+          Schedules added here cover only this record. Upkeep every unit of a model or
+          system type needs is defined once in{" "}
+          <a href="/settings/procedures" style={{ color: "var(--link)" }}>Settings → Procedures &amp; maintenance</a>{" "}
+          and lands on every matching unit automatically.
+        </div>
+      )}
 
       {open && (
         <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>

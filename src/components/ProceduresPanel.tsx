@@ -31,7 +31,7 @@ const CADENCES = [
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "intake", label: "At intake" },
-  { key: "recurring", label: "Recurring" },
+  { key: "recurring", label: "Maintenance" },
   { key: "tests", label: "Tests" },
   { key: "tasks", label: "Tasks" },
 ] as const;
@@ -113,7 +113,6 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   categories: string[];                            // system categories, from the catalog
   categoriesByType: Record<string, string[]>;      // which categories each module type serves
 }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [openBand, setOpenBand] = useState<string | null>("system");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
@@ -216,20 +215,31 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     setError("");
     setSheet({ assetType });
   };
+  const draftFrom = (i: ProcedureRow): Draft => ({
+    kind: i.kind, name: i.name, notes: i.notes,
+    resultType: i.resultType, target: i.target ?? "", tolerancePct: i.tolerancePct ?? "",
+    requiresNote: i.requiresNote, consumesPart: i.consumesPart,
+    runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
+    intervalDays: String(i.intervalDays ?? 90), required: i.required,
+    parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
+    categoryScope: i.categoryScope,
+  });
   const openEdit = (i: ProcedureRow) => {
-    setDraft({
-      kind: i.kind, name: i.name, notes: i.notes,
-      resultType: i.resultType, target: i.target ?? "", tolerancePct: i.tolerancePct ?? "",
-      requiresNote: i.requiresNote, consumesPart: i.consumesPart,
-      runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
-      intervalDays: String(i.intervalDays ?? 90), required: i.required,
-      parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
-      categoryScope: i.categoryScope,
-    });
+    setDraft(draftFrom(i));
     setTimingBefore({ intervalDays: i.intervalDays });
     setApplyNow(false);
     setError("");
     setSheet({ assetType: i.assetType, id: i.id });
+  };
+  // A new procedure pre-filled from an existing one, on the same type. This is
+  // how "the LC-30 takes a different seal kit than the LC-20" gets its own row:
+  // duplicate, narrow the model scope, swap the part.
+  const openDuplicate = (i: ProcedureRow) => {
+    setDraft({ ...draftFrom(i), modelScope: [], categoryScope: [] });
+    setTimingBefore(null);
+    setApplyNow(false);
+    setError("");
+    setSheet({ assetType: i.assetType });
   };
 
   const isSystem = sheet?.assetType === "system";
@@ -382,6 +392,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             ))}
           </div>
         </button>
+        {/* A new variant on the same type - the LC-30's seal kit isn't the
+            LC-20's, so each model's version is its own row. */}
+        <button className="btn link" aria-label={`Duplicate ${i.name}`} title="Duplicate - e.g. a per-model variant with different parts"
+          disabled={pending}
+          onClick={() => openDuplicate(i)}
+          style={{ fontSize: 12, padding: 4 }}>duplicate</button>
         {/* The same work on another module type - a leak check is a leak check
             whether it is a pump or the whole stack. */}
         <button className="btn link" aria-label={`Copy ${i.name} to another module type`} title="Copy to another type"
@@ -401,7 +417,16 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 8 }}>Procedures</div>
+      <div className="card-title">Procedures & maintenance</div>
+      {/* The one fact that saves the copy/paste: definitions here apply
+          themselves. Without this line, people write upkeep onto each system
+          by hand and never find out they didn't have to. */}
+      <div className="mut" style={{ fontSize: 12, margin: "4px 0 10px", maxWidth: 720 }}>
+        Define work once - for a whole system type, a module type, or specific models. Anything
+        with a cadence becomes a <b>maintenance schedule on every matching unit automatically</b>,
+        existing and new; anything marked &ldquo;at intake&rdquo; is created as checkout work when
+        a matching unit arrives. Nothing needs copying onto individual systems.
+      </div>
 
       {/* Copy one procedure onto other module types. Several at once, because
           "this belongs on the stack and the detector too" is one thought. */}
@@ -495,84 +520,81 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       </div>
       {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
+      {/* One accordion, the Catalog's shape: System first, then a band per
+          system category. An open band shows every module type inside it
+          EXPANDED - the old second accordion meant two clicks to see any row,
+          which read as an empty page. */}
       {BANDS.map((band) => {
         const bandRows = band.types.flatMap((ty) => grouped.get(ty) ?? []);
         const bandOpen = openBand === band.key;
         const bandRecur = bandRows.filter((i) => i.intervalDays !== null).length;
         return (
-        <div key={band.key} style={{ marginBottom: 10 }}>
+        <div key={band.key}>
           <div className="row-hover" onClick={() => setOpenBand(bandOpen ? null : band.key)}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", cursor: "pointer", borderBottom: "1px solid var(--line)" }}>
-            <span style={{ fontSize: 14, fontWeight: 700 }}>{band.label}</span>
-            <span className="mut" style={{ fontSize: 11 }}>
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 4px", cursor: "pointer", borderTop: "1px solid var(--line)" }}>
+            <span style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)", letterSpacing: "-0.2px" }}>
+              {band.key === "system" ? "System-wide" : band.label}
+            </span>
+            <span className="mut" style={{ fontSize: 12 }}>
               {bandRows.length
-                ? `${bandRows.length} procedure${bandRows.length === 1 ? "" : "s"}${bandRecur ? ` · ${bandRecur} recurring` : ""} · ${band.types.length} type${band.types.length === 1 ? "" : "s"}`
-                : `no procedures yet · ${band.types.length} type${band.types.length === 1 ? "" : "s"}`}
+                ? `${bandRows.length} procedure${bandRows.length === 1 ? "" : "s"}${bandRecur ? ` · ${bandRecur} maintenance` : ""}`
+                : "no procedures yet"}
+              {band.key !== "system" && ` · ${band.types.length} type${band.types.length === 1 ? "" : "s"}`}
             </span>
             <span className="mut" style={{ marginLeft: "auto", fontSize: 12 }}>{bandOpen ? "▴" : "▾"}</span>
           </div>
-          {bandOpen && <div style={{ padding: "10px 0 2px" }}>{band.types.map((bandType) => {
-        const g = GROUPS.find((x) => x.type === bandType) ?? { type: bandType, label: bandType, subtitle: undefined };
-        const sectionKey = `${band.key}::${g.type}`;
-        const all = grouped.get(g.type) ?? [];
-        const list = all.filter((i) => passesFilter(i, filter));
-        const hidden = all.length - list.length;
-        const open = expanded === sectionKey;
-        const intakeN = all.filter((i) => i.runsAtIntake).length;
-        const recurN = all.filter((i) => i.intervalDays !== null).length;
-        const counts = all.length
-          ? [`${all.length}`, intakeN ? `${intakeN} intake` : "", recurN ? `${recurN} recurring` : ""].filter(Boolean).join(" · ")
-          : "none yet";
-        return (
-          <div key={g.type} style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
-            <div className="row-hover" onClick={() => setExpanded(open ? null : sectionKey)}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: "pointer" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{g.label}</span>
-                {g.subtitle && <span className="mut" style={{ fontSize: 11, marginLeft: 8 }}>{g.subtitle}</span>}
-              </div>
-              <div className="mut" style={{ fontSize: 12, textAlign: "right" }}>{counts}</div>
-              {/* Filed in the wrong place: move the type, keeping its models and
-                  their makers. Only inside a real category - "System" and the
-                  loose band are not places a type can be moved out of. */}
-              {band.key !== "system" && band.key !== "__loose" && g.type !== "system" && (
-                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMoving({ assetType: g.type, from: band.key });
-                    setMoveTo(""); setSaved(""); setError("");
-                  }}>move</button>
-              )}
-              <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
+          {bandOpen && (
+            <div style={{ padding: "10px 0 12px" }}>
+              {band.subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{band.subtitle}</div>}
+              {band.types.map((bandType) => {
+                const g = GROUPS.find((x) => x.type === bandType) ?? { type: bandType, label: bandType, subtitle: undefined };
+                const all = grouped.get(g.type) ?? [];
+                const list = all.filter((i) => passesFilter(i, filter));
+                const hidden = all.length - list.length;
+                const isSystemBand = band.key === "system";
+                return (
+                  <div key={g.type} style={{ marginBottom: 14 }}>
+                    {/* The System band holds one pseudo-type; a second "System"
+                        heading inside it said nothing. */}
+                    {!isSystemBand && (
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "0 0 6px" }}>
+                        <span style={{ fontSize: 13, fontWeight: 700 }}>{g.label}</span>
+                        <span className="mut" style={{ fontSize: 11 }}>
+                          {all.length ? `${all.length} procedure${all.length === 1 ? "" : "s"}` : "none yet"}
+                        </span>
+                        {/* Filed in the wrong place: move the type, keeping its
+                            models and their makers. Only inside a real category. */}
+                        {band.key !== "__loose" && (
+                          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                            onClick={() => {
+                              setMoving({ assetType: g.type, from: band.key });
+                              setMoveTo(""); setSaved(""); setError("");
+                            }}>move</button>
+                        )}
+                      </div>
+                    )}
+                    {all.length > 0 && list.length === 0 && (
+                      <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
+                        {hidden} hidden by the {FILTERS.find((f) => f.key === filter)?.label} filter.
+                      </div>
+                    )}
+                    <div ref={(el) => { listRefs.current[g.type] = el; }}>
+                      {list.map((i) => renderRow(i, g.type))}
+                    </div>
+                    {list.length > 0 && hidden > 0 && (
+                      <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+                        +{hidden} more hidden by the filter.
+                      </div>
+                    )}
+                    <button className="btn sm" onClick={() => openAdd(g.type)}
+                      style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "#1D6396" }}>
+                      ＋ Procedure{isSystemBand ? " · system-wide" : ` · ${g.label}`}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
-
-            {open && (
-              <div style={{ borderTop: "1px solid var(--line)", padding: 12, background: "#FAFBFD" }}>
-                {all.length === 0 && (
-                  <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>Nothing defined for this type yet.</div>
-                )}
-                {all.length > 0 && list.length === 0 && (
-                  <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>
-                    {hidden} procedure{hidden === 1 ? "" : "s"} hidden by the {FILTERS.find((f) => f.key === filter)?.label} filter.
-                  </div>
-                )}
-                <div ref={(el) => { listRefs.current[g.type] = el; }}>
-                  {list.map((i) => renderRow(i, g.type))}
-                </div>
-                {list.length > 0 && hidden > 0 && (
-                  <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
-                    +{hidden} more hidden by the filter.
-                  </div>
-                )}
-                <button className="btn sm" onClick={() => openAdd(g.type)}
-                  style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "#1D6396", marginTop: list.length ? 4 : 0 }}>
-                  ＋ Procedure
-                </button>
-              </div>
-            )}
-          </div>
-        );
-          })}</div>}
+          )}
         </div>
         );
       })}
@@ -663,7 +685,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "8px 0 0" }}>
                     <input type="checkbox" checked={draft.repeats} style={{ width: 15, height: 15 }}
                       onChange={(e) => setDraft({ ...draft, repeats: e.target.checked })} />
-                    Repeats - scheduled on every {isSystem ? "system" : "unit"}, existing and new
+                    Maintenance - repeats on a cadence, scheduled on every {isSystem ? "system" : "unit"} it covers, existing and new
                   </label>
                   {draft.repeats && (
                     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8, paddingLeft: 21 }}>
@@ -760,6 +782,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 <label>Models</label>
                 <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}
                   onChange={(next) => setDraft({ ...draft, modelScope: next })} />
+                <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                  Models that take different parts get their own copy: save this one narrowed to
+                  its models, then use &ldquo;duplicate&rdquo; on the row for the next variant.
+                </div>
               </>
             )}
 

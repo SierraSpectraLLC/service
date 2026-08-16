@@ -29,7 +29,7 @@ const GROUPS: Group[] = [
     name: "Catalog",
     tabs: [
       { key: "catalog", href: "/settings/catalog", label: "Equipment", ownerOnly: false },
-      { key: "procedures", href: "/settings/procedures", label: "Procedures", ownerOnly: false },
+      { key: "procedures", href: "/settings/procedures", label: "Procedures & maintenance", ownerOnly: false },
       // What each part number IS, and the paper behind the work. Curated by
       // staff rather than by the owner alone, like the rest of the catalog.
       { key: "parts", href: "/settings/parts", label: "Parts book", ownerOnly: false },

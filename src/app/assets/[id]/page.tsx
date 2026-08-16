@@ -328,6 +328,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
+              catalogHint={isStaff}
               people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => ({
                 id: s.id, title: s.title, body: s.body, assignee: s.assignee,

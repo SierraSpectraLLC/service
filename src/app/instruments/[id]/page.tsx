@@ -488,6 +488,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
+              catalogHint={isStaff}
               people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => {
                 const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;
