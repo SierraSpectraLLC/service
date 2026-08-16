@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  allowance, countsAsVisit, daysLeft, drawdown, inTerm, needsAttention, renewalLine, standing,
+  allowance, countsAsVisit, daysLeft, drawdown, inTerm, kitStates, needsAttention, parseKits,
+  renewalLine, serializeKits, standing,
 } from "@/lib/agreements";
 
 const TODAY = "2026-08-16";
@@ -70,6 +71,37 @@ describe("which work draws down", () => {
   it("includes the first and last day of the term", () => {
     expect(inTerm(ag(), "2026-01-01")).toBe(true);
     expect(inTerm(ag(), "2026-12-31")).toBe(true);
+  });
+});
+
+describe("kits the contract includes", () => {
+  // How a PM contract is actually sold: "two PMs, each with its kit". The
+  // entitlement is a COUNT of a named part, not a sum of money that goes
+  // stale the moment the kit is repriced.
+  const kits = [
+    { partNumber: "062-65005-00", name: "UV PM Kit", qty: 2 },
+    { partNumber: "228-52708-91", name: "LC PM Kit", qty: 4 },
+  ];
+
+  it("round-trips, defaulting a missing quantity to one", () => {
+    expect(parseKits(serializeKits(kits))).toEqual(kits);
+    expect(parseKits('[{"partNumber":"X-1","name":"","qty":0}]')).toEqual([{ partNumber: "X-1", name: "", qty: 1 }]);
+    expect(parseKits("")).toEqual([]);
+    expect(parseKits("not json")).toEqual([]);
+    // A row with no part number entitles nothing, so it is dropped.
+    expect(serializeKits([{ partNumber: "  ", name: "ghost", qty: 3 }])).toBe("");
+  });
+
+  it("counts what was fitted against what was sold, case-insensitively", () => {
+    const s = kitStates(kits, { "062-65005-00": 1, "228-52708-91": 0 });
+    expect(s[0]).toMatchObject({ used: 1, remaining: 1, over: false });
+    expect(s[1]).toMatchObject({ used: 0, remaining: 4, over: false });
+  });
+
+  it("reports an extra kit as billable rather than clamping it", () => {
+    // Three fitted on a two-kit contract is not an error: the third bills.
+    const s = kitStates(kits, { "062-65005-00": 3 });
+    expect(s[0]).toMatchObject({ used: 3, remaining: -1, over: true });
   });
 });
 

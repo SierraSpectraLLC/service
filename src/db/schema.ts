@@ -1085,6 +1085,11 @@ export const agreements = pgTable("agreements", {
   // not two. Off by default: turning it on is a statement about this contract,
   // and flipping every existing one silently would rewrite their numbers.
   pmPartsIncluded: boolean("pm_parts_included").notNull().default(false),
+  // What the contract actually includes, when it includes KITS rather than a
+  // sum of money: [{partNumber, name, qty}] as JSON, the parts.specs convention.
+  // "Two PMs, each with its kit" is how these are sold and quoted; a dollar
+  // allowance is a proxy for it that goes wrong the moment a kit's price moves.
+  includedKits: text("included_kits").notNull().default(""),
   // What an hour beyond the included ones bills at. Null = not set.
   hourlyRateCents: integer("hourly_rate_cents"),
   valueCents: integer("value_cents"),                 // the contract's value

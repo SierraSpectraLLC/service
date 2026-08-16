@@ -2157,3 +2157,8 @@ DO $$ BEGIN
       FOREIGN KEY ("pm_schedule_id") REFERENCES "pm_schedules"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- ── Contracts that include kits, not a sum of money ─────────────────────────
+-- "Two PMs, each with its kit" is how a PM contract is sold; a dollar figure
+-- is a proxy that drifts the moment a kit's price moves.
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "included_kits" text NOT NULL DEFAULT '';

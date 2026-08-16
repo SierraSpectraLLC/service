@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { addAgreement, removeAgreement, updateAgreement } from "@/app/actions";
+import { addAgreement, listCatalogPartsForPicker, removeAgreement, updateAgreement } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import {
-  AGREEMENT_KINDS, KIND_LABEL, STANDING_COLOR, STANDING_LABEL, allowance, renewalLine, standing,
-  type Standing,
+  AGREEMENT_KINDS, KIND_LABEL, STANDING_COLOR, STANDING_LABEL, allowance, kitStates, parseKits,
+  renewalLine, standing, type IncludedKit, type Standing,
 } from "@/lib/agreements";
 import { formatCents } from "@/lib/money";
 import { formatHours } from "@/lib/hours";
@@ -16,12 +16,14 @@ export type AgreementRow = {
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
   visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
+  /** JSON [{partNumber, name, qty}] - what the paper includes in kind. */
+  includedKits: string;
   hourlyRateCents: number | null;
   /** Which of the client's systems this paper covers. [] = all of them. */
   instrumentIds: number[];
   valueCents: number | null; note: string;
   /** Summed from the work, never stored - see lib/agreementUsage. */
-  used: { partsCents: number; visits: number; laborMinutes: number; pmPartsCents?: number };
+  used: { partsCents: number; visits: number; laborMinutes: number; pmPartsCents?: number; kitUsed?: Record<string, number> };
 };
 
 const emptyDraft = {
@@ -29,6 +31,7 @@ const emptyDraft = {
   startsOn: "", endsOn: "", renewNoticeDays: "60",
   visitsIncluded: "0", partsAllowance: "", laborIncludedHours: "",
   visitsUnlimited: false, partsUnlimited: false, pmPartsIncluded: false, hourlyRate: "",
+  includedKits: [] as IncludedKit[],
   instrumentIds: [] as number[],
   value: "", note: "",
 };
@@ -99,11 +102,19 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   title?: string;
 }) {
   const [sheet, setSheet] = useState<null | { id?: number; orgId: number }>(null);
+  // The parts book, for naming an included kit instead of typing its number.
+  const [book, setBook] = useState<{ partNumber: string; name: string; kind: string }[] | null>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
-  const openAdd = (orgId: number) => { setDraft(emptyDraft); setError(""); setSheet({ orgId }); };
+  const loadBook = () => {
+    if (book !== null) return;
+    startTransition(async () => {
+      try { setBook((await listCatalogPartsForPicker()).parts); } catch { setBook([]); }
+    });
+  };
+  const openAdd = (orgId: number) => { setDraft(emptyDraft); setError(""); setSheet({ orgId }); loadBook(); };
   const openEdit = (r: AgreementRow) => {
     setDraft({
       kind: r.kind, number: r.number, title: r.title, status: r.status,
@@ -113,12 +124,13 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       laborIncludedHours: r.laborIncludedMinutes ? (r.laborIncludedMinutes / 60).toFixed(1) : "",
       visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
       pmPartsIncluded: r.pmPartsIncluded,
+      includedKits: parseKits(r.includedKits),
       hourlyRate: r.hourlyRateCents != null ? (r.hourlyRateCents / 100).toFixed(2) : "",
       instrumentIds: [...r.instrumentIds],
       value: r.valueCents != null ? (r.valueCents / 100).toFixed(2) : "",
       note: r.note,
     });
-    setError(""); setSheet({ id: r.id, orgId: r.orgId });
+    setError(""); setSheet({ id: r.id, orgId: r.orgId }); loadBook();
   };
 
   const save = () => {
@@ -205,6 +217,26 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 unlimited={r.visitsUnlimited} />
               <Bar label="Labour hours" included={r.laborIncludedMinutes} used={r.used.laborMinutes} fmt={formatHours} />
             </div>
+            {/* What the paper includes in kind, and how much of it is left. */}
+            {(() => {
+              const states = kitStates(parseKits(r.includedKits), r.used.kitUsed ?? {});
+              if (!states.length) return null;
+              return (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                  {states.map((k) => (
+                    <span key={k.partNumber} className="pill" title={k.partNumber}
+                      style={{
+                        background: k.over ? "#FBE9E9" : k.remaining === 0 ? "#FAF0DC" : "#E8F3EC",
+                        color: k.over ? "#A32D2D" : k.remaining === 0 ? "#8A5410" : "#2E6B2E",
+                      }}>
+                      🧰 {k.name || k.partNumber} {k.used}/{k.qty}
+                      {k.over ? ` · ${k.used - k.qty} billable` : ""}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+
             {/* Reported, never hidden: the money was really spent, the client
                 just isn't being charged for it out of this allowance. */}
             {r.pmPartsIncluded && (r.used.pmPartsCents ?? 0) > 0 && (
@@ -316,6 +348,45 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 </label>
               </div>
             </div>
+            {/* What the paper includes IN KIND. A PM contract is sold as
+                "two PMs, each with its kit", so this is the entitlement -
+                counted, not costed, and not a dollar figure that goes stale
+                when a kit's price moves. */}
+            <label>PM kits included</label>
+            <div style={{ marginBottom: 8 }}>
+              {draft.includedKits.map((k, idx) => (
+                <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                  <input type="number" min={1} value={k.qty} aria-label="How many"
+                    onChange={(e) => setDraft({ ...draft, includedKits: draft.includedKits.map((x, i) =>
+                      (i === idx ? { ...x, qty: parseInt(e.target.value) || 1 } : x)) })}
+                    style={{ width: 62, fontSize: 12 }} />
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{k.partNumber}</span>
+                  <span className="mut" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
+                  <button className="btn link" aria-label={`Remove ${k.partNumber}`} style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 13 }}
+                    onClick={() => setDraft({ ...draft, includedKits: draft.includedKits.filter((_, i) => i !== idx) })}>×</button>
+                </div>
+              ))}
+              <select value="" aria-label="Add an included kit"
+                onChange={(e) => {
+                  const hit = (book ?? []).find((b) => b.partNumber === e.target.value);
+                  if (!hit) return;
+                  if (draft.includedKits.some((k) => k.partNumber.toLowerCase() === hit.partNumber.toLowerCase())) return;
+                  setDraft({ ...draft, includedKits: [...draft.includedKits, { partNumber: hit.partNumber, name: hit.name, qty: 1 }] });
+                }}
+                style={{ fontSize: 12 }}>
+                <option value="">＋ Add a kit from the parts book...</option>
+                {(book ?? []).map((b) => (
+                  <option key={b.partNumber} value={b.partNumber}>
+                    {b.kind === "kit" ? "🧰 " : ""}{b.partNumber}{b.name ? ` - ${b.name}` : ""}
+                  </option>
+                ))}
+              </select>
+              <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                Fitting one of these draws down its count instead of the money above. Past the
+                included quantity, extras bill as ordinary parts.
+              </div>
+            </div>
+
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
                 <label>Labour hours included</label>

@@ -103,6 +103,62 @@ export function daysLeft(endsOn: string, today: string): number | null {
 export const inTerm = (a: Pick<AgreementLike, "startsOn" | "endsOn">, day: string): boolean =>
   (!a.startsOn || day >= a.startsOn) && (!a.endsOn || day <= a.endsOn);
 
+/**
+ * One kit the contract includes, and how many of it.
+ *
+ * A PM contract is sold as "two PMs, each with its kit", so this is what the
+ * paper actually says. Matching is by part NUMBER, the same key the rest of
+ * the system uses for parts, so a kit fitted on any covered system counts
+ * whether or not anybody catalogued it first.
+ */
+export type IncludedKit = { partNumber: string; name: string; qty: number };
+
+/** Tolerant parse: bad or legacy JSON degrades to "no kits", never a crash. */
+export function parseKits(raw: string): IncludedKit[] {
+  if (!raw.trim()) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((k) => ({
+        partNumber: String(k?.partNumber ?? "").trim(),
+        name: String(k?.name ?? "").trim(),
+        qty: Math.max(1, Math.floor(Number(k?.qty) || 1)),
+      }))
+      .filter((k) => k.partNumber);
+  } catch {
+    return [];
+  }
+}
+
+export function serializeKits(list: IncludedKit[]): string {
+  const clean = list
+    .map((k) => ({
+      partNumber: k.partNumber.trim(), name: k.name.trim(),
+      qty: Math.max(1, Math.floor(Number(k.qty) || 1)),
+    }))
+    .filter((k) => k.partNumber);
+  return clean.length ? JSON.stringify(clean) : "";
+}
+
+export type KitState = IncludedKit & { used: number; remaining: number; over: boolean };
+
+/**
+ * Each included kit against what was actually fitted.
+ *
+ * Counted, not costed: the entitlement is "a kit", so the answer is "one of
+ * two used" rather than a sum of money that has to be reconciled against a
+ * price list. Fitting more than the contract includes is not an error - it is
+ * a billable extra, which is why `over` is reported rather than clamped.
+ */
+export function kitStates(kits: IncludedKit[], usedByPn: Record<string, number>): KitState[] {
+  const at = (pn: string) => usedByPn[pn.trim().toLowerCase()] ?? 0;
+  return kits.map((k) => {
+    const used = at(k.partNumber);
+    return { ...k, used, remaining: k.qty - used, over: used > k.qty };
+  });
+}
+
 export type Usage = {
   /** What draws down the allowance - PM parts already removed when covered. */
   partsCents: number;
@@ -111,6 +167,9 @@ export type Usage = {
   /** Parts fitted on an included PM. Reported always; drawn down only when the
       contract does NOT include its PM's parts. */
   pmPartsCents?: number;
+  /** How many of each included kit was fitted, keyed by lower-cased part
+      number. Counted, not costed - see kitStates. */
+  kitUsed?: Record<string, number>;
 };
 
 export type Allowance = {

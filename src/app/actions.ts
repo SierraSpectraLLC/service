@@ -17,7 +17,7 @@ import {
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
-import { AGREEMENT_KINDS, AGREEMENT_STATES } from "@/lib/agreements";
+import { AGREEMENT_KINDS, AGREEMENT_STATES, serializeKits, type IncludedKit } from "@/lib/agreements";
 import {
   closeLine, moverOf, nextWoNumber, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
   type Mover,
@@ -7029,6 +7029,25 @@ export async function removeCatalogRef(id: number): Promise<{ error?: string }> 
   return {};
 }
 
+/**
+ * The parts book, for pickers that need to name a part rather than have one
+ * typed - the contract's included kits, most of all. Kits lead, because that
+ * is what a PM contract entitles somebody to.
+ */
+export async function listCatalogPartsForPicker(): Promise<{
+  parts: { partNumber: string; name: string; kind: string }[];
+}> {
+  const u = await requireStaff();
+  const rows = await db.select({
+    partNumber: partCatalog.partNumber, name: partCatalog.name, kind: partCatalog.kind,
+  }).from(partCatalog)
+    .where(and(forTenant(partCatalog.tenantOrgId, readTenant(u)), eq(partCatalog.archived, false)))
+    .orderBy(asc(partCatalog.partNumber))
+    .catch(() => []);
+  const rank = (k: string) => (k === "kit" ? 0 : 1);
+  return { parts: [...rows].sort((a, b) => rank(a.kind) - rank(b.kind)) };
+}
+
 export async function addCatalogPart(data: CatalogInput): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const clean = cleanCatalog(data);
@@ -7139,6 +7158,7 @@ export type AgreementInput = {
   startsOn: string; endsOn: string; renewNoticeDays: number | string;
   visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
   visitsUnlimited?: boolean; partsUnlimited?: boolean; pmPartsIncluded?: boolean;
+  includedKits?: IncludedKit[];
   hourlyRate?: string;
   instrumentIds?: number[];
   value: string; note: string;
@@ -7149,6 +7169,7 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
   startsOn: string; endsOn: string; renewNoticeDays: number;
   visitsIncluded: number; partsAllowanceCents: number; laborIncludedMinutes: number;
   visitsUnlimited: boolean; partsUnlimited: boolean; pmPartsIncluded: boolean;
+  includedKits: string;
   hourlyRateCents: number | null; instrumentIds: number[];
   valueCents: number | null; note: string;
 } {
@@ -7180,6 +7201,7 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
     visitsUnlimited: d.visitsUnlimited ?? false,
     partsUnlimited: d.partsUnlimited ?? false,
     pmPartsIncluded: d.pmPartsIncluded ?? false,
+    includedKits: serializeKits(d.includedKits ?? []),
     hourlyRateCents: parseMoney(d.hourlyRate ?? ""),
     // Which of the client's systems this paper covers; [] = all of them.
     // Ownership is validated by usage-time scoping, not here - a system that

@@ -59,7 +59,7 @@ export default async function AgreementsPage() {
     visitsIncluded: r.visitsIncluded, partsAllowanceCents: r.partsAllowanceCents,
     laborIncludedMinutes: r.laborIncludedMinutes,
     visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
-    pmPartsIncluded: r.pmPartsIncluded,
+    pmPartsIncluded: r.pmPartsIncluded, includedKits: r.includedKits,
     hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
     valueCents: r.valueCents, note: r.note,
     used: usage.get(r.id) ?? nothing,
