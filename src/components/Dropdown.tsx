@@ -27,6 +27,49 @@ export default function Dropdown({ label, align = "right", ariaLabel, summaryCla
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Keep the open panel on the screen.
+   *
+   * The panel is anchored to its trigger (right edge by default), which is
+   * right on a desktop and wrong on a phone: a trigger near the left edge threw
+   * a 190px panel 73px off the side of the screen, and the menu simply could
+   * not be read. CSS cannot know where the trigger sits in the viewport, so
+   * this measures on open and nudges the panel back inside.
+   *
+   * Positioning only - if it never runs, the menu still opens exactly as the
+   * browser would place it, which is the same posture as the close-on-outside
+   * handler below.
+   */
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const clamp = () => {
+      const panel = panelRef.current;
+      if (!panel || !el.open) return;
+      // Back to the CSS anchor first, so re-opening never compounds a nudge.
+      panel.style.left = "";
+      panel.style.right = "";
+      const pad = 8;
+      const vw = document.documentElement.clientWidth;
+      const box = panel.getBoundingClientRect();
+      const anchor = el.getBoundingClientRect();
+      if (box.left < pad) {
+        panel.style.right = "auto";
+        panel.style.left = `${pad - anchor.left}px`;
+      } else if (box.right > vw - pad) {
+        panel.style.left = "auto";
+        panel.style.right = `${anchor.right - (vw - pad)}px`;
+      }
+    };
+    el.addEventListener("toggle", clamp);
+    window.addEventListener("resize", clamp);
+    return () => {
+      el.removeEventListener("toggle", clamp);
+      window.removeEventListener("resize", clamp);
+    };
+  }, []);
 
   useEffect(() => {
     const el = ref.current;
@@ -52,7 +95,7 @@ export default function Dropdown({ label, align = "right", ariaLabel, summaryCla
       <summary className={summaryClass ?? (typeof label === "string" ? "btn sm" : "nav-ico")} aria-label={ariaLabel}>
         {label}{typeof label === "string" ? " ▾" : null}
       </summary>
-      <div className={`menu-panel${align === "left" ? " left" : ""}`}
+      <div ref={panelRef} className={`menu-panel${align === "left" ? " left" : ""}`}
         // Choosing something is the end of the interaction.
         onClick={() => { if (ref.current) ref.current.open = false; }}>
         {children}
