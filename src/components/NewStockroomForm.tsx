@@ -16,11 +16,19 @@ export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
+  // A dialog, not an inline form: the trigger lives in the page header, and a
+  // form unfolding inside a header's action cluster floats in dead space.
   return (
     <>
-      <button className="btn sm primary" onClick={() => setOpen(!open)}>{open ? "Cancel" : "+ New stockroom"}</button>
+      <button className="btn sm primary" onClick={() => setOpen(!open)}>+ New stockroom</button>
       {open && (
-        <div className="dash-form" style={{ marginTop: 10 }}>
+        <>
+          <div className="scrim" onClick={() => setOpen(false)} />
+          <div className="sheet" role="dialog" aria-modal="true" aria-label="New stockroom">
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--navy)" }}>New stockroom</div>
+            <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }} onClick={() => setOpen(false)}>close</button>
+          </div>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>Name *</label>
@@ -67,7 +75,8 @@ export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
               if (res.id) router.push(`/stock/${res.id}`);
             })}>{pending ? "Creating..." : "Create"}</button>
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+          </div>
+        </>
       )}
     </>
   );

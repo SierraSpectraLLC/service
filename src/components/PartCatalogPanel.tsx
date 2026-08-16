@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { addCatalogPart, archiveCatalogPart, setKitLines, updateCatalogPart } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { addCatalogPart, addPartPrices, archiveCatalogPart, deletePartPrice, setKitLines, updateCatalogPart } from "@/app/actions";
+import { formatCents } from "@/lib/money";
 import {
   catalogLabel, kitContents, PART_KINDS, PART_KIND_LABEL, searchCatalog,
 } from "@/lib/partCatalog";
@@ -35,18 +37,26 @@ const emptyDraft = {
  * catalog stays empty; asking them to name the twelve numbers they used last
  * month is a job somebody finishes.
  */
-export default function PartCatalogPanel({ items, assetTypes, modelsByType, unnamed }: {
+export type VendorPrice = {
+  id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string;
+};
+
+export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed }: {
   items: CatalogRow[];
   assetTypes: string[];
   /** Catalog models per module type, for the per-model chips. */
   modelsByType: Record<string, string[]>;
+  /** The price book's rows, so vendors and prices are set right here. */
+  prices?: VendorPrice[];
   /** Part numbers in use on real work that the catalog has never heard of. */
   unnamed: string[];
 }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [sheet, setSheet] = useState<null | { id?: number }>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [lines, setLines] = useState<{ partNumber: string; name: string; qty: number }[]>([]);
+  const [vendorDraft, setVendorDraft] = useState({ vendor: "", price: "", isOem: false, url: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -129,6 +139,12 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, unna
                 r.kind === "kit" && r.lines.length ? kitContents(r.lines) : "",
                 r.assetTypes.length ? r.assetTypes.join(", ") : "",
                 r.models.length ? r.models.join(", ") : "",
+                (() => {
+                  const mine = prices.filter((p) => p.partNumber.toLowerCase() === r.partNumber.toLowerCase());
+                  if (!mine.length) return "";
+                  const best = mine.reduce((a, b) => (a.priceCents <= b.priceCents ? a : b));
+                  return `${formatCents(best.priceCents)} at ${best.vendor}${mine.length > 1 ? ` (+${mine.length - 1} more)` : ""}`;
+                })(),
               ].filter(Boolean).join(" · ")}
             </div>
           </button>
@@ -274,6 +290,57 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, unna
                 </>
               );
             })()}
+
+            {/* Who sells it and for how much: the OEM and the secondary vendors,
+                each with a link. Same rows the price book shows; "Request part"
+                on a maintenance job pulls the cheapest offer from here. */}
+            <label>Vendors &amp; prices</label>
+            <div style={{ marginBottom: 8 }}>
+              {prices.filter((p) => p.partNumber.toLowerCase() === draft.partNumber.trim().toLowerCase()).map((p) => (
+                <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5 }}>
+                  <span style={{ fontWeight: 600 }}>{p.vendor}</span>
+                  {p.isOem && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>OEM</span>}
+                  <span className="mono">{formatCents(p.priceCents)}</span>
+                  {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>link ↗</a>}
+                  <button className="btn link" aria-label={`Remove ${p.vendor}'s price`} disabled={pending}
+                    style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12 }}
+                    onClick={() => startTransition(async () => { await deletePartPrice(p.id); router.refresh(); })}>×</button>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                <input value={vendorDraft.vendor} placeholder="Vendor"
+                  onChange={(e) => setVendorDraft({ ...vendorDraft, vendor: e.target.value })}
+                  style={{ flex: "1 1 110px", fontSize: 12 }} />
+                <input value={vendorDraft.price} placeholder="$" inputMode="decimal"
+                  onChange={(e) => setVendorDraft({ ...vendorDraft, price: e.target.value })}
+                  style={{ flex: "0 1 80px", fontSize: 12 }} />
+                <input className="mono" value={vendorDraft.url} placeholder="https://... (optional)"
+                  onChange={(e) => setVendorDraft({ ...vendorDraft, url: e.target.value })}
+                  style={{ flex: "2 1 160px", fontSize: 12 }} />
+                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, margin: 0, fontWeight: 400, color: "var(--ink)" }}>
+                  <input type="checkbox" checked={vendorDraft.isOem} style={{ width: 14, height: 14 }}
+                    onChange={(e) => setVendorDraft({ ...vendorDraft, isOem: e.target.checked })} />
+                  OEM
+                </label>
+                <button type="button" className="btn sm" disabled={pending || !draft.partNumber.trim() || !vendorDraft.vendor.trim() || !vendorDraft.price.trim()}
+                  onClick={() => {
+                    setError("");
+                    startTransition(async () => {
+                      const res = await addPartPrices([{
+                        partNumber: draft.partNumber, vendor: vendorDraft.vendor,
+                        price: vendorDraft.price, isOem: vendorDraft.isOem, url: vendorDraft.url,
+                      }]);
+                      if (res?.error) { setError(res.error); return; }
+                      if (res.failures?.length) { setError(res.failures[0].error); return; }
+                      setVendorDraft({ vendor: "", price: "", isOem: false, url: "" });
+                      router.refresh();
+                    });
+                  }}>＋ Vendor</button>
+              </div>
+              {!draft.partNumber.trim() && (
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>Type the part number first - prices hang off it.</div>
+              )}
+            </div>
 
             <label>Note</label>
             <textarea value={draft.note} rows={2} style={{ width: "100%", marginBottom: 8 }}

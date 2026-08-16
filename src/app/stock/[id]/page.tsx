@@ -3,10 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  assets, instruments, orgs, partPrices, stockItems, stockMoves, stockrooms, stockroomShares,
+  assets, instruments, orgs, partCatalog, partPrices, stockItems, stockMoves, stockrooms, stockroomShares,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
 import { canSeeCosts } from "@/lib/redact";
 import { shopTime } from "@/lib/shopday";
 import { KIND_LABEL, MOVE_LABEL, reorderLines, stockAccess, stockTotals } from "@/lib/stock";
@@ -51,6 +51,12 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
       isOem: partPrices.isOem, priceCents: partPrices.priceCents,
     }).from(partPrices),
   ]);
+  // The parts book: what each number IS. A shelf line whose number the book
+  // knows borrows its name, and the add-grid offers the book's numbers.
+  const bookRows = await db.select({ partNumber: partCatalog.partNumber, name: partCatalog.name })
+    .from(partCatalog).where(and(forTenant(partCatalog.tenantOrgId, readTenant(user)), eq(partCatalog.archived, false)))
+    .orderBy(asc(partCatalog.partNumber)).catch(() => []);
+  const bookName = new Map(bookRows.map((b) => [b.partNumber.trim().toLowerCase(), b.name]));
 
   // Where stock from this room may go: systems the viewer can work, plus their
   // own shelf units. Same scope the work pages use, so a picker can never
@@ -110,7 +116,11 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
   const showCosts = canSeeCosts(user, room.orgId, room.tenantOrgId);
   const totals = stockTotals(items);
   const short = reorderLines(items);
-  const knownParts = [...new Set([...priceRows.map((p) => p.partNumber), ...items.map((i) => i.partNumber)])].sort();
+  const knownParts = [...new Map([
+    ...priceRows.map((p) => [p.partNumber, ""] as [string, string]),
+    ...items.map((i) => [i.partNumber, i.name] as [string, string]),
+    ...bookRows.map((b) => [b.partNumber, b.name] as [string, string]),
+  ].map(([pn, name]) => [pn, { pn, name }])).values()].sort((a, b) => a.pn.localeCompare(b.pn));
   const instLabel = new Map(systemRows.map((s) => [s.id, s.externalId]));
   const roomName = new Map(otherRooms.map((r) => [r.id, r.name]));
 
@@ -146,7 +156,11 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
 
         <StockShelf
           items={items.map((i) => ({
-            id: i.id, partNumber: i.partNumber, name: i.name, qty: i.qty, minQty: i.minQty,
+            id: i.id, partNumber: i.partNumber,
+            // The book's name backfills a nameless line, so the shelf and the
+            // catalog agree about what a number is.
+            name: i.name || bookName.get(i.partNumber.trim().toLowerCase()) || "",
+            qty: i.qty, minQty: i.minQty,
             bin: i.bin, note: i.note, unitCostCents: showCosts ? i.unitCostCents : null,
           }))}
           targets={targets} rooms={otherRooms}

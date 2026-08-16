@@ -25,8 +25,9 @@ const filled = (r: Row) => !!r.partNumber.trim();
  */
 export default function StockGrid({ stockroomId, knownParts, onDone }: {
   stockroomId: number;
-  /** Part numbers from the price book and existing shelves, for autocomplete. */
-  knownParts: string[];
+  /** Numbers from the parts book, the price book and existing shelves, with
+      the book's name where it has one - autocomplete plus description fill. */
+  knownParts: { pn: string; name: string }[];
   onDone?: () => void;
 }) {
   const [rows, setRows] = useState<Row[]>([blank(), blank(), blank()]);
@@ -36,7 +37,17 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
   const [pending, startTransition] = useTransition();
 
   const setCell = (i: number, key: keyof Row, value: string) =>
-    setRows((rs) => rs.map((r, n) => (n === i ? { ...r, [key]: value } : r)));
+    setRows((rs) => rs.map((r, n) => {
+      if (n !== i) return r;
+      const next = { ...r, [key]: value };
+      // Typing a number the parts book knows fills the description in, the
+      // same way the book fills names on the shelf - one source of truth.
+      if (key === "partNumber" && !r.name.trim()) {
+        const hit = knownParts.find((p) => p.pn.toLowerCase() === value.trim().toLowerCase());
+        if (hit?.name) next.name = hit.name;
+      }
+      return next;
+    }));
 
   const onPaste = (e: React.ClipboardEvent, atRow: number, atCol: number) => {
     const text = e.clipboardData.getData("text/plain");
@@ -125,7 +136,7 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
           </tbody>
         </table>
       </div>
-      <datalist id="stock-known-parts">{knownParts.map((p) => <option key={p} value={p} />)}</datalist>
+      <datalist id="stock-known-parts">{knownParts.map((p) => <option key={p.pn} value={p.pn}>{p.name}</option>)}</datalist>
 
       <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, blank()])}>＋ Row</button>
