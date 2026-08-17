@@ -5,7 +5,7 @@ import { promptReason } from "@/lib/reason";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
-  alignMaintenance, undoRunPmNow,
+  alignMaintenance, undoRunPmNow, logPastPm,
 } from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
 import { pmGroups } from "@/lib/pmGroups";
@@ -49,7 +49,11 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const [error, setError] = useState("");
   const [showLater, setShowLater] = useState(false);
   const [aligning, setAligning] = useState(false);
-  const [alignDraft, setAlignDraft] = useState<{ mode: "lastDone" | "visit"; date: string }>({ mode: "lastDone", date: today });
+  const [alignDraft, setAlignDraft] = useState<{ mode: "lastDone" | "visit"; date: string; fileRecord: boolean }>({ mode: "lastDone", date: today, fileRecord: false });
+  // Per-schedule backfill: one past completion, filed as the Done task it
+  // would have left behind.
+  const [logging, setLogging] = useState<number | null>(null);
+  const [logDraft, setLogDraft] = useState({ date: "", note: "", doneBy: "", advanceSchedule: true });
   const [pending, startTransition] = useTransition();
 
   if (!canEdit && schedules.length === 0) return null;
@@ -139,6 +143,14 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                     if (res?.error) setError(res.error);
                   })}>undo start</button>
               )}
+              {canEdit && (
+                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  title="File a completion that happened before the software was watching"
+                  onClick={() => {
+                    setLogging(logging === s.id ? null : s.id);
+                    setLogDraft({ date: "", note: "", doneBy: "", advanceSchedule: true });
+                  }}>log past done</button>
+              )}
               <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                 onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({
                   ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue },
@@ -161,6 +173,32 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           )}
         </div>
         {s.body && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
+        {/* One past completion, filed as the Done task it would have left
+            behind - so the vendor's 2024 visit exists as history, not memory. */}
+        {logging === s.id && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
+            <input type="date" value={logDraft.date} aria-label="Date it was done"
+              onChange={(ev) => setLogDraft({ ...logDraft, date: ev.target.value })}
+              style={{ width: "auto", fontSize: 12 }} />
+            <input value={logDraft.doneBy} placeholder="By (vendor or engineer, optional)"
+              onChange={(ev) => setLogDraft({ ...logDraft, doneBy: ev.target.value })}
+              style={{ width: "auto", flex: "1 1 130px", fontSize: 12 }} />
+            <input value={logDraft.note} placeholder="Note (optional)"
+              onChange={(ev) => setLogDraft({ ...logDraft, note: ev.target.value })}
+              style={{ width: "auto", flex: "2 1 150px", fontSize: 12 }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, margin: 0, fontWeight: 400 }}>
+              <input type="checkbox" checked={logDraft.advanceSchedule} style={{ width: 14, height: 14 }}
+                onChange={(ev) => setLogDraft({ ...logDraft, advanceSchedule: ev.target.checked })} />
+              set next due from it
+            </label>
+            <button className="btn sm accent" disabled={pending || !logDraft.date}
+              onClick={() => startTransition(async () => {
+                const res = await logPastPm(s.id, logDraft);
+                if (res?.error) { setError(res.error); return; }
+                setLogging(null);
+              })}>File</button>
+          </div>
+        )}
         {s.parts.filter((pt) => pt.number).map((pt) => {
           const key = `${s.id}:${pt.number}`;
           return (
@@ -246,6 +284,14 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               {pending ? "Aligning..." : `Apply to ${schedules.length} schedule${schedules.length === 1 ? "" : "s"}`}
             </button>
           </div>
+          {alignDraft.mode === "lastDone" && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "8px 0 0", fontWeight: 400 }}>
+              <input type="checkbox" checked={alignDraft.fileRecord} style={{ width: 15, height: 15 }}
+                onChange={(e) => setAlignDraft({ ...alignDraft, fileRecord: e.target.checked })} />
+              Also file the completed work as records on that date
+              <span className="mut">- the visit becomes history, not just a date</span>
+            </label>
+          )}
           <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
             {alignDraft.mode === "lastDone"
               ? "Marks every schedule last done that day - each comes due its own cadence later (quarterly work in 3 months, annual next year)."

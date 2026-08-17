@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { openWorkOrder } from "@/app/actions";
+import { logPastWorkOrder, openWorkOrder } from "@/app/actions";
 import { WO_COLOR, WO_LABEL, WO_SEVERITIES, woLine, woOpen } from "@/lib/workOrders";
 
 export type WorkOrderRow = {
@@ -41,6 +41,9 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit }: {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [severity, setSeverity] = useState("Degraded");
+  // Backfilling: work that already happened, filed closed on its real date.
+  const [past, setPast] = useState(false);
+  const [pastDraft, setPastDraft] = useState({ title: "", summary: "", date: "", reference: "", doneBy: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -82,12 +85,60 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit }: {
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Work orders</div>
         {canEdit && (
-          <button className="btn sm primary" style={{ marginLeft: "auto" }}
-            onClick={() => { setOpen(!open); setError(""); }}>
-            {open ? "Cancel" : "Open one"}
-          </button>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            <button className="btn sm" onClick={() => { setPast(!past); setOpen(false); setError(""); }}>
+              {past ? "Cancel" : "Log past work"}
+            </button>
+            <button className="btn sm primary" onClick={() => { setOpen(!open); setPast(false); setError(""); }}>
+              {open ? "Cancel" : "Open one"}
+            </button>
+          </span>
         )}
       </div>
+
+      {/* History a system arrived with: filed already closed, on the date it
+          was done. "What was done" is the one required thing - a backfilled
+          job with no summary is a date, not history. */}
+      {past && (
+        <div className="dash-form" style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <div style={{ flex: "2 1 180px" }}>
+              <label>What was the job? *</label>
+              <input value={pastDraft.title} onChange={(e) => setPastDraft({ ...pastDraft, title: e.target.value })}
+                maxLength={160} placeholder="Replaced nebulizer, leak check" />
+            </div>
+            <div>
+              <label>Done on *</label>
+              <input type="date" value={pastDraft.date}
+                onChange={(e) => setPastDraft({ ...pastDraft, date: e.target.value })} style={{ width: "auto" }} />
+            </div>
+          </div>
+          <label>What was done *</label>
+          <textarea value={pastDraft.summary} onChange={(e) => setPastDraft({ ...pastDraft, summary: e.target.value })}
+            rows={3} placeholder="The close-out, as it would have been written that day" style={{ width: "100%", marginBottom: 8 }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <div style={{ flex: "1 1 140px" }}>
+              <label>Reference #</label>
+              <input value={pastDraft.reference} onChange={(e) => setPastDraft({ ...pastDraft, reference: e.target.value })}
+                placeholder="Old WO number (optional)" className="mono" />
+            </div>
+            <div style={{ flex: "1 1 140px" }}>
+              <label>Done by</label>
+              <input value={pastDraft.doneBy} onChange={(e) => setPastDraft({ ...pastDraft, doneBy: e.target.value })}
+                placeholder="Engineer or vendor (optional)" />
+            </div>
+          </div>
+          <button className="btn sm accent" disabled={pending || !pastDraft.title.trim() || !pastDraft.summary.trim() || !pastDraft.date}
+            onClick={() => startTransition(async () => {
+              const res = await logPastWorkOrder(target, pastDraft);
+              if (res?.error) { setError(res.error); return; }
+              setPast(false); setPastDraft({ title: "", summary: "", date: "", reference: "", doneBy: "" });
+            })}>
+            {pending ? "Filing..." : "File it, closed"}
+          </button>
+          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+        </div>
+      )}
 
       {open && (
         <div className="dash-form" style={{ marginBottom: 8 }}>

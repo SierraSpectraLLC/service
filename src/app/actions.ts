@@ -1530,7 +1530,7 @@ export async function updatePmSchedule(
  * somebody moved to In progress or Blocked is being worked and stays.
  */
 export async function alignMaintenance(
-  target: WorkTarget, data: { mode: "lastDone" | "visit"; date: string },
+  target: WorkTarget, data: { mode: "lastDone" | "visit"; date: string; fileRecord?: boolean },
 ): Promise<{ error?: string; changed?: number }> {
   const u = await requireEditor();
   const date = data.date.trim();
@@ -1559,6 +1559,21 @@ export async function alignMaintenance(
     const set = data.mode === "lastDone" ? { lastDone: date, nextDue } : { nextDue };
     if (s.nextDue === nextDue && (data.mode !== "lastDone" || s.lastDone === date)) continue;
     await db.update(pmSchedules).set(set).where(eq(pmSchedules.id, s.id));
+  }
+  // "The PM was done that day" can also FILE the done work, so the visit
+  // exists as history and not just as arithmetic on the next due date.
+  if (data.mode === "lastDone" && data.fileRecord) {
+    for (const s of rows) {
+      // Asset-hosted schedules file against the system too - the alignment was
+      // asked for from the system, and that is where the history reads.
+      const onSystem = s.instrumentId ?? target.instrumentId;
+      await db.insert(tasks).values({
+        tenantOrgId: s.tenantOrgId, instrumentId: onSystem, assetId: s.assetId,
+        title: s.title, body: `Backfilled - done ${date} (PM visit).`,
+        state: "Done", origin: "pm", pmScheduleId: s.id, procedureId: s.procedureId,
+        dueDate: date, completedAt: new Date(`${date}T12:00:00Z`),
+      });
+    }
   }
   // Tasks generated off the old anchor claim work that this correction says is
   // not owed yet (or was already done). Only untouched Open ones go.
@@ -1619,6 +1634,65 @@ export async function runPmNow(scheduleId: number): Promise<{ error?: string; ta
   else if (s.assetId !== null) revalidatePath(`/assets/${s.assetId}`);
   revalidatePath("/maintenance");
   return { taskId: t.id };
+}
+
+/**
+ * File a PM that happened before the software was watching.
+ *
+ * The record is a Done task on the date it was done - exactly what completing
+ * the job live would have left - so it prints on packets, counts in history,
+ * and reads like every other completed PM. The schedule's calendar moves only
+ * when this is the LATEST known completion and only when asked: logging the
+ * 2024 visit after the 2026 one is filling in history, not turning the clock
+ * back.
+ */
+export async function logPastPm(
+  scheduleId: number,
+  data: { date: string; note: string; doneBy?: string; advanceSchedule: boolean },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [sched] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!sched) return { error: "Not found" };
+  await assertWorkEditable(u, sched);
+  const date = data.date.trim();
+  if (!isIsoDay(date)) return { error: "Pick the date it was done" };
+  if (date > shopToday()) return { error: "That's the future - use Do it now for work that's happening" };
+  const doneBy = (data.doneBy ?? "").trim() || (u.name || u.email);
+
+  // Same resolution as live generation: a schedule on an installed unit files
+  // its work against the SYSTEM too, so the history reads in one place.
+  const onSystem = sched.instrumentId ?? (sched.assetId === null
+    ? null
+    : (await db.select({ instrumentId: assets.instrumentId }).from(assets)
+        .where(eq(assets.id, sched.assetId)))[0]?.instrumentId ?? null);
+
+  const [t] = await db.insert(tasks).values({
+    tenantOrgId: sched.tenantOrgId,
+    instrumentId: onSystem, assetId: sched.assetId,
+    title: sched.title,
+    body: [data.note.trim(), `Backfilled - done ${date} by ${doneBy}.`].filter(Boolean).join("\n"),
+    state: "Done", origin: "pm", pmScheduleId: sched.id, procedureId: sched.procedureId,
+    assignee: doneBy, dueDate: date,
+    completedAt: new Date(`${date}T12:00:00Z`),
+  }).returning();
+  // Only the latest known completion may move the calendar, and only when
+  // asked - a bulk Align may already have pinned the dates deliberately.
+  if (data.advanceSchedule && (sched.lastDone === "" || date > sched.lastDone)) {
+    await db.update(pmSchedules)
+      .set({ lastDone: date, nextDue: advancePm(date, sched.everyDays) })
+      .where(eq(pmSchedules.id, sched.id));
+  }
+  await audit({
+    actor: u.email, instrumentId: sched.instrumentId, assetId: sched.assetId,
+    entityType: "pm", entityId: sched.id,
+    action: `logged past completion of '${sched.title}' - done ${date} by ${doneBy}`
+      + (data.advanceSchedule && (sched.lastDone === "" || date > sched.lastDone)
+        ? ` (next due ${advancePm(date, sched.everyDays)})` : ""),
+    field: "lastDone", newValue: date,
+  });
+  revWork(sched);
+  void t;
+  return {};
 }
 
 /**
@@ -4206,6 +4280,64 @@ export async function openWorkOrder(
     title, body: data.body.trim().slice(0, 4000), severity: data.severity,
     origin: "", assignee: (data.assignee ?? "").trim(),
     externalId: targetLabel(t0.externalId, t0.asset),
+  });
+  revWo(wo);
+  return { id: wo.id, number: wo.number };
+}
+
+/**
+ * File work that already happened - the paper history a system arrives with.
+ *
+ * A work order normally opens live and earns its close-out; a system serviced
+ * for years before it entered this software has neither, and the history is
+ * real whether or not the software watched it happen. So this writes the
+ * record already closed, on the date it was done, with "what was done" as the
+ * one required thing - a backfilled job with no summary is a date, not
+ * history. The reference keeps the paper trail's own number when there is
+ * one; otherwise the house series stamps it like any other job.
+ */
+export async function logPastWorkOrder(
+  target: WorkTarget,
+  data: { title: string; summary: string; date: string; reference?: string; doneBy?: string },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireEditor();
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say briefly what the job was" };
+  const summary = data.summary.trim().slice(0, 4000);
+  if (!summary) return { error: "Say what was done - a backfilled job with no summary is a date, not history" };
+  const date = data.date.trim();
+  if (!isIsoDay(date)) return { error: "Pick the date it was done" };
+  if (date > shopToday()) return { error: "That's the future - open a work order instead" };
+  const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: target.assetId });
+  if ("error" in t0) return t0;
+
+  const reference = (data.reference ?? "").trim().slice(0, 40);
+  const used = await db.select({ number: workOrders.number }).from(workOrders)
+    .where(forTenant(workOrders.tenantOrgId, t0.tenantOrgId));
+  if (reference && used.some((r) => r.number.toLowerCase() === reference.toLowerCase())) {
+    return { error: `${reference} is already a work order here` };
+  }
+  const number = reference || nextWoNumber(used.map((r) => r.number));
+
+  const orgId = t0.instrumentId !== null
+    ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
+        .where(eq(instruments.id, t0.instrumentId)))[0]?.o ?? null
+    : t0.asset?.ownerOrgId ?? null;
+  const doneBy = (data.doneBy ?? "").trim() || (u.name || u.email);
+
+  const [wo] = await db.insert(workOrders).values({
+    tenantOrgId: t0.tenantOrgId, number,
+    instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+    orgId, requestedBy: doneBy, requestedByEmail: u.email,
+    title, body: "", severity: "Planned", state: "closed",
+    openedOn: date, closeSummary: summary, closedBy: doneBy,
+    // Noon, so the calendar date survives every timezone's midnight.
+    closedAt: new Date(`${date}T12:00:00Z`), resolvedAt: new Date(`${date}T12:00:00Z`),
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "work_order", entityId: wo.id,
+    action: `logged past work ${wo.number} (${date}): ${title}`,
   });
   revWo(wo);
   return { id: wo.id, number: wo.number };
