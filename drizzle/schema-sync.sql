@@ -2341,3 +2341,9 @@ DO $$ BEGIN
       FOREIGN KEY ("serves_asset_id") REFERENCES "assets"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- A checklist written once on a procedure and stamped onto every task it makes,
+-- with section headings ("Remove & Sonicate:") that are labels, not boxes.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "checklist" text NOT NULL DEFAULT '';
+ALTER TABLE "checklist_items" ADD COLUMN IF NOT EXISTS "heading" boolean NOT NULL DEFAULT false;
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "checklist" text NOT NULL DEFAULT '';

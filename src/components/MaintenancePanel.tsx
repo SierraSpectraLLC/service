@@ -44,7 +44,10 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   catalogHint?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "90", firstDue: today, partName: "", partNumber: "" });
+  // Yearly by default, like the procedure catalog: most upkeep worth writing
+  // down is annual, and the form already remembers the last cadence used
+  // (see the reset below) for shops whose rhythm is something else.
+  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "365", firstDue: today, partName: "", partNumber: "" });
   const [requested, setRequested] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string }>>({});
   const [error, setError] = useState("");

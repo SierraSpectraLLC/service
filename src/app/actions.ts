@@ -32,8 +32,10 @@ import {
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
+  stampChecklist,
 } from "@/lib/pmGenerate";
 import { parseProcParts, partQty, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
+import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, resultIsRecorded } from "@/lib/testResult";
 import { cleanBody, messageableFrom } from "@/lib/messages";
@@ -597,13 +599,14 @@ async function generateCheckout(
   const fresh = picked.filter((i) => !openTitles.has(i.name.toLowerCase()));
   if (!fresh.length) return 0;
   for (const i of fresh) {
-    await db.insert(tasks).values({
+    const [t] = await db.insert(tasks).values({
       tenantOrgId,
       // Parts narrowed to this unit's model - a per-model mapping on the
       // procedure must not put the LC-20's kit on an LC-30's task.
       instrumentId, title: i.name, body: procedureTaskBody(i, partsForModel(parseProcParts(i.parts), target.model)), origin: "checkout",
       assetId: target.id, sortOrder: i.position, procedureId: i.id ?? null,
-    });
+    }).returning();
+    await stampChecklist(t.id, i.checklist);
   }
   const label = target.id !== null ? assetLabel(target as { kind: string; model: string; serial: string }) : "the system";
   await audit({
@@ -1939,14 +1942,22 @@ export async function assignTask(taskId: number, assignee: string) {
 
 export async function addChecklistItem(taskId: number, text: string) {
   const u = await requireEditor();
-  if (!text.trim()) return;
+  // Same rule a pasted template follows: a line ending in a colon is a section
+  // label, not a box. One convention, wherever a line is typed.
+  const line = cleanItem(text);
+  if (!line) return;
   const [t] = await db.select().from(tasks).where(eq(tasks.id, taskId));
   if (!t) return;
   await assertWorkEditable(u, t);
-  await db.insert(checklistItems).values({ taskId, text: text.trim() });
+  const after = await db.select({ sortOrder: checklistItems.sortOrder }).from(checklistItems)
+    .where(eq(checklistItems.taskId, taskId));
+  await db.insert(checklistItems).values({
+    taskId, text: line.text, heading: line.heading,
+    sortOrder: Math.max(0, ...after.map((a) => a.sortOrder)) + 1,
+  });
   await audit({
     actor: u.email, instrumentId: t.instrumentId, entityType: "checklist_item", entityId: taskId,
-    action: `added checklist item '${text.trim()}' to '${t.title}'`,
+    action: `added checklist ${line.heading ? "heading" : "item"} '${line.text}' to '${t.title}'`,
   });
   revWork(t);
 }
@@ -3463,6 +3474,8 @@ type ProcedureInput = {
   required?: boolean;
   qualification?: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
+  /** The steps, one per line. See lib/checklist. */
+  checklist?: string;
 };
 
 /** Validate + normalize; returns {error} or clean column values. */
@@ -3474,6 +3487,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   required: boolean;
   qualification: string;
   parts: string; modelScope: string[]; categoryScope: string[];
+  checklist: string;
 } {
   if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
   if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
@@ -3533,6 +3547,9 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
     qualification: (QUALIFICATIONS as readonly string[]).includes(data.qualification ?? "")
       ? data.qualification! : "",
     parts: serializeProcParts(data.parts), modelScope, categoryScope,
+    // Normalized here rather than at every reader: what gets stored is what
+    // the stamper will produce, so the editor shows the real steps back.
+    checklist: serializeChecklist(parseChecklist(data.checklist ?? "")),
   };
 }
 

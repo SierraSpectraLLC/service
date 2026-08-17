@@ -13,9 +13,10 @@ import {
 } from "@/app/actions";
 import { RESULT_LABEL } from "@/lib/checkout";
 import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResult";
+import { checklistProgress } from "@/lib/checklist";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
-type Item = { id: number; text: string; done: boolean; thread: Note[] };
+type Item = { id: number; text: string; done: boolean; heading?: boolean; thread: Note[] };
 /** The catalog's spec, when the procedure behind this task is a test. */
 type TestSpec = { resultType: string; target: string | null; tolerancePct: string | null };
 type TaskResult = {
@@ -290,7 +291,9 @@ export default function TasksPanel({
 
   const renderTask = (t: Task, isDone: boolean) => {
     const open = expanded === t.id;
-    const done = t.checklist.filter((c) => c.done).length;
+    // Headings are labels, not boxes - counting them reports a finished job as
+    // 12/14 forever. See lib/checklist.
+    const progress = checklistProgress(t.checklist);
     return (
       <div key={t.id} style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden", opacity: isDone && !open ? 0.7 : 1 }}>
         <div className="row-hover" onClick={() => (picking ? toggle(t.id) : setExpanded(open ? null : t.id))}
@@ -301,7 +304,9 @@ export default function TasksPanel({
           )}
           <span className="pill" style={{ background: TASK_COLOR[t.state]?.bg, color: TASK_COLOR[t.state]?.fg }}>{t.state}</span>
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
-          {t.checklist.length > 0 && <span className="mut" style={{ fontSize: 11 }}>{done}/{t.checklist.length}</span>}
+          {progress.total > 0 && (
+            <span className="mut" style={{ fontSize: 11 }}>{progress.done}/{progress.total}</span>
+          )}
           {/* A test reads as a test in a list of twenty, and carries its verdict
               once it has one - the reading is the outcome, not the checkbox. */}
           {t.test && (
@@ -390,6 +395,15 @@ export default function TasksPanel({
               const n = c.thread.length;
               return (
                 <div key={c.id} style={{ marginBottom: 6 }}>
+                  {c.heading ? (
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 8 }}>
+                      <span className="eyebrow" style={{ flex: 1 }}>{c.text.replace(/:$/, "")}</span>
+                      {isStaff && (
+                        <button className="btn link" title="Remove heading" style={{ color: "#A32D2D", padding: "0 4px" }}
+                          onClick={() => startTransition(() => deleteChecklistItem(c.id))}>×</button>
+                      )}
+                    </div>
+                  ) : (
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <ItemCheckbox item={c} canEdit={canEdit} />
                     <span style={{ fontSize: 13, flex: 1, textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--mut)" : "var(--ink)" }}>{c.text}</span>
@@ -405,7 +419,8 @@ export default function TasksPanel({
                         }}>×</button>
                     )}
                   </div>
-                  {tOpen && (
+                  )}
+                  {!c.heading && tOpen && (
                     <div style={{ marginLeft: 24, marginTop: 6, borderLeft: "2px solid var(--line)", paddingLeft: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                       {c.thread.map((m) => renderNote(m, "item"))}
                       {canEdit && (

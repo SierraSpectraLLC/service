@@ -7,6 +7,7 @@ import { addProcedure, updateProcedure, deleteProcedure, reorderProcedures,
 import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
 import { cadenceLabel } from "@/lib/pm";
 import { describeProcedure, type ProcPart } from "@/lib/procedures";
+import { parseChecklist } from "@/lib/checklist";
 import { procedureRole, ROLE_COLOR, ROLE_LABEL } from "@/lib/procedureRole";
 import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
 
@@ -17,6 +18,7 @@ export type ProcedureRow = {
   runsAtIntake: boolean; intervalDays: number | null; required: boolean;
   qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
+  checklist: string;
 };
 
 const KIND_GLYPH: Record<string, { glyph: string; bg: string; fg: string }> = {
@@ -55,15 +57,18 @@ type Draft = {
   runsAtIntake: boolean; repeats: boolean; intervalDays: string; required: boolean;
   qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
+  checklist: string;
 };
 const emptyDraft: Draft = {
   kind: "task", name: "", notes: "",
   resultType: "pass_fail", target: "", tolerancePct: "",
   requiresNote: false, consumesPart: false,
   // Filters never pre-fill this: a new procedure always starts with both off.
-  runsAtIntake: false, repeats: false, intervalDays: "90", required: false,
+  // Yearly, because most upkeep worth writing down is annual and picking the
+  // same value on every new procedure is a tax on the common case.
+  runsAtIntake: false, repeats: false, intervalDays: "365", required: false,
   qualification: "",
-  parts: [], modelScope: [], categoryScope: [],
+  parts: [], modelScope: [], categoryScope: [], checklist: "",
 };
 
 /** Multiselect over catalog models: chips in the field, type-to-filter list below. */
@@ -248,10 +253,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     resultType: i.resultType, target: i.target ?? "", tolerancePct: i.tolerancePct ?? "",
     requiresNote: i.requiresNote, consumesPart: i.consumesPart,
     runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
-    intervalDays: String(i.intervalDays ?? 90), required: i.required,
+    intervalDays: String(i.intervalDays ?? 365), required: i.required,
     qualification: i.qualification,
     parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
-    categoryScope: i.categoryScope,
+    categoryScope: i.categoryScope, checklist: i.checklist,
   });
   const openEdit = (i: ProcedureRow) => {
     setDraft(draftFrom(i));
@@ -297,7 +302,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       qualification: draft.qualification,
       intervalDays: draft.repeats ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
-      categoryScope: draft.categoryScope,
+      categoryScope: draft.categoryScope, checklist: draft.checklist,
     };
     startTransition(async () => {
       const res = sheet.id
@@ -905,6 +910,23 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
               placeholder="What doing this involves (optional)"
               style={{ width: "100%", marginBottom: 10, resize: "vertical", fontSize: 13 }} />
+
+            {/* The steps as boxes rather than as a paragraph. Every task this
+                makes - at intake and on every cycle - arrives with them
+                already ticked off nothing, so a fourteen-step teardown stops
+                being one checkbox somebody ticks at the end. */}
+            <label>Checklist <span className="mut" style={{ fontWeight: 400 }}>(one step per line)</span></label>
+            <textarea value={draft.checklist} rows={5}
+              onChange={(e) => setDraft({ ...draft, checklist: e.target.value })}
+              placeholder={"Remove & Sonicate:\nLow-Pressure Funnel Assembly\nHigh-Pressure Funnel Assembly"}
+              style={{ width: "100%", marginBottom: 4, resize: "vertical", fontSize: 13 }} />
+            <div className="mut" style={{ fontSize: 10.5, marginBottom: 10 }}>
+              End a line with a colon to make it a section label instead of a tick box.
+              {(() => {
+                const n = parseChecklist(draft.checklist).filter((l) => !l.heading).length;
+                return n ? ` ${n} box${n === 1 ? "" : "es"} on every task this makes.` : "";
+              })()}
+            </div>
 
             <label>Parts it takes</label>
             <div style={{ marginBottom: 10 }}>

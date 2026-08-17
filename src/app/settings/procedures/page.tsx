@@ -60,7 +60,7 @@ export default async function ProceduresPage() {
           runsAtIntake: r.runsAtIntake, intervalDays: r.intervalDays, required: r.required,
           qualification: r.qualification,
           categoryScope: r.categoryScope,
-          parts: parseProcParts(r.parts), modelScope: r.modelScope,
+          parts: parseProcParts(r.parts), modelScope: r.modelScope, checklist: r.checklist,
         }))}
       />
     </div>

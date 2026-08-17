@@ -473,6 +473,17 @@ export const procedures = pgTable("procedures", {
   // is a set of procedures rather than a separate object to maintain.
   qualification: text("qualification").notNull().default(""),
   parts: text("parts").notNull().default(""),       // JSON [{name, number}], "" = none
+  /**
+   * The steps, one per line, stamped onto every task this makes.
+   *
+   * `notes` above is prose - the paragraph explaining what the job involves.
+   * Prose is not tickable, so a fourteen-step teardown was either one checkbox
+   * ticked at the end or fourteen items retyped by hand on every unit, every
+   * visit. Lines rather than JSON because a checklist IS lines and people paste
+   * them out of an SOP. Parsing (including the trailing-colon heading rule)
+   * lives in lib/checklist.
+   */
+  checklist: text("checklist").notNull().default(""),
   modelScope: text("model_scope").array().notNull().default([]), // [] = all models
   // System-level procedures only: which system CATEGORIES this covers. [] = all
   // of them, which is what every system procedure meant before this existed.
@@ -521,6 +532,11 @@ export const pmSchedules = pgTable("pm_schedules", {
   partName: text("part_name").notNull().default(""),
   partNumber: text("part_number").notNull().default(""),
   parts: text("parts").notNull().default(""),
+  // The steps, stamped from the procedure the same way `parts` is and owned by
+  // the unit from then on. One customer's teardown gains a step the model's
+  // does not, and a schedule that re-read the catalog every cycle would lose it
+  // - see lib/checklist for the format.
+  checklist: text("checklist").notNull().default(""),
   // Which definition stamped this schedule out; null = written by hand. Kept
   // on deletion - the schedule is shop data now, not catalog state.
   // template_id predates the procedures merge and is no longer written.
@@ -568,6 +584,13 @@ export const checklistItems = pgTable("checklist_items", {
   taskId: integer("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
   text: text("text").notNull(),
   done: boolean("done").notNull().default(false),
+  /**
+   * A section label rather than a box: "Remove & Sonicate:" over the two things
+   * to remove and sonicate. Not tickable and never counted in the progress
+   * figure - see lib/checklist, where a heading is anything ending in a colon,
+   * because that is already how people write one.
+   */
+  heading: boolean("heading").notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
 }, (t) => [index("checklist_task_idx").on(t.taskId)]);
 

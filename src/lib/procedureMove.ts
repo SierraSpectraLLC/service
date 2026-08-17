@@ -26,6 +26,7 @@ export type ProcedureLike = {
   required: boolean;
   qualification: string;
   parts: string;
+  checklist: string;
   modelScope: string[];
   categoryScope: string[];
 };
@@ -60,6 +61,9 @@ export function procedureCopy(p: ProcedureLike, toAssetType: string, position: n
     // A leak check that is OQ work on one module type is OQ work on the next.
     qualification: p.qualification,
     parts: p.parts,
+    // The steps carry: a teardown copied to a second module type is the same
+    // teardown, and re-typing it is how the two silently diverge.
+    checklist: p.checklist,
     modelScope: [] as string[],
     // The system-type scope CARRIES: it names system types (TOC, LC-MS), and
     // those mean the same thing on the new type as on the old one - a TOC

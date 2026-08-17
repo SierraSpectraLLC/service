@@ -8,6 +8,7 @@ const proc = (over: Partial<ProcedureLike> = {}): ProcedureLike => ({
   resultType: "pass_fail", target: null, tolerancePct: null,
   requiresNote: true, consumesPart: false, runsAtIntake: true, intervalDays: 365,
   required: true, qualification: "OQ", parts: '[{"name":"Seal kit","number":"5063-6589"}]',
+  checklist: "Remove & Sonicate:\nLow-Pressure Funnel Assembly",
   modelScope: ["LC-20AD", "LC-30AD"], categoryScope: [],
   ...over,
 });
@@ -18,6 +19,8 @@ describe("copying a procedure to another module type", () => {
     expect(c).toMatchObject({
       assetType: "LC System", kind: "test", name: "Leak Check",
       notes: "Hold 200 bar for 5 min.", requiresNote: true, runsAtIntake: true,
+      // The steps are part of the work, so a copy is not a blank one.
+      checklist: "Remove & Sonicate:\nLow-Pressure Funnel Assembly",
       intervalDays: 365, required: true, position: 4,
     });
     expect(c.parts).toBe('[{"name":"Seal kit","number":"5063-6589"}]');

@@ -19,9 +19,11 @@
 import { and, eq, inArray, isNotNull, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  appSettings, assets, instruments, orgs, pmSchedules, procedures, queueEvents, systemShares, tasks,
+  appSettings, assets, checklistItems, instruments, orgs, pmSchedules, procedures, queueEvents,
+  systemShares, tasks,
 } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { parseChecklist } from "@/lib/checklist";
 import { getBrand } from "@/lib/brand";
 import { pmHandoff } from "@/lib/pmQueue";
 import { notifyTaskAssigned } from "@/lib/notify";
@@ -29,6 +31,25 @@ import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
 import { coversSystem } from "@/lib/procedureRole";
 import { parseProcParts, partLabel, partsForModel, schedulePartsOf, serializeProcParts } from "@/lib/procedures";
+
+/**
+ * Put a procedure's checklist onto a task that was just made from it.
+ *
+ * Lives here rather than in actions.ts because actions.ts is "use server":
+ * exporting it there would publish a callable endpoint that writes checklist
+ * items onto any task id, with no access check in front of it. Intake imports
+ * it from here for the same reason.
+ *
+ * Silent on an empty template, which is what most procedures have.
+ */
+export async function stampChecklist(taskId: number, template: string | null | undefined): Promise<number> {
+  const lines = parseChecklist(template ?? "");
+  if (!lines.length) return 0;
+  await db.insert(checklistItems).values(lines.map((l, idx) => ({
+    taskId, text: l.text, heading: l.heading, sortOrder: idx,
+  })));
+  return lines.length;
+}
 
 /**
  * The task a schedule turns into. Shared by the daily generator and by doing a
@@ -57,6 +78,9 @@ export async function createPmTask(
     // recurring task was an orphan that looked identical but enforced nothing.
     procedureId: s.procedureId,
   }).returning();
+  // The steps, as boxes rather than as a paragraph in the body. Read off the
+  // SCHEDULE, so a unit whose teardown gained a step keeps it every cycle.
+  await stampChecklist(t.id, s.checklist);
   await audit({
     actor, instrumentId: onSystem, assetId: s.assetId, entityType: "task", entityId: t.id, action,
   });
@@ -228,6 +252,7 @@ export async function applyProcedures(assetId: number, today: string, actor: str
       // different kit per model, and the LC-30's schedule must not carry the
       // LC-20's part number.
       parts: serializeProcParts(partsForModel(parseProcParts(p.parts), a.model)),
+      checklist: p.checklist,
       procedureId: p.id, createdBy: actor,
     });
     created++;
@@ -288,6 +313,7 @@ export async function applySystemProcedures(
       // A cadence out, not day one: a system being set up was just gone over.
       nextDue: addDays(today, p.intervalDays!),
       parts: serializeProcParts(parseProcParts(p.parts)),
+      checklist: p.checklist,
       procedureId: p.id, createdBy: actor,
     });
     created++;
