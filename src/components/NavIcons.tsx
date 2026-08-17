@@ -21,6 +21,13 @@ export const MessagesIcon = () => (
   <svg {...S} aria-hidden><path d="M21 12a8 8 0 0 1-8 8H8l-4 3v-5.5A8 8 0 0 1 13 4a8 8 0 0 1 8 8z" /></svg>
 );
 
+/** Two people, for person-to-person mail - distinct from the room's bubble. */
+export const InboxIcon = () => (
+  <svg {...S} aria-hidden>
+    <path d="M4 5h16v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" /><path d="M4 7l8 5 8-5" />
+  </svg>
+);
+
 export const BellIcon = () => (
   <svg {...S} aria-hidden>
     <path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" /><path d="M10.5 20a1.9 1.9 0 0 0 3 0" />

@@ -13,12 +13,13 @@ import { PATH_HEADER } from "@/middleware";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import HeaderNav from "@/components/HeaderNav";
 import AccountMenu from "@/components/AccountMenu";
-import { NavIcon, SearchIcon, MessagesIcon } from "@/components/NavIcons";
+import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import NotificationCenter from "@/components/NotificationCenter";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { unreadDiscussions } from "@/lib/discussionUnread";
+import { unreadMessages } from "@/lib/messageUnread";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -70,6 +71,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Same posture as the parity and inbox counts: a shell that can't count must
   // still render. Zero hides the badge, which is the honest failure.
   const unreadTalk = user ? await unreadDiscussions(user).catch(() => 0) : 0;
+  const unreadDm = user ? await unreadMessages(user.email).catch(() => 0) : 0;
   // Staff always get the Stock link; an org only gets it once it has a room of
   // its own or one shared with it, so a client without inventory sees no
   // dead end.
@@ -182,6 +184,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       discussion post already raises a notification, so merging
                       them would make one control both the alert and the room. */}
                   <NavIcon href="/discussions" label="Discussions" count={unreadTalk}><MessagesIcon /></NavIcon>
+                  {/* Its own icon again, and for the same reason: the bubble is
+                      the room attached to a system, this is mail addressed to
+                      you by a person. */}
+                  <NavIcon href="/messages" label="Messages" count={unreadDm}><InboxIcon /></NavIcon>
                   {/* Live: polls for new arrivals, toasts them, and (opt-in)
                       raises OS notifications when the tab is hidden. */}
                   <NotificationCenter initialUnread={unread} />

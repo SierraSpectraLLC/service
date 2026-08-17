@@ -354,6 +354,38 @@ export async function notifyPartsRequested(opts: {
   }
 }
 
+/**
+ * Somebody wrote to you directly.
+ *
+ * The body is quoted, because a direct message is short and making somebody
+ * open a tab to read one line is how a notification becomes noise. Everyone
+ * addressed can already see it - they are in the thread.
+ */
+export async function notifyMessage(opts: {
+  to: string[]; threadId: number; fromName: string; body: string;
+  title: string; memberCount: number;
+}) {
+  try {
+    if (!opts.to.length) return;
+    const url = appUrl();
+    const href = `/messages/${opts.threadId}`;
+    const where = opts.title.trim()
+      ? ` in ${opts.title.trim()}`
+      : opts.memberCount > 2 ? " in a group" : "";
+    const preview = opts.body.length > 300 ? `${opts.body.slice(0, 300)}...` : opts.body;
+    await deliver({
+      to: opts.to, kind: "message", href,
+      title: `${opts.fromName}${where}: ${opts.body.slice(0, 120)}`,
+      subject: `${opts.fromName} messaged you${where}`,
+      html: await wrap(`<b>${esc(opts.fromName)}</b> wrote${esc(where)}:
+        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(preview)}</div>
+        ${url ? `<div style="margin-top:10px;"><a href="${url}${href}">Reply</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] message email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyQueueKick(opts: {
   to: string[]; externalId: string; instrumentId: number;
   fromName: string; toName: string; reason: string; stages: string[];

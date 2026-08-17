@@ -1579,6 +1579,62 @@ export const clientAllowlist = pgTable("client_allowlist", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);
 
+// ── Direct messages ─────────────────────────────────────────────────────────
+// A conversation between named people, as opposed to discussion_posts, which
+// are attached to a system and read by whoever can see that system.
+//
+// The distinction is the point. "Is the Altis fixed?" belongs on the Altis,
+// where the next engineer will find it. "Can you cover Tuesday?" belongs to
+// the two people it concerns and nowhere else - and before this it had to go
+// through somebody's personal email, out of reach of the record entirely.
+//
+// Membership is by EMAIL rather than a user id: this app's identity is an
+// email on an allowlist, people arrive before they ever sign in, and a thread
+// must survive somebody being re-added under a new row.
+export const messageThreads = pgTable("message_threads", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  // Groups may be named; a two-person thread is named by who is in it.
+  title: text("title").notNull().default(""),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Denormalized so the thread list can sort without reading every message.
+  // Safe to denormalize because it is derived from an append-only table and
+  // rewritten by the one action that appends.
+  lastMessageAt: timestamp("last_message_at").notNull().defaultNow(),
+});
+
+export const threadMembers = pgTable("thread_members", {
+  id: serial("id").primaryKey(),
+  threadId: integer("thread_id").notNull().references(() => messageThreads.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  name: text("name").notNull().default(""),   // display only, as of when they joined
+  orgName: text("org_name").notNull().default(""),
+  // What the unread badge counts from. Null = never opened it.
+  lastReadAt: timestamp("last_read_at"),
+  addedBy: text("added_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Leaving hides the thread from your list without deleting what was said -
+  // the others' copy of the conversation is not yours to remove.
+  leftAt: timestamp("left_at"),
+}, (t) => [
+  index("thread_members_thread_idx").on(t.threadId),
+  index("thread_members_email_idx").on(t.email),
+  unique("thread_member_unique").on(t.threadId, t.email),
+]);
+
+export const messages = pgTable("messages", {
+  id: serial("id").primaryKey(),
+  threadId: integer("thread_id").notNull().references(() => messageThreads.id, { onDelete: "cascade" }),
+  authorEmail: text("author_email").notNull(),
+  authorName: text("author_name").notNull().default(""),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Kept, not erased: "deleted by the author" is itself part of a conversation
+  // two people may later disagree about.
+  deletedAt: timestamp("deleted_at"),
+}, (t) => [index("messages_thread_idx").on(t.threadId, t.createdAt)]);
+
 // Singleton row (id = 1)
 export const appSettings = pgTable("app_settings", {
   id: integer("id").primaryKey().default(1),

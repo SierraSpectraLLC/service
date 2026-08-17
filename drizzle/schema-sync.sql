@@ -2276,3 +2276,56 @@ DO $$ BEGIN
       FOREIGN KEY ("requested_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- ── Direct messages ─────────────────────────────────────────────────────────
+-- Person-to-person and small-group conversations, as opposed to the
+-- system-attached discussion posts. Membership is by email, which is what this
+-- app's identity actually is.
+CREATE TABLE IF NOT EXISTS "message_threads" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "title" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "last_message_at" timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "thread_members" (
+  "id" serial PRIMARY KEY,
+  "thread_id" integer NOT NULL,
+  "email" text NOT NULL,
+  "name" text NOT NULL DEFAULT '',
+  "org_name" text NOT NULL DEFAULT '',
+  "last_read_at" timestamp,
+  "added_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "left_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "thread_members_thread_idx" ON "thread_members" ("thread_id");
+CREATE INDEX IF NOT EXISTS "thread_members_email_idx" ON "thread_members" ("email");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'thread_member_unique') THEN
+    ALTER TABLE "thread_members" ADD CONSTRAINT "thread_member_unique" UNIQUE ("thread_id", "email");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'thread_members_thread_id_fk') THEN
+    ALTER TABLE "thread_members" ADD CONSTRAINT "thread_members_thread_id_fk"
+      FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "messages" (
+  "id" serial PRIMARY KEY,
+  "thread_id" integer NOT NULL,
+  "author_email" text NOT NULL,
+  "author_name" text NOT NULL DEFAULT '',
+  "body" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "deleted_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "messages_thread_idx" ON "messages" ("thread_id", "created_at");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'messages_thread_id_fk') THEN
+    ALTER TABLE "messages" ADD CONSTRAINT "messages_thread_id_fk"
+      FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

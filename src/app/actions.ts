@@ -14,7 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, orgSites, partCatalog, partKitLines, agreements, catalogRefs, taskResults,
-  validationDocs, validationSignatures,
+  validationDocs, validationSignatures, messageThreads, threadMembers, messages,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
@@ -30,6 +30,7 @@ import {
 import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, resultIsRecorded } from "@/lib/testResult";
+import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
 import { cleanNickname, deviceLabel } from "@/lib/deviceName";
@@ -40,7 +41,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyMessage, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -87,7 +88,7 @@ import { matchItems, scopeMatches, summarizeItem, CHECKOUT_KINDS, RESULT_TYPES }
 import { systemLabel } from "@/lib/systemLabel";
 import { clientAfterHandoff, ownerFields } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
-import { assignableNames } from "@/lib/directory";
+import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
@@ -3966,6 +3967,161 @@ export async function setCatalogDocTypes(termId: number, docTypes: string[]): Pr
   });
   revalidatePath("/settings/catalog");
   return {};
+}
+
+// ---------------- Direct messages ----------------
+// Person-to-person conversations, as opposed to discussion posts, which belong
+// to a system. Membership is the whole access rule: you can read a thread if
+// and only if you are in it, and you may only start one with people your
+// directory already shows you.
+
+/** Your membership row, or null when the thread is not yours to read. */
+async function threadSeat(threadId: number, email: string) {
+  const [seat] = await db.select().from(threadMembers)
+    .where(and(eq(threadMembers.threadId, threadId), eq(threadMembers.email, email.toLowerCase())));
+  return seat && !seat.leftAt ? seat : null;
+}
+
+/** The directory, which is exactly who this person may write to. */
+async function messageable(u: SessionUser) {
+  return messageableFrom(await visibleDirectory(u), u.email);
+}
+
+export async function startThread(
+  emails: string[], data: { title: string; body: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireUser();
+  const allowed = await messageable(u);
+  const want = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+  if (!want.length) return { error: "Pick somebody to write to" };
+  // Every recipient has to be somebody this person may already see. Silently
+  // dropping a stranger would create a thread quietly missing a member.
+  const picked = want.map((e) => allowed.find((a) => a.email.toLowerCase() === e));
+  if (picked.some((p) => !p)) return { error: "You can only message people you work with" };
+  const clean = cleanBody(data.body);
+  if ("error" in clean) return clean;
+
+  const [thread] = await db.insert(messageThreads).values({
+    tenantOrgId: myTenantOrgId(u),
+    title: data.title.trim().slice(0, 80),
+    createdBy: u.email, lastMessageAt: new Date(),
+  }).returning();
+
+  const now = new Date();
+  await db.insert(threadMembers).values([
+    // The author starts read - they have just written the only message in it.
+    { threadId: thread.id, email: u.email.toLowerCase(), name: u.name || u.email, orgName: u.orgName ?? "", addedBy: u.email, lastReadAt: now },
+    ...picked.map((p) => ({
+      threadId: thread.id, email: p!.email.toLowerCase(), name: p!.name, orgName: p!.org, addedBy: u.email,
+    })),
+  ]);
+  await db.insert(messages).values({
+    threadId: thread.id, authorEmail: u.email, authorName: u.name || u.email, body: clean.body,
+  });
+  await notifyMessage({
+    to: picked.map((p) => p!.email), threadId: thread.id,
+    fromName: u.name || u.email, body: clean.body,
+    title: data.title.trim(), memberCount: picked.length + 1,
+  });
+  revalidatePath("/messages");
+  return { id: thread.id };
+}
+
+export async function sendMessage(threadId: number, body: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const seat = await threadSeat(threadId, u.email);
+  if (!seat) return { error: "Not found" };
+  const clean = cleanBody(body);
+  if ("error" in clean) return clean;
+  const now = new Date();
+  await db.insert(messages).values({
+    threadId, authorEmail: u.email, authorName: u.name || u.email, body: clean.body,
+  });
+  await db.update(messageThreads).set({ lastMessageAt: now }).where(eq(messageThreads.id, threadId));
+  // Writing is reading: your own message must never come back as unread.
+  await db.update(threadMembers).set({ lastReadAt: now }).where(eq(threadMembers.id, seat.id));
+  const others = await db.select().from(threadMembers)
+    .where(and(eq(threadMembers.threadId, threadId), isNull(threadMembers.leftAt)));
+  const [thread] = await db.select().from(messageThreads).where(eq(messageThreads.id, threadId));
+  await notifyMessage({
+    to: others.filter((o) => o.email !== u.email.toLowerCase()).map((o) => o.email),
+    threadId, fromName: u.name || u.email, body: clean.body,
+    title: thread?.title ?? "", memberCount: others.length,
+  });
+  revalidatePath("/messages");
+  revalidatePath(`/messages/${threadId}`);
+  return {};
+}
+
+/** Opening a conversation is reading it. Idempotent, called on every view. */
+export async function markMessagesRead(threadId: number): Promise<void> {
+  const u = await requireUser();
+  const seat = await threadSeat(threadId, u.email);
+  if (!seat) return;
+  await db.update(threadMembers).set({ lastReadAt: new Date() }).where(eq(threadMembers.id, seat.id));
+  revalidatePath("/messages");
+}
+
+/** Add somebody to a thread already running. They see what was said before. */
+export async function addToThread(threadId: number, email: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const seat = await threadSeat(threadId, u.email);
+  if (!seat) return { error: "Not found" };
+  const allowed = await messageable(u);
+  const person = allowed.find((a) => a.email.toLowerCase() === email.trim().toLowerCase());
+  if (!person) return { error: "You can only add people you work with" };
+  const [existing] = await db.select().from(threadMembers)
+    .where(and(eq(threadMembers.threadId, threadId), eq(threadMembers.email, person.email.toLowerCase())));
+  if (existing && !existing.leftAt) return { error: `${person.name} is already here` };
+  if (existing) {
+    await db.update(threadMembers).set({ leftAt: null, addedBy: u.email }).where(eq(threadMembers.id, existing.id));
+  } else {
+    await db.insert(threadMembers).values({
+      threadId, email: person.email.toLowerCase(), name: person.name, orgName: person.org, addedBy: u.email,
+    });
+  }
+  // Said in the room, because a new pair of eyes on a conversation is
+  // something the people already in it should not have to notice for
+  // themselves.
+  await db.insert(messages).values({
+    threadId, authorEmail: u.email, authorName: u.name || u.email,
+    body: `${u.name || u.email} added ${person.name} to the conversation.`,
+  });
+  await db.update(messageThreads).set({ lastMessageAt: new Date() }).where(eq(messageThreads.id, threadId));
+  revalidatePath(`/messages/${threadId}`);
+  return {};
+}
+
+/** Leave. What was said stays - the others' copy is not yours to remove. */
+export async function leaveThread(threadId: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const seat = await threadSeat(threadId, u.email);
+  if (!seat) return { error: "Not found" };
+  await db.update(threadMembers).set({ leftAt: new Date() }).where(eq(threadMembers.id, seat.id));
+  await db.insert(messages).values({
+    threadId, authorEmail: u.email, authorName: u.name || u.email,
+    body: `${u.name || u.email} left the conversation.`,
+  });
+  revalidatePath("/messages");
+  return {};
+}
+
+/** Take back your own message. Kept as a tombstone, never erased. */
+export async function deleteMessage(messageId: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [m] = await db.select().from(messages).where(eq(messages.id, messageId));
+  if (!m) return { error: "Not found" };
+  if (m.authorEmail.toLowerCase() !== u.email.toLowerCase()) return { error: "Only the author can take a message back" };
+  if (!(await threadSeat(m.threadId, u.email))) return { error: "Not found" };
+  await db.update(messages).set({ deletedAt: new Date() }).where(eq(messages.id, messageId));
+  revalidatePath(`/messages/${m.threadId}`);
+  return {};
+}
+
+/** Everyone this person may start a conversation with, for the picker. */
+export async function listMessageable(): Promise<{ people: { name: string; email: string; org: string }[] }> {
+  const u = await requireUser();
+  return { people: await messageable(u) };
 }
 
 // ---------------- Stage vocabulary ----------------
