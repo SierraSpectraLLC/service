@@ -143,6 +143,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                         ...(modules.eod ? [{ href: "/eod", label: "EOD update" }] : []),
                         { href: "/maintenance", label: "Maintenance" },
                         { href: "/purchasing", label: "Purchasing" },
+                        /* Something you DO to a system, so it sits with the
+                           other doing - it was under Library, which is files
+                           and tools, and a remote session is neither. */
+                        ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
                         { href: "/metrics", label: "Metrics" },
                         ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
                         { href: "/archive", label: "Archived" },
@@ -155,10 +159,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                         { href: "/gallery", label: "Gallery" },
                         { href: "/pdf", label: "PDF studio" },
                         { href: "/import", label: "Import spreadsheet" },
-                        ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
                       ],
                     },
                   ] : [
+                    // Same two menus as staff see, so the shape of the app does
+                    // not change with who is reading it - a client asking where
+                    // remote support lives gets the same answer as the engineer.
+                    ...(orgRemoteOn ? [{
+                      label: "Operations",
+                      items: [{ href: "/remote", label: "Remote support" }],
+                    }] : []),
                     // An organization's own tools: its file shelf and the studio.
                     // Both used to be staff-only, which left a client with nowhere
                     // to keep a document and no way to assemble a packet.
@@ -168,7 +178,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                         { href: "/documents", label: "Files" },
                         { href: "/gallery", label: "Gallery" },
                         { href: "/pdf", label: "PDF studio" },
-                        ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
                       ],
                     },
                   ]}
