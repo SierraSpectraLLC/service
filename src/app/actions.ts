@@ -605,23 +605,6 @@ async function generateCheckout(
   return fresh.length;
 }
 
-/**
- * Run an asset's checkout on demand - a spare being refurbished for resale
- * gets its tests without ever joining a system.
- */
-export async function runAssetCheckout(assetId: number): Promise<{ error?: string; created?: number }> {
-  const u = await requireEditor();
-  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
-  if (!a) return { error: "Not found" };
-  const acc = await assetAccess(u, assetId);
-  if (!acc.see) return { error: "Not found" };
-  if (!acc.edit) return { error: "Read-only access to this asset" };
-  const created = await generateCheckout(a.instrumentId, a, u.email, a.tenantOrgId);
-  revWork({ instrumentId: a.instrumentId, assetId });
-  if (!created) return { error: "Nothing new to add - its checkout items are already open (or none are defined for this type)" };
-  return { created };
-}
-
 export async function createAsset(instrumentId: number | null, data: AssetInput): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
   const a = cleanAsset(data);

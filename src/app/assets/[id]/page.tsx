@@ -40,7 +40,6 @@ import MaintenancePanel from "@/components/MaintenancePanel";
 import HoursPanel from "@/components/HoursPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
-import RunCheckoutButton from "@/components/RunCheckoutButton";
 import TrackAsSystem from "@/components/TrackAsSystem";
 import PanelLayout from "@/components/PanelLayout";
 import { getUiLayout } from "@/app/actions";
@@ -231,7 +230,6 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         {canEdit && asset.instrumentId === null && (
           <TrackAsSystem assetId={asset.id} suggestion={asset.serial || asset.model} />
         )}
-        {canEdit && <RunCheckoutButton assetId={asset.id} />}
         {isStaff && (
           <>
             <Link href={`/assets/${asset.id}/label`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
