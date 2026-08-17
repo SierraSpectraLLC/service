@@ -481,3 +481,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   letter-spacing: 0.8px; text-transform: uppercase; color: var(--slate);
 }
 .band-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* Balanced band columns: cards flow into two columns by HEIGHT rather than by
+   a fixed left/right assignment, so a band with one short card and two tall
+   ones doesn't leave half the screen empty. break-inside keeps each card
+   whole; the fixed two-stack grid remains for arrange mode, where "which
+   column" is the thing being edited. */
+.panel-flow { columns: 1; column-gap: 16px; }
+@media (min-width: 1200px) { .panel-flow { columns: 2; } }
+.panel-flow > .panel-slot { break-inside: avoid; width: 100%; }

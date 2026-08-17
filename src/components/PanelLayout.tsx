@@ -288,10 +288,16 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
       {/* The record's identity rides above the section bar - wherever you
           scroll, what you're looking at was established on the way in. */}
       {banded && pinned.length > 0 && (
-        <div className="panel-cols">
-          <div>{left.filter((k) => pinned.includes(k)).map(slot)}</div>
-          <div>{rightCol.filter((k) => pinned.includes(k)).map(slot)}</div>
-        </div>
+        editing ? (
+          <div className="panel-cols">
+            <div>{left.filter((k) => pinned.includes(k)).map(slot)}</div>
+            <div>{rightCol.filter((k) => pinned.includes(k)).map(slot)}</div>
+          </div>
+        ) : (
+          <div className="panel-flow">
+            {[...left, ...rightCol].filter((k) => pinned.includes(k)).map(slot)}
+          </div>
+        )
       )}
 
       {banded && !editing && (
@@ -325,10 +331,16 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
               <section key={g.key} id={`band-${g.key}`} aria-label={g.label}
                 style={{ scrollMarginTop: 52 }}>
                 <div className="band-label">{g.label}</div>
-                <div className="panel-cols">
-                  <div>{l.map(slot)}</div>
-                  <div>{r.map(slot)}</div>
-                </div>
+                {editing ? (
+                  <div className="panel-cols">
+                    <div>{l.map(slot)}</div>
+                    <div>{r.map(slot)}</div>
+                  </div>
+                ) : (
+                  /* Order is still the saved arrangement (left stack, then
+                     right); only the geometry balances itself. */
+                  <div className="panel-flow">{[...l, ...r].map(slot)}</div>
+                )}
               </section>
             );
           })}
