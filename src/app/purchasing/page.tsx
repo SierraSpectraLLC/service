@@ -1,15 +1,16 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, poLines, purchaseOrders, stockrooms, stockroomShares } from "@/db/schema";
+import { instruments, orgs, parts, poLines, purchaseOrders, stockrooms, stockroomShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
 import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
 import { formatCents } from "@/lib/money";
 import { canSeeCosts } from "@/lib/redact";
-import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import NeededPartsCard from "@/components/NeededPartsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,30 @@ export default async function PurchasingPage() {
     ? await db.select().from(poLines).where(inArray(poLines.poId, pos.map((p) => p.id)))
     : [];
 
+  // Parts a real system says it needs. Purchasing used to listen only to the
+  // shelf - a stock item under its minimum - while a part marked Needed on an
+  // instrument sat on that instrument's page waiting to be retyped into an
+  // order. Both are "something has to be bought", and this one has a system
+  // waiting on it.
+  const visible = await visibleSystemIds(user);
+  const needed = await db.select({
+    id: parts.id, name: parts.name, partNumber: parts.partNumber, qty: parts.qty,
+    status: parts.status, vendor: parts.vendor, costCents: parts.costCents,
+    instrumentId: parts.instrumentId, assetId: parts.assetId,
+    ownerOrgId: parts.ownerOrgId, requestedOrgId: parts.requestedOrgId, requestedAt: parts.requestedAt,
+    externalId: instruments.externalId, systemOwnerOrgId: instruments.ownerOrgId,
+  }).from(parts).leftJoin(instruments, eq(instruments.id, parts.instrumentId))
+    .where(and(
+      eq(parts.status, "Needed"),
+      visible === null ? undefined : visible.length ? inArray(parts.instrumentId, visible) : sql`false`,
+    ))
+    .orderBy(asc(parts.id));
+
   const roomName = new Map(seeRooms.map((r) => [r.id, r.name]));
+  const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
+  // Rooms this person may actually order INTO, which is a stricter test than
+  // seeing them - the same rule createPurchaseOrder enforces server-side.
+  const orderRooms = rooms.filter((r) => stockAccess(user, r, myShares.find((s) => s.stockroomId === r.id)).issue);
   const roomOrg = new Map(seeRooms.map((r) => [r.id, r.orgId]));
   const open = pos.filter((p) => p.status === "draft" || p.status === "sent" || p.status === "partial");
   const closed = pos.filter((p) => !open.includes(p));
@@ -91,6 +115,20 @@ export default async function PurchasingPage() {
           can&apos;t drift apart.
         </p>
       </div>
+      {/* The floor's queue, above the paperwork: these have systems waiting. */}
+      <NeededPartsCard
+        parts={needed.map((n) => ({
+          id: n.id, name: n.name, partNumber: n.partNumber, qty: n.qty, vendor: n.vendor,
+          instrumentId: n.instrumentId, assetId: n.assetId, externalId: n.externalId,
+          ownerOrgId: n.systemOwnerOrgId ?? n.ownerOrgId,
+          ownerName: orgName.get(n.systemOwnerOrgId ?? n.ownerOrgId ?? -1) ?? "the owner",
+          requestedOrgName: orgName.get(n.requestedOrgId ?? -1) ?? "",
+          requestedAt: n.requestedAt?.toISOString() ?? null,
+        }))}
+        rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))}
+        canOrder={orderRooms.length > 0}
+      />
+
       <div className="card">
         {open.length === 0 && closed.length === 0 && (
           <div className="empty">

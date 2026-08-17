@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { addAgreement, listCatalogPartsForPicker, removeAgreement, updateAgreement } from "@/app/actions";
+import {
+  addAgreement, fileAgreementPaper, listCatalogPartsForPicker, listLibraryFiles,
+  removeAgreement, unfileAgreementPaper, updateAgreement,
+} from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import {
   AGREEMENT_KINDS, KIND_LABEL, STANDING_COLOR, STANDING_LABEL, allowance, kitStates, parseKits,
@@ -91,9 +94,16 @@ function Bar({ label, included, used, fmt, unlimited = false }: {
  * stored, which is the whole design (see lib/agreements). It costs a query; it
  * buys never having to explain why two screens disagree about the same money.
  */
-export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, title = "Agreements" }: {
+export type AgreementPaper = {
+  id: number; agreementId: number; fileName: string; kind: string;
+  size: number; uploadedBy: string; when: string;
+};
+
+export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, papers = [], title = "Agreements" }: {
   rows: AgreementRow[];
   today: string;
+  /** The signed documents filed against these agreements. */
+  papers?: AgreementPaper[];
   /** Organizations an agreement may be written against. Empty = one org page. */
   orgs: { id: number; name: string }[];
   /** The clients' systems, for assigning a contract to specific ones. */
@@ -106,7 +116,21 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   const [book, setBook] = useState<{ partNumber: string; name: string; kind: string }[] | null>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState("");
+  // Which agreement is having a document filed against it, and the library to
+  // pick from - fetched once, on demand.
+  const [filing, setFiling] = useState<number | null>(null);
+  const [lib, setLib] = useState<{ id: number; fileName: string; kind: string; size: number }[] | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const openFiling = (agreementId: number) => {
+    setFiling(filing === agreementId ? null : agreementId);
+    setError("");
+    if (lib === null) {
+      startTransition(async () => {
+        try { setLib((await listLibraryFiles()).files); } catch { setLib([]); }
+      });
+    }
+  };
 
   const loadBook = () => {
     if (book !== null) return;
@@ -194,6 +218,55 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               )}
             </div>
             <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{renewalLine(r, today)}</div>
+
+            {/* The signed paper itself, beside the terms it contains. */}
+            {(() => {
+              const mine = papers.filter((p) => p.agreementId === r.id);
+              if (!mine.length && !canEdit) return null;
+              return (
+                <div style={{ marginTop: 4 }}>
+                  {mine.map((pp) => (
+                    <div key={pp.id} style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", fontSize: 11.5 }}>
+                      <a href={`/api/files/${pp.id}`} target="_blank" rel="noreferrer" className="mono">{pp.fileName}</a>
+                      <span className="mut">{pp.kind} · {pp.uploadedBy} · {pp.when}</span>
+                      {canEdit && (
+                        <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                          title="Unfile it - the document stays in your library"
+                          onClick={() => startTransition(async () => {
+                            const res = await unfileAgreementPaper(pp.id);
+                            if (res?.error) setError(res.error);
+                          })}>unfile</button>
+                      )}
+                    </div>
+                  ))}
+                  {canEdit && (
+                    <button className="btn link" style={{ fontSize: 11 }} onClick={() => openFiling(r.id)}>
+                      {filing === r.id ? "cancel" : mine.length ? "+ another document" : "+ attach the signed agreement"}
+                    </button>
+                  )}
+                  {canEdit && filing === r.id && (
+                    <div style={{ marginTop: 4, padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
+                      {lib === null && <span className="mut" style={{ fontSize: 11 }}>Loading your files...</span>}
+                      {lib?.length === 0 && (
+                        <span className="mut" style={{ fontSize: 11 }}>
+                          Nothing in your library yet - upload it under Files first, then file it here.
+                        </span>
+                      )}
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {(lib ?? []).filter((f) => !papers.some((p) => p.id === f.id)).slice(0, 40).map((f) => (
+                          <button key={f.id} className="btn sm mono" style={{ fontSize: 11 }} disabled={pending}
+                            onClick={() => startTransition(async () => {
+                              const res = await fileAgreementPaper(r.id, f.id);
+                              if (res?.error) { setError(res.error); return; }
+                              setFiling(null);
+                            })}>{f.fileName}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* Which systems the paper covers. Silence would read as "all of
                 them", which is true only when nothing is assigned. */}
             {r.instrumentIds.length > 0 && (

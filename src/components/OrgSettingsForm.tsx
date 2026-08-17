@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   setOrgAppearance, updateEodRecipients, addClientAccess, removeClientAccess,
-  setClientAccessRole, removeOrg, setSheetOrg, setOrgStorageLimit, setOrgRemoteAccess,
+  setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit, setOrgRemoteAccess,
 } from "@/app/actions";
 import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
@@ -13,7 +13,7 @@ import StorageMeter from "@/components/StorageMeter";
 
 const MAX_LOGO_BYTES = 1024 * 1024; // a header logo, not a tune file
 
-type Entry = { id: number; entry: string; canEdit: boolean };
+type Entry = { id: number; entry: string; canEdit: boolean; canSeeAgreements: boolean };
 
 /**
  * One organization's own settings page. It serves two audiences with the same
@@ -139,6 +139,18 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                   {r.canEdit ? "editor" : "viewer"}
                 </span>
               )}
+              {/* Seeing the systems and seeing what they cost are different
+                  questions; one org has people on both sides of that line. */}
+              {isOwner ? (
+                <label style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontSize: 11, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
+                  title="Whether this person may read this organization's agreements - contract value, allowances, the signed paper">
+                  <input type="checkbox" checked={r.canSeeAgreements} disabled={pending} style={{ width: 14, height: 14 }}
+                    onChange={(e) => startTransition(async () => { await setClientSeesAgreements(r.id, e.target.checked); })} />
+                  agreements
+                </label>
+              ) : r.canSeeAgreements ? (
+                <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>agreements</span>
+              ) : null}
               {(isOwner || !domain) && (
                 <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
                   onClick={() => {

@@ -2,16 +2,17 @@ import { asc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
-import { agreements, appSettings, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares } from "@/db/schema";
+import { agreements, appSettings, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
+import { shopDay } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import OrgSettingsForm from "@/components/OrgSettingsForm";
 import SitesCard from "@/components/SitesCard";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
-import { isHouse } from "@/lib/tenancy";
+import { isHouse, maySeeAgreements } from "@/lib/tenancy";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   // the organization's own - not any staff member's.
   const mayConfigure = isOwner || (user.role === "client_editor" && user.orgId === orgId);
   if (!mayConfigure) notFound();
+  // Reading the contracts is its own privilege - see lib/tenancy.maySeeAgreements.
+  const seesAgreements = await maySeeAgreements(user, orgId);
 
   const [[org], [s], allowRows, shareRows, brand] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, orgId)),
@@ -56,6 +59,22 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   const agreementRows = await db.select().from(agreements)
     .where(eq(agreements.orgId, orgId)).orderBy(asc(agreements.endsOn), asc(agreements.id));
   const usage = await usageForAll(agreementRows);
+  // The signed document itself. attachments.agreementId has always existed;
+  // until now nothing wrote it, so the terms lived in the app and the contract
+  // lived in somebody's mail.
+  const agreementPapers = agreementRows.length
+    ? (await db.select({
+        id: attachments.id, agreementId: attachments.agreementId,
+        fileName: attachments.fileName, kind: attachments.kind, size: attachments.size,
+        uploadedBy: attachments.uploadedBy, createdAt: attachments.createdAt,
+      }).from(attachments)
+        .where(inArray(attachments.agreementId, agreementRows.map((r) => r.id)))
+        .orderBy(asc(attachments.createdAt))
+      ).map((a) => ({
+        id: a.id, agreementId: a.agreementId!, fileName: a.fileName, kind: a.kind,
+        size: a.size, uploadedBy: a.uploadedBy, when: shopDay(a.createdAt),
+      }))
+    : [];
   // Their systems, so a contract can be assigned to specific ones.
   const ownedSystems = (await db.select({
     id: instruments.id, ownerOrgId: instruments.ownerOrgId,
@@ -98,7 +117,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           remoteAccessEnabled: org.remoteAccessEnabled, remoteDevices: deviceCount,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
-        people={allowRows.map((r) => ({ id: r.id, entry: r.entry, canEdit: r.canEdit }))}
+        people={allowRows.map((r) => ({ id: r.id, entry: r.entry, canEdit: r.canEdit, canSeeAgreements: r.canSeeAgreements }))}
         platformName={brand.name}
         isOwner={isOwner}
         showRecipients={s?.eodEnabled ?? false}
@@ -108,6 +127,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
       </div>
 
       <div>
+      {seesAgreements && (
       <AgreementsPanel
         rows={agreementRows.map((r) => ({
           id: r.id, orgId: r.orgId, orgName: org.name,
@@ -126,7 +146,9 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         systems={ownedSystems}
         // A client reads their own contract; only the service company writes one.
         canEdit={isHouse(user.role)}
+        papers={agreementPapers}
       />
+      )}
       <SitesCard
         orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
         canEdit={mayConfigure}

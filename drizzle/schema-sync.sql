@@ -2263,3 +2263,16 @@ DO $$ BEGIN
 END $$;
 
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "doc_types" text[] NOT NULL DEFAULT '{}';
+
+-- ── Per-person agreement privilege, and parts asked of a client ─────────────
+-- Who at a client organization may read its contracts, and which needed parts
+-- have been handed to a client's own purchasing department to order.
+ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_agreements" boolean NOT NULL DEFAULT true;
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "requested_org_id" integer;
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "requested_at" timestamp;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parts_requested_org_id_fk') THEN
+    ALTER TABLE "parts" ADD CONSTRAINT "parts_requested_org_id_fk"
+      FOREIGN KEY ("requested_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

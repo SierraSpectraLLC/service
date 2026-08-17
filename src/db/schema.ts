@@ -703,6 +703,12 @@ export const parts = pgTable("parts", {
   // and is still what gets displayed; this is the link, so "where is the
   // receipt for this part" has an answer that survives somebody's typing.
   poId: integer("po_id").references((): AnyPgColumn => purchaseOrders.id, { onDelete: "set null" }),
+  // Asked of somebody else's purchasing department. A client who buys their own
+  // parts (their systems, their money) is TOLD what is needed rather than
+  // waiting for us to order it - this is who was asked and when, so "Needed"
+  // can say whose move it is instead of looking like nobody has done anything.
+  requestedOrgId: integer("requested_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  requestedAt: timestamp("requested_at"),
   // The maintenance job this part was requested for, stamped by requestPmPart.
   // The note said so in prose already; this is the queryable version, and it is
   // what lets a contract whose PM includes its parts stop those parts from
@@ -1562,6 +1568,13 @@ export const clientAllowlist = pgTable("client_allowlist", {
   // old instance-wide "clients can edit" toggle (kept in app_settings for the
   // one-time backfill, ignored since).
   canEdit: boolean("can_edit").notNull().default(false),
+  // Whether this person may read their organization's AGREEMENTS - contract
+  // value, allowances, what was signed. A lab manager needs them; the tech who
+  // logs in to check whether the LC is fixed usually should not, and in some
+  // companies must not. Defaults true because that is what everyone at an org
+  // could already see: this switch exists to take the privilege away
+  // deliberately, never to remove it from people by upgrading.
+  canSeeAgreements: boolean("can_see_agreements").notNull().default(true),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);

@@ -40,7 +40,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -2711,6 +2711,57 @@ export async function attachLibraryFile(target: WorkTarget, attachmentId: number
  * rather than a page prop so a record page doesn't query the whole library on
  * every load just in case somebody opens the picker.
  */
+/**
+ * File the signed agreement against the agreement.
+ *
+ * attachments.agreementId has been in the schema since agreements were - and
+ * nothing ever wrote it, so the terms lived in this app while the contract
+ * everybody actually signs lived in somebody's mail. The file itself comes
+ * from the library (Files > upload there first), the same way a manual is
+ * filed onto a catalog entry: no re-upload, no pasted link.
+ */
+export async function fileAgreementPaper(agreementId: number, attachmentId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [a] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!a) return { error: "Not found" };
+  const gate = await adminOrgGate(u, a.orgId);
+  if ("error" in gate) return gate;
+  const [src] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  // Library files only - re-pointing a system's evidence at a contract would
+  // move a report out of the record it proves.
+  if (!src || src.instrumentId !== null || src.assetId !== null) return { error: "Not a library file" };
+  if ((src.orgId ?? null) !== u.orgId) return { error: "Not found" };
+  if (src.agreementId === agreementId) return {};
+  await db.update(attachments).set({ agreementId }).where(eq(attachments.id, attachmentId));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: agreementId,
+    action: `filed '${src.fileName}' against ${a.number || a.title || "the agreement"}`,
+  });
+  revalidatePath(`/settings/organizations/${a.orgId}`);
+  revalidatePath("/agreements");
+  return {};
+}
+
+/** Unfile it. The document stays in the library; only the link goes. */
+export async function unfileAgreementPaper(attachmentId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [src] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
+  if (!src || src.agreementId === null) return { error: "Not found" };
+  const [a] = await db.select().from(agreements).where(eq(agreements.id, src.agreementId));
+  if (a) {
+    const gate = await adminOrgGate(u, a.orgId);
+    if ("error" in gate) return gate;
+  }
+  await db.update(attachments).set({ agreementId: null }).where(eq(attachments.id, attachmentId));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: src.agreementId,
+    action: `unfiled '${src.fileName}' from the agreement - the file stays in the library`,
+  });
+  if (a) revalidatePath(`/settings/organizations/${a.orgId}`);
+  revalidatePath("/agreements");
+  return {};
+}
+
 export async function listLibraryFiles(): Promise<{
   files: { id: number; fileName: string; kind: string; description: string; size: number }[];
 }> {
@@ -4952,6 +5003,33 @@ export async function setClientAccessRole(id: number, canEdit: boolean): Promise
   return {};
 }
 
+/**
+ * Whether one person at a client organization may read its agreements.
+ *
+ * Access to a system and access to the contract behind it are different
+ * questions, and everybody at an org used to get both. A lab manager needs the
+ * terms; the tech checking whether the LC is fixed usually does not, and at
+ * some companies must not.
+ */
+export async function setClientSeesAgreements(id: number, canSee: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row) return { error: "Not found" };
+  if (row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  if (row.canSeeAgreements === canSee) return {};
+  await db.update(clientAllowlist).set({ canSeeAgreements: canSee }).where(eq(clientAllowlist.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: `${row.entry} ${canSee ? "may now read" : "may no longer read"} their organization's agreements`,
+    field: "can_see_agreements", oldValue: String(row.canSeeAgreements), newValue: String(canSee),
+  });
+  revalidatePath("/settings");
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  return {};
+}
+
 export async function setClientAccessOrg(id: number, orgId: number): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
@@ -7107,6 +7185,118 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
   });
   revPo(line.poId);
   return {};
+}
+
+/**
+ * Draft a purchase order from parts a system says it needs.
+ *
+ * Purchasing only ever listened to the shelf: a stock item below its minimum
+ * suggested an order, while a part somebody marked Needed on an instrument sat
+ * on that instrument's page waiting for a human to retype it into a PO. These
+ * are the same fact - something has to be bought - and the second one is the
+ * more urgent, because a system is down for it.
+ *
+ * The parts are stamped with the PO as it is created, so the link exists going
+ * forward instead of being guessed by part number at receipt.
+ */
+export async function orderNeededParts(
+  partIds: number[], data: { vendor: string; stockroomId: number },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireEditor();
+  if (!partIds.length) return { error: "Pick at least one part" };
+  const rows = await db.select().from(parts).where(inArray(parts.id, partIds));
+  if (!rows.length) return { error: "Not found" };
+  if (rows.some((r) => !partOpen(r.status))) return { error: "One of those is already received or fitted" };
+  // Every part has to be on a record this person may work on.
+  for (const r of rows) {
+    if (r.instrumentId !== null) {
+      try { await assertSystemEditable(u, r.instrumentId); } catch { return { error: "Not found" }; }
+    } else if (r.assetId !== null && !(await assetAccess(u, r.assetId)).edit) {
+      return { error: "Not found" };
+    }
+  }
+  const res = await createPurchaseOrder({
+    vendor: data.vendor, stockroomId: data.stockroomId, reference: "", note: "",
+    expectedAt: "",
+    // parts.qty is free text ("2", "1 box") - the number in it is the order
+    // quantity, and anything unparseable is one.
+    lines: rows.map((r) => ({
+      partNumber: r.partNumber, name: r.name,
+      qty: String(parseInt(r.qty) > 0 ? parseInt(r.qty) : 1),
+      price: r.costCents != null ? String(r.costCents / 100) : "",
+      note: "",
+    })),
+  });
+  if (res.error || !res.id) return { error: res.error ?? "Could not draft the order" };
+  const [po] = await db.select({ number: purchaseOrders.number }).from(purchaseOrders)
+    .where(eq(purchaseOrders.id, res.id));
+
+  for (const r of rows) {
+    await db.update(parts).set({ poId: res.id, status: "Ordered" }).where(eq(parts.id, r.id));
+    await audit({
+      actor: u.email, instrumentId: r.instrumentId, assetId: r.assetId,
+      entityType: "part", entityId: r.id,
+      action: `added ${r.name}${r.partNumber ? ` (${r.partNumber})` : ""} to ${po?.number ?? "the order"}`,
+      field: "status", oldValue: r.status, newValue: "Ordered",
+    });
+    revWork(r);
+  }
+  revalidatePath("/purchasing");
+  return { id: res.id, number: po?.number ?? "" };
+}
+
+/**
+ * Hand a list of needed parts to the organization that buys its own.
+ *
+ * Some clients order for their own systems - their instruments, their money,
+ * their vendor account - and what they need from us is the LIST, not an
+ * invoice. Before this, "Needed" on such a system meant nobody was moving and
+ * the record could not tell you whose move it was.
+ *
+ * The parts stay Needed, because they are: nothing has been ordered. What
+ * changes is that the record now says who was asked and when, and the people
+ * at that organization get the list.
+ */
+export async function sendPartsRequest(
+  orgId: number, partIds: number[], note: string,
+): Promise<{ error?: string; sent?: number }> {
+  const u = await requireEditor();
+  if (!partIds.length) return { error: "Pick at least one part" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  const rows = await db.select().from(parts).where(inArray(parts.id, partIds));
+  if (!rows.length) return { error: "Not found" };
+  if (rows.some((r) => !partOpen(r.status))) return { error: "One of those is already received or fitted" };
+  for (const r of rows) {
+    if (r.instrumentId !== null) {
+      try { await assertSystemEditable(u, r.instrumentId); } catch { return { error: "Not found" }; }
+    }
+  }
+
+  const now = new Date();
+  for (const r of rows) {
+    await db.update(parts).set({ requestedOrgId: orgId, requestedAt: now }).where(eq(parts.id, r.id));
+  }
+  // One audit line per record, so each system's own history says it was asked.
+  for (const instrumentId of [...new Set(rows.map((r) => r.instrumentId))]) {
+    const mine = rows.filter((r) => r.instrumentId === instrumentId);
+    await audit({
+      actor: u.email, instrumentId, assetId: mine[0].assetId, entityType: "part", entityId: mine[0].id,
+      action: `asked ${org.name} to order ${mine.length} part${mine.length === 1 ? "" : "s"}: `
+        + mine.map((r) => `${r.name}${r.partNumber ? ` (${r.partNumber})` : ""}`).join(", "),
+    });
+  }
+  await notifyPartsRequested({
+    to: await ownerAudience(orgId),
+    orgName: org.name, actorName: u.name || u.email, note: note.trim(),
+    parts: rows.map((r) => ({
+      name: r.name, partNumber: r.partNumber,
+      qty: parseInt(r.qty) > 0 ? parseInt(r.qty) : 1,
+      instrumentId: r.instrumentId, assetId: r.assetId,
+    })),
+  });
+  revalidatePath("/purchasing");
+  return { sent: rows.length };
 }
 
 export async function cancelPurchaseOrder(id: number, reason: string): Promise<{ error?: string }> {

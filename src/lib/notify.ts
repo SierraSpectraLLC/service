@@ -317,6 +317,43 @@ export async function notifyPmRequested(opts: {
   }
 }
 
+/**
+ * Tell an organization what its systems need bought.
+ *
+ * The only notification in this app that asks the CLIENT to do the buying -
+ * for the clients who run their own vendor account, where our job is to say
+ * precisely what is needed and theirs is to order it. The list is the message,
+ * so it is in the mail body rather than behind a link somebody has to open.
+ */
+export async function notifyPartsRequested(opts: {
+  to: string[]; orgName: string; actorName: string; note: string;
+  parts: { name: string; partNumber: string; qty: number; instrumentId: number | null; assetId: number | null }[];
+}) {
+  try {
+    const url = appUrl();
+    const first = opts.parts[0];
+    const href = first?.instrumentId !== null && first?.instrumentId !== undefined
+      ? `/instruments/${first.instrumentId}` : "/assets";
+    const n = opts.parts.length;
+    const list = opts.parts.map((p) =>
+      `<li>${esc(p.name)}${p.partNumber ? ` - <span style="font-family:monospace">${esc(p.partNumber)}</span>` : ""}`
+      + `${p.qty > 1 ? ` x${p.qty}` : ""}</li>`).join("");
+    await deliver({
+      to: opts.to, kind: "parts_request", href,
+      title: `${opts.actorName} asked ${opts.orgName} to order ${n} part${n === 1 ? "" : "s"}`,
+      subject: `Parts to order - ${n} item${n === 1 ? "" : "s"}`,
+      html: await wrap(`<b>${esc(opts.actorName)}</b> has asked ${esc(opts.orgName)} to order
+        ${n} part${n === 1 ? "" : "s"} for your systems.
+        <ul style="margin:8px 0;padding-left:18px;">${list}</ul>
+        ${opts.note ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.note)}</div>` : ""}
+        <div style="margin-top:8px;">They stay marked <b>Needed</b> on the record until they arrive.</div>
+        ${url ? `<div style="margin-top:10px;"><a href="${url}${href}">Open the record</a></div>` : ""}`),
+    });
+  } catch (e) {
+    console.error("[notify] parts request email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyQueueKick(opts: {
   to: string[]; externalId: string; instrumentId: number;
   fromName: string; toName: string; reason: string; stages: string[];

@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { and, asc, eq, inArray, isNull, or, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, assetShares, instruments, orgs, systemShares } from "@/db/schema";
+import { assets, assetShares, clientAllowlist, instruments, orgs, systemShares } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/houseRole";
 import {
@@ -252,4 +252,28 @@ export async function tenantOfSystem(instrumentId: number): Promise<number | nul
   const [i] = await db.select({ tenantOrgId: instruments.tenantOrgId })
     .from(instruments).where(eq(instruments.id, instrumentId));
   return i?.tenantOrgId ?? null;
+}
+
+
+/**
+ * May this person read an organization's agreements?
+ *
+ * The house always can - it wrote them. For a client, it is a per-person
+ * privilege on their sign-in entry (client_allowlist.can_see_agreements),
+ * because "can see the system" and "can see what we pay for it" are different
+ * questions and one org has people on both sides of that line.
+ */
+export async function maySeeAgreements(
+  user: { role: string; email: string; orgId: number | null },
+  orgId: number,
+): Promise<boolean> {
+  if (user.role === "owner" || user.role === "staff") return true;
+  if (user.orgId !== orgId) return false;
+  const rows = await db.select({ canSee: clientAllowlist.canSeeAgreements })
+    .from(clientAllowlist)
+    .where(and(eq(clientAllowlist.orgId, orgId), eq(clientAllowlist.entry, user.email.toLowerCase())));
+  // A domain-wildcard entry (@lab.com) has no row of its own for this person;
+  // absence of an explicit grant is not a denial, it is "the org's default",
+  // and the org's default is what everyone had before this switch existed.
+  return rows.length === 0 ? true : rows[0].canSee;
 }
