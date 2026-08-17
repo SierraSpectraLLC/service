@@ -1621,6 +1621,40 @@ export async function runPmNow(scheduleId: number): Promise<{ error?: string; ta
   return { taskId: t.id };
 }
 
+/**
+ * Undo an accidental "Do it now".
+ *
+ * Starting a job early only creates the task - the schedule's dates are never
+ * touched until the work is COMPLETED - so undoing is removing that task, and
+ * only while it is genuinely untouched: still Open, nothing recorded against
+ * it. Work somebody has picked up is not an accident anymore, and a job that
+ * has actually fallen due is owed regardless of how its task came to exist.
+ */
+export async function undoRunPmNow(scheduleId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!s) return { error: "Not found" };
+  await assertWorkEditable(u, s);
+  const [t] = await db.select().from(tasks)
+    .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done"))).limit(1);
+  if (!t) return { error: "Nothing to undo - no open task for this schedule" };
+  if (s.nextDue <= shopToday()) {
+    return { error: "This job is actually due - the work is owed, so finish it or reschedule the date instead" };
+  }
+  if (t.state !== "Open") {
+    return { error: `Somebody moved it to ${t.state} - if it really shouldn't exist, delete it from Tasks with a reason` };
+  }
+  const [r] = await db.select().from(taskResults).where(eq(taskResults.taskId, t.id));
+  if (r) return { error: "A result has been recorded against it - that's work now, not an accident" };
+  await db.delete(tasks).where(eq(tasks.id, t.id)); // checklist + notes cascade
+  await audit({
+    actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: s.id,
+    action: `undid an early start of '${s.title}' - the schedule keeps its ${s.nextDue} due date`,
+  });
+  revWork(s);
+  return {};
+}
+
 export async function setPmPaused(id: number, paused: boolean): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, id));

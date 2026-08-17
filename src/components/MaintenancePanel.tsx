@@ -5,7 +5,7 @@ import { promptReason } from "@/lib/reason";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
-  alignMaintenance,
+  alignMaintenance, undoRunPmNow,
 } from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
 import { pmGroups } from "@/lib/pmGroups";
@@ -128,6 +128,16 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               )}
               {s.openTaskId !== null && (
                 <span className="mut" style={{ fontSize: 11 }}>in Tasks</span>
+              )}
+              {/* An early start that nobody has touched can simply be taken
+                  back - the click created a task, never moved the dates. */}
+              {canEdit && s.openTaskId !== null && !s.paused && s.nextDue > today && (
+                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  title="Removes the task the early start created. The schedule's due date was never touched."
+                  onClick={() => startTransition(async () => {
+                    const res = await undoRunPmNow(s.id);
+                    if (res?.error) setError(res.error);
+                  })}>undo start</button>
               )}
               <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                 onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({

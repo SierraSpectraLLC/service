@@ -38,14 +38,15 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
   /** This person's stored arrangement, or null for the defaults. */
   saved: PanelArrangement | null;
   /**
-   * Tabs. A record page grew to fifteen panels, which is three screens of
-   * scroll and none of it findable; grouped, each tab is one working context -
-   * the work, the equipment, the paper, the log. Panels stay mounted when
-   * their tab is inactive (hidden, not unmounted), so a half-typed note
-   * survives flipping away and back. Omit for the old single-page layout.
+   * Section bands. A record page grew to sixteen panels and none of it
+   * findable; grouped, each band is one working context - the work, the
+   * equipment, the paper, the log - down a single page, with a sticky bar
+   * that jump-scrolls between them. Nothing is ever hidden: flipping to
+   * check a part number must not lose sight of the task it was for.
+   * Omit for the plain two-column layout.
    */
   groups?: PanelGroup[];
-  /** Keys that render above the tabs on every tab - the record's identity. */
+  /** Keys that render above the section bar - the record's identity. */
   pinned?: string[];
 }) {
   const known = panels.map((p) => p.key);
@@ -70,38 +71,47 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
   const [drag, setDrag] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
-  // The active tab lives in the URL hash, so "the maintenance tab of T-003"
-  // is a link somebody can send. Initialized after mount rather than in state
-  // (the server render has no hash to read), which costs one paint on a
-  // deep-link and nothing otherwise.
+  // Nothing is hidden: the groups render as labeled bands down one page, and
+  // the sticky bar jump-scrolls between them. Tabs were tried first and hid
+  // too much - flipping to check a part number lost sight of the task it was
+  // for. A scroll position is also a place the browser already knows how to
+  // restore; a tab was not.
   const [active, setActive] = useState(groups?.[0]?.key ?? "");
+  const banded = !!groups?.length;
   useEffect(() => {
-    if (!groups?.length) return;
-    const apply = () => {
-      const fromHash = window.location.hash.replace("#", "");
-      if (groups.some((g) => g.key === fromHash)) setActive(fromHash);
-    };
-    apply();
-    // Hash-only navigation (back/forward, a #documents link clicked on the
-    // page itself) never remounts the component, so the listener is the only
-    // thing that hears it.
-    window.addEventListener("hashchange", apply);
-    return () => window.removeEventListener("hashchange", apply);
+    if (!banded) return;
+    // Deep link: #documents scrolls to the band on arrival.
+    const fromHash = window.location.hash.replace("#", "");
+    if (groups!.some((g) => g.key === fromHash)) {
+      document.getElementById(`band-${fromHash}`)?.scrollIntoView();
+    }
+    // Scroll-spy: the bar highlights the band under the reader as they
+    // scroll, so it doubles as a "you are here".
+    const io = new IntersectionObserver(
+      (entries) => {
+        const hit = entries.filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (hit) setActive(hit.target.id.replace("band-", ""));
+      },
+      { rootMargin: "-64px 0px -60% 0px" },
+    );
+    for (const g of groups!) {
+      const el = document.getElementById(`band-${g.key}`);
+      if (el) io.observe(el);
+    }
+    return () => io.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const pickTab = (key: string) => {
+  }, [banded]);
+  const jumpTo = (key: string) => {
     setActive(key);
     history.replaceState(null, "", `#${key}`);
+    document.getElementById(`band-${key}`)?.scrollIntoView({ behavior: "smooth" });
   };
-  /** Which tab a panel belongs to; strays land on the first tab, never vanish. */
+  /** Which band a panel belongs to; strays land on the first band, never vanish. */
   const groupOf = (key: string): string => {
-    if (!groups?.length || pinned.includes(key)) return "";
-    return groups.find((g) => g.keys.includes(key))?.key ?? groups[0].key;
+    if (!banded || pinned.includes(key)) return "";
+    return groups!.find((g) => g.keys.includes(key))?.key ?? groups![0].key;
   };
-  // While arranging, every panel shows - moving a panel you cannot see is a
-  // guessing game - and the tabs read as labels for where things will land.
-  const tabbed = !!groups?.length;
-  const visibleNow = (key: string) => !tabbed || editing || groupOf(key) === "" || groupOf(key) === active;
 
   // Optimistic: the arrangement is already on screen, and a failed save is not
   // worth interrupting anyone over - the next change retries the whole shape.
@@ -179,7 +189,6 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
     if (!p) return null;
     return (
       <div key={key}
-        style={visibleNow(key) ? undefined : { display: "none" }}
         className={[
           "panel-slot",
           editing ? "editing" : "",
@@ -276,17 +285,17 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
         </div>
       )}
 
-      {/* The record's identity rides above the tabs - whatever tab is open,
-          you can still see what you're looking at. Same grid, same widths. */}
-      {tabbed && !editing && pinned.length > 0 && (
+      {/* The record's identity rides above the section bar - wherever you
+          scroll, what you're looking at was established on the way in. */}
+      {banded && pinned.length > 0 && (
         <div className="panel-cols">
           <div>{left.filter((k) => pinned.includes(k)).map(slot)}</div>
           <div>{rightCol.filter((k) => pinned.includes(k)).map(slot)}</div>
         </div>
       )}
 
-      {tabbed && !editing && (
-        <div className="subtabs" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+      {banded && !editing && (
+        <nav className="section-bar" aria-label="Page sections">
           {groups!.map((g) => {
             const tone = g.badgeTone ?? "info";
             const badgeStyle = tone === "bad" ? { background: "#FBE9E9", color: "#A32D2D" }
@@ -294,7 +303,7 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
               : { background: "#E7F2FA", color: "#1D6396" };
             return (
               <button key={g.key} className={`subtab${active === g.key ? " active" : ""}`}
-                aria-pressed={active === g.key} onClick={() => pickTab(g.key)}>
+                aria-current={active === g.key} onClick={() => jumpTo(g.key)}>
                 {g.label}
                 {g.badge !== undefined && g.badge !== 0 && (
                   <span className="pill" style={{ ...badgeStyle, marginLeft: 6 }}>{g.badge}</span>
@@ -302,13 +311,40 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
               </button>
             );
           })}
-        </div>
+        </nav>
       )}
 
-      <div className="panel-cols">
-        <div>{(tabbed && !editing ? left.filter((k) => !pinned.includes(k)) : left).map(slot)}{tail(false)}</div>
-        <div>{(tabbed && !editing ? rightCol.filter((k) => !pinned.includes(k)) : rightCol).map(slot)}{tail(true)}</div>
-      </div>
+      {banded ? (
+        <>
+          {groups!.map((g) => {
+            const bandKeys = (k: string) => groupOf(k) === g.key;
+            const l = left.filter(bandKeys);
+            const r = rightCol.filter(bandKeys);
+            if (!l.length && !r.length && !editing) return null;
+            return (
+              <section key={g.key} id={`band-${g.key}`} aria-label={g.label}
+                style={{ scrollMarginTop: 52 }}>
+                <div className="band-label">{g.label}</div>
+                <div className="panel-cols">
+                  <div>{l.map(slot)}</div>
+                  <div>{r.map(slot)}</div>
+                </div>
+              </section>
+            );
+          })}
+          {editing && (
+            <div className="panel-cols">
+              <div>{tail(false)}</div>
+              <div>{tail(true)}</div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="panel-cols">
+          <div>{left.map(slot)}{tail(false)}</div>
+          <div>{rightCol.map(slot)}{tail(true)}</div>
+        </div>
+      )}
     </>
   );
 }
