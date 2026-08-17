@@ -132,7 +132,23 @@ describe("seeding the catalog from what the shop actually uses", () => {
     });
   });
 
+  it("gathers a kit's contents under every module type the kit fits", () => {
+    // Listing six parts inside a kit is the fastest way to put six undescribed
+    // numbers into the shop. The page emits one mention per module type the kit
+    // suits, and they have to merge into one row rather than six.
+    const [u] = uncatalogued(catalog, [
+      { partNumber: "5063-6589", name: "Plunger seal", assetType: "Pump", models: ["LC-20AD"], source: "kit" },
+      { partNumber: "5063-6589", name: "Plunger seal", assetType: "LC System", models: ["LC-20AD"], source: "kit" },
+    ]);
+    expect(u).toEqual({
+      partNumber: "5063-6589", name: "Plunger seal",
+      assetTypes: ["Pump", "LC System"], models: ["LC-20AD"], sources: ["kit"],
+    });
+  });
+
   it("never lists a number the catalog already describes, whatever the source", () => {
+    // Including a kit line that names a part somebody has since described.
+    expect(uncatalogued(catalog, [{ partNumber: "5181-3323", name: "x", source: "kit" }])).toEqual([]);
     expect(uncatalogued(catalog, [{ partNumber: "agi-7167-pmk", name: "x", source: "maintenance" }])).toEqual([]);
   });
 });

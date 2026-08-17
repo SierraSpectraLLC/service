@@ -77,11 +77,29 @@ export default async function PartsCatalogPage() {
         .orderBy(asc(partKitLines.sortOrder), asc(partKitLines.id))
     : [];
 
+  // What's INSIDE the catalogued kits. A kit is a bag of other numbers, and
+  // listing six of them is the single fastest way to put six numbers into the
+  // shop that nothing describes - each already typed with its name, right
+  // there, and then invisible everywhere else. They arrive here carrying the
+  // kit's own fit, because a seal in an LC-20 pump kit is an LC-20 pump seal:
+  // describing one is confirming a filled-in sheet rather than starting from a
+  // bare number.
+  const kitParts: UsedPart[] = lines.flatMap((l) => {
+    const kit = rows.find((r) => r.id === l.kitId);
+    const types: (string | undefined)[] = kit?.assetTypes.length ? kit.assetTypes : [undefined];
+    return types.map((assetType) => ({
+      partNumber: l.partNumber, name: l.name,
+      assetType, models: kit?.models ?? [],
+      source: "kit",
+    }));
+  });
+
   const used: (string | UsedPart)[] = [
     ...usedParts.map((r) => ({ partNumber: r.pn, source: "fitted" })),
     ...usedStock.map((r) => ({ partNumber: r.pn, source: "stock" })),
     ...usedPo.map((r) => ({ partNumber: r.pn, source: "purchasing" })),
     ...maintenanceParts,
+    ...kitParts,
   ];
 
   return (

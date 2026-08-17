@@ -174,9 +174,9 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
         <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
           <div className="eyebrow" style={{ marginBottom: 4 }}>Used but not described</div>
           <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
-            {unnamed.length} number{unnamed.length === 1 ? "" : "s"} on real work - fitted, stocked, ordered, or
-            named by a maintenance task - with no catalog entry yet. Describing one keeps everything
-            maintenance already said about it.
+            {unnamed.length} number{unnamed.length === 1 ? "" : "s"} on real work - fitted, stocked, ordered,
+            named by a maintenance task, or packed inside a kit - with no catalog entry yet. Describing one
+            keeps everything already said about it.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {unnamed.slice(0, 40).map((u) => (
@@ -187,6 +187,10 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                 {u.sources.includes("maintenance") && (
                   <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}
                     title="Named by a maintenance task or PM schedule">maintenance</span>
+                )}
+                {u.sources.includes("kit") && (
+                  <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}
+                    title="Listed inside a kit's contents">🧰 kit</span>
                 )}
                 {u.models.slice(0, 3).map((m) => (
                   <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{m}</span>
