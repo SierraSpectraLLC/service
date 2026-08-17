@@ -33,7 +33,7 @@ import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } f
 import {
   applyProcedures, applySystemProcedures, backfillProcedure, createPmTask, generateDuePmTasks,
 } from "@/lib/pmGenerate";
-import { parseProcParts, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
+import { parseProcParts, partQty, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, resultIsRecorded } from "@/lib/testResult";
 import { cleanBody, messageableFrom } from "@/lib/messages";
@@ -1874,7 +1874,10 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
   const best = bestPrice(book, want.number);
   const [p] = await db.insert(parts).values({
     instrumentId, assetId: s.assetId, name, partNumber: want.number,
-    qty: "1", status: "Needed", note: `for maintenance '${s.title}'`,
+    // What the procedure says the job takes. Hardcoded to one until the
+    // procedure could carry a count, which quietly ordered a single bottle of
+    // oil for a change that needs two.
+    qty: String(partQty(want)), status: "Needed", note: `for maintenance '${s.title}'`,
     // The queryable version of that note: a contract whose PM includes its
     // parts reads this to keep them off the parts allowance.
     pmScheduleId: s.id,

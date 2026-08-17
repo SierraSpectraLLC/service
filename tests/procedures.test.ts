@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  describeProcedure, parseProcParts, partsForModel, serializeProcParts, schedulePartsOf, partLabel,
+  describeProcedure, parseProcParts, partQty, partsForModel, serializeProcParts, schedulePartsOf, partLabel,
 } from "@/lib/procedures";
 import { matchItems } from "@/lib/checkout";
 
@@ -65,6 +65,48 @@ describe("parts round-trip", () => {
     expect(schedulePartsOf({ parts: "", partName: "", partNumber: "" })).toEqual([]);
     expect(partLabel({ name: "", number: "999" })).toBe("PN 999");
     expect(partLabel({ name: "Ferrule", number: "" })).toBe("Ferrule");
+  });
+});
+
+describe("how many the job takes", () => {
+  // An MS120's annual oil change needs two bottles of AVF Gold. One bottle
+  // arriving is the job not getting done.
+  const oil = { name: "AVF Gold", number: "AVF-1L", qty: 2 };
+
+  it("carries the count through a round-trip", () => {
+    expect(parseProcParts(serializeProcParts([oil]))).toEqual([oil]);
+  });
+
+  it("leaves a single-quantity part byte-identical to a pre-quantity one", () => {
+    // The key is absent at 1, so every procedure written before this existed
+    // serializes exactly as it always did.
+    expect(serializeProcParts([{ name: "Ferrule", number: "F-1" }]))
+      .toBe('[{"name":"Ferrule","number":"F-1"}]');
+    expect(serializeProcParts([{ name: "Ferrule", number: "F-1", qty: 1 }]))
+      .toBe('[{"name":"Ferrule","number":"F-1"}]');
+  });
+
+  it("reads every nonsense quantity as one, never as none", () => {
+    // A part on the list is needed. Ordering zero of it is the one answer that
+    // cannot be right, so nothing may produce it.
+    for (const qty of [0, -3, 0.5, NaN, Infinity, undefined]) {
+      expect(partQty({ qty })).toBe(1);
+    }
+    expect(partQty({ qty: 2.9 })).toBe(2);
+    expect(partQty({ qty: 100000 })).toBe(999);
+  });
+
+  it("leads the label with the count, and stays quiet at one", () => {
+    expect(partLabel(oil)).toBe("2 × AVF Gold PN AVF-1L");
+    expect(partLabel({ name: "Ferrule", number: "F-1" })).toBe("Ferrule PN F-1");
+    expect(partLabel({ name: "Ferrule", number: "", qty: 3 })).toBe("3 × Ferrule");
+  });
+
+  it("says it in the sentence the editor shows", () => {
+    expect(describeProcedure({
+      assetType: "Vacuum pump", runsAtIntake: false, intervalDays: 365,
+      modelScope: ["MS120"], parts: [oil],
+    })).toBe("Runs yearly on MS120. Takes 2 × AVF Gold PN AVF-1L.");
   });
 });
 

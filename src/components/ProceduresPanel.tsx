@@ -916,6 +916,18 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 return (
                 <div key={idx} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", marginBottom: 6 }}>
                   <div style={{ display: "flex", gap: 6 }}>
+                    {/* How many the job takes. An MS120's annual oil change
+                        needs two bottles, and one arriving is the job not
+                        getting done - so this reaches the part that gets
+                        ordered, not just the wording of the task. Blank reads
+                        as 1, which is what every part meant before this. */}
+                    <input type="number" min={1} max={999} value={pt.qty ?? ""} placeholder="1"
+                      aria-label="How many this job takes"
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        setPart({ qty: Number.isFinite(n) && n > 1 ? n : undefined });
+                      }}
+                      style={{ width: 56, fontSize: 13 }} />
                     <input className="mono" value={pt.number} placeholder="Part number"
                       onChange={(e) => setPart({ number: e.target.value })}
                       style={{ flex: 1, fontSize: 13 }} />

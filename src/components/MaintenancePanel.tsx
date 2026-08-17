@@ -8,13 +8,14 @@ import {
   alignMaintenance, undoRunPmNow, logPastPm,
 } from "@/app/actions";
 import { cadenceLabel } from "@/lib/pm";
+import { partLabel, type ProcPart } from "@/lib/procedures";
 import { pmGroups } from "@/lib/pmGroups";
 
 export type PmRow = {
   id: number; title: string; body: string; assignee: string;
   everyDays: number; nextDue: string; lastDone: string; paused: boolean;
   /** All parts the job takes (procedure-stamped or the hand-made single pair). */
-  parts: { name: string; number: string }[];
+  parts: ProcPart[];
   /** Set when a schedule shown on a system page actually lives on one of its assets. */
   onAsset?: string;
   /** An open generated task is the schedule "in flight". */
@@ -203,9 +204,10 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           const key = `${s.id}:${pt.number}`;
           return (
             <div key={key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 3, flexWrap: "wrap" }}>
-              <span className="mono mut" style={{ fontSize: 11 }}>
-                {pt.name ? `${pt.name} · ` : ""}PN {pt.number}
-              </span>
+              {/* partLabel rather than a second spelling of it: this line sits
+                  next to the button that actually orders the part, so it is the
+                  last place that should disagree with the task about how many. */}
+              <span className="mono mut" style={{ fontSize: 11 }}>{partLabel(pt)}</span>
               {canEdit && (requested[key]
                 ? <span style={{ fontSize: 11, color: requested[key] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
                     {requested[key] === "ok" ? "Requested - see Parts" : requested[key]}
