@@ -18,7 +18,13 @@ import {
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
-import { AGREEMENT_KINDS, AGREEMENT_STATES, serializeKits, type IncludedKit } from "@/lib/agreements";
+// Aliased: lib/stock exports a KIND_LABEL too (shelf, van, ...), imported below
+// and lexically first, so the bare name here silently meant the wrong map -
+// which made every new agreement throw on its own audit line.
+import {
+  AGREEMENT_KINDS, AGREEMENT_STATES, KIND_LABEL as AGREEMENT_KIND_LABEL,
+  serializeKits, type IncludedKit,
+} from "@/lib/agreements";
 import {
   closeLine, moverOf, nextWoNumber, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
   type Mover,
@@ -2717,9 +2723,9 @@ export async function attachLibraryFile(target: WorkTarget, attachmentId: number
  *
  * attachments.agreementId has been in the schema since agreements were - and
  * nothing ever wrote it, so the terms lived in this app while the contract
- * everybody actually signs lived in somebody's mail. The file itself comes
- * from the library (Files > upload there first), the same way a manual is
- * filed onto a catalog entry: no re-upload, no pasted link.
+ * everybody actually signs lived in somebody's mail. The file may come from the
+ * library, the same way a manual is filed onto a catalog entry - or straight
+ * off the desk, which is what uploadAgreementPapers below is for.
  */
 export async function fileAgreementPaper(agreementId: number, attachmentId: number): Promise<{ error?: string }> {
   const u = await requireStaff();
@@ -2740,6 +2746,46 @@ export async function fileAgreementPaper(agreementId: number, attachmentId: numb
   });
   revalidatePath(`/settings/organizations/${a.orgId}`);
   revalidatePath("/agreements");
+  return {};
+}
+
+/**
+ * Put the signed paper on the agreement in one motion: record the upload and
+ * file it, without a trip through the library first.
+ *
+ * The library route (fileAgreementPaper) assumed the PDF was already on the
+ * shelf, which it never is at the moment somebody is typing a contract's terms
+ * off it - so writing an agreement meant leaving the form, uploading under
+ * Files, and coming back. One insert rather than record-then-link, so a failure
+ * cannot leave a document on the shelf that nobody knows belongs to a contract.
+ */
+export async function uploadAgreementPapers(
+  agreementId: number,
+  files: { fileName: string; url: string; size: number }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!files.length) return {};
+  const [a] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!a) return { error: "Not found" };
+  const gate = await adminOrgGate(u, a.orgId);
+  if ("error" in gate) return gate;
+  const guard = await guardStorage(u.orgId, files.reduce((n, f) => n + (f.size || 0), 0));
+  if (guard) return guard;
+  const rows = await db.insert(attachments).values(files.map((f) => ({
+    fileName: f.fileName, url: f.url, size: f.size, description: "",
+    kind: "Other", tenantOrgId: myTenantOrgId(u),
+    instrumentId: null, assetId: null, orgId: u.orgId, agreementId,
+    uploadedBy: u.name,
+  }))).returning();
+  for (const row of rows) {
+    await audit({
+      actor: u.email, entityType: "agreement", entityId: agreementId, tenantOrgId: a.tenantOrgId,
+      action: `filed '${row.fileName}' against ${a.number || a.title || "the agreement"}`,
+    });
+  }
+  revalidatePath(`/settings/organizations/${a.orgId}`);
+  revalidatePath("/agreements");
+  revalidatePath("/documents");
   return {};
 }
 
@@ -8158,7 +8204,7 @@ function cleanAgreement(d: AgreementInput): { error: string } | {
 }
 
 const agreementName = (a: { kind: string; number: string; title: string }) =>
-  [a.number, a.title].filter(Boolean).join(" ") || KIND_LABEL[a.kind] || "agreement";
+  [a.number, a.title].filter(Boolean).join(" ") || AGREEMENT_KIND_LABEL[a.kind] || "agreement";
 
 export async function addAgreement(orgId: number, data: AgreementInput): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
@@ -8175,7 +8221,7 @@ export async function addAgreement(orgId: number, data: AgreementInput): Promise
   }).returning();
   await audit({
     actor: u.email, entityType: "agreement", entityId: row.id, tenantOrgId: row.tenantOrgId,
-    action: `added ${KIND_LABEL[clean.kind].toLowerCase()} ${agreementName(clean)} for ${org.name}`
+    action: `added ${(AGREEMENT_KIND_LABEL[clean.kind] ?? "agreement").toLowerCase()} ${agreementName(clean)} for ${org.name}`
       + `${clean.endsOn ? ` (to ${clean.endsOn})` : ""}`,
   });
   revalidatePath(`/settings/organizations/${orgId}`);

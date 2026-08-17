@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
+import { upload } from "@vercel/blob/client";
 import {
   addAgreement, fileAgreementPaper, listCatalogPartsForPicker, listLibraryFiles,
-  removeAgreement, unfileAgreementPaper, updateAgreement,
+  removeAgreement, unfileAgreementPaper, updateAgreement, uploadAgreementPapers,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import {
@@ -47,27 +48,36 @@ const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg
  * Nothing at all is the important case: zero included means the entitlement is
  * not part of this agreement, and drawing an instantly-full bar for it would
  * report every unlimited contract as blown through on day one.
+ *
+ * Each one is a fixed-width block rather than a share of the row. Growing to
+ * fill the card put "Parts" and "$0 used" at opposite ends of a thousand
+ * pixels - two words with a field between them, which reads as a gap rather
+ * than as a pair. A capped block keeps the label beside its number, and the
+ * leftover width simply stays empty.
  */
+const BLOCK = { flex: "0 1 210px", minWidth: 150 } as const;
+
 function Bar({ label, included, used, fmt, unlimited = false }: {
   label: string; included: number; used: number; fmt: (n: number) => string; unlimited?: boolean;
 }) {
   const a = allowance(included, used, unlimited);
   if (!a.tracked) return null;
   if (a.unlimited) {
-    // Covered with no number to burn: usage is information, not drawdown.
+    // Covered with no number to burn: usage is information, not drawdown - so
+    // the pill sits beside the figure instead of under a bar that isn't there.
     return (
-      <div style={{ flex: "1 1 160px", minWidth: 140 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-          <span className="mut">{label}</span>
-          <span style={{ fontWeight: 700 }}>{fmt(a.used)} used</span>
+      <div style={BLOCK}>
+        <div className="mut" style={{ fontSize: 11, marginBottom: 3 }}>{label}</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>unlimited</span>
+          <span style={{ fontSize: 11, fontWeight: 700 }}>{fmt(a.used)} used</span>
         </div>
-        <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>unlimited</span>
       </div>
     );
   }
   return (
-    <div style={{ flex: "1 1 160px", minWidth: 140 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+    <div style={BLOCK}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, marginBottom: 3 }}>
         <span className="mut">{label}</span>
         <span style={{ fontWeight: 700, color: a.over ? "#A32D2D" : "var(--ink)" }}>
           {fmt(a.used)} / {fmt(a.included)}
@@ -99,6 +109,54 @@ export type AgreementPaper = {
   size: number; uploadedBy: string; when: string;
 };
 
+type LibFile = { id: number; fileName: string; kind: string; size: number };
+
+/**
+ * Where the signed paper comes from: your desk, or the shelf.
+ *
+ * Both, because both happen. The contract whose terms you are typing in is in
+ * somebody's downloads folder; the one filed last quarter is already in the
+ * library. Offering only the shelf - which is all this used to do - meant
+ * abandoning a half-written agreement to go and upload a PDF.
+ *
+ * The picker only reports what was chosen. Whether that gets filed now or when
+ * the form is saved is the caller's business, because on a new agreement there
+ * is nothing to file it against yet.
+ */
+function PaperPicker({ lib, onPick, onFiles, disabled, note }: {
+  /** The library, or null while it is still being fetched. */
+  lib: LibFile[] | null;
+  onPick: (file: LibFile) => void;
+  onFiles: (files: File[]) => void;
+  disabled: boolean;
+  note?: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <div style={{ marginTop: 4, padding: "7px 9px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button type="button" className="btn sm primary" disabled={disabled} onClick={() => ref.current?.click()}>
+          ⇧ Upload a file
+        </button>
+        <input ref={ref} type="file" multiple style={{ display: "none" }}
+          onChange={(e) => { onFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+        {note && <span className="mut" style={{ fontSize: 11 }}>{note}</span>}
+      </div>
+      <div className="mut" style={{ fontSize: 11, margin: "7px 0 3px" }}>
+        {lib === null ? "Loading your library..."
+          : lib.length === 0 ? "Nothing else on the shelf yet."
+            : "...or pick one already in your library:"}
+      </div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {(lib ?? []).slice(0, 40).map((f) => (
+          <button key={f.id} type="button" className="btn sm mono" style={{ fontSize: 11 }} disabled={disabled}
+            onClick={() => onPick(f)}>{f.fileName}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, papers = [], title = "Agreements" }: {
   rows: AgreementRow[];
   today: string;
@@ -119,16 +177,55 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   // Which agreement is having a document filed against it, and the library to
   // pick from - fetched once, on demand.
   const [filing, setFiling] = useState<number | null>(null);
-  const [lib, setLib] = useState<{ id: number; fileName: string; kind: string; size: number }[] | null>(null);
+  const [lib, setLib] = useState<LibFile[] | null>(null);
+  // The paper for an agreement that does not exist yet. Files are HELD, not
+  // uploaded: abandoning the form should leave nothing behind in the store.
+  const [heldFiles, setHeldFiles] = useState<File[]>([]);
+  const [heldLib, setHeldLib] = useState<LibFile[]>([]);
+  const [busy, setBusy] = useState("");
   const [pending, startTransition] = useTransition();
+
+  const loadLib = () => {
+    if (lib !== null) return;
+    startTransition(async () => {
+      try { setLib((await listLibraryFiles()).files); } catch { setLib([]); }
+    });
+  };
 
   const openFiling = (agreementId: number) => {
     setFiling(filing === agreementId ? null : agreementId);
     setError("");
-    if (lib === null) {
-      startTransition(async () => {
-        try { setLib((await listLibraryFiles()).files); } catch { setLib([]); }
-      });
+    loadLib();
+  };
+
+  /**
+   * Put paper on an agreement that exists. Returns the reason it failed, or ""
+   * - the uploads have to finish before the filing, so this is one await for
+   * callers rather than a state machine at every call site.
+   */
+  const attachPaper = async (agreementId: number, files: File[], picked: LibFile[]): Promise<string> => {
+    try {
+      const done: { fileName: string; url: string; size: number }[] = [];
+      for (const f of files) {
+        setBusy(`Uploading ${f.name}...`);
+        const blob = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/upload" });
+        done.push({ fileName: f.name, url: blob.url, size: f.size });
+      }
+      if (done.length) {
+        const res = await uploadAgreementPapers(agreementId, done);
+        if (res?.error) return res.error;
+      }
+      for (const p of picked) {
+        const res = await fileAgreementPaper(agreementId, p.id);
+        if (res?.error) return res.error;
+      }
+      // A file just uploaded is on the shelf too, so the picker's list is stale.
+      setLib(null);
+      return "";
+    } catch (e) {
+      return (e as Error).message;
+    } finally {
+      setBusy("");
     }
   };
 
@@ -138,7 +235,10 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       try { setBook((await listCatalogPartsForPicker()).parts); } catch { setBook([]); }
     });
   };
-  const openAdd = (orgId: number) => { setDraft(emptyDraft); setError(""); setSheet({ orgId }); loadBook(); };
+  const clearHeld = () => { setHeldFiles([]); setHeldLib([]); };
+  const openAdd = (orgId: number) => {
+    setDraft(emptyDraft); setError(""); clearHeld(); setSheet({ orgId }); loadBook(); loadLib();
+  };
   const openEdit = (r: AgreementRow) => {
     setDraft({
       kind: r.kind, number: r.number, title: r.title, status: r.status,
@@ -154,7 +254,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       value: r.valueCents != null ? (r.valueCents / 100).toFixed(2) : "",
       note: r.note,
     });
-    setError(""); setSheet({ id: r.id, orgId: r.orgId }); loadBook();
+    setError(""); clearHeld(); setSheet({ id: r.id, orgId: r.orgId }); loadBook(); loadLib();
   };
 
   const save = () => {
@@ -165,6 +265,17 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
         ? await updateAgreement(sheet.id, draft)
         : await addAgreement(sheet.orgId, draft);
       if (res?.error) { setError(res.error); return; }
+      const id = sheet.id ?? (res as { id?: number }).id;
+      if (id && (heldFiles.length || heldLib.length)) {
+        const why = await attachPaper(id, heldFiles, heldLib);
+        if (why) {
+          // The terms saved; only the document didn't. Closing the sheet on
+          // this would read as "none of that worked", and it would be retyped.
+          setError(`Saved - but the document didn't attach: ${why}. Attach it from the row below.`);
+          clearHeld();
+          return;
+        }
+      }
       setSheet(null);
     });
   };
@@ -245,24 +356,19 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                     </button>
                   )}
                   {canEdit && filing === r.id && (
-                    <div style={{ marginTop: 4, padding: "6px 8px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
-                      {lib === null && <span className="mut" style={{ fontSize: 11 }}>Loading your files...</span>}
-                      {lib?.length === 0 && (
-                        <span className="mut" style={{ fontSize: 11 }}>
-                          Nothing in your library yet - upload it under Files first, then file it here.
-                        </span>
-                      )}
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {(lib ?? []).filter((f) => !papers.some((p) => p.id === f.id)).slice(0, 40).map((f) => (
-                          <button key={f.id} className="btn sm mono" style={{ fontSize: 11 }} disabled={pending}
-                            onClick={() => startTransition(async () => {
-                              const res = await fileAgreementPaper(r.id, f.id);
-                              if (res?.error) { setError(res.error); return; }
-                              setFiling(null);
-                            })}>{f.fileName}</button>
-                        ))}
-                      </div>
-                    </div>
+                    <PaperPicker
+                      lib={lib === null ? null : lib.filter((f) => !papers.some((p) => p.id === f.id))}
+                      disabled={pending || !!busy} note={busy}
+                      onPick={(f) => startTransition(async () => {
+                        const why = await attachPaper(r.id, [], [f]);
+                        if (why) { setError(why); return; }
+                        setFiling(null);
+                      })}
+                      onFiles={(files) => startTransition(async () => {
+                        const why = await attachPaper(r.id, files, []);
+                        if (why) { setError(why); return; }
+                        setFiling(null);
+                      })} />
                   )}
                 </div>
               );
@@ -363,6 +469,42 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
             <label>What it covers</label>
             <input value={draft.title} placeholder="Annual service contract - 4 systems"
               onChange={(e) => setDraft({ ...draft, title: e.target.value })} style={{ marginBottom: 8 }} />
+
+            {/* The paper the terms above were read off. Asked for here because
+                here is where somebody has it open - sending them to Files to
+                upload it first is how a contract ends up with no contract. */}
+            <label>The signed agreement <span className="mut" style={{ fontWeight: 400 }}>(optional)</span></label>
+            <div style={{ marginBottom: 8 }}>
+              {(heldFiles.length > 0 || heldLib.length > 0) && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+                  {heldFiles.map((f, idx) => (
+                    <span key={`f${idx}`} className="pill mono" style={{ background: "#E7F2FA", color: "#1D6396" }}>
+                      {f.name}
+                      <button type="button" aria-label={`Don't attach ${f.name}`} className="btn link"
+                        style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
+                        onClick={() => setHeldFiles(heldFiles.filter((_, i) => i !== idx))}>×</button>
+                    </span>
+                  ))}
+                  {heldLib.map((f) => (
+                    <span key={`l${f.id}`} className="pill mono" style={{ background: "#EEF1F5", color: "#475569" }}>
+                      {f.fileName}
+                      <button type="button" aria-label={`Don't attach ${f.fileName}`} className="btn link"
+                        style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
+                        onClick={() => setHeldLib(heldLib.filter((x) => x.id !== f.id))}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <PaperPicker
+                lib={lib === null ? null : lib.filter((f) =>
+                  !papers.some((p) => p.id === f.id) && !heldLib.some((h) => h.id === f.id))}
+                disabled={pending || !!busy} note={busy}
+                onPick={(f) => setHeldLib([...heldLib, f])}
+                onFiles={(files) => setHeldFiles([...heldFiles, ...files])} />
+              <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                Uploaded when you save, and filed on both this agreement and your document shelf.
+              </div>
+            </div>
 
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
@@ -518,7 +660,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
             <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
               <button className="btn sm" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
               <button className="btn sm accent" onClick={save} disabled={pending}>
-                {pending ? "Saving..." : "Save"}
+                {busy ? busy : pending ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
