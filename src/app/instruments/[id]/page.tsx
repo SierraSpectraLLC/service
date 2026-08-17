@@ -518,6 +518,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               instrumentId={inst.id}
               assets={assetRows.map((a) => ({
                 id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
+                servesAssetId: a.servesAssetId, servesRole: a.servesRole,
                 ...unitPhoto(a),
                 openItems:
                   taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +

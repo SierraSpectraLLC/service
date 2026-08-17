@@ -21,6 +21,7 @@ import { formatHours } from "@/lib/hours";
 import { GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
+import { unitLabel } from "@/lib/assetServes";
 import ReferencePanel from "@/components/ReferencePanel";
 import { refsForUnits } from "@/lib/catalogRefs";
 import { copyTargetsFor } from "@/lib/copyTargets";
@@ -83,6 +84,19 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   ]);
   if (!asset) notFound();
   const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
+
+  // The rest of this unit's stack, for the "serves / served by" relationship.
+  // Only the columns needed to name one and to apply the rules in
+  // lib/assetServes - the whole row per sibling would be a page-load's worth of
+  // data to render one line.
+  const siblings = asset.instrumentId === null ? [] : await db.select({
+    id: assets.id, instrumentId: assets.instrumentId, servesAssetId: assets.servesAssetId,
+    servesRole: assets.servesRole, kind: assets.kind, model: assets.model, serial: assets.serial,
+  }).from(assets).where(eq(assets.instrumentId, asset.instrumentId)).orderBy(asc(assets.sortOrder), asc(assets.id));
+  const serveRows = siblings.map((s) => ({
+    id: s.id, instrumentId: s.instrumentId, servesAssetId: s.servesAssetId, servesRole: s.servesRole,
+    label: unitLabel(s),
+  }));
 
   // The reference shelf filed on this unit's model (and its type) in the
   // catalog - identical on every unit like it, which is the point.
@@ -308,7 +322,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               )}
               {asset.note && <div className="mut" style={{ fontSize: 13, marginBottom: 10, whiteSpace: "pre-wrap" }}>{asset.note}</div>}
               <AssetControls
-                asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId }}
+                asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId, servesAssetId: asset.servesAssetId, servesRole: asset.servesRole }}
+                siblings={serveRows}
                 systems={insts.filter((i) => !i.archived).map((i) => ({ id: i.id, externalId: i.externalId }))}
                 kinds={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
                 models={vocab.reduce<Record<string, string[]>>((acc, v) => {

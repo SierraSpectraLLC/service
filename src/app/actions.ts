@@ -54,6 +54,7 @@ import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
 import { storeFiles, storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
+import { checkServes, cleanRole, moveFallout } from "@/lib/assetServes";
 import {
   houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
   requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
@@ -733,6 +734,71 @@ export async function updateAsset(assetId: number, data: AssetInput): Promise<{ 
   return {};
 }
 
+/**
+ * Say which module this support unit serves - the roughing pump's mass spec,
+ * the chiller's detector.
+ *
+ * The unit stays exactly where it is: on the system, in the asset list, with
+ * its own page and history. This adds one fact to it. The rules that keep it a
+ * pointer rather than a hierarchy live in lib/assetServes and are checked
+ * against the system's OWN rows, so a stale id from a browser tab open since
+ * yesterday cannot link two units that no longer sit together.
+ */
+export async function setAssetServes(
+  assetId: number, servesAssetId: number | null, role = "",
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
+  if (!a) return { error: "Not found" };
+  const acc = await assetAccess(u, assetId);
+  if (!acc.see) return { error: "Not found" };
+  if (!acc.edit) return { error: "Read-only access to this asset" };
+  const siblings = a.instrumentId === null ? [a] : await db.select().from(assets)
+    .where(eq(assets.instrumentId, a.instrumentId));
+  const check = checkServes(a, servesAssetId, siblings);
+  if (!check.ok) return { error: check.error };
+  const servesRole = check.servesAssetId === null ? "" : cleanRole(role);
+  if (a.servesAssetId === check.servesAssetId && a.servesRole === servesRole) return {};
+  await db.update(assets)
+    .set({ servesAssetId: check.servesAssetId, servesRole })
+    .where(eq(assets.id, assetId));
+  const target = check.servesAssetId === null ? null : siblings.find((s) => s.id === check.servesAssetId);
+  const said = target
+    ? `serves ${assetLabel(target)}${servesRole ? ` (${servesRole})` : ""}`
+    : "no longer serves a particular module";
+  await logAssetEvent(assetId, "note", a.instrumentId, said, u.name);
+  await audit({
+    actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
+    action: `${assetLabel(a)} ${said}`,
+  });
+  if (a.instrumentId !== null) rev(a.instrumentId);
+  revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+  if (check.servesAssetId !== null) revalidatePath(`/assets/${check.servesAssetId}`);
+  if (a.servesAssetId !== null) revalidatePath(`/assets/${a.servesAssetId}`);
+  return {};
+}
+
+/**
+ * Cut the serves links a unit is about to break by leaving its system, keeping
+ * only the servers travelling with it. Shared by move, detach and decommission
+ * because all three are the same event to a hose: the module is going.
+ */
+async function cutServeLinks(
+  assetId: number, instrumentId: number | null, bringing: number[], keepOwn = false,
+): Promise<number[]> {
+  const around = instrumentId === null ? [] : await db.select().from(assets)
+    .where(eq(assets.instrumentId, instrumentId));
+  const { bring, orphan, clearOwn } = moveFallout(assetId, around, bringing);
+  if (clearOwn && !keepOwn) {
+    await db.update(assets).set({ servesAssetId: null, servesRole: "" }).where(eq(assets.id, assetId));
+  }
+  if (orphan.length) {
+    await db.update(assets).set({ servesAssetId: null, servesRole: "" }).where(inArray(assets.id, orphan));
+  }
+  return bring;
+}
+
 export async function setAssetStatus(assetId: number, status: string) {
   const u = await requireEditor();
   if (!(ASSET_STATES as readonly string[]).includes(status)) throw new Error("Unknown asset status");
@@ -908,6 +974,9 @@ export async function detachAsset(assetId: number) {
   if (!a || a.instrumentId === null) return;
   await assertSystemEditable(u, a.instrumentId);
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, a.instrumentId));
+  // Nothing travels with a unit becoming a spare: a shelf is not a place one
+  // module serves another.
+  await cutServeLinks(assetId, a.instrumentId, []);
   await db.update(assets).set({ instrumentId: null, status: "Spare" }).where(eq(assets.id, assetId));
   await logAssetEvent(assetId, "removed", a.instrumentId, `from ${inst?.externalId ?? "?"}`, u.name);
   await audit({
@@ -919,8 +988,30 @@ export async function detachAsset(assetId: number) {
   revalidatePath(`/assets/${assetId}`);
 }
 
-/** Move an asset straight from one system to another; history follows the asset. */
-export async function moveAsset(assetId: number, toInstrumentId: number): Promise<{ error?: string }> {
+/**
+ * Move an asset straight from one system to another; history follows the asset.
+ *
+ * `bringing` is the support units that come with it - the roughing pump plumbed
+ * to this mass spec. Offered rather than cascaded: a pump often stays with the
+ * bench while the spec goes back to the shop, so which ones travel is a
+ * question for whoever is carrying them. Servers left behind lose their link,
+ * because a hose does not reach between two systems.
+ */
+export async function moveAsset(
+  assetId: number, toInstrumentId: number, bringing: number[] = [],
+): Promise<{ error?: string }> {
+  return moveAssetTo(assetId, toInstrumentId, bringing, false);
+}
+
+/**
+ * `keepServes` is why this is not the exported action: it is true only when a
+ * unit is travelling WITH the module it serves, and a caller who could set it
+ * from the browser could strand a link pointing at another system - the one
+ * thing the column promises never happens.
+ */
+async function moveAssetTo(
+  assetId: number, toInstrumentId: number, bringing: number[], keepServes: boolean,
+): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   const [to] = await db.select().from(instruments).where(eq(instruments.id, toInstrumentId));
@@ -934,6 +1025,9 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
   } catch { return { error: "Not found" }; }
   const from = a.instrumentId !== null
     ? (await db.select().from(instruments).where(eq(instruments.id, a.instrumentId)))[0] : null;
+  // Decided before the move, while the old system's rows still say who served
+  // whom; the ones coming along are moved after, so their link survives intact.
+  const bring = await cutServeLinks(assetId, a.instrumentId, bringing, keepServes);
   await db.update(assets).set({ instrumentId: toInstrumentId, status: "In service" }).where(eq(assets.id, assetId));
   await logAssetEvent(assetId, "moved", toInstrumentId, `${from?.externalId ?? "spare"} -> ${to.externalId}`, u.name);
   if (from) {
@@ -952,6 +1046,10 @@ export async function moveAsset(assetId: number, toInstrumentId: number): Promis
   // the source's didn't.
   await applyProcedures(assetId, shopToday(), u.email);
   await applyCatalogGases({ instrumentId: toInstrumentId, assetId: null }, a.tenantOrgId);
+  // The ones plumbed to it follow, keeping their link - both ends land on the
+  // same system, so it never dangles. Not recursive in practice: a server
+  // cannot itself be served, so each of these brings nothing of its own.
+  for (const id of bring) await moveAssetTo(id, toInstrumentId, [], true);
   rev(toInstrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -964,6 +1062,8 @@ export async function decommissionAsset(assetId: number) {
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a || a.status === "Decommissioned") return;
   const fromId = a.instrumentId;
+  // Nothing follows a unit out of service, in either direction.
+  await cutServeLinks(assetId, fromId, []);
   await db.update(assets).set({ instrumentId: null, status: "Decommissioned" }).where(eq(assets.id, assetId));
   await logAssetEvent(assetId, "status", fromId, `${a.status} -> Decommissioned`, u.name);
   await audit({

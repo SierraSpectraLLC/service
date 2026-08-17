@@ -2329,3 +2329,15 @@ DO $$ BEGIN
       FOREIGN KEY ("thread_id") REFERENCES "message_threads"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- A support unit (roughing pump, chiller) names the module it serves. A flat
+-- self-pointer, not a hierarchy - see the column comment in db/schema.ts.
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "serves_asset_id" integer;
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "serves_role" text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS "assets_serves_idx" ON "assets" ("serves_asset_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'assets_serves_asset_id_fk') THEN
+    ALTER TABLE "assets" ADD CONSTRAINT "assets_serves_asset_id_fk"
+      FOREIGN KEY ("serves_asset_id") REFERENCES "assets"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

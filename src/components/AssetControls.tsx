@@ -1,18 +1,29 @@
 "use client";
 
+import Link from "next/link";
 import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_COLOR } from "@/lib/stages";
-import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, updateAsset } from "@/app/actions";
+import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, setAssetServes, updateAsset } from "@/app/actions";
+import { serveCandidates, serversOf } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
 
 type Asset = {
   id: number; kind: string; model: string; serial: string; manufacturer: string;
   owner: string; asFound: string; location: string; note: string; status: string; instrumentId: number | null;
+  servesAssetId: number | null; servesRole: string;
 };
 
-export default function AssetControls({ asset, systems, kinds, models, canEdit, isStaff }: {
-  asset: Asset; systems: { id: number; externalId: string }[]; kinds: string[];
+/** The other units on this asset's system, enough of each to name it. */
+export type Sibling = {
+  id: number; instrumentId: number | null; servesAssetId: number | null;
+  servesRole: string; label: string;
+};
+
+export default function AssetControls({ asset, siblings = [], systems, kinds, models, canEdit, isStaff }: {
+  asset: Asset;
+  siblings?: Sibling[];
+  systems: { id: number; externalId: string }[]; kinds: string[];
   // Catalog models per type; the unit's current values stay selectable even
   // if they've since left the catalog (CatalogSelect handles that).
   models: Record<string, string[]>;
@@ -21,8 +32,16 @@ export default function AssetControls({ asset, systems, kinds, models, canEdit, 
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note });
+  const [role, setRole] = useState(asset.servesRole);
   const [pending, startTransition] = useTransition();
   const c = ASSET_COLOR[asset.status] ?? ASSET_COLOR.Spare;
+
+  // What this unit may be pointed at, and what is pointed at it. Both from the
+  // same rules the server checks against, so the picker never offers something
+  // that would be refused.
+  const candidates = serveCandidates(asset, siblings);
+  const servers = serversOf(asset.id, siblings);
+  const serving = siblings.find((s) => s.id === asset.servesAssetId) ?? null;
 
   const run = (fn: () => Promise<{ error?: string } | void>) => {
     setError("");
@@ -47,7 +66,22 @@ export default function AssetControls({ asset, systems, kinds, models, canEdit, 
         {canEdit && (
           <>
             <select value="" disabled={pending}
-              onChange={(e) => { const id = parseInt(e.target.value); if (id) run(() => moveAsset(asset.id, id)); }}
+              onChange={(e) => {
+                const id = parseInt(e.target.value);
+                if (!id) return;
+                // Offered, never assumed: a roughing pump often stays plumbed to
+                // the bench while the spec goes back to the shop, so the answer
+                // is not something the software can know.
+                let bringing: number[] = [];
+                if (servers.length) {
+                  const what = servers.map((s) => s.label).join(", ");
+                  bringing = window.confirm(
+                    `${what} ${servers.length === 1 ? "serves" : "serve"} this unit. Move ${servers.length === 1 ? "it" : "them"} too?`
+                      + "\n\nOK moves them along. Cancel leaves them behind and drops the link.",
+                  ) ? servers.map((s) => s.id) : [];
+                }
+                run(() => moveAsset(asset.id, id, bringing));
+              }}
               style={{ width: "auto", fontSize: 12 }}>
               <option value="">{asset.instrumentId !== null ? "Move to..." : "Install into..."}</option>
               {systems.filter((s) => s.id !== asset.instrumentId).map((s) => <option key={s.id} value={s.id}>{s.externalId}</option>)}
@@ -78,6 +112,60 @@ export default function AssetControls({ asset, systems, kinds, models, canEdit, 
           </button>
         )}
       </div>
+      {/* What this unit is FOR, when it is for one module in particular - the
+          roughing pump's mass spec, the chiller's detector. Sits with status
+          and Move rather than inside Edit, because it is the same kind of fact
+          as those two and applies the moment it is picked. Hidden entirely on
+          a system with nothing to point at, which is most of them - and on a
+          module that is itself served, where the server would refuse it, since
+          a control that can only say no is worse than no control. */}
+      {asset.instrumentId !== null && !servers.length && (candidates.length > 0 || serving) && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8, fontSize: 12 }}>
+          <span className="mut">Serves</span>
+          {canEdit ? (
+            <select value={asset.servesAssetId ?? ""} disabled={pending}
+              aria-label="The module this unit serves"
+              onChange={(e) => {
+                const v = e.target.value;
+                run(() => setAssetServes(asset.id, v ? parseInt(v) : null, role));
+              }}
+              style={{ width: "auto", fontSize: 12 }}>
+              <option value="">nothing in particular</option>
+              {serving && <option value={serving.id}>{serving.label}</option>}
+              {candidates.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+          ) : (
+            <b style={{ fontWeight: 700 }}>{serving ? serving.label : "nothing in particular"}</b>
+          )}
+          {serving && canEdit && (
+            <>
+              <span className="mut">as</span>
+              <input value={role} disabled={pending} placeholder="fore-line" maxLength={40}
+                aria-label="What it does for that module"
+                onChange={(e) => setRole(e.target.value)}
+                onBlur={() => { if (role !== asset.servesRole) run(() => setAssetServes(asset.id, asset.servesAssetId, role)); }}
+                style={{ width: 120, fontSize: 12, padding: "3px 7px" }} />
+            </>
+          )}
+          {serving && !canEdit && asset.servesRole && <span className="mut">as {asset.servesRole}</span>}
+        </div>
+      )}
+
+      {/* The other direction. A mass spec with two pumps on it should say so on
+          its own page, not only on theirs. */}
+      {servers.length > 0 && (
+        <div style={{ fontSize: 12, marginTop: 6 }}>
+          <span className="mut">Served by </span>
+          {servers.map((s, i) => (
+            <span key={s.id}>
+              {i > 0 && <span className="mut">, </span>}
+              <Link href={`/assets/${s.id}`} style={{ fontWeight: 700 }}>{s.label}</Link>
+              {s.servesRole && <span className="mut"> ({s.servesRole})</span>}
+            </span>
+          ))}
+        </div>
+      )}
+
       {editing && (
         <div className="dash-form" style={{ marginTop: 10 }}>
           <div className="pf3" style={{ marginBottom: 8 }}>

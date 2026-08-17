@@ -4,12 +4,16 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { ASSET_COLOR } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
+import { servesLine } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
 import AssetGrid, { type GridModel } from "./AssetGrid";
 import PhotoThumb from "./PhotoThumb";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
+  /** The module this one serves, and what it does for it. See lib/assetServes. */
+  servesAssetId?: number | null;
+  servesRole?: string;
   /**
    * Where to fetch this module's picture: its own cover photo, or the catalog's
    * stock photo of the model when nobody has photographed this one. Blank for a
@@ -151,6 +155,10 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
       )}
       {assets.map((a) => {
         const c = ASSET_COLOR[a.status] ?? ASSET_COLOR.Spare;
+        // Read off the same list rather than fetched: the panel already has
+        // every unit on this system, and who serves whom is among them.
+        const serving = a.servesAssetId ? assets.find((x) => x.id === a.servesAssetId) : null;
+        const servers = assets.filter((x) => x.servesAssetId === a.id);
         return (
           <Link key={a.id} href={`/assets/${a.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 4px", borderTop: "1px solid var(--line)", flexWrap: "wrap", textDecoration: "none", color: "inherit" }}>
@@ -166,6 +174,21 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
             <span style={{ fontSize: 13, fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>
             {a.serial && <span className="mono mut" style={{ fontSize: 12 }}>SN {a.serial}</span>}
             {a.status !== "In service" && <span className="pill" style={{ background: c.bg, color: c.fg }}>{a.status}</span>}
+            {/* One line each way, so the stack reads as plumbed rather than as
+                an alphabetical parts manifest. */}
+            {serving && (
+              <span className="mut" style={{ fontSize: 11.5 }}>
+                → {serving.model || serving.serial || serving.kind}
+                {a.servesRole ? ` (${a.servesRole})` : ""}
+              </span>
+            )}
+            {servers.length > 0 && (
+              <span className="mut" style={{ fontSize: 11.5 }}>
+                {/* With the role, because two identical pumps on one spec read
+                    as a stutter without it. */}
+                ← {servesLine(servers.map((s) => ({ ...s, servesRole: s.servesRole ?? "" })))}
+              </span>
+            )}
             <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
               {a.openItems > 0 && <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{a.openItems} open</span>}
               <span className="mut" style={{ fontSize: 12 }}>→</span>

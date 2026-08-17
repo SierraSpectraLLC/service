@@ -900,6 +900,29 @@ export const assets = pgTable("assets", {
   /** This module's own photo. Same pointer-to-an-attachment rule as a system's. */
   photoAttachmentId: integer("photo_attachment_id"),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "set null" }), // null = unattached
+  /**
+   * The module this unit SERVES, when it serves one in particular.
+   *
+   * A roughing pump is on the system like any other asset - it has its own
+   * serial, its own procedures, its own failures - but it belongs to the mass
+   * spec rather than to the stack at large, and a triple-quad can have two of
+   * them. This says which, and it is a pointer rather than a parent: nothing is
+   * nested, nothing cascades, and every list, count and permission check
+   * carries on treating the pump as the first-class unit it is.
+   *
+   * Deliberately not a hierarchy. A child has one parent, and the next support
+   * unit through the door is an N2 generator feeding three systems - so
+   * containment is a shape that breaks, while a pointer per server does not.
+   * One level only, enforced in lib/assetServes: a thing that serves cannot
+   * itself be served.
+   *
+   * Never crosses a system. Detaching or moving either end clears it, because
+   * "the pump on G-010 serves the mass spec on G-014" is not a fact about
+   * anything.
+   */
+  servesAssetId: integer("serves_asset_id").references((): AnyPgColumn => assets.id, { onDelete: "set null" }),
+  /** What it does for that module, in the words on the hose: "fore-line", "interface". */
+  servesRole: text("serves_role").notNull().default(""),
   kind: text("kind").notNull().default("Other"), // Pump, Autosampler, ... (vocabulary in lib/stages.ts)
   model: text("model").notNull().default(""),
   serial: text("serial").notNull().default(""),
