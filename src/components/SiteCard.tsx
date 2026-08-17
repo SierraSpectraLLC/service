@@ -10,10 +10,10 @@ export type SiteOption = { id: number; name: string; address: string; archived: 
 /**
  * Where this instrument is, and what a tech needs to know before driving there.
  *
- * The access notes are shown in full and in a colour, because they are the thing
- * somebody is looking for at 7am with a van full of parts: which garage, what it
- * costs, which door, who to ask for. Everything else on this card is reference;
- * that part is the reason it exists.
+ * The access notes print in full - which garage, what it costs, which door, who
+ * to ask for - but as ordinary text. They used to sit in an amber block, which
+ * read as a warning about the site rather than as directions to it, and a page
+ * that colours its reference material has nothing left for its actual alarms.
  */
 export default function SiteCard({ instrumentId, siteId, options, site, ownerOrgId, canEdit }: {
   instrumentId: number;
@@ -59,11 +59,9 @@ export default function SiteCard({ instrumentId, siteId, options, site, ownerOrg
             </div>
           )}
           {site.accessNotes && (
-            <div style={{
-              fontSize: 12.5, marginTop: 8, padding: "7px 10px", borderRadius: 6,
-              background: "#FAF0DC", color: "#8A5410", whiteSpace: "pre-wrap",
-            }}>
-              {site.accessNotes}
+            <div style={{ marginTop: 8 }}>
+              <div className="eyebrow" style={{ marginBottom: 2 }}>Getting in</div>
+              <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{site.accessNotes}</div>
             </div>
           )}
         </>

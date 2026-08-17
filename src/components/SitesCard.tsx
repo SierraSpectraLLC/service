@@ -89,12 +89,12 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
           {[s.contactName, s.contactPhone].filter(Boolean).join(" · ")}
         </div>
       )}
+      {/* Plain text, like the address above it: these are directions, not a
+          warning, and the amber block read as the latter. */}
       {s.accessNotes && (
-        <div style={{
-          fontSize: 12, marginTop: 6, padding: "5px 9px", borderRadius: 6,
-          background: "#FAF0DC", color: "#8A5410", whiteSpace: "pre-wrap",
-        }}>
-          {s.accessNotes}
+        <div style={{ marginTop: 6 }}>
+          <div className="eyebrow" style={{ marginBottom: 2 }}>Getting in</div>
+          <div style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{s.accessNotes}</div>
         </div>
       )}
     </div>
