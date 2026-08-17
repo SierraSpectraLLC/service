@@ -123,14 +123,34 @@ type EngineNode = { _id?: string; name?: string; rname?: string; conn?: number; 
  * `mtype` 2 is the agent-managed kind; the engine's other group types can share a
  * name without meaning the same thing.
  */
-export function pickExistingGroup(meshes: unknown[], orgName: string): string | null {
-  const named = meshes.filter((m): m is { _id: string; name: string; mtype?: number } => {
+export function namedGroups(meshes: unknown[], orgName: string): { _id: string; name: string }[] {
+  return meshes.filter((m): m is { _id: string; name: string; mtype?: number } => {
     const g = m as { _id?: unknown; name?: unknown; mtype?: unknown };
     return typeof g?._id === "string" && g._id !== "" && typeof g?.name === "string"
       && g.name.trim().toLowerCase() === orgName.trim().toLowerCase()
       && (g.mtype === undefined || g.mtype === 2);
   });
+}
+
+export function pickExistingGroup(meshes: unknown[], orgName: string): string | null {
+  const named = namedGroups(meshes, orgName);
   return named.length === 1 ? named[0]._id : null;
+}
+
+/**
+ * The id a freshly created group reports, whichever way the host words it.
+ *
+ * Some versions answer createmesh with the new id, some answer "ok" and
+ * nothing else, and the two are not distinguishable in advance. Reading every
+ * shape here means the caller can tell "no id came back" from "the group was
+ * not made", which are different problems with different fixes.
+ */
+export function createdGroupId(reply: Record<string, unknown>): string {
+  const direct = reply.meshid ?? reply._id ?? reply.id;
+  if (typeof direct === "string" && direct !== "") return direct;
+  const nested = reply.mesh as { _id?: unknown; meshid?: unknown } | undefined;
+  const inner = nested?._id ?? nested?.meshid;
+  return typeof inner === "string" ? inner : "";
 }
 
 /**
@@ -154,17 +174,46 @@ export async function ensureOrgGroup(orgId: number): Promise<{ groupId: string }
     // it by hand in the engine's own console, or a previous createmesh succeeded
     // and the write of its id didn't - and that second one would otherwise leave
     // a group per attempt, each holding machines the portal can't see.
-    const seen = await engineCall(cfg, "meshes", {});
-    const adopted = pickExistingGroup(Array.isArray(seen.meshes) ? seen.meshes : [], groupName);
-    if (adopted) {
-      await db.update(orgs).set({ remoteGroupId: adopted }).where(eq(orgs.id, orgId));
-      return { groupId: adopted };
+    const listGroups = async () => {
+      const seen = await engineCall(cfg, "meshes", {});
+      return namedGroups(Array.isArray(seen.meshes) ? seen.meshes : [], groupName);
+    };
+    const existing = await listGroups();
+    if (existing.length === 1) {
+      await db.update(orgs).set({ remoteGroupId: existing[0]._id }).where(eq(orgs.id, orgId));
+      return { groupId: existing[0]._id };
     }
+    // Two groups wearing one name is not ours to resolve by picking - the wrong
+    // guess files a client's machines where another client can see them. Say so
+    // plainly, because the alternative is a button that never works and never
+    // explains itself. (Repeated failed attempts are how a host ends up like
+    // this, which is exactly why the id is re-read below rather than assumed.)
+    if (existing.length > 1) {
+      return { error:
+        `The remote-support host has ${existing.length} device groups named "${groupName}". `
+        + "Delete the extras there, leaving one, and try again - picking between them "
+        + "could put this organization's machines in another's group." };
+    }
+
     // meshtype 2 is a group of agent-managed machines, as opposed to Intel AMT
     // or agentless ones - the only kind this module deals in.
     const reply = await engineCall(cfg, "createmesh", { meshname: groupName, meshtype: 2 });
-    const groupId = typeof reply.meshid === "string" ? reply.meshid : "";
-    if (!groupId) return { error: "The remote-support host didn't return a device group id." };
+    let groupId = createdGroupId(reply);
+    // Some hosts answer "ok" without the new id. The group exists either way,
+    // so read it back by name rather than failing on a difference in wording -
+    // and failing here is what left a fresh organization permanently unable to
+    // make installation media while the older ones, whose ids were already
+    // stored, went on working.
+    if (!groupId) {
+      const made = await listGroups();
+      if (made.length === 1) groupId = made[0]._id;
+    }
+    if (!groupId) {
+      return { error:
+        `The host accepted the new device group "${groupName}" but did not report its id, `
+        + "and it is not in the group list afterwards. Check that REMOTE_ADMIN_USER is a site "
+        + "administrator with permission to create device groups." };
+    }
     await db.update(orgs).set({ remoteGroupId: groupId }).where(eq(orgs.id, orgId));
     return { groupId };
   } catch (e) {

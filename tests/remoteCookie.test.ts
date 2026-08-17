@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bareEngineId, connectUrl, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId,
-  isReplyTo, mintEngineToken, pickExistingGroup,
+  createdGroupId, isReplyTo, mintEngineToken, namedGroups, pickExistingGroup,
 } from "@/lib/remote";
 
 // The remote-support host authenticates the portal by a token it encrypts with a
@@ -222,5 +222,35 @@ describe("which chatter on the control channel is our answer", () => {
     expect(isReplyTo({ action: "serverinfo" }, "meshes", ID)).toBe(false);
     expect(isReplyTo({ action: "userinfo" }, "meshes", ID)).toBe(false);
     expect(isReplyTo({}, "meshes", ID)).toBe(false);
+  });
+});
+
+describe("the id a freshly created device group reports", () => {
+  it("reads it however the host words it", () => {
+    // Hosts differ: some answer createmesh with the id, some nest it, some say
+    // only "ok". Reading every shape is what keeps a working host from looking
+    // like a broken one.
+    expect(createdGroupId({ meshid: "mesh//aaa" })).toBe("mesh//aaa");
+    expect(createdGroupId({ _id: "mesh//bbb" })).toBe("mesh//bbb");
+    expect(createdGroupId({ mesh: { _id: "mesh//ccc" } })).toBe("mesh//ccc");
+  });
+
+  it("says plainly when no id came back, rather than inventing one", () => {
+    expect(createdGroupId({ result: "ok" })).toBe("");
+    expect(createdGroupId({ meshid: "" })).toBe("");
+    expect(createdGroupId({ mesh: {} })).toBe("");
+  });
+});
+
+describe("counting groups that wear one organization's name", () => {
+  const G = (name: string, _id: string) => ({ name, _id, mtype: 2 });
+
+  it("distinguishes none from one from several", () => {
+    // The caller needs all three: none means create, one means adopt, and
+    // several is a human's job - picking could file a client's machines in
+    // another client's group.
+    expect(namedGroups([G("Other", "mesh//x")], "LabZen")).toHaveLength(0);
+    expect(namedGroups([G("LabZen", "mesh//a")], "LabZen")).toHaveLength(1);
+    expect(namedGroups([G("LabZen", "mesh//a"), G("LabZen", "mesh//b")], "LabZen")).toHaveLength(2);
   });
 });
