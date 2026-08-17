@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bareEngineId, connectUrl, decodeEngineCookie, encodeEngineCookie, ENGINE_KEY_HEX_CHARS, engineUserId,
-  mintEngineToken, pickExistingGroup,
+  isReplyTo, mintEngineToken, pickExistingGroup,
 } from "@/lib/remote";
 
 // The remote-support host authenticates the portal by a token it encrypts with a
@@ -197,5 +197,30 @@ describe("the deep link's query", () => {
     const q = new URL(out).searchParams;
     expect(q.get("hide")).toBeNull();
     expect(q.get("mobile")).toBe("0");      // still never the phone layout
+  });
+});
+
+describe("which chatter on the control channel is our answer", () => {
+  const ID = "portal-abc123";
+
+  it("takes the reply that carries our id", () => {
+    expect(isReplyTo({ responseid: ID, action: "nodes" }, "nodes", ID)).toBe(true);
+  });
+
+  it("never takes somebody else's id, whatever it says", () => {
+    expect(isReplyTo({ responseid: "portal-other", action: "nodes" }, "nodes", ID)).toBe(false);
+  });
+
+  it("takes an id-less reply that names the action we asked for", () => {
+    // The engine answers 'meshes' without echoing the id - it is part of the
+    // state volunteered on connect. Insisting on the id there is what made the
+    // call time out with the answer sitting in the buffer.
+    expect(isReplyTo({ action: "meshes", meshes: [] }, "meshes", ID)).toBe(true);
+  });
+
+  it("ignores the rest of the state dump", () => {
+    expect(isReplyTo({ action: "serverinfo" }, "meshes", ID)).toBe(false);
+    expect(isReplyTo({ action: "userinfo" }, "meshes", ID)).toBe(false);
+    expect(isReplyTo({}, "meshes", ID)).toBe(false);
   });
 });

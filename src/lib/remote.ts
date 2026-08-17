@@ -525,7 +525,31 @@ function engineKey(keyHex: string): Buffer {
   return Buffer.from(clean, "hex");
 }
 
-type EngineReply = { responseid?: string; result?: string } & Record<string, unknown>;
+type EngineReply = { responseid?: string; result?: string; action?: string } & Record<string, unknown>;
+
+/**
+ * Is this chatter on the control channel the answer to OUR command?
+ *
+ * Correlation is by `responseid` whenever the reply carries one, which is the
+ * strict and obviously-correct case. But the engine does not echo the id on
+ * every command: the device-group list is part of the state it volunteers the
+ * moment a socket opens, and its explicit `meshes` handler answers the same
+ * way - action named, no id attached. Insisting on the id there meant the
+ * answer arrived, was ignored as somebody else's, and the call timed out with
+ * "the host didn't answer 'meshes'" while the data sat in the buffer.
+ *
+ * So: an id that is not ours is never ours. A reply with no id at all is ours
+ * when it names the action we asked for. The socket is opened per call and
+ * closed on the first match, so nothing else of ours is ever in flight to
+ * confuse it.
+ */
+export function isReplyTo(
+  msg: { responseid?: unknown; action?: unknown } & Record<string, unknown>,
+  action: string, responseid: string,
+): boolean {
+  if (typeof msg.responseid === "string") return msg.responseid === responseid;
+  return msg.action === action;
+}
 
 /**
  * One admin command, one connection, closed immediately. The engine's admin API
@@ -534,8 +558,8 @@ type EngineReply = { responseid?: string; result?: string } & Record<string, unk
  * our id, hang up.
  *
  * The control channel is chatty - it volunteers server info, user lists and
- * event streams the moment it opens - so correlation is by `responseid` and
- * everything else on the wire is ignored. Every caller treats a throw as
+ * event streams the moment it opens - so replies are correlated by isReplyTo
+ * and everything else on the wire is ignored. Every caller treats a throw as
  * "engine unreachable" and degrades, so nothing here needs to succeed for a page
  * to render.
  */
@@ -575,7 +599,7 @@ async function engineCall(
     ws.onmessage = (ev: MessageEvent) => {
       let msg: EngineReply;
       try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : String(ev.data)); } catch { return; }
-      if (msg.responseid !== responseid) return;
+      if (!isReplyTo(msg, action, responseid)) return;
       if (typeof msg.result === "string" && msg.result !== "ok") {
         const why = msg.result;
         finish(() => reject(new Error(why)));
