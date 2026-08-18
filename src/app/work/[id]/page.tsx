@@ -155,6 +155,12 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     workOrderId: wo.id,
   };
   const canAdd = canEdit && woAcceptsWork(wo.state);
+  // Files alone stay writable on a settled order, house staff only: the
+  // signed report arrives weeks after the job is filed, and reopening a
+  // closed job to carry one PDF pollutes its state history. The server
+  // enforces the same rule (resolveTarget's lateFiles), so this widening is
+  // display, not authority.
+  const canAttach = canAdd || (canEdit && staff);
   const fileQuota = await storeQuota(inst?.ownerOrgId ?? asset?.ownerOrgId ?? null);
 
   return (
@@ -218,7 +224,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       <AttachmentsPanel target={target} today={shopToday()}
         attachments={fileRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         evidenceTasks={taskRows.map((t) => ({ id: t.id, title: t.title, required: false }))}
-        canEdit={canAdd} isStaff={staff} listingCuration={false} storage={fileQuota}
+        canEdit={canAttach} isStaff={staff} listingCuration={false} storage={fileQuota}
         combineTitle={`${wo.number} packet`}
         combineLines={[wo.title, place.label, `Prepared by ${user.name}`].filter(Boolean)} />
 

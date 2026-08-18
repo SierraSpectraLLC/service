@@ -154,12 +154,39 @@ const revWork = (t: { instrumentId: number | null; assetId?: number | null }) =>
  * Resolve a caller-supplied target: the system must exist, the asset must
  * exist, and if both are given the asset must actually be on that system.
  */
-async function resolveTarget(t: WorkTarget): Promise<
+/**
+ * "had been closed 21 days" - the core of the late-filing note. Each audit
+ * line places the order's number itself, because one already names it in its
+ * sentence and the other does not, and "onto SVC-118 (SVC-118 had been...)"
+ * is a stutter no one should have to read.
+ */
+function lateNote(wo: { state: string; closedAt: Date | null } | null): string {
+  if (!wo) return "";
+  const days = wo.closedAt ? Math.max(1, Math.round((Date.now() - wo.closedAt.getTime()) / 86_400_000)) : 0;
+  const label = WO_LABEL[wo.state]?.toLowerCase() ?? "settled";
+  return days ? `had been ${label} ${days} day${days === 1 ? "" : "s"}` : `was already ${label}`;
+}
+
+async function resolveTarget(
+  t: WorkTarget,
+  opts: {
+    /**
+     * Allow the target work order to be SETTLED, for house staff only. The
+     * one legitimate late write: the signed report that comes back three
+     * weeks after the job was filed. Attachments pass this; hours, parts and
+     * tasks never do - those rewrite what a closed record says happened,
+     * while a file arriving late is archival.
+     */
+    lateFiles?: boolean;
+  } = {},
+): Promise<
   { error: string } | {
     instrumentId: number | null; assetId: number | null; externalId: string;
     asset: typeof assets.$inferSelect | null;
     /** The job this row joins, already checked to be on this record and open. */
     workOrderId: number | null;
+    /** Set when lateFiles let a settled order through - for the audit line. */
+    settledWo: { number: string; state: string; closedAt: Date | null } | null;
     /**
      * Whose workspace the work belongs to - the RECORD's, not the writer's. An
      * engineer from another operator, invited onto a system, files work that
@@ -204,6 +231,7 @@ async function resolveTarget(t: WorkTarget): Promise<
   // job being posted from a hand-edited form, the second stops today's hours
   // landing on a job that closed in March.
   let workOrderId: number | null = null;
+  let settledWo: { number: string; state: string; closedAt: Date | null } | null = null;
   if (t.workOrderId) {
     const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, t.workOrderId));
     if (!wo) return { error: "Not found" };
@@ -211,10 +239,18 @@ async function resolveTarget(t: WorkTarget): Promise<
       ? wo.instrumentId === t.instrumentId
       : wo.assetId === (asset?.id ?? null);
     if (!onThis) return { error: "That work order is not on this record" };
-    if (!woAcceptsWork(wo.state)) return { error: `${wo.number || "That work order"} is ${WO_LABEL[wo.state]?.toLowerCase() ?? "finished"}.` };
+    if (!woAcceptsWork(wo.state)) {
+      // House staff of the order's own workspace may still FILE onto it, when
+      // the caller said that is what this write is. Everybody else, and every
+      // other kind of work row, gets the refusal that keeps closed closed.
+      const houseLate = opts.lateFiles === true
+        && isStaffRole(u.role) && (readTenant(u) === null || wo.tenantOrgId === readTenant(u));
+      if (!houseLate) return { error: `${wo.number || "That work order"} is ${WO_LABEL[wo.state]?.toLowerCase() ?? "finished"}.` };
+      settledWo = { number: wo.number, state: wo.state, closedAt: wo.closedAt };
+    }
     workOrderId = wo.id;
   }
-  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId, workOrderId };
+  return { instrumentId: t.instrumentId, assetId: asset?.id ?? null, externalId, asset, tenantOrgId, workOrderId, settledWo };
 }
 
 /**
@@ -2444,7 +2480,9 @@ export async function recordAttachments(
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   if (!files.length) return {};
-  const t0 = await resolveTarget(target);
+  // Files may land on a settled order - the signed report that comes back
+  // weeks after the job was filed. Hours, parts and tasks may not.
+  const t0 = await resolveTarget(target, { lateFiles: true });
   if ("error" in t0) return t0;
   // Charged to whoever OWNS the record, not to whoever pressed upload: a tune
   // report on a client's system is the client's paperwork, and the shop filing
@@ -2458,10 +2496,13 @@ export async function recordAttachments(
       uploadedBy: u.name, workOrderId: t0.workOrderId,
     })))
     .returning();
+  // Said in the record, not hidden in a timestamp: a file added to a FILED
+  // job is fine exactly because it is visible as one.
+  const late = t0.settledWo ? ` onto ${t0.settledWo.number} (${lateNote(t0.settledWo)})` : "";
   for (const a of rows) {
     await audit({
       actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "attachment", entityId: a.id,
-      action: `uploaded ${a.kind}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}`,
+      action: `uploaded ${a.kind}: ${a.fileName}${a.description ? ` - ${a.description}` : ""}${late}`,
     });
   }
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
@@ -3123,7 +3164,9 @@ export async function startCloudUpload(
  */
 export async function attachLibraryFile(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const t = await resolveTarget(target);
+  // Same late-files door as a direct upload: filing the library's copy of the
+  // signed report onto a closed job is the same archival act.
+  const t = await resolveTarget(target, { lateFiles: true });
   if ("error" in t) return t;
   const [src] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
   // Must actually be a library file, and one of yours. Re-filing another
@@ -3142,11 +3185,16 @@ export async function attachLibraryFile(target: WorkTarget, attachmentId: number
     instrumentId: t.instrumentId, assetId: t.assetId,
     fileName: src.fileName, kind: src.kind, description: src.description,
     url: src.url, size: src.size, uploadedBy: u.name,
+    // The job, when this was filed from a work order's page. Without it the
+    // file landed on the system and never appeared on the order that filed it
+    // - the page lists by this column.
+    workOrderId: t.workOrderId,
   }).returning();
   await audit({
     actor: u.email, instrumentId: t.instrumentId, assetId: t.assetId,
     entityType: "attachment", entityId: row.id,
-    action: `filed ${src.fileName} from the document library onto ${t.externalId || "this unit"}`,
+    action: `filed ${src.fileName} from the document library onto ${t.externalId || "this unit"}`
+      + (t.settledWo ? ` (${t.settledWo.number} ${lateNote(t.settledWo)})` : ""),
   });
   revWork(row);
   return {};
