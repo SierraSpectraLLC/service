@@ -5,9 +5,7 @@ import { GAS_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { brandForTenant } from "@/lib/brand";
-
-const esc = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+import { emailShell, esc } from "@/lib/emailTheme";
 
 const pill = (text: string, bg: string, fg: string) =>
   `<span style="display:inline-block;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:999px;background:${bg};color:${fg};font-family:Helvetica,Arial,sans-serif;">${esc(text)}</span>`;
@@ -64,25 +62,24 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
     : `<div style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#0F6E56;margin-bottom:16px;">All gas requirements OK.</div>`;
 
   const today = new Date().toLocaleDateString("en-US", { timeZone: process.env.SHOP_TZ || "America/Los_Angeles", weekday: "short", month: "short", day: "numeric" });
-  const html = `
-<body style="background:#F4F6F9;margin:0;padding:20px 0;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width:680px;margin:auto;background:#fff;border-radius:12px;border:1px solid #E2E8F0;">
-    <tr><td style="height:4px;border-radius:12px 12px 0 0;background:#172A4A;"></td></tr>
-    <tr><td style="padding:18px 20px 6px;">
-      ${brand.operatorLogoUrl ? `<img src="${brand.operatorLogoUrl}" alt="" style="height:30px;max-width:150px;object-fit:contain;display:block;margin-bottom:4px;" />` : ""}
-      <div style="font-family:Helvetica,Arial,sans-serif;font-weight:bold;font-size:16px;color:#172A4A;letter-spacing:0.3px;">${esc(brand.operatorName).toUpperCase()}</div>
-      <div style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#64748B;margin-bottom:14px;">Daily system status &middot; ${today}</div>
-      ${attentionBlock}
+  const preheader = attention.length
+    ? `${attention.length} gas issue${attention.length === 1 ? "" : "s"} across ${rows.length} system${rows.length === 1 ? "" : "s"}.`
+    : `All gas requirements OK across ${rows.length} system${rows.length === 1 ? "" : "s"}.`;
+  const html = emailShell({
+    brand: brand.operatorName,
+    logoUrl: brand.operatorLogoUrl || undefined,
+    tagline: `Daily system status · ${today}`,
+    preheader,
+    width: 680,
+    body: `${attentionBlock}
       <table width="100%" border="0" cellspacing="0" cellpadding="0">
         <tr>
           ${["ID", "System", "Stages", "Gases", "Parts"].map((h) => `<th align="left" style="padding:6px 10px;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;">${h}</th>`).join("")}
         </tr>
         ${body}
-      </table>
-    </td></tr>
-    <tr><td style="padding:12px 20px 18px;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#94A3B8;">Sent daily by the instrument tracker. Statuses live on each system's page.</td></tr>
-  </table>
-</body>`;
+      </table>`,
+    footer: `Sent daily by ${esc(brand.name)}. Statuses live on each system's page.`,
+  });
 
   const subject = attention.length
     ? `System status: ${attention.length} gas issue${attention.length === 1 ? "" : "s"} - ${today}`

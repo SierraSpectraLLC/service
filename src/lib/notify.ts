@@ -12,11 +12,9 @@ import { emailAllowed, type NotifyKind } from "@/lib/inbox";
 import { getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { namedLogins } from "@/lib/directory";
+import { emailShell, esc, btn, quote, mutedLine } from "@/lib/emailTheme";
 
 export type Person = { name: string; email: string };
-
-const esc = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 
 /**
@@ -66,7 +64,10 @@ export function parseMentions(body: string, names: string[]): string[] {
 async function deliver(opts: {
   to: string[]; kind: NotifyKind; title: string;
   href: string;      // in-app path ("/instruments/12"), "" when there's nowhere to go
-  subject: string; html: string;
+  subject: string;
+  /** Body HTML only - deliver dresses it in the shared shell, with the inbox
+   * title as the preview line, so no notification can forget the envelope. */
+  body: string;
 }) {
   const emails = [...new Set(opts.to.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   if (!emails.length) return;
@@ -75,16 +76,21 @@ async function deliver(opts: {
   })));
   const prefRows = await db.select().from(notificationPrefs).where(inArray(notificationPrefs.email, emails));
   const wantEmail = emails.filter((e) => emailAllowed(prefRows.filter((p) => p.email === e), opts.kind));
-  if (wantEmail.length) await sendEmail(wantEmail, opts.subject, opts.html);
+  if (wantEmail.length) await sendEmail(wantEmail, opts.subject, await wrap(opts.body, { preheader: opts.title }));
 }
 
 // System notifications are sent by the platform, so they carry its name rather
-// than any one service company's - see lib/brand.ts.
-const wrap = async (body: string) => `
-  <div style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#172A4A;">
-    <div style="font-weight:bold;letter-spacing:0.3px;margin-bottom:10px;">${esc((await getBrand()).name).toUpperCase()}</div>
-    ${body}
-  </div>`;
+// than any one service company's - see lib/brand.ts. The footer points at the
+// inbox because that is where the email switches live - except on the invite,
+// whose recipient has never signed in and has no inbox to manage yet.
+const wrap = async (body: string, opts: { preheader?: string; prefsFooter?: boolean } = {}) => {
+  const brand = (await getBrand()).name;
+  const url = appUrl();
+  const footer = `Sent by ${esc(brand)}.${opts.prefsFooter !== false && url
+    ? ` <a href="${url}/inbox" style="color:#94A3B8;">Choose which emails you get</a>.`
+    : ""}`;
+  return emailShell({ brand, preheader: opts.preheader, body, footer });
+};
 
 export async function notifyTaskAssigned(opts: {
   actorEmail: string; actorName: string; assignee: string;
@@ -106,8 +112,8 @@ export async function notifyTaskAssigned(opts: {
       to: [to], kind: "task_assigned", href,
       title: `${opts.actorName} assigned you "${opts.taskTitle}" on ${opts.externalId}`,
       subject: `${opts.externalId}: assigned "${opts.taskTitle}"`,
-      html: await wrap(`${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
-        ${url && href ? `<div style="margin-top:10px;"><a href="${url}${href}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+      body: `${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
+        ${url && href ? btn(`${url}${href}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] task-assigned email failed:", (e as Error).message);
@@ -132,8 +138,8 @@ export async function notifySystemAssigned(opts: {
       to: [to], kind: "system_assigned", href: `/instruments/${opts.instrumentId}`,
       title: `${opts.actorName} made you the lead on ${opts.externalId}`,
       subject: `${opts.externalId}: you're the lead`,
-      html: await wrap(`${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+      body: `${esc(opts.actorName)} made you the lead on <b>${esc(opts.externalId)}${opts.label ? ` - ${esc(opts.label)}` : ""}</b>.
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] system-assigned email failed:", (e as Error).message);
@@ -173,9 +179,9 @@ export async function notifyDiscussion(opts: {
       to: [...to], kind: "discussion", href,
       title: `${opts.actorName} posted in discussion on ${opts.label}`,
       subject: `${opts.label}: ${opts.actorName} posted in discussion`,
-      html: await wrap(`<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
-        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.body)}</div>
-        ${url ? `<a href="${url}${href}">Reply in the portal</a>` : ""}`),
+      body: `<b>${esc(opts.actorName)}</b> on <b>${esc(opts.label)}</b>:
+        ${quote(opts.body)}
+        ${url ? btn(`${url}${href}`, "Reply in the portal") : ""}`,
     });
   } catch (e) {
     console.error("[notify] discussion email failed:", (e as Error).message);
@@ -201,9 +207,9 @@ export async function notifyAccessRequest(opts: {
     await deliver({
       to: opts.to, kind: "access_request", href: `/instruments/${opts.instrumentId}`,
       title: subject, subject,
-      html: await wrap(`<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
-        ${opts.message ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.message)}</div>` : ""}
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Approve or deny on ${esc(opts.externalId)}</a></div>` : ""}`),
+      body: `<b>${esc(opts.actorName)}</b>${opts.orgName ? ` (${esc(opts.orgName)})` : ""} matched <b>${esc(opts.assetDesc)}</b> by serial number and ${claim ? `says they <b>own</b>` : `is asking for access to`} <b>${esc(opts.externalId)}</b>.
+        ${opts.message ? quote(opts.message) : ""}
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Approve or deny on ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] access-request email failed:", (e as Error).message);
@@ -245,9 +251,9 @@ export async function notifyMention(opts: {
       to: [...to], kind: "mention", href: opts.href,
       title: `${opts.actorName} mentioned you on ${opts.where}`,
       subject: `You were mentioned on ${opts.where}`,
-      html: await wrap(`<b>${esc(opts.actorName)}</b> mentioned you on ${esc(opts.where)}:
-        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.body)}</div>
-        ${url ? `<a href="${url}${opts.href}">Open it</a>` : ""}`),
+      body: `<b>${esc(opts.actorName)}</b> mentioned you on ${esc(opts.where)}:
+        ${quote(opts.body)}
+        ${url ? btn(`${url}${opts.href}`, "Open it") : ""}`,
     });
   } catch (e) {
     console.error("[notify] mention email failed:", (e as Error).message);
@@ -277,13 +283,13 @@ export async function notifyIssueRaised(opts: {
       to: opts.to, kind: "issue", href: `/instruments/${opts.instrumentId}`,
       title: `${opts.orgName} reported ${opts.severity.toLowerCase()} on ${opts.externalId}: ${opts.summary}`,
       subject: `${urgent ? "DOWN" : opts.severity} - ${opts.externalId}: ${opts.summary}`,
-      html: await wrap(`<b>${esc(opts.orgName)}</b> reported a problem with
+      body: `<b>${esc(opts.orgName)}</b> reported a problem with
         <b>${esc(opts.externalId)}</b>${urgent ? " and says it is <b>down</b>" : ""}.
         <div style="margin-top:8px;"><b>${esc(opts.summary)}</b></div>
-        ${opts.details ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.details)}</div>` : ""}
-        <div style="margin-top:8px;">Raised by ${esc(opts.reporter)}${opts.files ? `, with ${opts.files} file${opts.files === 1 ? "" : "s"} attached` : ""}.
-        The system is marked as needing maintenance and is in your queue.</div>
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+        ${opts.details ? quote(opts.details) : ""}
+        ${mutedLine(`Raised by ${esc(opts.reporter)}${opts.files ? `, with ${opts.files} file${opts.files === 1 ? "" : "s"} attached` : ""}.
+        The system is marked as needing maintenance and is in your queue.`)}
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] issue email failed:", (e as Error).message);
@@ -305,12 +311,12 @@ export async function notifyPmRequested(opts: {
       to: opts.to, kind: "pm_request", href: `/instruments/${opts.instrumentId}`,
       title: `${opts.orgName} asked for maintenance on ${opts.externalId} - ${opts.windowLabel.toLowerCase()}`,
       subject: `Maintenance requested - ${opts.externalId} (${opts.windowLabel.toLowerCase()})`,
-      html: await wrap(`<b>${esc(opts.orgName)}</b> asked for maintenance on
+      body: `<b>${esc(opts.orgName)}</b> asked for maintenance on
         <b>${esc(opts.externalId)}</b>, ${esc(opts.windowLabel.toLowerCase())}.
-        ${opts.note ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.note)}</div>` : ""}
-        <div style="margin-top:8px;">Requested by ${esc(opts.requester)}. There's a task on the system dated
-        ${esc(opts.dueDate)}, and it's in your queue.${opts.calendar ? ` ${esc(opts.calendar)}` : ""}</div>
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+        ${opts.note ? quote(opts.note) : ""}
+        ${mutedLine(`Requested by ${esc(opts.requester)}. There's a task on the system dated
+        ${esc(opts.dueDate)}, and it's in your queue.${opts.calendar ? ` ${esc(opts.calendar)}` : ""}`)}
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] pm request email failed:", (e as Error).message);
@@ -342,12 +348,12 @@ export async function notifyPartsRequested(opts: {
       to: opts.to, kind: "parts_request", href,
       title: `${opts.actorName} asked ${opts.orgName} to order ${n} part${n === 1 ? "" : "s"}`,
       subject: `Parts to order - ${n} item${n === 1 ? "" : "s"}`,
-      html: await wrap(`<b>${esc(opts.actorName)}</b> has asked ${esc(opts.orgName)} to order
+      body: `<b>${esc(opts.actorName)}</b> has asked ${esc(opts.orgName)} to order
         ${n} part${n === 1 ? "" : "s"} for your systems.
         <ul style="margin:8px 0;padding-left:18px;">${list}</ul>
-        ${opts.note ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.note)}</div>` : ""}
-        <div style="margin-top:8px;">They stay marked <b>Needed</b> on the record until they arrive.</div>
-        ${url ? `<div style="margin-top:10px;"><a href="${url}${href}">Open the record</a></div>` : ""}`),
+        ${opts.note ? quote(opts.note) : ""}
+        ${mutedLine(`They stay marked <b>Needed</b> on the record until they arrive.`)}
+        ${url ? btn(`${url}${href}`, "Open the record") : ""}`,
     });
   } catch (e) {
     console.error("[notify] parts request email failed:", (e as Error).message);
@@ -375,8 +381,9 @@ export async function notifyDropReceived(opts: {
       to: [opts.to], kind: "drop", href: "/documents",
       title: `${opts.count} file${opts.count === 1 ? "" : "s"} arrived via "${opts.label}": ${what}`,
       subject: `Files arrived through your drop link`,
-      html: await wrap(`<b>${esc(String(opts.count))} file${opts.count === 1 ? "" : "s"}</b> arrived through
-        your drop link <b>${esc(opts.label)}</b>:<br>${esc(what)}`),
+      body: `<b>${esc(String(opts.count))} file${opts.count === 1 ? "" : "s"}</b> arrived through
+        your drop link <b>${esc(opts.label)}</b>:<br>${esc(what)}
+        ${appUrl() ? btn(`${appUrl()}/documents`, "Open Files") : ""}`,
     });
   } catch (e) {
     console.error("notifyDropReceived:", e);
@@ -399,9 +406,9 @@ export async function notifyMessage(opts: {
       to: opts.to, kind: "message", href,
       title: `${opts.fromName}${where}: ${opts.body.slice(0, 120)}`,
       subject: `${opts.fromName} messaged you${where}`,
-      html: await wrap(`<b>${esc(opts.fromName)}</b> wrote${esc(where)}:
-        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(preview)}</div>
-        ${url ? `<div style="margin-top:10px;"><a href="${url}${href}">Reply</a></div>` : ""}`),
+      body: `<b>${esc(opts.fromName)}</b> wrote${esc(where)}:
+        ${quote(preview)}
+        ${url ? btn(`${url}${href}`, "Reply") : ""}`,
     });
   } catch (e) {
     console.error("[notify] message email failed:", (e as Error).message);
@@ -419,12 +426,12 @@ export async function notifyQueueKick(opts: {
       to: opts.to, kind: "queue", href: `/instruments/${opts.instrumentId}`,
       title: `${opts.externalId} is in ${opts.toName}'s queue: ${opts.reason}`,
       subject: `${opts.externalId}: over to you - ${opts.reason}`,
-      html: await wrap(`<b>${esc(opts.fromName)}</b> moved <b>${esc(opts.externalId)}</b> into
+      body: `<b>${esc(opts.fromName)}</b> moved <b>${esc(opts.externalId)}</b> into
         <b>${esc(opts.toName)}</b>'s queue${stage ? ` (currently ${esc(stage)})` : ""}.
-        <div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.reason)}</div>
-        <div style="margin-top:8px;">Nothing is blocked at ${esc(opts.fromName)}'s end. Move it back whenever
-        it's theirs again - the record and the history stay exactly as they are.</div>
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+        ${quote(opts.reason)}
+        ${mutedLine(`Nothing is blocked at ${esc(opts.fromName)}'s end. Move it back whenever
+        it's theirs again - the record and the history stay exactly as they are.`)}
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] queue email failed:", (e as Error).message);
@@ -445,11 +452,11 @@ export async function notifyHandoff(opts: {
       to: opts.to, kind: "handoff", href: `/instruments/${opts.instrumentId}`,
       title: `${opts.externalId} changed hands: ${opts.fromName} → ${opts.toName}`,
       subject: `${opts.externalId}: now owned by ${opts.toName}`,
-      html: await wrap(`<b>${esc(opts.externalId)}</b> has been handed from <b>${esc(opts.fromName)}</b> to <b>${esc(opts.toName)}</b>.
-        ${opts.note ? `<div style="border-left:3px solid #E2E8F0;padding:6px 10px;margin:8px 0;white-space:pre-wrap;">${esc(opts.note)}</div>` : ""}
-        <div style="margin-top:8px;">The full service history transfers with it. ${esc(opts.fromName)} keeps a frozen
-        record of their period of ownership.</div>
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+      body: `<b>${esc(opts.externalId)}</b> has been handed from <b>${esc(opts.fromName)}</b> to <b>${esc(opts.toName)}</b>.
+        ${opts.note ? quote(opts.note) : ""}
+        ${mutedLine(`The full service history transfers with it. ${esc(opts.fromName)} keeps a frozen
+        record of their period of ownership.`)}
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] handoff email failed:", (e as Error).message);
@@ -467,7 +474,9 @@ export async function notifyInvite(opts: { to: string; inviterName: string; orgN
       [opts.to],
       `${opts.inviterName} invited you to ${brand}`,
       await wrap(`${esc(opts.inviterName)} added you to <b>${esc(opts.orgName)}</b>'s workspace on ${esc(brand)}.
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/login">Sign in with this email address</a> - no password, a sign-in link is emailed to you.</div>` : ""}`),
+        ${url ? `${btn(`${url}/login`, "Sign in")}
+        ${mutedLine("Use this email address - no password, a sign-in code is emailed to you.")}` : ""}`,
+      { preheader: `${opts.inviterName} added you to ${opts.orgName}'s workspace`, prefsFooter: false }),
     );
   } catch (e) {
     console.error("[notify] invite email failed:", (e as Error).message);
@@ -483,8 +492,8 @@ export async function notifyGasEmpty(opts: { actorEmail: string; actorName: stri
       to, kind: "gas_empty", href: `/instruments/${opts.instrumentId}`,
       title: `${opts.actorName} marked ${opts.gas} empty on ${opts.externalId}`,
       subject: `${opts.externalId}: ${opts.gas} is EMPTY`,
-      html: await wrap(`${esc(opts.actorName)} marked <b>${esc(opts.gas)}</b> empty on <b>${esc(opts.externalId)}</b>.
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/instruments/${opts.instrumentId}">Open ${esc(opts.externalId)}</a></div>` : ""}`),
+      body: `${esc(opts.actorName)} marked <b>${esc(opts.gas)}</b> empty on <b>${esc(opts.externalId)}</b>.
+        ${url ? btn(`${url}/instruments/${opts.instrumentId}`, `Open ${opts.externalId}`) : ""}`,
     });
   } catch (e) {
     console.error("[notify] gas-empty email failed:", (e as Error).message);
@@ -511,11 +520,11 @@ export async function notifyRenewalDue(opts: {
       to: opts.to, kind: "renewal", href: `/settings/organizations/${opts.orgId}`,
       title: `${opts.orgName}: ${opts.label} - ${opts.line}`,
       subject: `Renewal due - ${opts.orgName} ${opts.label}`,
-      html: await wrap(`<b>${esc(opts.orgName)}</b> - ${esc(opts.label)}.
+      body: `<b>${esc(opts.orgName)}</b> - ${esc(opts.label)}.
         <div style="margin-top:8px;">${esc(opts.line)}</div>
-        ${opts.parts || opts.visits ? `<div style="margin-top:8px;">Used so far:
-          ${[opts.parts, opts.visits].filter(Boolean).map(esc).join(" · ")}</div>` : ""}
-        ${url ? `<div style="margin-top:10px;"><a href="${url}/agreements">Open agreements</a></div>` : ""}`),
+        ${opts.parts || opts.visits ? mutedLine(`Used so far:
+          ${[opts.parts, opts.visits].filter(Boolean).map(esc).join(" · ")}`) : ""}
+        ${url ? btn(`${url}/agreements`, "Open agreements") : ""}`,
     });
   } catch (e) {
     console.error("[notify] renewal email failed:", (e as Error).message);

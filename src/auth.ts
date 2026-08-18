@@ -8,6 +8,8 @@ import { db } from "@/db";
 import { users, accounts, sessions, verificationTokens, appSettings, clientAllowlist, orgs } from "@/db/schema";
 
 import { parseList, matchesEntry, roleForEmail } from "@/lib/allowMatch";
+import { getBrand } from "@/lib/brand";
+import { emailShell, esc, codePanel, mutedLine } from "@/lib/emailTheme";
 import { houseIdentityForEmail, houseRoleForEmail, rootOperatorOrgId } from "@/lib/house";
 import { CODE_TTL_MINUTES, newCode } from "@/lib/loginCode";
 import { sendSms, smsConfigured } from "@/lib/sms";
@@ -82,6 +84,10 @@ async function deliverCode({ identifier, url, token, provider }: {
       if (sent) return;
     }
   }
+  // The brand read is cached per request and shares the sign-in path's pool;
+  // getBrand never throws, so a broken settings row still sends a mail that
+  // just says "Service Portal".
+  const brand = (await getBrand()).name;
   const started = Date.now();
   let res: Response;
   try {
@@ -98,10 +104,15 @@ async function deliverCode({ identifier, url, token, provider }: {
         // the machine this email is open on. The link is still here, and still
         // the faster path when you are reading this on the device you want in.
         subject: `${token} is your sign-in code`,
-        html: `<p style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#172A4A;">Type this code to sign in:</p>
-          <p style="font-family:Menlo,Consolas,monospace;font-size:34px;letter-spacing:6px;font-weight:bold;color:#172A4A;margin:8px 0 14px;">${token}</p>
-          <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#64748B;">It expires in ${CODE_TTL_MINUTES} minutes and works once.</p>
-          <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;">Reading this on the device you want to sign in on? <a href="${url}">Sign in here instead</a>.</p>`,
+        html: emailShell({
+          brand,
+          preheader: `It expires in ${CODE_TTL_MINUTES} minutes and works once.`,
+          body: `Type this code to sign in:
+            ${codePanel(token)}
+            ${mutedLine(`It expires in ${CODE_TTL_MINUTES} minutes and works once.`)}
+            ${mutedLine(`Reading this on the device you want to sign in on? <a href="${esc(url)}" style="color:#1D6396;">Sign in here instead</a>.`)}`,
+          footer: `Sent by ${esc(brand)}. If you didn't ask to sign in, you can ignore this email.`,
+        }),
         text: `Your sign-in code is ${token}\n\nIt expires in ${CODE_TTL_MINUTES} minutes and works once.\n\nOr sign in on this device: ${url}`,
       }),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),

@@ -12,10 +12,9 @@ import { namedLogins } from "@/lib/directory";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
+import { emailShell, esc } from "@/lib/emailTheme";
 
 const SEP = "-".repeat(50);
-const esc = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 
 /** One line on the report: a system or a single asset, with the day's update. */
@@ -217,9 +216,17 @@ export async function composeEodEmail(
   });
 
   const body = [`${dateMDY} - Daily Updates`, "", SEP, ...blocks].join("\n");
-  const html = `
-    <pre style="font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;color:#172A4A;margin:0;">${body}</pre>
-    ${url ? `<div style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#64748B;margin-top:16px;">Questions on a system? Tap its heading and reply in the portal - it keeps everyone on the same page. General topics: <a href="${url}/discussions">${url.replace(/^https?:\/\//, "")}/discussions</a></div>` : ""}`;
+  const html = emailShell({
+    brand: brand.operatorName,
+    logoUrl: brand.operatorLogoUrl || undefined,
+    tagline: `Daily Updates · ${dateMDY}`,
+    preheader: `${included.length} system${included.length === 1 ? "" : "s"} on today's report.`,
+    width: 640,
+    body: `<pre style="font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;color:#172A4A;margin:0;">${body}</pre>`,
+    footer: url
+      ? `Questions on a system? Tap its heading and reply in the portal - it keeps everyone on the same page. General topics: <a href="${url}/discussions" style="color:#94A3B8;">${esc(url.replace(/^https?:\/\//, ""))}/discussions</a>`
+      : `Sent by ${esc(brand.operatorName)}.`,
+  });
 
   return { subject: `${brand.operatorName} - Daily Updates ${dateMDY}`, html, filled, total: included.length };
 }
