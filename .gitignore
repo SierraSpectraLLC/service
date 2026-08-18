@@ -6,3 +6,7 @@ node_modules
 drizzle/meta
 *.tsbuildinfo
 next-env.d.ts
+
+# local browser-verification scratch scripts
+/probe.mjs
+/shot.mjs
