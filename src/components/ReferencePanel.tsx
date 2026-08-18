@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addCatalogRef, listStoreFilesForRef, removeCatalogRef } from "@/app/actions";
 import { looksLikeImage, refScopeLabel } from "@/lib/catalogRefs";
+import ProvenanceChip from "./ProvenanceChip";
+import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
 import { fmtBytes } from "@/lib/storage";
 
 type PickFile = {
@@ -14,6 +16,8 @@ type PickFile = {
 export type RefRow = {
   id: number; assetType: string; model: string; kind: string;
   title: string; url: string; body: string; createdBy: string; when: string;
+  /** '' | original | facts | oem - see lib/provenance. */
+  provenance?: string;
 };
 
 export type RefScope = { assetType: string; model: string; label: string };
@@ -36,7 +40,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ kind: "link", scope: 0, title: "", url: "", body: "" });
+  const [draft, setDraft] = useState({ kind: "link", scope: 0, title: "", url: "", body: "", provenance: "" });
   // Where the thing being linked lives. "shelf" browses what the shop already
   // has - the manuals somebody uploaded, the photos already on records - which
   // is the normal case; "web" is for a manual still on the manufacturer's site.
@@ -56,7 +60,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
     });
   };
   const reset = () => {
-    setDraft({ kind: "link", scope: draft.scope, title: "", url: "", body: "" });
+    setDraft({ kind: "link", scope: draft.scope, title: "", url: "", body: "", provenance: "" });
     setPicked(null); setFileFilter("");
   };
 
@@ -72,6 +76,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
         title: draft.title || (source === "shelf" ? picked?.fileName ?? "" : ""),
         url: source === "shelf" ? (picked ? `/api/files/${picked.id}` : "") : draft.url,
         body: draft.body,
+        provenance: draft.provenance,
       });
       if (res?.error) { setError(res.error); return; }
       reset();
@@ -87,6 +92,10 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Reference</div>
+        {/* How much of this shelf could travel with a licensed library. */}
+        {canEdit && refs.length > 0 && (
+          <span className="mut" style={{ fontSize: 10.5 }}>{tallyLine(tallyProvenance(refs))}</span>
+        )}
         {canEdit && scopes.length > 0 && (
           <button className="btn sm" style={{ marginLeft: "auto" }}
             onClick={() => { const next = !open; setOpen(next); setError(""); if (next) loadFiles(); }}>
@@ -190,6 +199,19 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                 onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
             </>
           )}
+          {/* Asked while it is being written, which is the only moment anybody
+              actually knows the answer. Skippable - an unreviewed row is honest,
+              and simply stays out of anything licensed. */}
+          <label>Where it came from <span className="mut" style={{ fontWeight: 400 }}>(decides what can be licensed on)</span></label>
+          <select value={draft.provenance} aria-label="Where it came from"
+            onChange={(e) => setDraft({ ...draft, provenance: e.target.value })}
+            style={{ width: "auto", fontSize: 12, marginBottom: 4 }}>
+            <option value="">Not saying yet</option>
+            {PROVENANCE_CHOICES.map((c) => <option key={c} value={c}>{PROVENANCE_LABEL[c]}</option>)}
+          </select>
+          <div className="mut" style={{ fontSize: 10.5, marginBottom: 8 }}>
+            {PROVENANCE_BLURB[(draft.provenance || "") as keyof typeof PROVENANCE_BLURB]}
+          </div>
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
           <button className="btn sm accent" onClick={save} disabled={pending}>
             {pending ? "Saving..." : "File it"}
@@ -222,7 +244,10 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                     ))}
                   </>
                 )}
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>{r.createdBy}{r.when ? ` · ${r.when}` : ""}</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
+                  <span className="mut" style={{ fontSize: 10.5 }}>{r.createdBy}{r.when ? ` · ${r.when}` : ""}</span>
+                  <ProvenanceChip what="ref" id={r.id} value={r.provenance ?? ""} canEdit={canEdit} />
+                </div>
               </div>
               {canEdit && (
                 <button className="btn link" aria-label={`Remove ${r.title || "reference"}`} disabled={pending}

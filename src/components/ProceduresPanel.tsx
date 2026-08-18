@@ -11,6 +11,8 @@ import { parseChecklist } from "@/lib/checklist";
 import PartNumberField from "./PartNumberField";
 import { procedureRole, ROLE_COLOR, ROLE_LABEL } from "@/lib/procedureRole";
 import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
+import ProvenanceChip from "./ProvenanceChip";
+import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
 
 export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
@@ -20,6 +22,8 @@ export type ProcedureRow = {
   qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
   checklist: string;
+  /** '' | original | facts | oem - see lib/provenance. */
+  provenance?: string;
 };
 
 const KIND_GLYPH: Record<string, { glyph: string; bg: string; fg: string }> = {
@@ -59,6 +63,7 @@ type Draft = {
   qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
   checklist: string;
+  provenance: string;
 };
 const emptyDraft: Draft = {
   kind: "task", name: "", notes: "",
@@ -69,7 +74,7 @@ const emptyDraft: Draft = {
   // same value on every new procedure is a tax on the common case.
   runsAtIntake: false, repeats: false, intervalDays: "365", required: false,
   qualification: "",
-  parts: [], modelScope: [], categoryScope: [], checklist: "",
+  parts: [], modelScope: [], categoryScope: [], checklist: "", provenance: "",
 };
 
 /** Multiselect over catalog models: chips in the field, type-to-filter list below. */
@@ -258,6 +263,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     qualification: i.qualification,
     parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
     categoryScope: i.categoryScope, checklist: i.checklist,
+    provenance: i.provenance ?? "",
   });
   const openEdit = (i: ProcedureRow) => {
     setDraft(draftFrom(i));
@@ -304,6 +310,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       intervalDays: draft.repeats ? draft.intervalDays : null,
       parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
       categoryScope: draft.categoryScope, checklist: draft.checklist,
+      provenance: draft.provenance,
     };
     startTransition(async () => {
       const res = sheet.id
@@ -416,6 +423,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 {i.qualification}
               </span>
             )}
+            {/* Display-only here: the whole row is already a button that opens
+                the sheet, and a button inside a button is both invalid markup
+                and a click that fires twice. The sheet carries the picker. */}
+            <ProvenanceChip what="procedure" id={i.id} value={i.provenance ?? ""} canEdit={false} />
             {/* What it IS, in the word the shop uses, before the detail of when.
                 The row used to make the reader assemble "this is a PM" from a
                 cadence pill. See lib/procedureRole. */}
@@ -495,7 +506,13 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
 
   return (
     <div className="card">
-      <div className="card-title">Procedures & maintenance</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+        <div className="card-title">Procedures &amp; maintenance</div>
+        {/* How much of the book could travel with a licensed library. */}
+        {items.length > 0 && (
+          <span className="mut" style={{ fontSize: 10.5 }}>{tallyLine(tallyProvenance(items))}</span>
+        )}
+      </div>
       {/* The one fact that saves the copy/paste: definitions here apply
           themselves. Without this line, people write upkeep onto each system
           by hand and never find out they didn't have to. */}
@@ -881,6 +898,24 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               <span className="mut" style={{ fontSize: 11 }}>
                 Groups this under IQ/OQ/PQ on regulated (GxP) systems. Others ignore it.
               </span>
+            </div>
+
+            {/* Whose words these are. Asked here, once, while the procedure is
+                being written - the only moment the answer is actually known.
+                Decides whether it can travel with a licensed library. */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
+              <label style={{ margin: 0 }}>Where it came from</label>
+              <div className="seg" role="group" aria-label="Where it came from">
+                {["", ...PROVENANCE_CHOICES].map((c) => (
+                  <button key={c || "none"} type="button" aria-pressed={draft.provenance === c}
+                    onClick={() => setDraft({ ...draft, provenance: c })}>
+                    {c ? PROVENANCE_LABEL[c as keyof typeof PROVENANCE_LABEL] : "Not saying"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
+              {PROVENANCE_BLURB[(draft.provenance || "") as keyof typeof PROVENANCE_BLURB]}
             </div>
 
             {/* Only on edit, and only when the timing actually changed: what

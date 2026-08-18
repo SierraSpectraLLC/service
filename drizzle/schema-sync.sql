@@ -2482,3 +2482,10 @@ DO $$ BEGIN
       FOREIGN KEY ("attachment_id") REFERENCES "attachments"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- Where a piece of reference material came from, and therefore whether it may
+-- travel with a licensed library: '' (unreviewed) | original | facts | oem.
+-- Default '' on purpose - unclassified is treated as not-ours-to-sell.
+-- See lib/provenance.
+ALTER TABLE "catalog_refs" ADD COLUMN IF NOT EXISTS "provenance" text NOT NULL DEFAULT '';
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "provenance" text NOT NULL DEFAULT '';

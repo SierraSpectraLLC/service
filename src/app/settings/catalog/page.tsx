@@ -109,6 +109,7 @@ export default async function CatalogPage() {
         refs={refRows.map((r) => ({
           id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
           title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
+          provenance: r.provenance,
           when: shopDay(r.createdAt),
         }))} />
     </div>

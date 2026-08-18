@@ -109,6 +109,7 @@ import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import { cleanMakerName } from "@/lib/makers";
+import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenance";
 import { tenantCatalogIds } from "@/lib/makersData";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
@@ -3893,6 +3894,8 @@ type ProcedureInput = {
   parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
   /** The steps, one per line. See lib/checklist. */
   checklist?: string;
+  /** Whose words these are - see lib/provenance. */
+  provenance?: string;
 };
 
 /** Validate + normalize; returns {error} or clean column values. */
@@ -3905,6 +3908,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   qualification: string;
   parts: string; modelScope: string[]; categoryScope: string[];
   checklist: string;
+  provenance: string;
 } {
   if (!validProcedureType(data.assetType)) return { error: "Pick an asset type" };
   if (!(CHECKOUT_KINDS as readonly string[]).includes(data.kind)) return { error: "Pick task or test" };
@@ -3967,6 +3971,7 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
     // Normalized here rather than at every reader: what gets stored is what
     // the stamper will produce, so the editor shows the real steps back.
     checklist: serializeChecklist(parseChecklist(data.checklist ?? "")),
+    provenance: cleanProvenance(data.provenance),
   };
 }
 
@@ -4126,6 +4131,11 @@ export async function updateProcedure(
   if (!before) return { error: "Not found" };
   const clean = cleanProcedure({ ...data, assetType: before.assetType }); // type is fixed at creation
   if ("error" in clean) return clean;
+  // An edit that doesn't mention provenance must not silently un-classify the
+  // row: cleanProcedure defaults it to '' (unreviewed), which for a procedure
+  // somebody has already cleared would quietly drop it out of the licensable
+  // set. Absent means "leave it"; only an explicit value changes it.
+  if (data.provenance === undefined) clean.provenance = before.provenance;
   const siblings = await db.select().from(procedures).where(eq(procedures.assetType, before.assetType));
   if (siblings.some((i) => i.id !== procedureId && i.kind === clean.kind && i.name.toLowerCase() === clean.name.toLowerCase()
       && sameScope(i, clean)))
@@ -8639,6 +8649,8 @@ const cleanCatalog = (d: CatalogInput) => ({
 export type CatalogRefInput = {
   assetType: string; model: string; kind: string;
   title: string; url: string; body: string;
+  /** Whose material this is - see lib/provenance. Asked at filing time. */
+  provenance?: string;
 };
 
 /**
@@ -8707,6 +8719,7 @@ export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: st
   const [row] = await db.insert(catalogRefs).values({
     tenantOrgId: myTenantOrgId(u),
     assetType, model: data.model.trim().slice(0, 120), kind, title, url, body,
+    provenance: cleanProvenance(data.provenance),
     createdBy: u.name || u.email,
   }).returning();
   await audit({
@@ -8715,6 +8728,51 @@ export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: st
   });
   revalidatePath("/settings/catalog");
   return { id: row.id };
+}
+
+/**
+ * Classify where a piece of reference material came from.
+ *
+ * One action for both libraries, because the question and the consequence are
+ * identical: a procedure and a filed note are equally licensable or equally
+ * not, and two near-identical actions is how the two drift apart.
+ *
+ * The audit line names the old and new class - reclassifying something as ours
+ * is exactly the move that would need explaining later, so it leaves a trail
+ * with a name on it.
+ */
+export async function setProvenance(
+  what: "ref" | "procedure", id: number, provenance: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const next = cleanProvenance(provenance);
+  const t = readTenant(u);
+  if (what === "ref") {
+    const [row] = await db.select().from(catalogRefs).where(eq(catalogRefs.id, id));
+    if (!row) return { error: "Not found" };
+    if (t !== null && row.tenantOrgId !== t) return { error: "Not found" };
+    if (row.provenance === next) return {};
+    await db.update(catalogRefs).set({ provenance: next }).where(eq(catalogRefs.id, id));
+    await audit({
+      actor: u.email, entityType: "catalog_ref", entityId: id, tenantOrgId: row.tenantOrgId,
+      action: `marked "${row.title || row.url || row.body.slice(0, 40)}" as ${PROVENANCE_LABEL[next].toLowerCase()}`,
+      field: "provenance", oldValue: row.provenance, newValue: next,
+    });
+  } else {
+    const [row] = await db.select().from(procedures).where(eq(procedures.id, id));
+    if (!row) return { error: "Not found" };
+    if (t !== null && row.tenantOrgId !== t) return { error: "Not found" };
+    if (row.provenance === next) return {};
+    await db.update(procedures).set({ provenance: next }).where(eq(procedures.id, id));
+    await audit({
+      actor: u.email, entityType: "procedure", entityId: id, tenantOrgId: row.tenantOrgId,
+      action: `marked procedure "${row.name}" as ${PROVENANCE_LABEL[next].toLowerCase()}`,
+      field: "provenance", oldValue: row.provenance, newValue: next,
+    });
+  }
+  revalidatePath("/settings/catalog");
+  revalidatePath("/settings/procedures");
+  return {};
 }
 
 export async function removeCatalogRef(id: number): Promise<{ error?: string }> {

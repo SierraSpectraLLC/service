@@ -61,6 +61,7 @@ export default async function ProceduresPage() {
           qualification: r.qualification,
           categoryScope: r.categoryScope,
           parts: parseProcParts(r.parts), modelScope: r.modelScope, checklist: r.checklist,
+          provenance: r.provenance,
         }))}
       />
     </div>

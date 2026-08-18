@@ -507,6 +507,12 @@ export const procedures = pgTable("procedures", {
   // and write each system's upkeep out by hand, once per system. See
   // lib/procedureRole.
   categoryScope: text("category_scope").array().notNull().default([]),
+  /**
+   * Whose words these are: '' | original | facts | oem. A procedure written
+   * from our own field notes is ours to license; one transcribed out of a
+   * manufacturer's manual is not. See lib/provenance.
+   */
+  provenance: text("provenance").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -1256,6 +1262,11 @@ export const catalogRefs = pgTable("catalog_refs", {
   // (a gallery photo, a shelf file) that illustrates it.
   url: text("url").notNull().default(""),
   body: text("body").notNull().default(""),         // the note text
+  /**
+   * Whose material this is: '' | original | facts | oem. Decides whether the
+   * row may travel with a licensed library - see lib/provenance.
+   */
+  provenance: text("provenance").notNull().default(""),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("catalog_refs_type_idx").on(t.assetType)]);
