@@ -130,13 +130,15 @@ export default function StoreFileList({
   const [dragOver, setDragOver] = useState<number | null | "root">(null);
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
-  const [filedNote, setFiledNote] = useState("");
+  const [filedNote, setFiledNote] = useState<{ text: string; ok: boolean } | null>(null);
 
   /**
    * Copy loose files onto a system - the same act the record's Files panel
    * calls "from the library", started from this end. Partial outcomes are
    * ordinary (a file may already be on the record), so the result is counted
-   * out loud instead of the first refusal aborting the rest.
+   * out loud instead of the first refusal aborting the rest - and a
+   * nothing-happened outcome is worded and colored as one, because "0 filed"
+   * in success green reads as the software congratulating itself.
    */
   const fileOnto = (targets: StoreFile[], instrumentId: number, label: string) =>
     startTransition(async () => {
@@ -145,10 +147,23 @@ export default function StoreFileList({
         const shelf = f.places.find((pl) => pl.kind === "shelf");
         if (!shelf) continue;
         const res = await attachLibraryFile({ instrumentId, assetId: null }, shelf.attachmentId);
-        if (res?.error) skipped.push(`${f.fileName}: ${res.error}`);
-        else filed++;
+        if (res?.error) {
+          // The action's refusals mostly name the file already; prefix only
+          // when one doesn't, and say WHERE rather than "this record" - on
+          // this page, the record is not the thing in front of the reader.
+          const why = res.error.replace("this record", label);
+          skipped.push(why.includes(f.fileName) ? why : `${f.fileName}: ${why}`);
+        } else filed++;
       }
-      setFiledNote(`${filed} filed onto ${label}${skipped.length ? ` · ${skipped.length} skipped (${skipped[0]})` : ""}`);
+      setFiledNote(
+        filed === 0
+          ? { ok: false, text: `Nothing filed - ${skipped[0] ?? "no loose copies in the selection"}` }
+          : {
+              ok: true,
+              text: `${filed} filed onto ${label}`
+                + (skipped.length ? ` · ${skipped.length} already there` : ""),
+            },
+      );
       setPicked(new Set());
     });
   // Column widths, draggable at the header and remembered per person on the
@@ -671,7 +686,11 @@ export default function StoreFileList({
           No file matches &ldquo;{filter}&rdquo;.
         </div>
       )}
-      {filedNote && <div style={{ fontSize: 12, color: "#2E6B2E", marginTop: 6, fontWeight: 700 }}>{filedNote}</div>}
+      {filedNote && (
+        <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: filedNote.ok ? "#2E6B2E" : "#8A5410" }}>
+          {filedNote.text}
+        </div>
+      )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
 
       {/* One file, close up: what it is called, what it is, and where it came
