@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
+import PartNumberField from "./PartNumberField";
 import {
   addPoLine, cancelPurchaseOrder, deletePoLine, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
 } from "@/app/actions";
@@ -173,7 +174,16 @@ export default function PoPanel({ po, lines, canManage }: {
         {editable && (adding ? (
           <div className="dash-form" style={{ marginTop: 10 }}>
             <div className="pf2" style={{ marginBottom: 8 }}>
-              <div><label>Part number *</label><input className="mono" value={newLine.partNumber} onChange={(e) => setNewLine({ ...newLine, partNumber: e.target.value })} /></div>
+              <div>
+                <label>Part number *</label>
+                {/* The one field where inserting a superseded number costs real
+                    money: it becomes what somebody orders. */}
+                <PartNumberField value={newLine.partNumber}
+                  onChange={(partNumber) => setNewLine({ ...newLine, partNumber })}
+                  onPick={(part) => setNewLine((l) => ({
+                    ...l, partNumber: part.partNumber, name: l.name.trim() || part.name,
+                  }))} />
+              </div>
               <div><label>Description</label><input value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} /></div>
               <div><label>Qty</label><input value={newLine.qty} inputMode="numeric" onChange={(e) => setNewLine({ ...newLine, qty: e.target.value })} /></div>
               <div><label>Unit $</label><input value={newLine.price} onChange={(e) => setNewLine({ ...newLine, price: e.target.value })} placeholder="129.95" /></div>

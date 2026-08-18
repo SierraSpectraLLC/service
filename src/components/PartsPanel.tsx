@@ -8,6 +8,7 @@ import {
   createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
 } from "@/app/actions";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
+import PartNumberField from "./PartNumberField";
 import { formatCents, centsToInput } from "@/lib/money";
 import { dayText, isoDay, partGroups, type ServiceEvent } from "@/lib/partGroups";
 
@@ -171,7 +172,16 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 placeholder={draft.kind === "consumable" ? "e.g. Vespel ferrule 1/4in" : "e.g. 10kV HED supply"} />
             </div>
-            <div><label>Part number</label><input value={draft.partNumber} onChange={(e) => setDraft({ ...draft, partNumber: e.target.value })} placeholder="G6303-80060" /></div>
+            <div>
+              <label>Part number</label>
+              {/* Resolves against the parts book first: the name comes with it,
+                  so a described part is never re-described by hand. */}
+              <PartNumberField value={draft.partNumber} placeholder="G6303-80060" className=""
+                onChange={(partNumber) => setDraft({ ...draft, partNumber })}
+                onPick={(part) => setDraft((d) => ({
+                  ...d, partNumber: part.partNumber, name: d.name.trim() || part.name,
+                }))} />
+            </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="US12345678" /></div>
             <div><label>Vendor</label><input value={draft.vendor} onChange={(e) => setDraft({ ...draft, vendor: e.target.value })} placeholder="Restek" /></div>
             <div><label>Qty</label><input value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} placeholder="1" /></div>

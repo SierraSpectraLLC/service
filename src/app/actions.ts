@@ -8238,6 +8238,47 @@ export async function listCatalogPartsForPicker(): Promise<{
   return { parts: [...rows].sort((a, b) => rank(a.kind) - rank(b.kind)) };
 }
 
+/**
+ * The parts book as a part-number field needs it: every live entry with its
+ * other numbers and its cover photo.
+ *
+ * Fetched once per field on first use and filtered in the browser rather than
+ * round-tripping every keystroke - a shop's book is hundreds of rows, matching
+ * is pure (lib/partCatalog), and a dropdown that lags behind typing is a
+ * dropdown people stop reading. Capped so it stays that way if a book ever runs
+ * to thousands.
+ */
+export async function catalogForLookup(): Promise<{
+  parts: {
+    id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
+    kind: string; archived: boolean; aliases: PartAlias[]; photoUrl: string;
+  }[];
+}> {
+  const u = await requireUser();
+  const rows = await db.select().from(partCatalog)
+    .where(and(forTenant(partCatalog.tenantOrgId, readTenant(u)), eq(partCatalog.archived, false)))
+    .orderBy(asc(partCatalog.partNumber))
+    .limit(2000)
+    .catch(() => []);
+  if (!rows.length) return { parts: [] };
+  const ids = rows.map((r) => r.id);
+  const [alias, photos] = await Promise.all([
+    db.select().from(partNumbers).where(inArray(partNumbers.catalogId, ids)).catch(() => []),
+    db.select().from(partPhotos).where(inArray(partPhotos.catalogId, ids))
+      .orderBy(asc(partPhotos.sortOrder), asc(partPhotos.id)).catch(() => []),
+  ]);
+  return {
+    parts: rows.map((r) => ({
+      id: r.id, partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
+      mfrPartNumber: r.mfrPartNumber, kind: r.kind, archived: r.archived,
+      aliases: alias.filter((a) => a.catalogId === r.id).map((a) => ({
+        kind: a.kind, partNumber: a.partNumber, manufacturer: a.manufacturer, note: a.note,
+      })),
+      photoUrl: photos.find((ph) => ph.catalogId === r.id)?.url ?? "",
+    })),
+  };
+}
+
 export async function addCatalogPart(data: CatalogInput): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const clean = cleanCatalog(data);

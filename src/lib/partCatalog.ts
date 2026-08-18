@@ -302,3 +302,53 @@ export function liveNumbers(e: Pick<CatalogEntry, "partNumber" | "mfrPartNumber"
   const dead = new Set((e.aliases ?? []).filter(isSuperseded).map((a) => normalizePn(a.partNumber)));
   return allNumbers(e).filter((n) => !dead.has(n));
 }
+
+/**
+ * One catalog row as a completion: what it says, and why it matched.
+ *
+ * `matchedOn` is the part that earns this its place in a dropdown. Typing an
+ * old number and being offered the current one is only useful if the row SAYS
+ * that is what happened - otherwise it looks like the wrong suggestion.
+ */
+export type PartSuggestion<T extends CatalogEntry = CatalogEntry> = {
+  entry: T;
+  /** The number to insert. Always the entry's current one. */
+  partNumber: string;
+  name: string;
+  /** "was 062-65005-00" when the query hit a superseded number, else "". */
+  wasQuoted: string;
+  /** The alias the query hit, when it was neither the primary nor the name. */
+  alsoKnownAs: string;
+};
+
+/**
+ * Completions for a part-number field: number fragments, maker's numbers,
+ * superseded numbers, and plain description.
+ *
+ * The point of resolving BEFORE inserting: "060-" should offer every number
+ * that starts that way, and "uv bulb" should offer the bulb - which means one
+ * field answers both "I have the box in my hand" and "I know what it is called
+ * but not its number". Both end in the same place, an insert of the catalog's
+ * own number rather than a fresh spelling of it.
+ */
+export function suggestParts<T extends CatalogEntry>(
+  catalog: T[], query: string, limit = 8,
+): PartSuggestion<T>[] {
+  const q = query.trim();
+  if (!q) return [];
+  const pn = normalizePn(q);
+  return searchCatalog(catalog, q, limit).map((entry) => {
+    const hitAlias = pn.length > 0
+      ? (entry.aliases ?? []).find((a) => normalizePn(a.partNumber).includes(pn))
+      : undefined;
+    return {
+      entry,
+      // Always the entry's own number, never the one that was typed: inserting
+      // a superseded number is the thing this whole path exists to stop.
+      partNumber: entry.partNumber,
+      name: entry.name,
+      wasQuoted: hitAlias && isSuperseded(hitAlias) ? hitAlias.partNumber : "",
+      alsoKnownAs: hitAlias && !isSuperseded(hitAlias) ? hitAlias.partNumber : "",
+    };
+  });
+}

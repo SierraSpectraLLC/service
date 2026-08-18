@@ -10,6 +10,7 @@ import {
 import { cadenceLabel } from "@/lib/pm";
 import { partLabel, type ProcPart } from "@/lib/procedures";
 import { pmGroups } from "@/lib/pmGroups";
+import PartNumberField from "./PartNumberField";
 
 export type PmRow = {
   id: number; title: string; body: string; assignee: string;
@@ -346,8 +347,11 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
             <input value={draft.partName} onChange={(e) => setDraft({ ...draft, partName: e.target.value })}
               placeholder="Part it takes (optional)" style={{ flex: "1 1 140px", fontSize: 12 }} />
-            <input className="mono" value={draft.partNumber} onChange={(e) => setDraft({ ...draft, partNumber: e.target.value })}
-              placeholder="Part number" style={{ flex: "1 1 120px", fontSize: 12 }} />
+            <PartNumberField value={draft.partNumber} style={{ flex: "1 1 120px", fontSize: 12 }}
+              onChange={(partNumber) => setDraft({ ...draft, partNumber })}
+              onPick={(part) => setDraft((d) => ({
+                ...d, partNumber: part.partNumber, partName: d.partName.trim() || part.name,
+              }))} />
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submit}
               disabled={pending || !draft.title.trim()}>
               {pending ? "Saving..." : "Schedule"}

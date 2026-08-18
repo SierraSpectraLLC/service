@@ -3,7 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  assets, instruments, orgs, partCatalog, partPrices, stockItems, stockMoves, stockrooms, stockroomShares,
+  assets, instruments, orgs, partCatalog, partNumbers, partPrices, stockItems, stockMoves,
+  stockrooms, stockroomShares,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { forTenant, isHouse, readTenant, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
@@ -53,7 +54,7 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
   ]);
   // The parts book: what each number IS. A shelf line whose number the book
   // knows borrows its name, and the add-grid offers the book's numbers.
-  const bookRows = await db.select({ partNumber: partCatalog.partNumber, name: partCatalog.name })
+  const bookRows = await db.select({ id: partCatalog.id, partNumber: partCatalog.partNumber, name: partCatalog.name })
     .from(partCatalog).where(and(forTenant(partCatalog.tenantOrgId, readTenant(user)), eq(partCatalog.archived, false)))
     .orderBy(asc(partCatalog.partNumber)).catch(() => []);
   const bookName = new Map(bookRows.map((b) => [b.partNumber.trim().toLowerCase(), b.name]));
@@ -116,11 +117,24 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
   const showCosts = canSeeCosts(user, room.orgId, room.tenantOrgId);
   const totals = stockTotals(items);
   const short = reorderLines(items);
+  // Every other spelling of a book part, pointing at what the book calls it -
+  // so counting a shelf under the maker's number, or under a number the book
+  // has superseded, still lands on one line.
+  const bookIds = bookRows.map((b) => b.id);
+  const aliasRows = bookIds.length
+    ? await db.select().from(partNumbers).where(inArray(partNumbers.catalogId, bookIds)).catch(() => [])
+    : [];
   const knownParts = [...new Map([
-    ...priceRows.map((p) => [p.partNumber, ""] as [string, string]),
-    ...items.map((i) => [i.partNumber, i.name] as [string, string]),
-    ...bookRows.map((b) => [b.partNumber, b.name] as [string, string]),
-  ].map(([pn, name]) => [pn, { pn, name }])).values()].sort((a, b) => a.pn.localeCompare(b.pn));
+    ...priceRows.map((p) => [p.partNumber, { pn: p.partNumber, name: "" }] as const),
+    ...items.map((i) => [i.partNumber, { pn: i.partNumber, name: i.name }] as const),
+    ...bookRows.map((b) => [b.partNumber, { pn: b.partNumber, name: b.name }] as const),
+    ...aliasRows.flatMap((a) => {
+      const book = bookRows.find((b) => b.id === a.catalogId);
+      return book ? [[a.partNumber, {
+        pn: a.partNumber, name: book.name, resolvesTo: book.partNumber,
+      }] as const] : [];
+    }),
+  ]).values()].sort((a, b) => a.pn.localeCompare(b.pn));
   const instLabel = new Map(systemRows.map((s) => [s.id, s.externalId]));
   const roomName = new Map(otherRooms.map((r) => [r.id, r.name]));
 

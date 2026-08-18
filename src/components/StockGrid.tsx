@@ -26,8 +26,11 @@ const filled = (r: Row) => !!r.partNumber.trim();
 export default function StockGrid({ stockroomId, knownParts, onDone }: {
   stockroomId: number;
   /** Numbers from the parts book, the price book and existing shelves, with
-      the book's name where it has one - autocomplete plus description fill. */
-  knownParts: { pn: string; name: string }[];
+      the book's name where it has one - autocomplete plus description fill.
+      `resolvesTo` is set on a number that is somebody ELSE's spelling of the
+      part - the maker's, or one it superseded - and names the number the book
+      calls it now. */
+  knownParts: { pn: string; name: string; resolvesTo?: string }[];
   onDone?: () => void;
 }) {
   const [rows, setRows] = useState<Row[]>([blank(), blank(), blank()]);
@@ -42,9 +45,16 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
       const next = { ...r, [key]: value };
       // Typing a number the parts book knows fills the description in, the
       // same way the book fills names on the shelf - one source of truth.
-      if (key === "partNumber" && !r.name.trim()) {
-        const hit = knownParts.find((p) => p.pn.toLowerCase() === value.trim().toLowerCase());
-        if (hit?.name) next.name = hit.name;
+      //
+      // And typing SOMEBODY ELSE'S number for the same part - the maker's, or
+      // one the book has since superseded - puts the book's own number on the
+      // shelf instead. A shelf counted under two spellings of one part is two
+      // lines that never add up.
+      if (key === "partNumber") {
+        const typed = value.trim().toLowerCase();
+        const hit = knownParts.find((p) => p.pn.toLowerCase() === typed);
+        if (hit?.resolvesTo) next.partNumber = hit.resolvesTo;
+        if (hit?.name && !r.name.trim()) next.name = hit.name;
       }
       return next;
     }));

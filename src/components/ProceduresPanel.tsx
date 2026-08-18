@@ -8,6 +8,7 @@ import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
 import { cadenceLabel } from "@/lib/pm";
 import { describeProcedure, type ProcPart } from "@/lib/procedures";
 import { parseChecklist } from "@/lib/checklist";
+import PartNumberField from "./PartNumberField";
 import { procedureRole, ROLE_COLOR, ROLE_LABEL } from "@/lib/procedureRole";
 import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
 
@@ -950,9 +951,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                         setPart({ qty: Number.isFinite(n) && n > 1 ? n : undefined });
                       }}
                       style={{ width: 56, fontSize: 13 }} />
-                    <input className="mono" value={pt.number} placeholder="Part number"
-                      onChange={(e) => setPart({ number: e.target.value })}
-                      style={{ flex: 1, fontSize: 13 }} />
+                    <PartNumberField value={pt.number} style={{ flex: 1, fontSize: 13 }}
+                      onChange={(number) => setPart({ number })}
+                      onPick={(part) => setPart({ number: part.partNumber, name: pt.name.trim() || part.name })} />
                     <input value={pt.name} placeholder="Name (optional)"
                       onChange={(e) => setPart({ name: e.target.value })}
                       style={{ flex: 1, fontSize: 13 }} />

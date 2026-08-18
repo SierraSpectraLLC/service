@@ -13,6 +13,7 @@ import {
   PART_KINDS, PART_KIND_LABEL, searchCatalog, type PartAlias,
 } from "@/lib/partCatalog";
 import type { UncataloguedPart } from "@/lib/partCatalog";
+import PartNumberField, { forgetCatalog } from "./PartNumberField";
 
 export type CatalogRow = {
   id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
@@ -116,6 +117,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
         const r2 = await setKitLines(id, lines);
         if (r2?.error) { setError(r2.error); return; }
       }
+      // The book just changed; the next field to open must see it.
+      forgetCatalog();
       setSheet(null);
     });
   };
@@ -419,8 +422,13 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4 }}>
                     <input type="number" min={1} value={l.qty} aria-label="Quantity" style={{ width: 64, fontSize: 12 }}
                       onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, qty: parseInt(e.target.value) || 1 } : x))} />
-                    <input className="mono" value={l.partNumber} placeholder="PN" style={{ flex: "0 1 140px", fontSize: 12 }}
-                      onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, partNumber: e.target.value } : x))} />
+                    {/* A kit's contents are the fastest way to put undescribed
+                        numbers in the book; resolving here means the ones that
+                        ARE described arrive with their real number and name. */}
+                    <PartNumberField value={l.partNumber} style={{ flex: "0 1 140px", fontSize: 12 }}
+                      onChange={(partNumber) => setLines(lines.map((x, j) => j === i ? { ...x, partNumber } : x))}
+                      onPick={(part) => setLines(lines.map((x, j) => j === i
+                        ? { ...x, partNumber: part.partNumber, name: x.name.trim() || part.name } : x))} />
                     <input value={l.name} placeholder="What it is" style={{ flex: 1, fontSize: 12 }}
                       onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
                     <button className="btn link" style={{ fontSize: 11 }}

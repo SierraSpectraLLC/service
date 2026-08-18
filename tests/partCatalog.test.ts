@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allNumbers, catalogEntry, catalogLabel, catalogName, cleanAliases, currentNumber, isCatalogued,
-  kitContents, liveNumbers, numberClash, searchCatalog, uncatalogued,
+  kitContents, liveNumbers, numberClash, searchCatalog, suggestParts, uncatalogued,
 } from "@/lib/partCatalog";
 
 const entry = (over: Partial<import("@/lib/partCatalog").CatalogEntry> = {}) => ({
@@ -295,5 +295,50 @@ describe("current and previous numbers", () => {
   it("treats a self-superseding entry as current rather than naming nothing", () => {
     const odd = entry({ id: 13, partNumber: "X-1", aliases: [{ kind: "superseded", partNumber: "X-1" }] });
     expect(currentNumber([odd], "X-1")).toBeNull();
+  });
+});
+
+describe("completions for a part-number field", () => {
+  const bulb = entry({
+    id: 20, partNumber: "060-65005-91", name: "Tungsten/Halogen UV bulb", kind: "consumable",
+    manufacturer: "Shimadzu", mfrPartNumber: "",
+    aliases: [
+      { kind: "superseded", partNumber: "060-65005-00", note: "replaced 2024" },
+      { kind: "oem", partNumber: "L6380-99", manufacturer: "Restek" },
+    ],
+  });
+  const lamp = entry({ id: 21, partNumber: "060-11111-00", name: "Deuterium lamp", kind: "consumable", manufacturer: "", mfrPartNumber: "" });
+  const book = [...catalog, bulb, lamp];
+
+  it("offers everything a number fragment could mean", () => {
+    // "060-" is how somebody who half-remembers a number types it.
+    expect(suggestParts(book, "060-").map((s) => s.partNumber))
+      .toEqual(["060-65005-91", "060-11111-00"]);
+  });
+
+  it("offers by description, so a name finds a number", () => {
+    expect(suggestParts(book, "uv bulb").map((s) => s.partNumber)).toEqual(["060-65005-91"]);
+    expect(suggestParts(book, "lamp").map((s) => s.partNumber)).toEqual(["060-11111-00"]);
+  });
+
+  it("inserts the current number even when an old one was typed, and says so", () => {
+    // The whole reason to resolve before inserting: typing the dead number
+    // must not put the dead number into a purchase order.
+    const [hit] = suggestParts(book, "060-65005-00");
+    expect(hit.partNumber).toBe("060-65005-91");
+    expect(hit.wasQuoted).toBe("060-65005-00");
+  });
+
+  it("names the maker's number it matched, so the row is not a mystery", () => {
+    const [hit] = suggestParts(book, "L6380");
+    expect(hit).toMatchObject({ partNumber: "060-65005-91", alsoKnownAs: "L6380-99", wasQuoted: "" });
+  });
+
+  it("offers nothing for an empty query rather than the whole book", () => {
+    expect(suggestParts(book, "   ")).toEqual([]);
+  });
+
+  it("carries the entry, so a picker can fill the description too", () => {
+    expect(suggestParts(book, "uv bulb")[0].name).toBe("Tungsten/Halogen UV bulb");
   });
 });
