@@ -14,13 +14,35 @@ const BAR: Record<Quota["state"], string> = {
  * worth knowing before anyone is charged for it, and because a meter that
  * appears only once a limit is set would make the limit look like the problem.
  */
-export default function StorageMeter({ quota, name, hint }: {
+export default function StorageMeter({ quota, name, hint, compact = false }: {
   quota: Quota & { storeName?: string };
   /** Whose store this is, for the heading. */
   name?: string;
   hint?: string;
+  /**
+   * One line in a header rather than a card of its own. A file store that
+   * opens on a gauge reads as a dashboard, and how full it is is rarely the
+   * question somebody came to the page with.
+   */
+  compact?: boolean;
 }) {
   const label = quotaLabel(quota);
+  if (compact) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        title={`${label} used${name ? ` of ${name}'s storage` : ""}`}>
+        {quota.limitBytes !== null && (
+          <span style={{ width: 44, height: 5, borderRadius: 999, background: "#E2E8F0", overflow: "hidden", display: "inline-block" }}
+            role="img" aria-label={`${quota.pct}% of file storage used`}>
+            <span style={{ display: "block", width: `${Math.max(quota.pct, quota.usedBytes > 0 ? 3 : 0)}%`, height: "100%", background: BAR[quota.state] }} />
+          </span>
+        )}
+        <span className="mut" style={{ fontSize: 11.5, color: quota.state === "ok" || quota.state === "unlimited" ? undefined : BAR[quota.state] }}>
+          {label}{quota.state === "full" ? " · full" : quota.state === "warn" ? " · low" : ""}
+        </span>
+      </span>
+    );
+  }
   return (
     <div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>

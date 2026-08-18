@@ -19,6 +19,9 @@ import { myCloudConnection } from "@/app/actions";
 export const dynamic = "force-dynamic";
 
 const CAP = 500;
+/** Mirrors the token mint in /api/upload. Named here so the page can say it
+    before somebody spends a transfer finding out. */
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 /**
  * An organization's file store - everything in it, which is the fix for a page
@@ -78,13 +81,28 @@ export default async function DocumentsPage(
       <div className="page-head">
         <h1 className="page-title">Files</h1>
         <span className="mut" style={{ fontSize: 12 }}>
-          {files.length === 0 ? "nothing stored yet"
-            : `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(shown)}${truncated ? ` (newest ${CAP} rows)` : ""}`}
+          {files.length === 0 ? "empty"
+            : `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(shown)}${truncated ? ` (newest ${CAP})` : ""}`}
         </span>
         <span className="page-actions">
-          <Link href="/pdf" className="btn sm" style={{ textDecoration: "none" }}>Open PDF studio</Link>
+          {/* The meter used to be a card of its own at the top, which made a
+              file store open on a gauge. It is a number now, and it moves out
+              of the way. */}
+          <StorageMeter quota={quota} name={quota.storeName} compact />
+          <Link href="/pdf" className="btn sm" style={{ textDecoration: "none" }}>PDF studio</Link>
         </span>
       </div>
+      {/* The sentence a client needed and did not get: they declined to upload
+          anything here because the page looked like filing something would
+          clutter their systems. It never would. */}
+      {isOwnStore && (
+        <div className="mut" style={{ fontSize: 12.5, marginTop: -4, marginBottom: 10 }}>
+          Your organization&apos;s storage. A file put here belongs to
+          {" "}{quota.storeName} and is attached to no system, no unit and no job -
+          it is somewhere to keep things. Filing one onto a record is a separate,
+          deliberate act done from that record.
+        </div>
+      )}
       {orgRows.length > 0 && (
         <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
           <span className="mut" style={{ fontSize: 12, marginRight: 4 }}>Store</span>
@@ -99,23 +117,17 @@ export default async function DocumentsPage(
       )}
 
       <div className="card">
-        <StorageMeter
-          quota={quota}
-          name={quota.storeName}
-        />
-      </div>
-
-      <div className="card">
         {!isOwnStore && (
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
             Everything {quota.storeName} is storing.
           </div>
         )}
-        {canEdit && isOwnStore && <LibraryUpload full={quota.state === "full"} />}
+        {canEdit && isOwnStore && <LibraryUpload full={quota.state === "full"} maxBytes={MAX_FILE_BYTES} />}
         <StoreFileList
           files={files.map((f) => ({
             url: f.url, size: f.size, fileName: f.fileName, description: f.description,
             kind: f.kind, uploadedBy: f.uploadedBy, when: shopTime(f.newest.createdAt),
+            at: new Date(f.newest.createdAt).getTime(),
             places: f.places,
             // Mirrors deleteAttachment exactly: a shelf file is its own org's to
             // remove, a file on a record is the house's. Showing a button the
@@ -165,10 +177,12 @@ export default async function DocumentsPage(
             files={guests.map((f) => ({
               url: f.url, size: f.size, fileName: f.fileName, description: f.description,
               kind: f.kind, uploadedBy: f.uploadedBy, when: shopTime(f.newest.createdAt),
+              at: new Date(f.newest.createdAt).getTime(),
               places: f.places, shelfOwnerId: f.newest.orgId,
             }))}
             // Not yours to delete. The buttons are simply absent.
             canRemoveShelf={false} canRemoveRecord={false}
+            emptyNote="Nothing shared with you yet."
           />
         </div>
       )}

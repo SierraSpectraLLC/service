@@ -5,6 +5,8 @@ import { useMemo, useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import { deleteAttachment } from "@/app/actions";
 import { fmtBytes } from "@/lib/storage";
+import { isPhotoFile } from "@/lib/photos";
+import { ATTACH_META } from "@/lib/stages";
 import type { Place } from "@/lib/storeGroup";
 
 export type StoreFile = {
@@ -15,113 +17,297 @@ export type StoreFile = {
   kind: string;
   uploadedBy: string;
   when: string;
+  /** Sortable form of `when`; the display string is not orderable. */
+  at: number;
   places: Place[];
   /** For a shelf file, whose shelf. Null = the operator's. */
   shelfOwnerId: number | null;
 };
 
+type SortKey = "name" | "size" | "when" | "where";
+
+const onShelf = (f: StoreFile) => f.places.some((p) => p.kind === "shelf");
+const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
+
 /**
- * One row per STORED file, with every place it appears. A file on four records
- * is one row here and one charge on the meter - listing it four times would make
- * the page total four times what the store actually holds.
+ * A file store, read the way people read a drive.
  *
- * Removal is deliberately narrow. Clearing the shelf is how an organization gets
- * out from under a quota, so it needs that. Pulling a report off a system is
- * deleting somebody's evidence, so that stays with the house - and the button is
- * simply absent where the server would refuse rather than there and failing.
+ * This used to be a list of rows each led by the RECORDS it was filed on, which
+ * quietly answered a question nobody asked and hid the one they did. A client
+ * declined to upload anything here at all - not because they could not, but
+ * because the page looked like filing something would clutter their systems.
+ * That is a reasonable reading of what was on screen, and it cost real files.
+ *
+ * So: name first, then where it is, sorted and selectable, with "not on any
+ * system" said in words rather than left as the absence of a chip. Everything
+ * that made it read as a report - the record chips leading each row, the
+ * jargon word "shelf" - is either gone or demoted behind the file itself.
+ *
+ * One row per STORED file, still: a file on four records is one row and one
+ * charge on the meter, because listing it four times would make the page total
+ * four times what the store actually holds.
  */
-export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord }: {
+export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, emptyNote }: {
   files: StoreFile[];
   canRemoveShelf: boolean;
   canRemoveRecord: boolean;
+  emptyNote?: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
   const [where, setWhere] = useState<"all" | "shelf" | "records">("all");
+  const [view, setView] = useState<"list" | "grid">("list");
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "when", desc: true });
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    return files.filter((f) => {
-      const onShelf = f.places.some((p) => p.kind === "shelf");
-      if (where === "shelf" && !onShelf) return false;
+    const hit = files.filter((f) => {
+      if (where === "shelf" && !onShelf(f)) return false;
       if (where === "records" && !f.places.some((p) => p.kind !== "shelf")) return false;
       if (!needle) return true;
-      const hay = `${f.fileName} ${f.description} ${f.kind} ${f.uploadedBy} ${f.places.map((p) => (p.kind === "shelf" ? "shelf" : p.label)).join(" ")}`;
+      const hay = `${f.fileName} ${f.description} ${f.kind} ${f.uploadedBy} ${f.places.map((p) => (p.kind === "shelf" ? "" : p.label)).join(" ")}`;
       return hay.toLowerCase().includes(needle);
     });
-  }, [files, filter, where]);
+    const dir = sort.desc ? -1 : 1;
+    return [...hit].sort((a, b) => {
+      switch (sort.key) {
+        case "name": return dir * a.fileName.localeCompare(b.fileName, undefined, { sensitivity: "base" });
+        case "size": return dir * (a.size - b.size);
+        case "where": return dir * (Number(onShelf(a)) - Number(onShelf(b)));
+        default: return dir * (a.at - b.at);
+      }
+    });
+  }, [files, filter, where, sort]);
 
   if (!files.length) {
     return (
-      <div className="mut" style={{ fontSize: 13 }}>
-        Nothing stored yet. Add a file to the shelf above, upload one on a system or unit,
-        or save a packet here from the PDF studio.
+      <div className="mut" style={{ fontSize: 13, padding: "18px 0", textAlign: "center" }}>
+        {emptyNote ?? "No files yet. Drop one anywhere on this page, or use Upload above."}
       </div>
     );
   }
 
   const removable = (p: Place) => (p.kind === "shelf" ? canRemoveShelf : canRemoveRecord);
+  const toggle = (url: string) =>
+    setPicked((s) => { const n = new Set(s); if (n.has(url)) n.delete(url); else n.add(url); return n; });
+
+  // Bulk removal is deliberately only your own copies. A report on somebody's
+  // system is their evidence, and sweeping a dozen of those away behind one
+  // confirmation is not a thing this page should make easy - so the count says
+  // exactly how many of the selection will actually go.
+  const sweepable = shown.filter((f) => picked.has(f.url) && canRemoveShelf && onShelf(f));
+
+  const head = (key: SortKey, label: string, extra: React.CSSProperties = {}) => (
+    <button className="btn link" style={{ fontSize: 11, fontWeight: 700, color: "var(--mut)", padding: 0, ...extra }}
+      onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "name" }))}>
+      {label}{sort.key === key ? (sort.desc ? " ↓" : " ↑") : ""}
+    </button>
+  );
 
   return (
     <>
-      {files.length > 6 && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by name, record or who uploaded it"
-            style={{ flex: "1 1 200px", fontSize: 12 }} />
-          <span className="seg">
-            {(["all", "shelf", "records"] as const).map((w) => (
-              <button key={w} aria-pressed={where === w} onClick={() => setWhere(w)}>
-                {w === "all" ? "All" : w === "shelf" ? "Shelf" : "On records"}
-              </button>
-            ))}
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+        <input value={filter} onChange={(e) => setFilter(e.target.value)}
+          placeholder="Search files" aria-label="Search files"
+          style={{ flex: "1 1 200px", fontSize: 12 }} />
+        <span className="seg">
+          {(["all", "shelf", "records"] as const).map((w) => (
+            <button key={w} aria-pressed={where === w} onClick={() => setWhere(w)}>
+              {w === "all" ? "All" : w === "shelf" ? "Loose" : "On a system"}
+            </button>
+          ))}
+        </span>
+        <span className="seg">
+          {(["list", "grid"] as const).map((v) => (
+            <button key={v} aria-pressed={view === v} onClick={() => setView(v)} aria-label={`${v} view`}>
+              {v === "list" ? "☰" : "▦"}
+            </button>
+          ))}
+        </span>
+      </div>
+
+      {picked.size > 0 && (
+        <div style={{
+          display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8,
+          padding: "6px 10px", background: "#EEF4FB", border: "1px solid var(--line)", borderRadius: 8,
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 700 }}>{picked.size} selected</span>
+          <span className="mut" style={{ fontSize: 11 }}>
+            {fmtBytes(shown.filter((f) => picked.has(f.url)).reduce((n, f) => n + f.size, 0))}
           </span>
+          <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>clear</button>
+          {sweepable.length > 0 && (
+            <button className="btn sm" disabled={pending} style={{ marginLeft: "auto", color: "#A32D2D" }}
+              onClick={() => {
+                const why = promptReason(
+                  `Delete ${sweepable.length} file${sweepable.length === 1 ? "" : "s"} from your files?`
+                  + (sweepable.length < picked.size
+                    ? ` The other ${picked.size - sweepable.length} are filed on records and stay.` : ""),
+                );
+                if (!why) return;
+                startTransition(async () => {
+                  for (const f of sweepable) {
+                    const shelf = f.places.find((p) => p.kind === "shelf");
+                    if (!shelf) continue;
+                    const res = await deleteAttachment(shelf.attachmentId, why);
+                    if (res?.error) { setError(res.error); return; }
+                  }
+                  setPicked(new Set());
+                });
+              }}>
+              Delete {sweepable.length}
+            </button>
+          )}
         </div>
       )}
 
-      {shown.map((f) => (
-        <div key={f.url} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-          <div style={{ minWidth: 0, flex: "1 1 240px" }}>
-            <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
-              className="mono" style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", overflowWrap: "anywhere" }}>
-              {f.fileName}
-            </a>
-            {f.description && <div className="mut" style={{ fontSize: 12 }}>{f.description}</div>}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 3 }}>
-              {f.places.map((p) => (
-                <span key={p.attachmentId} className="pill" style={{ background: "#EEF1F5", color: "#475569", display: "inline-flex", gap: 5, alignItems: "center" }}>
-                  {p.kind === "shelf" ? "shelf"
-                    : p.kind === "system" ? <Link href={`/instruments/${p.id}`} style={{ textDecoration: "none" }}>{p.label}</Link>
-                      : <Link href={`/assets/${p.id}`} style={{ textDecoration: "none" }}>{p.label}</Link>}
-                  {removable(p) && (
-                    <button className="btn link" style={{ fontSize: 10, color: "#A32D2D" }} disabled={pending}
-                      aria-label={`Remove ${f.fileName} from ${p.kind === "shelf" ? "the shelf" : p.label}`}
-                      onClick={() => {
-                        const scope = f.places.length > 1
-                          ? ` It stays on the ${f.places.length - 1} other place${f.places.length === 2 ? "" : "s"} it is filed.`
-                          : " The file is permanently deleted from storage.";
-                        const why = promptReason(`Remove "${f.fileName}" from ${p.kind === "shelf" ? "the shelf" : p.label}?${scope}`);
-                        if (!why) return;
-                        startTransition(async () => {
-                          const res = await deleteAttachment(p.attachmentId, why);
-                          setError(res?.error ?? "");
-                        });
-                      }}>×</button>
-                  )}
-                </span>
-              ))}
-            </div>
-          </div>
-          <span className="mut" style={{ fontSize: 12, flexShrink: 0 }}>{fmtBytes(f.size)}</span>
-          <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{f.uploadedBy} · {f.when}</span>
+      {view === "list" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 4px 6px", borderBottom: "1px solid var(--line)" }}>
+          <input type="checkbox" aria-label="Select all"
+            checked={shown.length > 0 && shown.every((f) => picked.has(f.url))}
+            onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((f) => f.url)) : new Set())}
+            style={{ width: 15, height: 15, flexShrink: 0 }} />
+          <span style={{ flex: "1 1 200px" }}>{head("name", "Name")}</span>
+          <span style={{ width: 190, flexShrink: 0 }}>{head("where", "Where")}</span>
+          <span style={{ width: 72, flexShrink: 0, textAlign: "right" }}>{head("size", "Size")}</span>
+          <span style={{ width: 150, flexShrink: 0, textAlign: "right" }}>{head("when", "Modified")}</span>
+        </div>
+      )}
+
+      {view === "list" && shown.map((f) => (
+        <div key={f.url} className="row-hover file-row"
+          style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)" }}>
+          <input type="checkbox" checked={picked.has(f.url)} onChange={() => toggle(f.url)}
+            aria-label={`Select ${f.fileName}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
+          <span style={{ flex: "1 1 200px", minWidth: 0, display: "flex", gap: 7, alignItems: "baseline" }}>
+            <span aria-hidden style={{ color: glyph(f).fg, flexShrink: 0 }}>{glyph(f).glyph}</span>
+            <span style={{ minWidth: 0 }}>
+              <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
+                style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", overflowWrap: "anywhere" }}>
+                {f.fileName}
+              </a>
+              {f.description && <div className="mut" style={{ fontSize: 11.5 }}>{f.description}</div>}
+            </span>
+          </span>
+          <span style={{ width: 190, flexShrink: 0, display: "flex", gap: 4, flexWrap: "wrap" }}>
+            <WhereChips file={f} removable={removable} pending={pending}
+              onRemoved={(err) => setError(err)} startTransition={startTransition} />
+          </span>
+          <span className="mut" style={{ width: 72, flexShrink: 0, fontSize: 12, textAlign: "right" }}>{fmtBytes(f.size)}</span>
+          {/* Two lines rather than one truncated one: who put a file there is
+              worth as much as when, and an ellipsis was eating both. */}
+          <span style={{ width: 150, flexShrink: 0, textAlign: "right", minWidth: 0 }}>
+            <span className="mut" style={{ fontSize: 11, display: "block" }}>{f.when}</span>
+            <span className="mut" style={{ fontSize: 10.5, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {f.uploadedBy}
+            </span>
+          </span>
         </div>
       ))}
 
+      {view === "grid" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+          {shown.map((f) => (
+            <div key={f.url} style={{
+              border: picked.has(f.url) ? "2px solid var(--navy)" : "1px solid var(--line)",
+              borderRadius: 10, padding: 8, position: "relative", minWidth: 0,
+            }}>
+              <input type="checkbox" checked={picked.has(f.url)} onChange={() => toggle(f.url)}
+                aria-label={`Select ${f.fileName}`}
+                style={{ position: "absolute", top: 6, left: 6, width: 15, height: 15, zIndex: 1 }} />
+              <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
+                style={{ textDecoration: "none", color: "inherit" }}>
+                <div style={{
+                  height: 92, borderRadius: 6, background: "#F4F6F9", marginBottom: 6,
+                  display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden",
+                }}>
+                  {isPhotoFile(f) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/api/files/${f.places[0].attachmentId}`} alt="" loading="lazy"
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <span aria-hidden style={{ fontSize: 30, color: glyph(f).fg }}>{glyph(f).glyph}</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.25 }}>{f.fileName}</div>
+              </a>
+              <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>
+                {fmtBytes(f.size)} · {onShelf(f) ? "not on a system" : f.places[0].kind === "shelf" ? "" : (f.places[0] as { label: string }).label}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {shown.length === 0 && (
-        <div className="mut" style={{ fontSize: 12, paddingTop: 8 }}>No stored file matches.</div>
+        <div className="mut" style={{ fontSize: 12, padding: "14px 0", textAlign: "center" }}>
+          No file matches &ldquo;{filter}&rdquo;.
+        </div>
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+    </>
+  );
+}
+
+/**
+ * Where a file is, in words.
+ *
+ * "Not on a system" is stated rather than implied by an absent chip. That
+ * sentence is the whole reason this pass happened: a client would not upload
+ * because they could not tell that a file here touches nothing of theirs.
+ */
+function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
+  file: StoreFile;
+  removable: (p: Place) => boolean;
+  pending: boolean;
+  onRemoved: (error: string) => void;
+  startTransition: (fn: () => void) => void;
+}) {
+  const shelf = file.places.find((p) => p.kind === "shelf");
+  const records = file.places.filter((p) => p.kind !== "shelf");
+  return (
+    <>
+      {records.length === 0 && shelf && (
+        <span className="mut" style={{ fontSize: 11 }}>
+          Not on a system
+          {removable(shelf) && (
+            <button className="btn link row-act" style={{ fontSize: 10, color: "#A32D2D", marginLeft: 4 }} disabled={pending}
+              aria-label={`Delete ${file.fileName}`}
+              onClick={() => {
+                const why = promptReason(`Delete "${file.fileName}"? It is permanently removed from storage.`);
+                if (!why) return;
+                startTransition(async () => {
+                  const res = await deleteAttachment(shelf.attachmentId, why);
+                  onRemoved(res?.error ?? "");
+                });
+              }}>×</button>
+          )}
+        </span>
+      )}
+      {records.slice(0, 2).map((p) => (
+        <span key={p.attachmentId} className="pill" style={{ background: "#EEF1F5", color: "#475569", display: "inline-flex", gap: 4, alignItems: "center" }}>
+          <Link href={p.kind === "system" ? `/instruments/${p.id}` : `/assets/${p.id}`}
+            style={{ textDecoration: "none" }}>{p.label}</Link>
+          {removable(p) && (
+            <button className="btn link row-act" style={{ fontSize: 10, color: "#A32D2D" }} disabled={pending}
+              aria-label={`Remove ${file.fileName} from ${p.label}`}
+              onClick={() => {
+                const scope = file.places.length > 1
+                  ? ` It stays on the ${file.places.length - 1} other place${file.places.length === 2 ? "" : "s"} it is filed.`
+                  : " The file is permanently deleted from storage.";
+                const why = promptReason(`Remove "${file.fileName}" from ${p.label}?${scope}`);
+                if (!why) return;
+                startTransition(async () => {
+                  const res = await deleteAttachment(p.attachmentId, why);
+                  onRemoved(res?.error ?? "");
+                });
+              }}>×</button>
+          )}
+        </span>
+      ))}
+      {records.length > 2 && <span className="mut" style={{ fontSize: 11 }}>+{records.length - 2}</span>}
     </>
   );
 }

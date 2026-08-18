@@ -490,3 +490,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .panel-flow { columns: 1; column-gap: 16px; }
 @media (min-width: 1200px) { .panel-flow { columns: 2; } }
 .panel-flow > .panel-slot { break-inside: avoid; width: 100%; }
+
+/* A file row's own delete button. Present but silent until the pointer is on
+   the row - a red x on every line of a file list reads as a page daring you to
+   press it, and selection is how bulk work is meant to happen anyway. Always
+   visible to keyboards, which have no hover. */
+.file-row .row-act { opacity: 0; transition: opacity .12s ease; }
+.file-row:hover .row-act,
+.file-row:focus-within .row-act { opacity: 1; }
+@media (hover: none) { .file-row .row-act { opacity: 1; } }
