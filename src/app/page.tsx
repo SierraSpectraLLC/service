@@ -156,6 +156,10 @@ export default async function Home() {
         categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
+        // The ship pipeline is the shop's own axis, and a reseller client's.
+        // For everyone else "Ship queue + shipped" is a tile about a business
+        // they aren't in - same burial as the resale controls.
+        showShipping={isStaff || (user.orgId !== null && (orgNames.find((o) => o.id === user.orgId)?.resaleEnabled ?? false))}
       />
       {(pastEngagements.length > 0 || previouslyOwned.length > 0) && (
         <div className="container" style={{ paddingTop: 0 }}>

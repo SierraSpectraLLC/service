@@ -24,9 +24,11 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff }: {
+export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping }: {
   data: Row[]; stageDefs: StageDefLite[]; people: string[];
   clients: string[]; categories: string[]; canEdit: boolean; isStaff: boolean;
+  /** Ship-pipeline tile: the shop and reseller accounts; clutter for lab clients. */
+  showShipping: boolean;
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
@@ -119,7 +121,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           ["Waiting / blocked", counts.blocked, "#A32D2D"],
           ["Awaiting parts", counts.waiting, "#8A5410"],
           ["Gas attention", counts.gas, "#A33A1A"],
-          ["Ship queue + shipped", counts.shipped, "#085041"],
+          ...(showShipping ? [["Ship queue + shipped", counts.shipped, "#085041"]] : []),
         ] as [string, number, string][]).map(([label, n, color]) => (
           <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
             <div style={{ fontSize: 12 }} className="mut">{label}</div>
