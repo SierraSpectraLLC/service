@@ -13,11 +13,15 @@ import {
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
-  workOrders, orgSites, partCatalog, partKitLines, agreements, catalogRefs, taskResults,
+  workOrders, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
+  catalogRefs, taskResults,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
-import { catalogEntry, catalogName, PART_KINDS, PART_KIND_LABEL } from "@/lib/partCatalog";
+import {
+  catalogEntry, catalogName, cleanAliases, MAX_PART_PHOTOS, numberClash, PART_KINDS,
+  PART_KIND_LABEL, type PartAlias,
+} from "@/lib/partCatalog";
 // Aliased: lib/stock exports a KIND_LABEL too (shelf, van, ...), imported below
 // and lexically first, so the bare name here silently meant the wrong map -
 // which made every new agreement throw on its own audit line.
@@ -2688,6 +2692,8 @@ async function deleteBlobs(urls: string[]) {
     ...(await db.select({ url: attachments.url }).from(attachments).where(inArray(attachments.url, unique)))
       .map((r) => r.url),
     ...(await db.select({ url: vocabTerms.photoUrl }).from(vocabTerms).where(inArray(vocabTerms.photoUrl, unique)))
+      .map((r) => r.url),
+    ...(await db.select({ url: partPhotos.url }).from(partPhotos).where(inArray(partPhotos.url, unique)))
       .map((r) => r.url),
   ]);
   const orphans = unique.filter((u) => !stillUsed.has(u));
@@ -8028,7 +8034,42 @@ export async function setSystemSite(instrumentId: number, siteId: number | null)
 export type CatalogInput = {
   partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
   kind: string; assetTypes: string[]; models?: string[]; note: string;
+  /** The part's OTHER numbers - ours and the makers'. See lib/partCatalog. */
+  aliases?: PartAlias[];
 };
+
+/**
+ * Attach each entry's other numbers, for a clash check that sees all of them.
+ * One query for the whole book rather than one per row.
+ */
+async function loadAliases<T extends { id: number }>(rows: T[]): Promise<(T & { aliases: PartAlias[] })[]> {
+  const ids = rows.map((r) => r.id);
+  const alias = ids.length
+    ? await db.select().from(partNumbers).where(inArray(partNumbers.catalogId, ids)).catch(() => [])
+    : [];
+  return rows.map((r) => ({
+    ...r,
+    aliases: alias.filter((a) => a.catalogId === r.id).map((a) => ({
+      kind: a.kind, partNumber: a.partNumber, manufacturer: a.manufacturer, note: a.note,
+    })),
+  }));
+}
+
+/**
+ * Replace an entry's other numbers wholesale.
+ *
+ * Same reasoning as setKitLines: this is a short list somebody edits as a block
+ * in one sheet, and diffing it row by row would buy nothing but a chance to get
+ * it wrong.
+ */
+async function writeAliases(catalogId: number, aliases: PartAlias[]) {
+  await db.delete(partNumbers).where(eq(partNumbers.catalogId, catalogId));
+  if (!aliases.length) return;
+  await db.insert(partNumbers).values(aliases.map((a, i) => ({
+    catalogId, kind: a.kind, partNumber: a.partNumber,
+    manufacturer: a.manufacturer ?? "", note: a.note ?? "", sortOrder: i,
+  })));
+}
 
 const cleanCatalog = (d: CatalogInput) => ({
   partNumber: d.partNumber.trim().slice(0, 80),
@@ -8167,12 +8208,20 @@ export async function addCatalogPart(data: CatalogInput): Promise<{ error?: stri
   const mine = await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, tenant));
   // Checked here so the answer is a sentence rather than a unique-violation
   // page; the index in schema-sync is what makes it true under a race.
-  if (catalogEntry(mine, clean.partNumber)) {
-    return { error: `${clean.partNumber} is already in the catalog` };
+  //
+  // Against EVERY number on both sides, not just the primaries: two entries
+  // answering to one number would resolve to whichever came first, so the same
+  // box would describe itself differently depending on the screen.
+  const aliases = cleanAliases(data.aliases ?? [], clean);
+  const withAliases = await loadAliases(mine);
+  const clash = numberClash(withAliases, { ...clean, aliases });
+  if (clash) {
+    return { error: `${clash.number} already belongs to ${clash.entry.partNumber}${clash.entry.name ? ` - ${clash.entry.name}` : ""}` };
   }
   const [row] = await db.insert(partCatalog).values({
     ...clean, tenantOrgId: tenant, createdBy: u.email,
   }).returning();
+  await writeAliases(row.id, aliases);
   await audit({
     actor: u.email, entityType: "part_catalog", entityId: row.id, tenantOrgId: tenant,
     action: `catalogued ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""} (${PART_KIND_LABEL[clean.kind].toLowerCase()})`,
@@ -8189,14 +8238,110 @@ export async function updateCatalogPart(id: number, data: CatalogInput): Promise
   const clean = cleanCatalog(data);
   if (!clean.partNumber) return { error: "A part number is the one thing this needs" };
   const mine = await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, before.tenantOrgId));
-  const clash = catalogEntry(mine.filter((c) => c.id !== id), clean.partNumber);
-  if (clash) return { error: `${clean.partNumber} is already in the catalog` };
+  const aliases = cleanAliases(data.aliases ?? [], clean);
+  const others = await loadAliases(mine.filter((c) => c.id !== id));
+  const clash = numberClash(others, { ...clean, aliases });
+  if (clash) {
+    return { error: `${clash.number} already belongs to ${clash.entry.partNumber}${clash.entry.name ? ` - ${clash.entry.name}` : ""}` };
+  }
   await db.update(partCatalog).set(clean).where(eq(partCatalog.id, id));
+  await writeAliases(id, aliases);
   await audit({
     actor: u.email, entityType: "part_catalog", entityId: id, tenantOrgId: before.tenantOrgId,
     action: `edited catalog entry ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""}`,
     field: "part", oldValue: `${before.partNumber} ${before.name}`, newValue: `${clean.partNumber} ${clean.name}`,
   });
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+/**
+ * What a part looks like.
+ *
+ * Same reasoning as a model's stock photo: one photo of a check valve is a
+ * photo of every check valve of that number, so it lives on the catalog row
+ * rather than on any record - it shows wherever the number does, and lands on
+ * nobody's file list and nobody's storage bill. Several per part, because the
+ * useful set is "the thing", "its label", and "where it goes".
+ */
+export async function addPartPhotos(
+  catalogId: number, files: { url: string; caption?: string }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!files.length) return {};
+  const [row] = await db.select().from(partCatalog).where(eq(partCatalog.id, catalogId));
+  if (!row) return { error: "Not found" };
+  if (readTenant(u) !== null && row.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const have = await db.select({ sortOrder: partPhotos.sortOrder }).from(partPhotos)
+    .where(eq(partPhotos.catalogId, catalogId));
+  if (have.length + files.length > MAX_PART_PHOTOS) {
+    return { error: `A part keeps up to ${MAX_PART_PHOTOS} photos - remove one first` };
+  }
+  const from = Math.max(0, ...have.map((h) => h.sortOrder)) + 1;
+  await db.insert(partPhotos).values(files.map((f, i) => ({
+    catalogId, url: f.url, caption: (f.caption ?? "").trim().slice(0, 120),
+    sortOrder: from + i, uploadedBy: u.name,
+  })));
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: catalogId, tenantOrgId: row.tenantOrgId,
+    action: `added ${files.length} photo${files.length === 1 ? "" : "s"} to ${row.partNumber}`,
+  });
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+
+export async function removePartPhoto(photoId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [photo] = await db.select().from(partPhotos).where(eq(partPhotos.id, photoId));
+  if (!photo) return { error: "Not found" };
+  const [row] = await db.select().from(partCatalog).where(eq(partCatalog.id, photo.catalogId));
+  if (!row) return { error: "Not found" };
+  if (readTenant(u) !== null && row.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  await db.delete(partPhotos).where(eq(partPhotos.id, photoId));
+  // Blob-owned, not an attachment: nothing else points at these bytes, so
+  // leaving them would be storage nobody can see or reach.
+  await deleteBlobs([photo.url]);
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: photo.catalogId, tenantOrgId: row.tenantOrgId,
+    action: `removed a photo from ${row.partNumber}`,
+  });
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+/** The caption is what tells three photos of one part apart. */
+export async function setPartPhotoCaption(photoId: number, caption: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [photo] = await db.select().from(partPhotos).where(eq(partPhotos.id, photoId));
+  if (!photo) return { error: "Not found" };
+  const [row] = await db.select().from(partCatalog).where(eq(partCatalog.id, photo.catalogId));
+  if (!row) return { error: "Not found" };
+  if (readTenant(u) !== null && row.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  await db.update(partPhotos).set({ caption: caption.trim().slice(0, 120) }).where(eq(partPhotos.id, photoId));
+  revalidatePath("/settings/parts");
+  return {};
+}
+
+/**
+ * Make one photo the cover - the one shown beside the number everywhere else.
+ * Ordering rather than a flag: "first" is already what cover means here, and a
+ * flag would be a second source of truth for the same fact.
+ */
+export async function makePartPhotoCover(photoId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [photo] = await db.select().from(partPhotos).where(eq(partPhotos.id, photoId));
+  if (!photo) return { error: "Not found" };
+  const [row] = await db.select().from(partCatalog).where(eq(partCatalog.id, photo.catalogId));
+  if (!row) return { error: "Not found" };
+  if (readTenant(u) !== null && row.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const rest = await db.select({ id: partPhotos.id }).from(partPhotos)
+    .where(and(eq(partPhotos.catalogId, photo.catalogId), ne(partPhotos.id, photoId)))
+    .orderBy(asc(partPhotos.sortOrder), asc(partPhotos.id));
+  await db.update(partPhotos).set({ sortOrder: 0 }).where(eq(partPhotos.id, photoId));
+  for (let i = 0; i < rest.length; i++) {
+    await db.update(partPhotos).set({ sortOrder: i + 1 }).where(eq(partPhotos.id, rest[i].id));
+  }
   revalidatePath("/settings/parts");
   return {};
 }

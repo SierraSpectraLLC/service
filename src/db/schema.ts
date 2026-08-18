@@ -1172,6 +1172,55 @@ export const catalogRefs = pgTable("catalog_refs", {
 // What is in a kit. Lines are part NUMBERS, not catalog ids, for the same reason
 // the rest of the system keys on numbers: a kit can list a part nobody has
 // catalogued, and should, rather than refusing to be written down.
+/**
+ * The other numbers this same part answers to.
+ *
+ * A part number is not one string. The seal you fit is Shimadzu's
+ * 228-35145-91, a third party's 5063-6589, and - once your shop wraps it - your
+ * own SS-SEAL-01; the box in somebody's hand carries whichever of those the
+ * person who sold it printed. part_catalog keeps ONE of each as the display
+ * identity (part_number, and mfr_part_number with its manufacturer) because
+ * every other table stores a bare string and something has to be the name. This
+ * table is the rest, and it is what makes all of them resolve to one described
+ * part instead of to three undescribed ones.
+ *
+ * No tenant stamp: like part_kit_lines, a row here belongs to its catalog entry
+ * and dies with it.
+ */
+export const partNumbers = pgTable("part_numbers", {
+  id: serial("id").primaryKey(),
+  catalogId: integer("catalog_id").notNull().references((): AnyPgColumn => partCatalog.id, { onDelete: "cascade" }),
+  /** 'shop' - another number of ours; 'oem' - somebody else's for the same thing. */
+  kind: text("kind").notNull().default("oem"),
+  partNumber: text("part_number").notNull(),
+  /** Whose number it is. Blank on a shop number, which is ours by definition. */
+  manufacturer: text("manufacturer").notNull().default(""),
+  note: text("note").notNull().default(""),   // "superseded 2024", "pack of 10"
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("part_numbers_catalog_idx").on(t.catalogId), index("part_numbers_pn_idx").on(t.partNumber)]);
+
+/**
+ * What a part looks like.
+ *
+ * Same reasoning as a model's stock photo (vocab_terms.photo_url): one photo of
+ * a check valve is a photo of every check valve of that number, so it belongs
+ * to the catalog rather than to any record - it appears wherever the number
+ * does, and lands on nobody's file list, nobody's gallery and nobody's storage
+ * bill. Several per part because the useful set is usually "the thing", "its
+ * label", and "where it goes", and a caption is what tells them apart.
+ *
+ * Blob-owned rather than an attachment, so removing one deletes the bytes.
+ */
+export const partPhotos = pgTable("part_photos", {
+  id: serial("id").primaryKey(),
+  catalogId: integer("catalog_id").notNull().references((): AnyPgColumn => partCatalog.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  caption: text("caption").notNull().default(""),
+  sortOrder: integer("sort_order").notNull().default(0),
+  uploadedBy: text("uploaded_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("part_photos_catalog_idx").on(t.catalogId)]);
+
 export const partKitLines = pgTable("part_kit_lines", {
   id: serial("id").primaryKey(),
   kitId: integer("kit_id").notNull().references((): AnyPgColumn => partCatalog.id, { onDelete: "cascade" }),

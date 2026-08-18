@@ -2347,3 +2347,40 @@ END $$;
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "checklist" text NOT NULL DEFAULT '';
 ALTER TABLE "checklist_items" ADD COLUMN IF NOT EXISTS "heading" boolean NOT NULL DEFAULT false;
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "checklist" text NOT NULL DEFAULT '';
+
+-- The other numbers one part answers to (ours and the makers'), and what it
+-- looks like. Both hang off a catalog entry and die with it.
+CREATE TABLE IF NOT EXISTS "part_numbers" (
+  "id" serial PRIMARY KEY,
+  "catalog_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'oem',
+  "part_number" text NOT NULL,
+  "manufacturer" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "sort_order" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "part_numbers_catalog_idx" ON "part_numbers" ("catalog_id");
+CREATE INDEX IF NOT EXISTS "part_numbers_pn_idx" ON "part_numbers" ("part_number");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'part_numbers_catalog_id_fk') THEN
+    ALTER TABLE "part_numbers" ADD CONSTRAINT "part_numbers_catalog_id_fk"
+      FOREIGN KEY ("catalog_id") REFERENCES "part_catalog"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "part_photos" (
+  "id" serial PRIMARY KEY,
+  "catalog_id" integer NOT NULL,
+  "url" text NOT NULL,
+  "caption" text NOT NULL DEFAULT '',
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "uploaded_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "part_photos_catalog_idx" ON "part_photos" ("catalog_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'part_photos_catalog_id_fk') THEN
+    ALTER TABLE "part_photos" ADD CONSTRAINT "part_photos_catalog_id_fk"
+      FOREIGN KEY ("catalog_id") REFERENCES "part_catalog"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

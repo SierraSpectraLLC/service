@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { addCatalogPart, addPartPrices, archiveCatalogPart, deletePartPrice, setKitLines, updateCatalogPart } from "@/app/actions";
+import { upload } from "@vercel/blob/client";
+import {
+  addCatalogPart, addPartPhotos, addPartPrices, archiveCatalogPart, deletePartPrice,
+  makePartPhotoCover, removePartPhoto, setKitLines, setPartPhotoCaption, updateCatalogPart,
+} from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import {
-  catalogLabel, kitContents, PART_KINDS, PART_KIND_LABEL, searchCatalog,
+  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, kitContents, MAX_PART_PHOTOS,
+  PART_KINDS, PART_KIND_LABEL, searchCatalog, type PartAlias,
 } from "@/lib/partCatalog";
 import type { UncataloguedPart } from "@/lib/partCatalog";
 
@@ -13,7 +18,13 @@ export type CatalogRow = {
   id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
   kind: string; assetTypes: string[]; models: string[]; note: string; archived: boolean;
   lines: { partNumber: string; name: string; qty: number }[];
+  /** Its other numbers - ours and the makers'. See lib/partCatalog. */
+  aliases: PartAlias[];
+  /** What it looks like. First is the cover. */
+  photos: PartPhoto[];
 };
+
+export type PartPhoto = { id: number; url: string; caption: string };
 
 const KIND_COLOR: Record<string, { bg: string; fg: string }> = {
   part: { bg: "#E7F2FA", fg: "#1D6396" },
@@ -27,6 +38,7 @@ const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg
 const emptyDraft = {
   partNumber: "", name: "", manufacturer: "", mfrPartNumber: "",
   kind: "part", assetTypes: [] as string[], models: [] as string[], note: "",
+  aliases: [] as PartAlias[],
 };
 
 /**
@@ -58,6 +70,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
   const [draft, setDraft] = useState(emptyDraft);
   const [lines, setLines] = useState<{ partNumber: string; name: string; qty: number }[]>([]);
   const [vendorDraft, setVendorDraft] = useState({ vendor: "", price: "", isOem: false, url: "" });
+  const [busy, setBusy] = useState("");
+  const photoInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -77,7 +91,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
     setDraft({
       partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
       mfrPartNumber: r.mfrPartNumber, kind: r.kind, assetTypes: r.assetTypes,
-      models: r.models, note: r.note,
+      models: r.models, note: r.note, aliases: r.aliases.map((a) => ({ ...a })),
     });
     setLines(r.lines.map((l) => ({ ...l })));
     setError(""); setSheet({ id: r.id });
@@ -132,12 +146,35 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
           border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6,
           opacity: r.archived ? 0.55 : 1,
         }}>
+          {/* What it looks like beats what it is called, for the one question
+              this list gets asked at a bench: is this the thing in my hand? */}
+          {r.photos[0] && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={r.photos[0].url} alt="" width={34} height={34}
+              style={{ width: 34, height: 34, borderRadius: 6, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
+          )}
           <button className="btn link" onClick={() => openEdit(r)}
             style={{ flex: 1, minWidth: 0, textAlign: "left", padding: 0 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{r.partNumber}</span>
               <span style={{ fontSize: 13 }}>{r.name || <span className="mut">unnamed</span>}</span>
               <span className="pill" style={pill(KIND_COLOR[r.kind] ?? KIND_COLOR.part)}>{PART_KIND_LABEL[r.kind]}</span>
+              {/* The other numbers it answers to. Shown on the row rather than
+                  hidden in the sheet, because the number somebody is holding is
+                  as likely to be one of these as the one on the left. */}
+              {r.aliases.slice(0, 3).map((a) => (
+                <span key={a.partNumber} className="pill mono"
+                  title={`${ALIAS_KIND_LABEL[a.kind] ?? "Also"}${a.manufacturer ? ` · ${a.manufacturer}` : ""}${a.note ? ` · ${a.note}` : ""}`}
+                  style={{ background: "#F1F5F9", color: "#64748B", fontWeight: 400 }}>
+                  = {a.partNumber}
+                </span>
+              ))}
+              {r.aliases.length > 3 && (
+                <span className="mut" style={{ fontSize: 11 }}>+{r.aliases.length - 3}</span>
+              )}
+              {r.photos.length > 1 && (
+                <span className="mut" style={{ fontSize: 11 }}>▣ {r.photos.length}</span>
+              )}
               {r.archived && <span className="pill" style={{ background: "#F4F6F9", color: "#94A3B8" }}>retired</span>}
             </div>
             <div className="mut" style={{ fontSize: 11 }}>
@@ -235,6 +272,123 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   placeholder="G4521-67001" />
               </div>
             </div>
+
+            {/* Every OTHER number the same part answers to. The pair above is
+                the display identity - what the row is called and what every
+                other table stores as a bare string - and these make all of
+                them resolve to this one entry. Without it, buying the seal
+                under a third party's number puts a second undescribed part in
+                the book for the same thing. */}
+            <label>Its other numbers <span className="mut" style={{ fontWeight: 400 }}>(optional)</span></label>
+            <div style={{ marginBottom: 10 }}>
+              {draft.aliases.map((a, idx) => {
+                const setAlias = (patch: Partial<PartAlias>) =>
+                  setDraft({ ...draft, aliases: draft.aliases.map((x, i) => (i === idx ? { ...x, ...patch } : x)) });
+                return (
+                  <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center", flexWrap: "wrap" }}>
+                    <select value={a.kind} onChange={(e) => setAlias({ kind: e.target.value })}
+                      aria-label="Whose number this is" style={{ width: "auto", fontSize: 12 }}>
+                      {ALIAS_KINDS.map((k) => <option key={k} value={k}>{ALIAS_KIND_LABEL[k]}</option>)}
+                    </select>
+                    <input className="mono" value={a.partNumber} placeholder="PN"
+                      aria-label="Part number"
+                      onChange={(e) => setAlias({ partNumber: e.target.value })}
+                      style={{ flex: "1 1 130px", fontSize: 12 }} />
+                    <input value={a.manufacturer ?? ""} placeholder={a.kind === "shop" ? "-" : "Who makes it"}
+                      aria-label="Manufacturer" disabled={a.kind === "shop"}
+                      onChange={(e) => setAlias({ manufacturer: e.target.value })}
+                      style={{ flex: "1 1 110px", fontSize: 12 }} />
+                    <input value={a.note ?? ""} placeholder="e.g. superseded 2024"
+                      aria-label="Note"
+                      onChange={(e) => setAlias({ note: e.target.value })}
+                      style={{ flex: "1 1 120px", fontSize: 12 }} />
+                    <button className="btn link" aria-label={`Remove ${a.partNumber || "number"}`}
+                      style={{ color: "#A32D2D", fontSize: 13 }}
+                      onClick={() => setDraft({ ...draft, aliases: draft.aliases.filter((_, i) => i !== idx) })}>×</button>
+                  </div>
+                );
+              })}
+              <button className="btn sm" onClick={() => setDraft({ ...draft, aliases: [...draft.aliases, { kind: "oem", partNumber: "", manufacturer: "", note: "" }] })}>
+                ＋ Number
+              </button>
+              <div className="mut" style={{ fontSize: 10.5, marginTop: 4 }}>
+                Anything typed here finds this part - in a picker, on a purchase order, and in
+                the list of numbers nobody has described.
+              </div>
+            </div>
+
+            {/* What it looks like. Only once the entry exists, because a photo
+                has to hang off a row - and an upload is immediate rather than
+                held to Save, so it is never lost by a validation error on some
+                other field. */}
+            {sheet?.id !== undefined && (() => {
+              const row = items.find((x) => x.id === sheet.id);
+              const photos = row?.photos ?? [];
+              const upl = async (list: FileList | null) => {
+                const files = Array.from(list ?? []);
+                if (!files.length || sheet.id === undefined) return;
+                setError("");
+                try {
+                  const done: { url: string }[] = [];
+                  for (const f of files) {
+                    setBusy(`Uploading ${f.name}...`);
+                    const blob = await upload(f.name, f, { access: "public", handleUploadUrl: "/api/upload" });
+                    done.push({ url: blob.url });
+                  }
+                  const res = await addPartPhotos(sheet.id, done);
+                  if (res?.error) setError(res.error);
+                  else router.refresh();
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally { setBusy(""); }
+              };
+              return (
+                <div style={{ marginBottom: 10 }}>
+                  <label>Photos <span className="mut" style={{ fontWeight: 400 }}>({photos.length}/{MAX_PART_PHOTOS})</span></label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                    {photos.map((ph, i) => (
+                      <div key={ph.id} style={{ width: 104 }}>
+                        <div style={{ position: "relative" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={ph.url} alt={ph.caption} width={104} height={78}
+                            style={{ width: 104, height: 78, objectFit: "cover", borderRadius: 6, border: i === 0 ? "2px solid var(--navy)" : "1px solid var(--line)" }} />
+                          <button className="btn link" aria-label="Remove photo" disabled={pending}
+                            title="Remove this photo"
+                            onClick={() => startTransition(async () => {
+                              const res = await removePartPhoto(ph.id);
+                              if (res?.error) setError(res.error); else router.refresh();
+                            })}
+                            style={{ position: "absolute", top: 2, right: 2, background: "#fff", borderRadius: 4, color: "#A32D2D", fontSize: 12, lineHeight: 1, padding: "1px 4px" }}>×</button>
+                        </div>
+                        <input defaultValue={ph.caption} placeholder={i === 0 ? "cover" : "what this shows"}
+                          aria-label="Caption"
+                          onBlur={(e) => {
+                            if (e.target.value === ph.caption) return;
+                            startTransition(async () => { await setPartPhotoCaption(ph.id, e.target.value); router.refresh(); });
+                          }}
+                          style={{ width: "100%", fontSize: 11, padding: "3px 5px", marginTop: 2 }} />
+                        {i > 0 && (
+                          <button className="btn link" style={{ fontSize: 10.5 }} disabled={pending}
+                            onClick={() => startTransition(async () => { await makePartPhotoCover(ph.id); router.refresh(); })}>
+                            make cover
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button className="btn sm" disabled={!!busy || photos.length >= MAX_PART_PHOTOS}
+                    onClick={() => photoInput.current?.click()}>
+                    {busy || "＋ Photo"}
+                  </button>
+                  <input ref={photoInput} type="file" accept="image/*" multiple style={{ display: "none" }}
+                    onChange={(e) => { void upl(e.target.files); e.target.value = ""; }} />
+                  <div className="mut" style={{ fontSize: 10.5, marginTop: 4 }}>
+                    One photo of this number is a photo of every one of them, so it belongs here rather
+                    than on a record - it shows wherever the number does, on nobody&apos;s storage bill.
+                  </div>
+                </div>
+              );
+            })()}
 
             <label>Kind</label>
             <div className="seg" role="group" aria-label="Kind" style={{ marginBottom: 8 }}>

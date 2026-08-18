@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  catalogEntry, catalogLabel, catalogName, isCatalogued, kitContents, searchCatalog, uncatalogued,
+  allNumbers, catalogEntry, catalogLabel, catalogName, cleanAliases, isCatalogued, kitContents,
+  numberClash, searchCatalog, uncatalogued,
 } from "@/lib/partCatalog";
 
-const entry = (over: Partial<{
-  id: number; partNumber: string; name: string; manufacturer: string;
-  mfrPartNumber: string; kind: string; archived: boolean;
-}> = {}) => ({
+const entry = (over: Partial<import("@/lib/partCatalog").CatalogEntry> = {}) => ({
   id: 1, partNumber: "AGI-7167-PMK", name: "Agilent 7176 PM Kit", manufacturer: "Agilent",
   mfrPartNumber: "G4521-67001", kind: "kit", archived: false, ...over,
 });
@@ -150,5 +148,77 @@ describe("seeding the catalog from what the shop actually uses", () => {
     // Including a kit line that names a part somebody has since described.
     expect(uncatalogued(catalog, [{ partNumber: "5181-3323", name: "x", source: "kit" }])).toEqual([]);
     expect(uncatalogued(catalog, [{ partNumber: "agi-7167-pmk", name: "x", source: "maintenance" }])).toEqual([]);
+  });
+});
+
+describe("one part, several numbers", () => {
+  // The seal is Shimadzu's 228-35145-91, a third party's 5063-6589, and our
+  // own SS-SEAL-01. Whichever the box in somebody's hand carries, it is one
+  // described part.
+  const seal = entry({
+    id: 9, partNumber: "SS-SEAL-01", name: "Plunger seal", kind: "part",
+    manufacturer: "Shimadzu", mfrPartNumber: "228-35145-91",
+    aliases: [
+      { kind: "oem", partNumber: "5063-6589", manufacturer: "Restek" },
+      { kind: "shop", partNumber: "SS-SEAL-01-OLD", note: "superseded 2024" },
+    ],
+  });
+  const book = [...catalog, seal];
+
+  it("resolves by any of them", () => {
+    for (const pn of ["SS-SEAL-01", "228-35145-91", "5063-6589", " ss-seal-01-old "]) {
+      expect(catalogEntry(book, pn)?.id).toBe(9);
+    }
+    expect(catalogEntry(book, "NOT-A-NUMBER")).toBeNull();
+  });
+
+  it("gathers them primaries-first, normalized and deduped", () => {
+    expect(allNumbers(seal)).toEqual(["ss-seal-01", "228-35145-91", "5063-6589", "ss-seal-01-old"]);
+    expect(allNumbers({ partNumber: "A-1", mfrPartNumber: "", aliases: [{ kind: "oem", partNumber: " a-1 " }] }))
+      .toEqual(["a-1"]);
+  });
+
+  it("stops calling a number undescribed once some entry answers to it", () => {
+    // The bug this closes: buy the seal under Agilent's number, describe it
+    // under ours, and the parts book keeps asking to describe it.
+    expect(uncatalogued(book, [{ partNumber: "5063-6589", source: "purchasing" }])).toEqual([]);
+  });
+
+  it("finds it in a picker by an alias or by the maker who sells it", () => {
+    expect(searchCatalog(book, "5063").map((c) => c.id)).toEqual([9]);
+    // By the third party who also sells it - nothing else in the book is Restek.
+    expect(searchCatalog(book, "restek").map((c) => c.id)).toEqual([9]);
+  });
+});
+
+describe("keeping the numbers honest", () => {
+  const primaries = { partNumber: "SS-SEAL-01", mfrPartNumber: "228-35145-91" };
+
+  it("drops a re-listed primary, blanks and duplicates", () => {
+    // Pasting the whole row in and listing the primary again is the commonest
+    // slip; it would print the same string twice on the chip line.
+    expect(cleanAliases([
+      { kind: "oem", partNumber: " 228-35145-91 " },
+      { kind: "oem", partNumber: "ss-seal-01" },
+      { kind: "oem", partNumber: "  " },
+      { kind: "oem", partNumber: "5063-6589", manufacturer: " Restek " },
+      { kind: "oem", partNumber: "5063-6589" },
+    ], primaries)).toEqual([
+      { kind: "oem", partNumber: "5063-6589", manufacturer: "Restek", note: "" },
+    ]);
+  });
+
+  it("falls back to the maker's kind for anything unrecognised", () => {
+    expect(cleanAliases([{ kind: "nonsense", partNumber: "X-1" }], primaries)[0].kind).toBe("oem");
+    expect(cleanAliases([{ kind: "shop", partNumber: "X-1" }], primaries)[0].kind).toBe("shop");
+  });
+
+  it("names the entry that already claims a number", () => {
+    // Two entries answering to one number would describe the same box
+    // differently depending on the screen.
+    const clash = numberClash(catalog, { partNumber: "NEW-9", mfrPartNumber: "", aliases: [{ kind: "oem", partNumber: "5181-3323" }] });
+    expect(clash?.number).toBe("5181-3323");
+    expect(clash?.entry.id).toBe(2);
+    expect(numberClash(catalog, { partNumber: "NEW-9", mfrPartNumber: "", aliases: [] })).toBeNull();
   });
 });

@@ -1,7 +1,10 @@
 import { asc, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { partCatalog, partKitLines, partPrices, parts, pmSchedules, poLines, procedures, stockItems, vocabTerms } from "@/db/schema";
+import {
+  partCatalog, partKitLines, partNumbers, partPhotos, partPrices, parts, pmSchedules, poLines,
+  procedures, stockItems, vocabTerms,
+} from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
@@ -72,10 +75,27 @@ export default async function PartsCatalogPage() {
     .orderBy(asc(partPrices.partNumber), asc(partPrices.vendor));
 
   const kitIds = rows.filter((r) => r.kind === "kit").map((r) => r.id);
-  const lines = kitIds.length
-    ? await db.select().from(partKitLines).where(inArray(partKitLines.kitId, kitIds))
-        .orderBy(asc(partKitLines.sortOrder), asc(partKitLines.id))
-    : [];
+  const allIds = rows.map((r) => r.id);
+  const [lines, aliasRows, photoRows] = await Promise.all([
+    kitIds.length
+      ? db.select().from(partKitLines).where(inArray(partKitLines.kitId, kitIds))
+          .orderBy(asc(partKitLines.sortOrder), asc(partKitLines.id))
+      : [],
+    allIds.length
+      ? db.select().from(partNumbers).where(inArray(partNumbers.catalogId, allIds))
+          .orderBy(asc(partNumbers.sortOrder), asc(partNumbers.id))
+      : [],
+    allIds.length
+      ? db.select().from(partPhotos).where(inArray(partPhotos.catalogId, allIds))
+          .orderBy(asc(partPhotos.sortOrder), asc(partPhotos.id))
+      : [],
+  ]);
+  const aliasesOf = (id: number) => aliasRows.filter((a) => a.catalogId === id)
+    .map((a) => ({ kind: a.kind, partNumber: a.partNumber, manufacturer: a.manufacturer, note: a.note }));
+  // The catalog as the matcher needs to see it. Passed to uncatalogued() as
+  // well as to the panel, or a part described under the maker's number would
+  // keep appearing in the list of numbers nobody has described.
+  const withAliases = rows.map((r) => ({ ...r, aliases: aliasesOf(r.id) }));
 
   // What's INSIDE the catalogued kits. A kit is a bag of other numbers, and
   // listing six of them is the single fastest way to put six numbers into the
@@ -112,6 +132,9 @@ export default async function PartsCatalogPage() {
           models: r.models, note: r.note, archived: r.archived,
           lines: lines.filter((l) => l.kitId === r.id)
             .map((l) => ({ partNumber: l.partNumber, name: l.name, qty: l.qty })),
+          aliases: aliasesOf(r.id),
+          photos: photoRows.filter((ph) => ph.catalogId === r.id)
+            .map((ph) => ({ id: ph.id, url: ph.url, caption: ph.caption })),
         }))}
         assetTypes={terms.filter((t) => t.kind === "asset_type").map((t) => t.name)}
         modelsByType={terms.reduce<Record<string, string[]>>((acc, t) => {
@@ -127,7 +150,7 @@ export default async function PartsCatalogPage() {
           id: p.id, partNumber: p.partNumber, vendor: p.vendor, isOem: p.isOem,
           priceCents: p.priceCents, url: p.url,
         }))}
-        unnamed={uncatalogued(rows, used)}
+        unnamed={uncatalogued(withAliases, used)}
       />
       <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
     </div>

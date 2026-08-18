@@ -32,7 +32,35 @@ export type CatalogEntry = {
   mfrPartNumber: string;
   kind: string;
   archived: boolean;
+  /**
+   * Every OTHER number this same part answers to - our second number, the
+   * maker's, the third party's. Optional so a caller that has not loaded them
+   * behaves exactly as it did before they existed.
+   */
+  aliases?: PartAlias[];
 };
+
+/** One of a part's other numbers. `kind` is 'shop' (ours) or 'oem' (theirs). */
+export type PartAlias = { kind: string; partNumber: string; manufacturer?: string; note?: string };
+
+export const ALIAS_KINDS = ["shop", "oem"] as const;
+export const ALIAS_KIND_LABEL: Record<string, string> = { shop: "Ours", oem: "Maker's" };
+
+/**
+ * Every number that identifies this part, normalized, primaries first.
+ *
+ * The whole point of the alias table: matching a number in somebody's hand has
+ * to consider all of them, and forgetting one somewhere means the same part
+ * shows up described on one screen and undescribed on the next.
+ */
+export function allNumbers(e: Pick<CatalogEntry, "partNumber" | "mfrPartNumber" | "aliases">): string[] {
+  const out: string[] = [];
+  for (const n of [e.partNumber, e.mfrPartNumber, ...(e.aliases ?? []).map((a) => a.partNumber)]) {
+    const pn = normalizePn(n ?? "");
+    if (pn && !out.includes(pn)) out.push(pn);
+  }
+  return out;
+}
 
 /**
  * The catalog row for a number, matched the way the rest of the system matches
@@ -47,7 +75,10 @@ export type CatalogEntry = {
 export function catalogEntry<T extends CatalogEntry>(catalog: T[], partNumber: string): T | null {
   const pn = normalizePn(partNumber);
   if (!pn) return null;
-  const hits = catalog.filter((c) => normalizePn(c.partNumber) === pn);
+  // Any of its numbers, not just the one on the row. A seal bought as the
+  // maker's number and fitted under ours is one part, and resolving only the
+  // primary is how it became two.
+  const hits = catalog.filter((c) => allNumbers(c).includes(pn));
   // A live entry beats an archived one when both spellings exist, which is what
   // superseding a number by re-cataloguing it looks like.
   return hits.find((c) => !c.archived) ?? hits[0] ?? null;
@@ -78,8 +109,10 @@ export function searchCatalog<T extends CatalogEntry>(catalog: T[], query: strin
   const hit = (c: T) =>
     (pn.length > 0 && normalizePn(c.partNumber).includes(pn))
     || (pn.length > 0 && normalizePn(c.mfrPartNumber).includes(pn))
+    || (pn.length > 0 && (c.aliases ?? []).some((a) => normalizePn(a.partNumber).includes(pn)))
     || c.name.toLowerCase().includes(q)
-    || c.manufacturer.toLowerCase().includes(q);
+    || c.manufacturer.toLowerCase().includes(q)
+    || (c.aliases ?? []).some((a) => (a.manufacturer ?? "").toLowerCase().includes(q));
   // Live entries first: an archived part is usually not what somebody picking
   // from a list wants, but it is occasionally exactly what they want.
   const live = catalog.filter((c) => !c.archived && hit(c));
@@ -148,7 +181,9 @@ export type UncataloguedPart = {
  * and enriched across sources: the name comes from whichever mention had one.
  */
 export function uncatalogued(catalog: CatalogEntry[], used: (string | UsedPart)[]): UncataloguedPart[] {
-  const known = new Set(catalog.map((c) => normalizePn(c.partNumber)).filter(Boolean));
+  // Every number of every entry, or a part described under the maker's number
+  // would keep appearing here as one nobody has described.
+  const known = new Set(catalog.flatMap(allNumbers));
   const out = new Map<string, UncataloguedPart>();
   for (const raw of used) {
     const u: UsedPart = typeof raw === "string" ? { partNumber: raw } : raw;
@@ -165,3 +200,56 @@ export function uncatalogued(catalog: CatalogEntry[], used: (string | UsedPart)[
   }
   return [...out.values()].sort((a, b) => a.partNumber.localeCompare(b.partNumber, undefined, { sensitivity: "base" }));
 }
+
+/**
+ * Clean a typed list of extra numbers: trimmed, bounded, and de-duplicated
+ * against each other AND against the entry's own primaries.
+ *
+ * Re-listing the primary as an alias is the commonest slip (you paste the whole
+ * row in), and it would make the same string appear twice on the chip line.
+ */
+export function cleanAliases(
+  list: PartAlias[], primaries: { partNumber: string; mfrPartNumber: string },
+): PartAlias[] {
+  const seen = new Set([normalizePn(primaries.partNumber), normalizePn(primaries.mfrPartNumber)].filter(Boolean));
+  const out: PartAlias[] = [];
+  for (const a of list.slice(0, 30)) {
+    const partNumber = (a.partNumber ?? "").trim().slice(0, 80);
+    const pn = normalizePn(partNumber);
+    if (!pn || seen.has(pn)) continue;
+    seen.add(pn);
+    out.push({
+      kind: (ALIAS_KINDS as readonly string[]).includes(a.kind) ? a.kind : "oem",
+      partNumber,
+      manufacturer: (a.manufacturer ?? "").trim().slice(0, 80),
+      note: (a.note ?? "").trim().slice(0, 120),
+    });
+  }
+  return out;
+}
+
+/**
+ * Which OTHER catalog entry already claims one of these numbers, if any.
+ *
+ * Two entries answering to one number is the failure this table can create:
+ * catalogEntry would resolve it to whichever came first, so the same box would
+ * describe itself differently depending on the screen. Caught at save time
+ * instead, naming the number and the entry that has it.
+ */
+export function numberClash<T extends CatalogEntry>(
+  others: T[], numbers: { partNumber: string; mfrPartNumber: string; aliases?: PartAlias[] },
+): { number: string; entry: T } | null {
+  const mine = allNumbers(numbers);
+  for (const pn of mine) {
+    const hit = others.find((o) => allNumbers(o).includes(pn));
+    if (hit) return { number: pn, entry: hit };
+  }
+  return null;
+}
+
+/**
+ * How many photos one part keeps. A cap rather than none: this is a catalog
+ * row, shown inline wherever the number appears, and thirty photos of a seal
+ * is a gallery nobody scrolls.
+ */
+export const MAX_PART_PHOTOS = 8;
