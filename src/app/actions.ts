@@ -19,8 +19,8 @@ import {
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
-  catalogEntry, catalogName, cleanAliases, MAX_PART_PHOTOS, numberClash, PART_KINDS,
-  PART_KIND_LABEL, type PartAlias,
+  catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS, numberClash,
+  PART_KINDS, PART_KIND_LABEL, type PartAlias,
 } from "@/lib/partCatalog";
 // Aliased: lib/stock exports a KIND_LABEL too (shelf, van, ...), imported below
 // and lexically first, so the bare name here silently meant the wrong map -
@@ -1866,25 +1866,47 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
   // so both pages show it coming.
   const [a] = s.assetId !== null ? await db.select().from(assets).where(eq(assets.id, s.assetId)) : [];
   const instrumentId = s.instrumentId ?? a?.instrumentId ?? null;
+  // A procedure written three years ago names the number the maker sold then.
+  // Ordering it is ordering something nobody stocks any more, so the catalog's
+  // replacement wins - and the note says which number was asked for, because
+  // the person reading the PO is holding the old paperwork.
+  //
+  // Resolved BEFORE the duplicate check, or requesting the old number and then
+  // the new one would file the same part twice: the check would look for the
+  // number on the sheet while the row carries the number being bought.
+  const catalog = await loadAliases(
+    await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, s.tenantOrgId)),
+  ).catch(() => []);
+  const moved = currentNumber(catalog, want.number);
+  const orderPn = moved ? moved.current : want.number;
+  const name = want.name || moved?.entry.name || s.title;
   const open = await db.select().from(parts).where(
     s.assetId !== null ? eq(parts.assetId, s.assetId) : eq(parts.instrumentId, instrumentId!)
   );
-  if (open.some((p) => partOpen(p.status) && p.partNumber.toLowerCase() === want.number.toLowerCase())) {
-    return { error: `PN ${want.number} is already requested and not yet installed` };
+  // Either spelling counts as already-requested: the open row may predate the
+  // supersession, or postdate it.
+  const already = open.find((p) => partOpen(p.status)
+    && [orderPn, want.number].some((n) => p.partNumber.toLowerCase() === n.toLowerCase()));
+  if (already) {
+    return { error: `PN ${already.partNumber} is already requested and not yet installed` };
   }
-  const name = want.name || s.title;
   // Best offer from the house price book, if anyone prices this PN. Filling
   // cost/vendor here doesn't breach the "editors who can't see costs can't
   // write them" rule: the numbers are server-derived staff data, not caller
   // input, and lib/redact still governs who sees them on the way back out.
+  //
+  // Priced on the number being BOUGHT: the price book is keyed by PN, and a
+  // superseded number is exactly the one nobody has a current price under.
   const book = await db.select().from(partPrices);
-  const best = bestPrice(book, want.number);
+  const best = bestPrice(book, orderPn);
   const [p] = await db.insert(parts).values({
-    instrumentId, assetId: s.assetId, name, partNumber: want.number,
+    instrumentId, assetId: s.assetId, name, partNumber: orderPn,
     // What the procedure says the job takes. Hardcoded to one until the
     // procedure could carry a count, which quietly ordered a single bottle of
     // oil for a change that needs two.
-    qty: String(partQty(want)), status: "Needed", note: `for maintenance '${s.title}'`,
+    qty: String(partQty(want)), status: "Needed",
+    note: `for maintenance '${s.title}'`
+      + (moved ? ` - replaces ${moved.quoted}, which the maintenance sheet still names` : ""),
     // The queryable version of that note: a contract whose PM includes its
     // parts reads this to keep them off the parts allowance.
     pmScheduleId: s.id,
@@ -1895,7 +1917,8 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
     actor: u.email, instrumentId, assetId: s.assetId, entityType: "part", entityId: p.id,
     // No price in the audit line: activity feeds are visible to every org on
     // a shared system, and cost never appears where lib/redact would blank it.
-    action: `requested part '${name}' (PN ${want.number}) for maintenance '${s.title}'`
+    action: `requested part '${name}' (PN ${orderPn}) for maintenance '${s.title}'`
+      + (moved ? ` - ${moved.quoted} is superseded` : "")
       + (best ? ` - from ${best.vendor}${best.isOem ? " (OEM)" : ""} per the price book` : ""),
   });
   revWork(p);

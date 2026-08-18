@@ -40,11 +40,26 @@ export type CatalogEntry = {
   aliases?: PartAlias[];
 };
 
-/** One of a part's other numbers. `kind` is 'shop' (ours) or 'oem' (theirs). */
+/**
+ * One of a part's other numbers.
+ *
+ * `kind` is 'shop' (another of ours), 'oem' (somebody else's for the same
+ * thing), or 'superseded' - a number that IS this part but is no longer the one
+ * to buy. The third is the one that carries weight: a superseded number must
+ * still resolve, because it is on every record and every invoice from before
+ * the maker changed it, and it must never be the number the software goes and
+ * orders. Recording it as a note said the first half and did nothing about the
+ * second.
+ */
 export type PartAlias = { kind: string; partNumber: string; manufacturer?: string; note?: string };
 
-export const ALIAS_KINDS = ["shop", "oem"] as const;
-export const ALIAS_KIND_LABEL: Record<string, string> = { shop: "Ours", oem: "Maker's" };
+export const ALIAS_KINDS = ["shop", "oem", "superseded"] as const;
+export const ALIAS_KIND_LABEL: Record<string, string> = {
+  shop: "Ours", oem: "Maker's", superseded: "Superseded",
+};
+
+/** True when this number is history: it still looks up, it never gets ordered. */
+export const isSuperseded = (a: Pick<PartAlias, "kind">) => a.kind === "superseded";
 
 /**
  * Every number that identifies this part, normalized, primaries first.
@@ -253,3 +268,37 @@ export function numberClash<T extends CatalogEntry>(
  * is a gallery nobody scrolls.
  */
 export const MAX_PART_PHOTOS = 8;
+
+/**
+ * What should actually be bought when somebody quotes this number.
+ *
+ * The whole point of recording a superseded number: it stays look-up-able
+ * forever, and the answer to "order me one of these" is the number that
+ * replaced it. Returns null when the number is unknown or already current, so
+ * the caller's ordinary path is untouched and only the interesting case costs
+ * anything.
+ *
+ * The replacement is the entry's OWN number - its primary, which is by
+ * definition the one it is called now. A part whose primary is itself marked
+ * superseded is a contradiction somebody typed; treated as current, because
+ * refusing to name any number would be worse than naming the one on the row.
+ */
+export function currentNumber<T extends CatalogEntry>(
+  catalog: T[], partNumber: string,
+): { quoted: string; current: string; entry: T } | null {
+  const pn = normalizePn(partNumber);
+  if (!pn) return null;
+  const entry = catalogEntry(catalog, partNumber);
+  if (!entry) return null;
+  const hit = (entry.aliases ?? []).find((a) => isSuperseded(a) && normalizePn(a.partNumber) === pn);
+  if (!hit) return null;
+  const current = entry.partNumber.trim();
+  if (!current || normalizePn(current) === pn) return null;
+  return { quoted: partNumber.trim(), current, entry };
+}
+
+/** The numbers this part is still sold under - everything except its history. */
+export function liveNumbers(e: Pick<CatalogEntry, "partNumber" | "mfrPartNumber" | "aliases">): string[] {
+  const dead = new Set((e.aliases ?? []).filter(isSuperseded).map((a) => normalizePn(a.partNumber)));
+  return allNumbers(e).filter((n) => !dead.has(n));
+}

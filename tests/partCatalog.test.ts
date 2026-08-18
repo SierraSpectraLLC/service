@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  allNumbers, catalogEntry, catalogLabel, catalogName, cleanAliases, isCatalogued, kitContents,
-  numberClash, searchCatalog, uncatalogued,
+  allNumbers, catalogEntry, catalogLabel, catalogName, cleanAliases, currentNumber, isCatalogued,
+  kitContents, liveNumbers, numberClash, searchCatalog, uncatalogued,
 } from "@/lib/partCatalog";
 
 const entry = (over: Partial<import("@/lib/partCatalog").CatalogEntry> = {}) => ({
@@ -252,5 +252,48 @@ describe("a retired part still owns its numbers", () => {
     // Letting a new part take it would silently re-point every old record at
     // the new description.
     expect(numberClash(book, { partNumber: "5063-OLD", mfrPartNumber: "", aliases: [] })?.entry.id).toBe(7);
+  });
+});
+
+describe("current and previous numbers", () => {
+  // Shimadzu replaced 062-65005-00 with -91. The part did not change; the
+  // number you order did, and every record from before says the old one.
+  const bulb = entry({
+    id: 12, partNumber: "062-65005-91", name: "Tungsten/Halogen UV Bulb",
+    manufacturer: "Shimadzu", mfrPartNumber: "",
+    aliases: [
+      { kind: "superseded", partNumber: "062-65005-00", note: "replaced 2024" },
+      { kind: "oem", partNumber: "5063-6589", manufacturer: "Restek" },
+    ],
+  });
+  const book = [...catalog, bulb];
+
+  it("still resolves the old number - that is the point of keeping it", () => {
+    expect(catalogEntry(book, "062-65005-00")?.id).toBe(12);
+    expect(uncatalogued(book, ["062-65005-00"])).toEqual([]);
+  });
+
+  it("answers what to buy instead", () => {
+    expect(currentNumber(book, "062-65005-00")).toMatchObject({
+      quoted: "062-65005-00", current: "062-65005-91",
+    });
+  });
+
+  it("says nothing for a number that is already current, or unknown", () => {
+    // Only the interesting case costs the caller anything.
+    expect(currentNumber(book, "062-65005-91")).toBeNull();
+    expect(currentNumber(book, "5063-6589")).toBeNull();
+    expect(currentNumber(book, "NEVER-SEEN")).toBeNull();
+    expect(currentNumber(book, "  ")).toBeNull();
+  });
+
+  it("keeps history out of the numbers it is sold under", () => {
+    expect(liveNumbers(bulb)).toEqual(["062-65005-91", "5063-6589"]);
+    expect(allNumbers(bulb)).toContain("062-65005-00");
+  });
+
+  it("treats a self-superseding entry as current rather than naming nothing", () => {
+    const odd = entry({ id: 13, partNumber: "X-1", aliases: [{ kind: "superseded", partNumber: "X-1" }] });
+    expect(currentNumber([odd], "X-1")).toBeNull();
   });
 });

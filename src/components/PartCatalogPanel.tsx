@@ -9,7 +9,7 @@ import {
 } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import {
-  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, kitContents, MAX_PART_PHOTOS,
+  ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, isSuperseded, kitContents, MAX_PART_PHOTOS,
   PART_KINDS, PART_KIND_LABEL, searchCatalog, type PartAlias,
 } from "@/lib/partCatalog";
 import type { UncataloguedPart } from "@/lib/partCatalog";
@@ -163,10 +163,18 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   hidden in the sheet, because the number somebody is holding is
                   as likely to be one of these as the one on the left. */}
               {r.aliases.slice(0, 3).map((a) => (
+                /* A superseded number reads as history at a glance - struck
+                   through, and pointing at what replaced it. Looking the same
+                   as a live alternate is how somebody orders a number nobody
+                   sells any more. */
                 <span key={a.partNumber} className="pill mono"
-                  title={`${ALIAS_KIND_LABEL[a.kind] ?? "Also"}${a.manufacturer ? ` · ${a.manufacturer}` : ""}${a.note ? ` · ${a.note}` : ""}`}
-                  style={{ background: "#F1F5F9", color: "#64748B", fontWeight: 400 }}>
-                  = {a.partNumber}
+                  title={isSuperseded(a)
+                    ? `Superseded - order ${r.partNumber} instead${a.note ? ` · ${a.note}` : ""}`
+                    : `${ALIAS_KIND_LABEL[a.kind] ?? "Also"}${a.manufacturer ? ` · ${a.manufacturer}` : ""}${a.note ? ` · ${a.note}` : ""}`}
+                  style={isSuperseded(a)
+                    ? { background: "#F4F6F9", color: "#94A3B8", fontWeight: 400, textDecoration: "line-through" }
+                    : { background: "#F1F5F9", color: "#64748B", fontWeight: 400 }}>
+                  {isSuperseded(a) ? "was " : "= "}{a.partNumber}
                 </span>
               ))}
               {r.aliases.length > 3 && (
@@ -298,7 +306,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                       aria-label="Manufacturer" disabled={a.kind === "shop"}
                       onChange={(e) => setAlias({ manufacturer: e.target.value })}
                       style={{ flex: "1 1 110px", fontSize: 12 }} />
-                    <input value={a.note ?? ""} placeholder="e.g. superseded 2024"
+                    <input value={a.note ?? ""} placeholder={isSuperseded(a) ? "when it changed" : "e.g. pack of 10"}
                       aria-label="Note"
                       onChange={(e) => setAlias({ note: e.target.value })}
                       style={{ flex: "1 1 120px", fontSize: 12 }} />
@@ -313,7 +321,9 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
               </button>
               <div className="mut" style={{ fontSize: 10.5, marginTop: 4 }}>
                 Anything typed here finds this part - in a picker, on a purchase order, and in
-                the list of numbers nobody has described.
+                the list of numbers nobody has described. <b style={{ fontWeight: 700 }}>Superseded</b> keeps
+                an old number look-up-able for the records that still quote it, and orders
+                {" "}<span className="mono">{draft.partNumber || "this part"}</span> in its place.
               </div>
             </div>
 
