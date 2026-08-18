@@ -4,7 +4,8 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   setOrgAppearance, updateEodRecipients, addClientAccess, removeClientAccess,
-  setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit, setOrgRemoteAccess,
+  setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
+  setOrgRemoteAccess, setOrgResale,
 } from "@/app/actions";
 import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
@@ -29,6 +30,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     eodRecipients: string; systems: number; isOperator: boolean; isSheetOrg: boolean;
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
+    resaleEnabled: boolean;
   };
   /** Whether the instance has the remote-support module on at all. */
   showRemote?: boolean;
@@ -77,6 +79,9 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
 
   // Remote support tier
   const [remoteOn, setRemoteOn] = useState(org.remoteAccessEnabled);
+  // Resale: off unless this organization is actually in that business.
+  const [resaleOn, setResaleOn] = useState(org.resaleEnabled);
+  const [resaleMsg, setResaleMsg] = useState("");
   const [remoteMsg, setRemoteMsg] = useState("");
 
   // Storage ceiling
@@ -245,6 +250,34 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           {recipientsMsg && (
             <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
           )}
+        </div>
+      )}
+
+      {isOwner && (
+        <div className="card">
+          <div className="card-title" style={{ marginBottom: 4 }}>Resale</div>
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            Off unless {org.name} deals in used equipment. When it is off, systems and units
+            carry no listing controls at all - anything already listed keeps its own, so
+            turning this off never strands a live listing.
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button className={`btn sm${resaleOn ? "" : " accent"}`} disabled={pending}
+              onClick={() => {
+                const next = !resaleOn;
+                setResaleOn(next); setResaleMsg("");
+                startTransition(async () => {
+                  const res = await setOrgResale(org.id, next);
+                  if (res?.error) { setResaleOn(!next); setResaleMsg(res.error); }
+                });
+              }}>
+              {resaleOn ? "Turn resale off" : "Turn resale on"}
+            </button>
+            <span className="pill" style={{ background: resaleOn ? "#E5F3E5" : "#EEF1F5", color: resaleOn ? "#2E6B2E" : "#475569" }}>
+              {resaleOn ? "can list equipment for sale" : "not a reseller"}
+            </span>
+          </div>
+          {resaleMsg && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{resaleMsg}</div>}
         </div>
       )}
 

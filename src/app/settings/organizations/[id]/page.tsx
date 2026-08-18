@@ -114,7 +114,8 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
           eodRecipients: org.eodRecipients, systems: shareRows.length,
           storageLimitMb: org.storageLimitMb, quota,
-          remoteAccessEnabled: org.remoteAccessEnabled, remoteDevices: deviceCount,
+          remoteAccessEnabled: org.remoteAccessEnabled,
+          resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
         people={allowRows.map((r) => ({ id: r.id, entry: r.entry, canEdit: r.canEdit, canSeeAgreements: r.canSeeAgreements }))}

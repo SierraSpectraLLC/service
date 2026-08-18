@@ -133,6 +133,19 @@ export const orgs = pgTable("orgs", {
   // can reach their own machines from the portal. House staff always can - that
   // is the base service - so this dial is only about client self-service.
   remoteAccessEnabled: boolean("remote_access_enabled").notNull().default(false),
+  /**
+   * Whether this organization deals in used equipment.
+   *
+   * Off by default, which is the point: resale is a real business for a
+   * handful of orgs and clutter on every page for the rest. A lab that
+   * services four instruments has no use for a listing link on each of them,
+   * and a control nobody will ever press still has to be read past every time.
+   *
+   * Gating the CONTROL, never a live listing - see canSell on the record
+   * pages: anything already for sale keeps its controls whatever this says,
+   * or turning it off would strand a listing with no way to end it.
+   */
+  resaleEnabled: boolean("resale_enabled").notNull().default(false),
   // The engine's device group for this organization, created the first time a
   // machine is enrolled for them. One group per org is what keeps one client's
   // machines invisible to another. Blank = no group yet.

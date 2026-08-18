@@ -4455,6 +4455,28 @@ export async function setOrgRemoteAccess(orgId: number, on: boolean): Promise<{ 
 }
 
 /**
+ * Whether this organization's records offer resale controls at all.
+ *
+ * Off by default. A lab that services four instruments will never list one for
+ * sale, and a control nobody presses still has to be read past on every page.
+ */
+export async function setOrgResale(orgId: number, on: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const gate = await adminOrgGate(u, orgId);
+  if ("error" in gate) return gate;
+  const { org } = gate;
+  await db.update(orgs).set({ resaleEnabled: on }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `turned resale listings for ${org.name} ${on ? "on" : "off"}`,
+    field: "resaleEnabled", oldValue: String(org.resaleEnabled), newValue: String(on),
+  });
+  revalidatePath("/", "layout");
+  revalidatePath("/settings");
+  return {};
+}
+
+/**
  * An installer link that joins one organization's device group. Staff-only: this
  * is a capability to enroll a machine, and handing it out is our act, not a
  * client's. Short-lived by construction on the engine side.

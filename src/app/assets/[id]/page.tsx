@@ -25,6 +25,7 @@ import { unitLabel } from "@/lib/assetServes";
 import ReferencePanel from "@/components/ReferencePanel";
 import { refsForUnits } from "@/lib/catalogRefs";
 import { copyTargetsFor } from "@/lib/copyTargets";
+import { canOfferResale, resaleFlagFor } from "@/lib/owner";
 import {
   fileSrc, isPhotoFile, livingCover, sharedCover, sharesPhotos, stockPhotoForUnit, stockSrc,
 } from "@/lib/photos";
@@ -137,7 +138,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
 
   const canEdit = access.edit;
   const isStaff = user.role === "owner" || user.role === "staff";
-  const canSell = isStaff || (asset.ownerOrgId !== null && asset.ownerOrgId === user.orgId && user.role === "client_editor");
+  // Resale controls only where somebody actually resells - see lib/owner.
+  const resaleOrgs = await db.select({ id: orgs.id, resaleEnabled: orgs.resaleEnabled }).from(orgs).catch(() => []);
+  const canSell = canOfferResale({
+    isStaff, viewerOrgId: user.orgId, viewerRole: user.role,
+    ownerOrgId: asset.ownerOrgId,
+    ownerResaleEnabled: resaleFlagFor(asset.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null),
+    alreadyListed: asset.forSale,
+  });
 
   // Who this asset's dossier is shared with (beyond its system and its owner).
   const [shareRows, orgRows] = await Promise.all([

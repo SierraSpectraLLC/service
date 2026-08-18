@@ -98,3 +98,46 @@ export function clientAfterHandoff(client: string, fromName: string, toName: str
   if (was && now.toLowerCase() === was.toLowerCase()) return toName.trim();
   return now;
 }
+
+/**
+ * May this record offer resale controls?
+ *
+ * Two questions, and both have to be yes. WHO: staff, or an editor at the
+ * organization that owns the record - unchanged, that was always the rule.
+ * WHETHER: the owning organization deals in used equipment at all. Off by
+ * default, because resale is a real business for a handful of orgs and clutter
+ * on every page for everybody else.
+ *
+ * `alreadyListed` overrides the second question and never the first. Turning
+ * the capability off must not strand a live listing with no way to end it - the
+ * same asymmetry stage removal has: adding is gated, taking something away
+ * never is.
+ *
+ * Unowned stock is the house's, so it answers to the operator's own flag.
+ */
+export function canOfferResale(a: {
+  isStaff: boolean;
+  viewerOrgId: number | null;
+  viewerRole: string;
+  ownerOrgId: number | null;
+  /** resale_enabled on the owning org - the operator's, for unowned stock. */
+  ownerResaleEnabled: boolean;
+  alreadyListed: boolean;
+}): boolean {
+  const who = a.isStaff
+    || (a.ownerOrgId !== null && a.viewerOrgId === a.ownerOrgId && a.viewerRole === "client_editor");
+  if (!who) return false;
+  return a.ownerResaleEnabled || a.alreadyListed;
+}
+
+/**
+ * The resale flag that governs a record: its owner's, or the operator's when
+ * nobody owns it - unowned stock on our bench is our stock to sell.
+ */
+export function resaleFlagFor(
+  ownerOrgId: number | null, orgs: { id: number; resaleEnabled: boolean }[], operatorOrgId: number | null,
+): boolean {
+  const id = ownerOrgId ?? operatorOrgId;
+  if (id === null) return orgs.some((o) => o.resaleEnabled);
+  return orgs.find((o) => o.id === id)?.resaleEnabled ?? false;
+}

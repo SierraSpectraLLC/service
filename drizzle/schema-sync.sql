@@ -2384,3 +2384,7 @@ DO $$ BEGIN
       FOREIGN KEY ("catalog_id") REFERENCES "part_catalog"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- Resale is a business a handful of organizations are in and clutter for the
+-- rest, so the controls are off unless somebody turns them on.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "resale_enabled" boolean NOT NULL DEFAULT false;

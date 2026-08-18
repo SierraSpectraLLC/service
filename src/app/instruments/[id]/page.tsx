@@ -27,6 +27,7 @@ import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { clientOptions } from "@/lib/clientNames";
+import { canOfferResale, resaleFlagFor } from "@/lib/owner";
 import { sitesFor } from "@/lib/sites";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
@@ -122,6 +123,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   }
 
   const showCosts = canSeeCosts(user, inst.ownerOrgId, inst.tenantOrgId);
+  // Resale controls only where somebody actually resells - see lib/owner.
+  const resaleOrgs = await db.select({ id: orgs.id, resaleEnabled: orgs.resaleEnabled }).from(orgs).catch(() => []);
 
   // What closed on each day, so the parts fitted that day read as that job's work
   // rather than as forty loose rows - see lib/partGroups.
@@ -491,7 +494,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               }))}
               ownerOrgId={inst.ownerOrgId}
               canEdit={canEdit} isStaff={isStaff} isOwner={user.role === "owner"}
-              canSell={isStaff || (inst.ownerOrgId !== null && inst.ownerOrgId === user.orgId && user.role === "client_editor")}
+              canSell={canOfferResale({
+                isStaff, viewerOrgId: user.orgId, viewerRole: user.role,
+                ownerOrgId: inst.ownerOrgId,
+                ownerResaleEnabled: resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null),
+                alreadyListed: inst.forSale,
+              })}
             />
           ) },
           // Whose move it is. High on the page: on a parked system it's the first thing that explains why nothing is happening.
