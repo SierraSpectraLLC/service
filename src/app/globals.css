@@ -71,6 +71,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    Procedures, the catalog - because moving between them and having the column
    jump is the kind of small wrongness that reads as a broken page. */
 .container.settings { max-width: 1080px; }
+.container.fluid { max-width: 1440px; }    /* the file browser: a table with user-sized columns wants the room */
 
 /* ── Page header ────────────────────────────────────────────────────────────
    One pattern for "what page am I on and what can I do here": title on the

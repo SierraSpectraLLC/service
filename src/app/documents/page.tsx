@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { attachments, dropLinks, folders as foldersTable, orgs, shareLinks, shareLinkFiles } from "@/db/schema";
+import { attachments, dropLinks, folders as foldersTable, instruments, orgs, shareLinks, shareLinkFiles } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeFiles, storeQuota, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
-import { visibleOrgs } from "@/lib/tenancy";
+import { visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
+import StorePicker from "@/components/StorePicker";
 import FileLinksCard, { type StoreLink } from "@/components/FileLinksCard";
 import LibraryUpload from "@/components/LibraryUpload";
 import StorageMeter from "@/components/StorageMeter";
@@ -86,6 +87,17 @@ export default async function DocumentsPage(
   // their widths on the first frame instead of snapping after hydration.
   const canEdit = user.role !== "client_viewer";
   const savedCols = await getFileColumns().catch(() => null);
+  // Where a loose file can be filed from here: the systems this person can
+  // see. attachLibraryFile still checks edit rights on the target, so the
+  // picker being generous costs a sentence, never a leak.
+  const visSystems = isOwnStore && canEdit ? await visibleSystemIds(user) : [];
+  const systemRows = isOwnStore && canEdit
+    ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model })
+        .from(instruments)
+        .where(and(eq(instruments.archived, false),
+          visSystems === null ? undefined : visSystems.length ? inArray(instruments.id, visSystems) : sql`false`))
+        .orderBy(asc(instruments.externalId)).catch(() => [])
+    : [];
   // The store's open doors: drop links into it, plus share links this person
   // made. Staff browsing another org's store see that store's drop links -
   // they administer it - but only their own shares, which are personal.
@@ -125,7 +137,7 @@ export default async function DocumentsPage(
   const truncated = rows.length >= CAP;
 
   return (
-    <div className="container page">
+    <div className="container fluid">
       <div className="page-head">
         <h1 className="page-title">Files</h1>
         <span className="mut" style={{ fontSize: 12 }}>
@@ -136,6 +148,11 @@ export default async function DocumentsPage(
           {/* The meter used to be a card of its own at the top, which made a
               file store open on a gauge. It is a number now, and it moves out
               of the way. */}
+          {orgRows.length > 0 && (
+            <StorePicker viewing={viewing}
+              options={[{ id: null, name: `${brand.operatorName || brand.name} (own work)` },
+                ...orgRows.map((o) => ({ id: o.id, name: o.name }))]} />
+          )}
           <StorageMeter quota={quota} name={quota.storeName} compact />
           <Link href="/pdf" className="btn sm" style={{ textDecoration: "none" }}>PDF studio</Link>
         </span>
@@ -151,19 +168,6 @@ export default async function DocumentsPage(
           deliberate act done from that record.
         </div>
       )}
-      {orgRows.length > 0 && (
-        <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span className="mut" style={{ fontSize: 12, marginRight: 4 }}>Store</span>
-          {[{ id: null as number | null, name: `${brand.operatorName || brand.name} (own work)` },
-            ...orgRows.map((o) => ({ id: o.id as number | null, name: o.name }))].map((s) => (
-            <Link key={s.id ?? "own"} href={s.id === null ? "/documents" : `/documents?store=${s.id}`}
-              className={`btn sm${viewing === s.id ? " primary" : ""}`} style={{ textDecoration: "none" }}>
-              {s.name}
-            </Link>
-          ))}
-        </div>
-      )}
-
       <div className="card">
         {!isOwnStore && (
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
@@ -193,6 +197,7 @@ export default async function DocumentsPage(
           storeOrgId={viewing}
           openFolderId={openFolder?.id ?? null}
           columnWidths={savedCols}
+          systems={systemRows}
           canOrganise={canOrganise}
           canRemoveShelf={canEdit && isOwnStore}
           canRemoveRecord={isHouseUser}

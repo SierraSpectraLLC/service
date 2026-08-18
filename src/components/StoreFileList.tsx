@@ -5,8 +5,9 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { promptReason } from "@/lib/reason";
 import {
-  createFolder, createShareLink, deleteAttachment, deleteFolder, moveFilesToFolder, moveFolder,
-  renameFolder, saveFileColumns, updateAttachment, type FileColumnWidths,
+  attachLibraryFile, createFolder, createShareLink, deleteAttachment, deleteFolder,
+  moveFilesToFolder, moveFolder, renameFolder, saveFileColumns, updateAttachment,
+  type FileColumnWidths,
 } from "@/app/actions";
 import { addDaysIso, DEFAULT_LINK_DAYS } from "@/lib/dropShare";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
@@ -48,6 +49,13 @@ const oneLine: React.CSSProperties = {
   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
 };
 
+/**
+ * The column seams, faint but real. With user-sized columns the eye needs to
+ * see where one ends - a hair fainter than the row rule, so the verticals read
+ * as structure and the horizontals still read as rows.
+ */
+const colLine: React.CSSProperties = { borderLeft: "1px solid #EFF3F8", paddingLeft: 8 };
+
 const onShelf = (f: StoreFile) => f.places.some((p) => p.kind === "shelf");
 const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
 
@@ -71,7 +79,7 @@ const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
  */
 export default function StoreFileList({
   files, folders = [], storeOrgId = null, openFolderId = null, columnWidths = null,
-  canOrganise = false, canRemoveShelf, canRemoveRecord, emptyNote,
+  systems = [], canOrganise = false, canRemoveShelf, canRemoveRecord, emptyNote,
 }: {
   files: StoreFile[];
   /** The store's folders. Empty means this list is browsed flat. */
@@ -82,6 +90,8 @@ export default function StoreFileList({
   openFolderId?: number | null;
   /** This person's saved column widths, read on the server. Null = defaults. */
   columnWidths?: FileColumnWidths | null;
+  /** Systems a loose file can be filed onto from here. Empty hides the control. */
+  systems?: { id: number; externalId: string; model: string }[];
   canOrganise?: boolean;
   canRemoveShelf: boolean;
   canRemoveRecord: boolean;
@@ -120,6 +130,27 @@ export default function StoreFileList({
   const [dragOver, setDragOver] = useState<number | null | "root">(null);
   const [shareUrl, setShareUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [filedNote, setFiledNote] = useState("");
+
+  /**
+   * Copy loose files onto a system - the same act the record's Files panel
+   * calls "from the library", started from this end. Partial outcomes are
+   * ordinary (a file may already be on the record), so the result is counted
+   * out loud instead of the first refusal aborting the rest.
+   */
+  const fileOnto = (targets: StoreFile[], instrumentId: number, label: string) =>
+    startTransition(async () => {
+      let filed = 0; const skipped: string[] = [];
+      for (const f of targets) {
+        const shelf = f.places.find((pl) => pl.kind === "shelf");
+        if (!shelf) continue;
+        const res = await attachLibraryFile({ instrumentId, assetId: null }, shelf.attachmentId);
+        if (res?.error) skipped.push(`${f.fileName}: ${res.error}`);
+        else filed++;
+      }
+      setFiledNote(`${filed} filed onto ${label}${skipped.length ? ` · ${skipped.length} skipped (${skipped[0]})` : ""}`);
+      setPicked(new Set());
+    });
   // Column widths, draggable at the header and remembered per person on the
   // server - the same "how I like this screen" fact as a panel arrangement.
   // Name is never a number: it flexes into whatever the fixed columns leave.
@@ -289,6 +320,21 @@ export default function StoreFileList({
             {fmtBytes(shown.filter((f) => picked.has(f.url)).reduce((n, f) => n + f.size, 0))}
           </span>
           <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>clear</button>
+          {systems.length > 0 && (
+            <select value="" disabled={pending} aria-label="File the selection onto a system"
+              onChange={(e) => {
+                const id = parseInt(e.target.value);
+                if (!id) return;
+                const sys = systems.find((x) => x.id === id);
+                fileOnto(shown.filter((f) => picked.has(f.url)), id, sys?.externalId ?? "the system");
+              }}
+              style={{ width: "auto", fontSize: 12 }}>
+              <option value="">File onto system...</option>
+              {systems.map((x) => (
+                <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` — ${x.model}` : ""}</option>
+              ))}
+            </select>
+          )}
           {/* One archive of the selection. Authorized per file by the same
               gate as a single download - see /api/files/zip. */}
           <a className="btn sm" style={{ textDecoration: "none" }}
@@ -386,7 +432,7 @@ export default function StoreFileList({
           {/* Each fixed column drags at its right edge; Name takes the slack. */}
           {([["where", "Where", {}], ["size", "Size", { textAlign: "right" }], ["when", "Modified", { textAlign: "right" }]] as const)
             .map(([key, label, extra]) => (
-              <span key={key} style={{ width: cols[key], flexShrink: 0, position: "relative", ...extra }}>
+              <span key={key} style={{ width: cols[key], flexShrink: 0, position: "relative", ...colLine, ...extra }}>
                 {head(key, label)}
                 <span role="separator" aria-orientation="vertical" aria-label={`Resize the ${label} column`}
                   title="Drag to resize · double-click to reset"
@@ -427,7 +473,7 @@ export default function StoreFileList({
             <span aria-hidden style={{ color: "#8A5410", flexShrink: 0 }}>▮</span>
             <span style={{ fontSize: 13, fontWeight: 700, minWidth: 0, ...oneLine }}>{d.name}</span>
           </button>
-          <span style={{ width: cols.where, flexShrink: 0, ...oneLine }}>
+          <span style={{ width: cols.where, flexShrink: 0, ...colLine, ...oneLine }}>
             {(() => {
               // Everything at any depth, so a folder's line means the same
               // thing whether somebody nested things inside it or not.
@@ -443,8 +489,8 @@ export default function StoreFileList({
               );
             })()}
           </span>
-          <span style={{ width: cols.size, flexShrink: 0 }} />
-          <span style={{ width: cols.when, flexShrink: 0, textAlign: "right", ...oneLine }}>
+          <span style={{ width: cols.size, flexShrink: 0, ...colLine, alignSelf: "stretch" }} />
+          <span style={{ width: cols.when, flexShrink: 0, textAlign: "right", ...colLine, ...oneLine }}>
             {canOrganise && (
               <>
                 <button className="btn link row-act" style={{ fontSize: 10.5 }} disabled={pending}
@@ -522,7 +568,7 @@ export default function StoreFileList({
               </span>
             )}
           </span>
-          <span style={{ width: cols.where, flexShrink: 0, display: "flex", gap: 4, alignItems: "baseline", overflow: "hidden", whiteSpace: "nowrap" }}>
+          <span style={{ width: cols.where, flexShrink: 0, display: "flex", gap: 4, alignItems: "baseline", overflow: "hidden", whiteSpace: "nowrap", ...colLine }}>
             {/* Found by search: say which folder it lives in, and make the
                 answer a door. "Does it exist" without "where did I put it" is
                 half of what somebody searching wanted. */}
@@ -537,7 +583,7 @@ export default function StoreFileList({
             <WhereChips file={f} removable={removable} pending={pending}
               onRemoved={(err) => setError(err)} startTransition={startTransition} />
           </span>
-          <span style={{ width: cols.size, flexShrink: 0, textAlign: "right", whiteSpace: "nowrap" }}>
+          <span style={{ width: cols.size, flexShrink: 0, textAlign: "right", whiteSpace: "nowrap", ...colLine }}>
             <span className="mut" style={{ fontSize: 12 }}>{fmtBytes(f.size)}</span>
             {canOrganise && (
               <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }}
@@ -552,7 +598,7 @@ export default function StoreFileList({
           {/* One line; widen the column when you want the uploader too - the
               hover title always carries both. */}
           <span className="mut" title={`${f.when} · ${f.uploadedBy}`}
-            style={{ width: cols.when, flexShrink: 0, fontSize: 11, textAlign: "right", ...oneLine }}>
+            style={{ width: cols.when, flexShrink: 0, fontSize: 11, textAlign: "right", ...colLine, ...oneLine }}>
             {f.when} · {f.uploadedBy}
           </span>
         </div>
@@ -625,6 +671,7 @@ export default function StoreFileList({
           No file matches &ldquo;{filter}&rdquo;.
         </div>
       )}
+      {filedNote && <div style={{ fontSize: 12, color: "#2E6B2E", marginTop: 6, fontWeight: 700 }}>{filedNote}</div>}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
 
       {/* One file, close up: what it is called, what it is, and where it came
@@ -663,6 +710,28 @@ export default function StoreFileList({
                 : "Not on any system."}
             </div>
 
+            {systems.length > 0 && details.places.some((pl) => pl.kind === "shelf") && (
+              <div style={{ marginBottom: 10 }}>
+                <label>Put it on a system</label>
+                <select value="" disabled={pending} aria-label="File this onto a system"
+                  onChange={(e) => {
+                    const id = parseInt(e.target.value);
+                    if (!id) return;
+                    const sys = systems.find((x) => x.id === id);
+                    fileOnto([details], id, sys?.externalId ?? "the system");
+                    setDetails(null);
+                  }}
+                  style={{ fontSize: 12 }}>
+                  <option value="">Choose a system...</option>
+                  {systems.map((x) => (
+                    <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` — ${x.model}` : ""}</option>
+                  ))}
+                </select>
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  It appears in that system&apos;s files AND stays here - one stored copy, filed twice.
+                </div>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <a className="btn sm" href={`/api/files/${details.places[0].attachmentId}`} download
                 style={{ marginRight: "auto", textDecoration: "none" }}>Download</a>
