@@ -787,6 +787,55 @@ export const folders = pgTable("folders", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("folders_org_idx").on(t.orgId), index("folders_parent_idx").on(t.parentId)]);
 
+/**
+ * Bearer links into and out of a file store - see lib/dropShare.
+ *
+ * A DROP link lets somebody without a login send files IN: the URL is the
+ * credential, it targets one store (and optionally one folder), it expires,
+ * and it can be revoked. The row survives revocation and expiry so "who could
+ * write into our storage, and when" stays answerable.
+ */
+export const dropLinks = pgTable("drop_links", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Whose store uploads land in. Null = the operator's own. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /** Which folder, or null for the top level. A dead folder falls back to root. */
+  folderId: integer("folder_id").references((): AnyPgColumn => folders.id, { onDelete: "set null" }),
+  token: text("token").notNull().unique(),
+  label: text("label").notNull().default(""),
+  expiresOn: text("expires_on").notNull(),   // YYYY-MM-DD, last working day
+  usedCount: integer("used_count").notNull().default(0),
+  lastUploadAt: timestamp("last_upload_at"),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+}, (t) => [index("drop_links_org_idx").on(t.orgId)]);
+
+/**
+ * The outbound twin: named files, readable by whoever holds the URL until it
+ * expires or is killed. Files are named at creation from what the creator
+ * could read AT THAT MOMENT - the link never grows.
+ */
+export const shareLinks = pgTable("share_links", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  token: text("token").notNull().unique(),
+  label: text("label").notNull().default(""),
+  expiresOn: text("expires_on").notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  revokedAt: timestamp("revoked_at"),
+});
+
+// Cascades from both ends: a deleted file leaves every share it was in, and a
+// deleted share takes only its rows. No stamp - a child of share_links.
+export const shareLinkFiles = pgTable("share_link_files", {
+  id: serial("id").primaryKey(),
+  shareId: integer("share_id").notNull().references((): AnyPgColumn => shareLinks.id, { onDelete: "cascade" }),
+  attachmentId: integer("attachment_id").notNull().references((): AnyPgColumn => attachments.id, { onDelete: "cascade" }),
+}, (t) => [index("share_link_files_share_idx").on(t.shareId)]);
+
 export const attachments = pgTable("attachments", {
   /**
    * How this photo sits in a thumbnail: "rot,zoom,x,y", blank for untouched.

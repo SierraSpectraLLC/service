@@ -5,9 +5,10 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { promptReason } from "@/lib/reason";
 import {
-  createFolder, deleteAttachment, deleteFolder, moveFilesToFolder, moveFolder, renameFolder,
-  saveFileColumns, updateAttachment, type FileColumnWidths,
+  createFolder, createShareLink, deleteAttachment, deleteFolder, moveFilesToFolder, moveFolder,
+  renameFolder, saveFileColumns, updateAttachment, type FileColumnWidths,
 } from "@/app/actions";
+import { addDaysIso, DEFAULT_LINK_DAYS } from "@/lib/dropShare";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { canMoveFolder, childrenOf, descendantIds, folderPath, type FolderLike } from "@/lib/folders";
 import { fmtBytes } from "@/lib/storage";
@@ -114,6 +115,11 @@ export default function StoreFileList({
   const [details, setDetails] = useState<StoreFile | null>(null);
   const [draft, setDraft] = useState({ fileName: "", kind: "Other", description: "" });
   const [folderMove, setFolderMove] = useState<number | null>(null);
+  // A row being dragged, and the folder it is over. The drag carries the
+  // whole selection when the dragged row is part of it - the drive gesture.
+  const [dragOver, setDragOver] = useState<number | null | "root">(null);
+  const [shareUrl, setShareUrl] = useState("");
+  const [copied, setCopied] = useState(false);
   // Column widths, draggable at the header and remembered per person on the
   // server - the same "how I like this screen" fact as a panel arrangement.
   // Name is never a number: it flexes into whatever the fixed columns leave.
@@ -177,6 +183,25 @@ export default function StoreFileList({
   }
 
   const removable = (p: Place) => (p.kind === "shelf" ? canRemoveShelf : canRemoveRecord);
+  /** The loose copies a gesture moves: the selection if the file is in it, else just the file. */
+  const dragIds = (f: StoreFile): number[] => {
+    const set = picked.has(f.url) ? shown.filter((x) => picked.has(x.url)) : [f];
+    return set.flatMap((x) => { const sp = x.places.find((pl) => pl.kind === "shelf"); return sp ? [sp.attachmentId] : []; });
+  };
+  const dropIds = (e: React.DragEvent): number[] =>
+    (e.dataTransfer.getData("application/x-store-file") || "").split(",").map((n) => parseInt(n)).filter((n) => n > 0);
+  const acceptsFileDrag = (e: React.DragEvent) => e.dataTransfer.types.includes("application/x-store-file");
+  const dropInto = (folderId: number | null) => (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(null);
+    const ids = dropIds(e);
+    if (!ids.length) return;
+    startTransition(async () => {
+      const res = await moveFilesToFolder(ids, folderId);
+      if (res?.error) { setError(res.error); return; }
+      setPicked(new Set()); setError("");
+    });
+  };
   const toggle = (url: string) =>
     setPicked((s) => { const n = new Set(s); if (n.has(url)) n.delete(url); else n.add(url); return n; });
 
@@ -197,8 +222,11 @@ export default function StoreFileList({
     <>
       {folders.length > 0 || canOrganise ? (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <button className="btn link" style={{ fontSize: 12.5, fontWeight: trail.length ? 400 : 700 }}
-            onClick={() => setAt(null)}>All files</button>
+          <button className="btn link" style={{ fontSize: 12.5, fontWeight: trail.length ? 400 : 700, background: dragOver === "root" ? "#EEF4FB" : undefined, borderRadius: 6 }}
+            onClick={() => setAt(null)}
+            onDragOver={(e) => { if (acceptsFileDrag(e)) { e.preventDefault(); setDragOver("root"); } }}
+            onDragLeave={() => setDragOver(null)}
+            onDrop={dropInto(null)}>All files</button>
           {trail.map((f, i) => (
             <span key={f.id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
               <span className="mut" style={{ fontSize: 12 }}>/</span>
@@ -261,6 +289,38 @@ export default function StoreFileList({
             {fmtBytes(shown.filter((f) => picked.has(f.url)).reduce((n, f) => n + f.size, 0))}
           </span>
           <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>clear</button>
+          {/* One archive of the selection. Authorized per file by the same
+              gate as a single download - see /api/files/zip. */}
+          <a className="btn sm" style={{ textDecoration: "none" }}
+            href={`/api/files/zip?ids=${shown.filter((f) => picked.has(f.url)).map((f) => f.places[0].attachmentId).join(",")}`}>
+            Download .zip
+          </a>
+          {canOrganise && !shareUrl && (
+            <button className="btn sm" disabled={pending}
+              title="A link anyone can open - no account needed. Lasts two weeks; revoke it under Links."
+              onClick={() => {
+                const label = window.prompt("Name this share (optional) - e.g. who it's for:", "") ?? "";
+                startTransition(async () => {
+                  const ids = shown.filter((f) => picked.has(f.url)).map((f) => f.places[0].attachmentId);
+                  const res = await createShareLink(ids, {
+                    label, expiresOn: addDaysIso(new Date().toISOString().slice(0, 10), DEFAULT_LINK_DAYS),
+                  });
+                  if (res?.error || !res.token) { setError(res?.error ?? "Sharing failed"); return; }
+                  setShareUrl(`${window.location.origin}/share/${res.token}`);
+                  setError("");
+                });
+              }}>Share...</button>
+          )}
+          {shareUrl && (
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+              <a href={shareUrl} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: 11, ...oneLine, maxWidth: 260 }}>{shareUrl}</a>
+              <button className="btn sm accent" onClick={() => {
+                void navigator.clipboard?.writeText(shareUrl);
+                setCopied(true); setTimeout(() => setCopied(false), 1500);
+              }}>{copied ? "Copied ✓" : "Copy link"}</button>
+              <button className="btn link" style={{ fontSize: 11 }} onClick={() => setShareUrl("")}>done</button>
+            </span>
+          )}
           {canOrganise && (
             <span style={{ position: "relative" }}>
               <button className="btn sm" disabled={pending} onClick={() => setMoveOpen((v) => !v)}>
@@ -351,7 +411,15 @@ export default function StoreFileList({
           while searching, because a search is about files. */}
       {view === "list" && !searching && here.map((d) => (
         <div key={`d${d.id}`} className="row-hover file-row"
-          style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)" }}>
+          onDragOver={(e) => { if (acceptsFileDrag(e)) { e.preventDefault(); setDragOver(d.id); } }}
+          onDragLeave={() => setDragOver((v) => (v === d.id ? null : v))}
+          onDrop={dropInto(d.id)}
+          style={{
+            display: "flex", gap: 8, alignItems: "center", padding: "7px 4px",
+            borderBottom: "1px solid var(--line)",
+            background: dragOver === d.id ? "#EEF4FB" : undefined,
+            outline: dragOver === d.id ? "1.5px dashed var(--navy)" : undefined, outlineOffset: -2,
+          }}>
           <span style={{ width: 15, flexShrink: 0 }} />
           <button className="btn link" onClick={() => { setAt(d.id); setPicked(new Set()); }}
             style={{ flex: "1 1 200px", textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0 }}
@@ -428,7 +496,14 @@ export default function StoreFileList({
 
       {view === "list" && shown.map((f) => (
         <div key={f.url} className="row-hover file-row"
-          style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)" }}>
+          draggable={canOrganise && onShelf(f)}
+          onDragStart={(e) => {
+            // The drag never carries the browser's "Files" type, so the page's
+            // drop-to-upload overlay stays quiet during an internal move.
+            e.dataTransfer.setData("application/x-store-file", dragIds(f).join(","));
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)", cursor: canOrganise && onShelf(f) ? "grab" : undefined }}>
           <input type="checkbox" checked={picked.has(f.url)} onChange={() => toggle(f.url)}
             aria-label={`Select ${f.fileName}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
           {/* One line, whatever the name's length. The full name and the
@@ -448,6 +523,17 @@ export default function StoreFileList({
             )}
           </span>
           <span style={{ width: cols.where, flexShrink: 0, display: "flex", gap: 4, alignItems: "baseline", overflow: "hidden", whiteSpace: "nowrap" }}>
+            {/* Found by search: say which folder it lives in, and make the
+                answer a door. "Does it exist" without "where did I put it" is
+                half of what somebody searching wanted. */}
+            {searching && f.folderId !== null && (
+              <button className="pill" type="button"
+                title={folderPath(folders, f.folderId).map((x) => x.name).join(" / ")}
+                onClick={() => { setFilter(""); setAt(f.folderId); }}
+                style={{ background: "#FAF0DC", color: "#8A5410", border: "none", cursor: "pointer", ...oneLine, maxWidth: 120 }}>
+                ▮ {folders.find((x) => x.id === f.folderId)?.name ?? "folder"}
+              </button>
+            )}
             <WhereChips file={f} removable={removable} pending={pending}
               onRemoved={(err) => setError(err)} startTransition={startTransition} />
           </span>
@@ -474,6 +560,34 @@ export default function StoreFileList({
 
       {view === "grid" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+          {/* Folders as tiles, ahead of the files - the list view has had them
+              from the start, and a tile view where they vanish reads as "my
+              folders are gone". Hidden while searching, same as the list. */}
+          {!searching && here.map((d) => {
+            const scope = new Set([d.id, ...descendantIds(folders, d.id)]);
+            const n = files.filter((f) => f.folderId !== null && scope.has(f.folderId)).length
+              + descendantIds(folders, d.id).length;
+            return (
+              <button key={`d${d.id}`} type="button" onClick={() => { setAt(d.id); setPicked(new Set()); }}
+                onDragOver={(e) => { if (acceptsFileDrag(e)) { e.preventDefault(); setDragOver(d.id); } }}
+                onDragLeave={() => setDragOver((v) => (v === d.id ? null : v))}
+                onDrop={dropInto(d.id)}
+                style={{
+                  border: dragOver === d.id ? "1.5px dashed var(--navy)" : "1px solid var(--line)",
+                  borderRadius: 10, padding: 8, minWidth: 0, textAlign: "left", cursor: "pointer",
+                  background: dragOver === d.id ? "#EEF4FB" : "#fff",
+                }}>
+                <div style={{
+                  height: 92, borderRadius: 6, background: "#FAF6EE", marginBottom: 6,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <span aria-hidden style={{ fontSize: 30, color: "#8A5410" }}>▮</span>
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, ...oneLine }}>{d.name}</div>
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</div>
+              </button>
+            );
+          })}
           {shown.map((f) => (
             <div key={f.url} style={{
               border: picked.has(f.url) ? "2px solid var(--navy)" : "1px solid var(--line)",

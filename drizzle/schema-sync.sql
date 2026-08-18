@@ -2421,3 +2421,64 @@ DO $$ BEGIN
       FOREIGN KEY ("folder_id") REFERENCES "folders"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Bearer links into (drop) and out of (share) a file store. See lib/dropShare.
+CREATE TABLE IF NOT EXISTS "drop_links" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "org_id" integer,
+  "folder_id" integer,
+  "token" text NOT NULL,
+  "label" text NOT NULL DEFAULT '',
+  "expires_on" text NOT NULL,
+  "used_count" integer NOT NULL DEFAULT 0,
+  "last_upload_at" timestamp,
+  "created_by" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "revoked_at" timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "drop_links_token_unique" ON "drop_links" ("token");
+CREATE INDEX IF NOT EXISTS "drop_links_org_idx" ON "drop_links" ("org_id");
+CREATE TABLE IF NOT EXISTS "share_links" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "token" text NOT NULL,
+  "label" text NOT NULL DEFAULT '',
+  "expires_on" text NOT NULL,
+  "created_by" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "revoked_at" timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "share_links_token_unique" ON "share_links" ("token");
+CREATE TABLE IF NOT EXISTS "share_link_files" (
+  "id" serial PRIMARY KEY,
+  "share_id" integer NOT NULL,
+  "attachment_id" integer NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "share_link_files_share_idx" ON "share_link_files" ("share_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drop_links_org_id_fk') THEN
+    ALTER TABLE "drop_links" ADD CONSTRAINT "drop_links_org_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drop_links_folder_id_fk') THEN
+    ALTER TABLE "drop_links" ADD CONSTRAINT "drop_links_folder_id_fk"
+      FOREIGN KEY ("folder_id") REFERENCES "folders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drop_links_tenant_org_id_fk') THEN
+    ALTER TABLE "drop_links" ADD CONSTRAINT "drop_links_tenant_org_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_tenant_org_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_tenant_org_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_link_files_share_id_fk') THEN
+    ALTER TABLE "share_link_files" ADD CONSTRAINT "share_link_files_share_id_fk"
+      FOREIGN KEY ("share_id") REFERENCES "share_links"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_link_files_attachment_id_fk') THEN
+    ALTER TABLE "share_link_files" ADD CONSTRAINT "share_link_files_attachment_id_fk"
+      FOREIGN KEY ("attachment_id") REFERENCES "attachments"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

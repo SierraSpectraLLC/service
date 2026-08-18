@@ -22,6 +22,7 @@ export const NOTIFY_KINDS = [
   { kind: "renewal", label: "A contract is coming up for renewal" },
   { kind: "parts_request", label: "We're asked to order parts for our systems" },
   { kind: "message", label: "Somebody messages me directly" },
+  { kind: "drop", label: "Files arrive through a drop link I made" },
 ] as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];

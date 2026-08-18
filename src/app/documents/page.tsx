@@ -1,16 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, eq, isNull } from "drizzle-orm";
+import { asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { folders as foldersTable, orgs } from "@/db/schema";
+import { attachments, dropLinks, folders as foldersTable, orgs, shareLinks, shareLinkFiles } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
-import { shopTime } from "@/lib/shopday";
+import { shopTime, shopToday } from "@/lib/shopday";
 import { storeFiles, storeQuota, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
 import { visibleOrgs } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
+import FileLinksCard, { type StoreLink } from "@/components/FileLinksCard";
 import LibraryUpload from "@/components/LibraryUpload";
 import StorageMeter from "@/components/StorageMeter";
 import CloudLibraryCard from "@/components/CloudLibraryCard";
@@ -83,13 +84,45 @@ export default async function DocumentsPage(
   const openFolder = folderRows.find((f) => f.id === wantFolder) ?? null;
   // How this person likes their columns. Read here so the table renders at
   // their widths on the first frame instead of snapping after hydration.
+  const canEdit = user.role !== "client_viewer";
   const savedCols = await getFileColumns().catch(() => null);
+  // The store's open doors: drop links into it, plus share links this person
+  // made. Staff browsing another org's store see that store's drop links -
+  // they administer it - but only their own shares, which are personal.
+  const canOrganise = canEdit && (isOwnStore || isHouseUser);
+  const [dropRows, shareRows] = await Promise.all([
+    canOrganise
+      ? db.select().from(dropLinks)
+          .where(viewing === null ? isNull(dropLinks.orgId) : eq(dropLinks.orgId, viewing))
+          .orderBy(desc(dropLinks.createdAt)).limit(30).catch(() => [])
+      : [],
+    isOwnStore && canEdit
+      ? db.select().from(shareLinks).where(eq(shareLinks.createdBy, user.email))
+          .orderBy(desc(shareLinks.createdAt)).limit(30).catch(() => [])
+      : [],
+  ]);
+  const shareCounts = shareRows.length
+    ? await db.select({ shareId: shareLinkFiles.shareId, n: sql<number>`count(*)` })
+        .from(shareLinkFiles).where(inArray(shareLinkFiles.shareId, shareRows.map((r) => r.id)))
+        .groupBy(shareLinkFiles.shareId).catch(() => [])
+    : [];
+  const storeLinks: StoreLink[] = [
+    ...dropRows.map((l) => ({
+      id: l.id, kind: "drop" as const, label: l.label, token: l.token, expiresOn: l.expiresOn,
+      revokedAt: l.revokedAt?.toISOString() ?? null, count: l.usedCount,
+      folderName: folderRows.find((f) => f.id === l.folderId)?.name,
+    })),
+    ...shareRows.map((l) => ({
+      id: l.id, kind: "share" as const, label: l.label, token: l.token, expiresOn: l.expiresOn,
+      revokedAt: l.revokedAt?.toISOString() ?? null,
+      count: Number(shareCounts.find((c) => c.shareId === l.id)?.n ?? 0),
+    })),
+  ];
 
   const files = groupStoredFiles(rows);
   const guests = groupStoredFiles(guestRows);
   const shown = totalBytes(files);
   const truncated = rows.length >= CAP;
-  const canEdit = user.role !== "client_viewer";
 
   return (
     <div className="container page">
@@ -141,6 +174,9 @@ export default async function DocumentsPage(
           <LibraryUpload full={quota.state === "full"} maxBytes={MAX_FILE_BYTES}
             folderId={openFolder?.id ?? null} folderName={openFolder?.name ?? ""} />
         )}
+        <FileLinksCard links={storeLinks} storeOrgId={viewing}
+          openFolderId={openFolder?.id ?? null} openFolderName={openFolder?.name ?? ""}
+          today={shopToday()} canManage={canOrganise} />
         <StoreFileList
           files={files.map((f) => ({
             url: f.url, size: f.size, fileName: f.fileName, description: f.description,
@@ -157,7 +193,7 @@ export default async function DocumentsPage(
           storeOrgId={viewing}
           openFolderId={openFolder?.id ?? null}
           columnWidths={savedCols}
-          canOrganise={canEdit && (isOwnStore || isHouseUser)}
+          canOrganise={canOrganise}
           canRemoveShelf={canEdit && isOwnStore}
           canRemoveRecord={isHouseUser}
         />

@@ -361,6 +361,28 @@ export async function notifyPartsRequested(opts: {
  * open a tab to read one line is how a notification becomes noise. Everyone
  * addressed can already see it - they are in the thread.
  */
+/**
+ * Files arrived through a drop link. Sent to whoever made the link - an
+ * anonymous write into the store that nobody is told about is how a bearer
+ * token quietly becomes a liability.
+ */
+export async function notifyDropReceived(opts: {
+  to: string; label: string; count: number; names: string[];
+}) {
+  try {
+    const what = opts.names.slice(0, 3).join(", ") + (opts.count > 3 ? ` +${opts.count - 3} more` : "");
+    await deliver({
+      to: [opts.to], kind: "drop", href: "/documents",
+      title: `${opts.count} file${opts.count === 1 ? "" : "s"} arrived via "${opts.label}": ${what}`,
+      subject: `Files arrived through your drop link`,
+      html: await wrap(`<b>${esc(String(opts.count))} file${opts.count === 1 ? "" : "s"}</b> arrived through
+        your drop link <b>${esc(opts.label)}</b>:<br>${esc(what)}`),
+    });
+  } catch (e) {
+    console.error("notifyDropReceived:", e);
+  }
+}
+
 export async function notifyMessage(opts: {
   to: string[]; threadId: number; fromName: string; body: string;
   title: string; memberCount: number;

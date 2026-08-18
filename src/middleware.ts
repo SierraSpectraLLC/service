@@ -28,9 +28,9 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // `listing` is the one public page: a for-sale item's buyer-facing view,
-  // keyed by its unguessable token. `api/files` does its own authorization
-  // (it must serve listing files to anonymous buyers). Both 404 anything
-  // they don't explicitly allow.
-  matcher: ["/((?!api/auth|api/cron|api/upload|api/files|login|listing|_next/static|_next/image|favicon.ico).*)"],
+  // The public pages are the token-keyed ones - a listing's buyer view, a
+  // drop link's sender view, a share link's recipient view - plus the API
+  // routes that serve them. Every one of them treats its unguessable token as
+  // the credential and 404s anything it doesn't explicitly allow.
+  matcher: ["/((?!api/auth|api/cron|api/upload|api/files|api/drop|api/share|login|listing|drop|share|_next/static|_next/image|favicon.ico).*)"],
 };

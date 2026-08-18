@@ -14,7 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
-  catalogRefs, taskResults, folders,
+  catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
@@ -63,6 +63,8 @@ import { audit } from "@/lib/audit";
 import {
   canMoveFolder, cleanFolderName, depthOf, descendantIds, MAX_DEPTH, nameTaken,
 } from "@/lib/folders";
+import { cleanExpiry, cleanLabel } from "@/lib/dropShare";
+import { mayReadAttachment } from "@/lib/fileAccess";
 import { checkServes, cleanRole, moveFallout } from "@/lib/assetServes";
 import {
   houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
@@ -2814,6 +2816,112 @@ export async function moveFilesToFolder(
   });
   revalidatePath("/documents");
   return { moved: loose.length };
+}
+
+/**
+ * A drop link: a URL that lets somebody WITHOUT a login send files into this
+ * store - the technician at an air-gapped instrument who has the data on a
+ * stick and no account here. The token is the credential, so it expires (90
+ * days at most) and dies on demand; the public half lives in /drop/[token]
+ * and the API routes beside it.
+ */
+export async function createDropLink(
+  orgId: number | null, folderId: number | null, data: { label: string; expiresOn: string },
+): Promise<{ error?: string; token?: string }> {
+  const u = await requireEditor();
+  const gate = await folderStoreGate(u, orgId);
+  if ("error" in gate) return gate;
+  const expiry = cleanExpiry(data.expiresOn, shopToday());
+  if ("error" in expiry) return expiry;
+  if (folderId !== null) {
+    const all = await storeFolders(orgId);
+    if (!all.some((f) => f.id === folderId)) return { error: "That folder is gone" };
+  }
+  const token = crypto.randomBytes(18).toString("base64url");
+  const [row] = await db.insert(dropLinks).values({
+    orgId, folderId, token, label: cleanLabel(data.label), expiresOn: expiry.expiresOn,
+    tenantOrgId: myTenantOrgId(u), createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "drop_link", entityId: row.id,
+    action: `made a drop link${row.label ? ` "${row.label}"` : ""} (to ${expiry.expiresOn})`,
+  });
+  revalidatePath("/documents");
+  return { token };
+}
+
+export async function revokeDropLink(id: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [row] = await db.select().from(dropLinks).where(eq(dropLinks.id, id));
+  if (!row) return { error: "Not found" };
+  const gate = await folderStoreGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  if (row.revokedAt !== null) return {};
+  await db.update(dropLinks).set({ revokedAt: new Date() }).where(eq(dropLinks.id, id));
+  await audit({
+    actor: u.email, entityType: "drop_link", entityId: id,
+    action: `revoked the drop link${row.label ? ` "${row.label}"` : ""}`,
+  });
+  revalidatePath("/documents");
+  return {};
+}
+
+/**
+ * A share link: named files, readable by whoever holds the URL. The outbound
+ * twin of a drop link, and the answer to "email it to them" for somebody with
+ * no account - the same job the client's Mimecast was doing, pointed the
+ * other way.
+ *
+ * The file set is named AT CREATION, from what this person can read at this
+ * moment, and never grows. mayReadAttachment is the same gate /api/files
+ * runs, so a share can never carry a byte its maker could not have downloaded
+ * themselves.
+ */
+export async function createShareLink(
+  attachmentIds: number[], data: { label: string; expiresOn: string },
+): Promise<{ error?: string; token?: string }> {
+  const u = await requireUser();
+  if (u.role === "client_viewer") return { error: "Not allowed" };
+  const ids = [...new Set(attachmentIds.filter((n) => Number.isInteger(n)))].slice(0, 100);
+  if (!ids.length) return { error: "Pick at least one file" };
+  const expiry = cleanExpiry(data.expiresOn, shopToday());
+  if ("error" in expiry) return expiry;
+  const rows = await db.select().from(attachments).where(inArray(attachments.id, ids));
+  if (rows.length !== ids.length) return { error: "A file in the selection is gone" };
+  for (const r of rows) {
+    if (!(await mayReadAttachment(r))) return { error: "A file in the selection isn't yours to share" };
+  }
+  const token = crypto.randomBytes(18).toString("base64url");
+  const [link] = await db.insert(shareLinks).values({
+    token, label: cleanLabel(data.label), expiresOn: expiry.expiresOn,
+    tenantOrgId: myTenantOrgId(u), createdBy: u.email,
+  }).returning();
+  await db.insert(shareLinkFiles).values(ids.map((attachmentId) => ({ shareId: link.id, attachmentId })));
+  await audit({
+    actor: u.email, entityType: "share_link", entityId: link.id,
+    action: `shared ${ids.length} file${ids.length === 1 ? "" : "s"} by link${link.label ? ` "${link.label}"` : ""} (to ${expiry.expiresOn})`,
+  });
+  revalidatePath("/documents");
+  return { token };
+}
+
+export async function revokeShareLink(id: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [row] = await db.select().from(shareLinks).where(eq(shareLinks.id, id));
+  if (!row) return { error: "Not found" };
+  // Yours to kill if you made it, or if you're staff of its workspace - the
+  // person who notices a leaked URL is not always the person who minted it.
+  if (row.createdBy !== u.email && !(isStaffRole(u.role) && (readTenant(u) === null || row.tenantOrgId === readTenant(u)))) {
+    return { error: "Not found" };
+  }
+  if (row.revokedAt !== null) return {};
+  await db.update(shareLinks).set({ revokedAt: new Date() }).where(eq(shareLinks.id, id));
+  await audit({
+    actor: u.email, entityType: "share_link", entityId: id,
+    action: `revoked the share link${row.label ? ` "${row.label}"` : ""}`,
+  });
+  revalidatePath("/documents");
+  return {};
 }
 
 export async function recordLibraryFiles(
