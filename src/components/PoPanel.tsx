@@ -18,8 +18,10 @@ export type PoLineRow = {
   unitCents: number | null; note: string;
 };
 
-export default function PoPanel({ po, lines, canManage }: {
+export default function PoPanel({ po, lines, canManage, makers }: {
   po: PoRow; lines: PoLineRow[]; canManage: boolean;
+  /** The maker/vendor book (Settings → Catalog), suggested on the Vendor field. */
+  makers?: string[];
 }) {
   const editable = canManage && poEditable(po.status);
   const receivable = canManage && poReceivable(po.status);
@@ -79,7 +81,8 @@ export default function PoPanel({ po, lines, canManage }: {
         {editing && (
           <div className="dash-form" style={{ marginBottom: 10 }}>
             <div className="pf2" style={{ marginBottom: 8 }}>
-              <div><label>Vendor *</label><input value={head.vendor} onChange={(e) => setHead({ ...head, vendor: e.target.value })} /></div>
+              <div><label>Vendor *</label><input value={head.vendor} list="maker-book" onChange={(e) => setHead({ ...head, vendor: e.target.value })} />
+                <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
               <div><label>Reference</label><input value={head.reference} onChange={(e) => setHead({ ...head, reference: e.target.value })} placeholder="Vendor quote #" /></div>
               <div><label>Expected</label><input value={head.expectedAt} onChange={(e) => setHead({ ...head, expectedAt: e.target.value })} placeholder="Jul 23" /></div>
             </div>

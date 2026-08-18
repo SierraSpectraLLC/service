@@ -7,6 +7,8 @@ import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
+import MakersCard from "@/components/MakersCard";
+import { makerBook } from "@/lib/makersData";
 import CatalogPhotosCard from "@/components/CatalogPhotosCard";
 import ReferencePanel from "@/components/ReferencePanel";
 import CatalogGasCard from "@/components/CatalogGasCard";
@@ -35,6 +37,8 @@ export default async function CatalogPage() {
     db.select({ category: instruments.category }).from(instruments)
       .where(forTenant(instruments.tenantOrgId, readTenant(user))),
   ]);
+  // The maker/vendor book: defined names plus every spelling in use, with counts.
+  const makerRows = await makerBook(readTenant(user));
   const refRows = await db.select().from(catalogRefs)
     .where(forTenant(catalogRefs.tenantOrgId, readTenant(user)))
     .orderBy(asc(catalogRefs.assetType), asc(catalogRefs.model), asc(catalogRefs.id)).catch(() => []);
@@ -82,7 +86,8 @@ export default async function CatalogPage() {
   return (
     <div className="container settings">
       <SettingsTabs active="catalog" isOwner={user.role === "owner"} isPlatform={isPlatform} />
-      <CatalogForm categories={categories} models={models} types={types} />
+      <CatalogForm categories={categories} models={models} types={types} makers={makerRows.map((m) => m.name)} />
+      <MakersCard makers={makerRows} />
       <CatalogPhotosCard entries={terms.map((t) => ({
         id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, manufacturer: t.manufacturer,
         // The URL itself never reaches the browser: the photo is fetched through

@@ -4,7 +4,8 @@ import { and, asc, desc, eq, inArray, sql, type AnyColumn, type SQL } from "driz
 import { db } from "@/db";
 import { instruments, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse, visibleSystemIds } from "@/lib/tenancy";
+import { isHouse, readTenant, visibleSystemIds } from "@/lib/tenancy";
+import { makerNames } from "@/lib/makersData";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
 import PoPanel from "@/components/PoPanel";
@@ -91,6 +92,10 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
           qtyReceived: l.qtyReceived, unitCents: l.unitCents, note: l.note,
         }))}
         canManage={manage}
+        // Vendor suggestions come from the maker book - house only: a client
+        // who can issue their own POs still shouldn't be handed the shop's
+        // whole supplier list as autocomplete.
+        makers={isHouse(user.role) && manage ? await makerNames(readTenant(user)) : []}
       />
 
       <PoJobCard poId={po.id} canManage={manage}

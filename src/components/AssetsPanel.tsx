@@ -26,7 +26,7 @@ export type AssetRow = {
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels, gridModels, owners }: {
+export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels, gridModels, owners, makers }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).
   instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[];
   kinds: string[]; canEdit: boolean;
@@ -36,6 +36,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
   /** The same models with their makers, for the grid's Mfr column. */
   gridModels: Record<string, GridModel[]>;
   owners: string[];
+  /** The maker/vendor book (Settings → Catalog), suggested on the Manufacturer field. */
+  makers?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [grid, setGrid] = useState(false);
@@ -139,7 +141,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>
           </div>
           <div className="pf2" style={{ marginBottom: 10 }}>
-            <div><label>Manufacturer</label><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" /></div>
+            <div><label>Manufacturer</label><input value={draft.manufacturer} list="maker-book" onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" />
+              <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
             <div><label>Note</label><input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder='e.g. "seals replaced Jul 24"' /></div>
           </div>
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}

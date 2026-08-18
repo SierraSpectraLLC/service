@@ -8,6 +8,7 @@ import {
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
+import { makerNames } from "@/lib/makersData";
 import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
 import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
 import SettingsTabs from "@/components/SettingsTabs";
@@ -44,6 +45,8 @@ export default async function PartsCatalogPage() {
     db.selectDistinct({ pn: stockItems.partNumber }).from(stockItems),
     db.selectDistinct({ pn: poLines.partNumber }).from(poLines),
   ]);
+  // The maker/vendor book, suggested on every manufacturer and vendor field.
+  const bookNames = await makerNames(tenant);
   // The parts maintenance says it will use - the PM checklist's consumables
   // list, typed once onto procedures and schedules. Unlike a number fitted at
   // 2am these arrive with a name, a module type and models, so describing one
@@ -151,8 +154,9 @@ export default async function PartsCatalogPage() {
           priceCents: p.priceCents, url: p.url,
         }))}
         unnamed={uncatalogued(withAliases, used)}
+        makers={bookNames}
       />
-      <PriceBookCard prices={priceRows} knownVendors={[...new Set(priceRows.map((p) => p.vendor))].sort()} />
+      <PriceBookCard prices={priceRows} knownVendors={[...new Set([...bookNames, ...priceRows.map((p) => p.vendor)])].sort()} />
     </div>
   );
 }

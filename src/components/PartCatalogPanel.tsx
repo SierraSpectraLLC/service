@@ -55,7 +55,7 @@ export type VendorPrice = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string;
 };
 
-export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed }: {
+export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed, makers = [] }: {
   items: CatalogRow[];
   assetTypes: string[];
   /** Catalog models per module type, for the per-model chips. */
@@ -64,6 +64,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
   prices?: VendorPrice[];
   /** Part numbers in use on real work that the catalog has never heard of. */
   unnamed: UncataloguedPart[];
+  /** The maker/vendor book (Settings → Catalog), suggested on every maker and vendor field. */
+  makers?: string[];
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -125,6 +127,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
 
   return (
     <div className="card">
+      {/* One spelling of "Shimadzu", wherever it's typed - see Settings → Catalog. */}
+      <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <div className="card-title">Parts book</div>
         <span className="mut" style={{ fontSize: 11 }}>
@@ -273,7 +277,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
                 <label>Manufacturer</label>
-                <input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })}
+                <input value={draft.manufacturer} list="maker-book" onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })}
                   placeholder="Agilent" />
               </div>
               <div>
@@ -305,7 +309,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                       aria-label="Part number"
                       onChange={(e) => setAlias({ partNumber: e.target.value })}
                       style={{ flex: "1 1 130px", fontSize: 12 }} />
-                    <input value={a.manufacturer ?? ""} placeholder={a.kind === "shop" ? "-" : "Who makes it"}
+                    <input value={a.manufacturer ?? ""} list="maker-book" placeholder={a.kind === "shop" ? "-" : "Who makes it"}
                       aria-label="Manufacturer" disabled={a.kind === "shop"}
                       onChange={(e) => setAlias({ manufacturer: e.target.value })}
                       style={{ flex: "1 1 110px", fontSize: 12 }} />
@@ -504,7 +508,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                 </div>
               ))}
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-                <input value={vendorDraft.vendor} placeholder="Vendor"
+                <input value={vendorDraft.vendor} list="maker-book" placeholder="Vendor"
                   onChange={(e) => setVendorDraft({ ...vendorDraft, vendor: e.target.value })}
                   style={{ flex: "1 1 110px", fontSize: 12 }} />
                 <input value={vendorDraft.price} placeholder="$" inputMode="decimal"

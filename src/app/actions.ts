@@ -108,6 +108,8 @@ import { clientAfterHandoff, ownerFields } from "@/lib/owner";
 import { isoDay, partDates } from "@/lib/partGroups";
 import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
+import { cleanMakerName } from "@/lib/makers";
+import { tenantCatalogIds } from "@/lib/makersData";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
@@ -6976,7 +6978,7 @@ export async function addVocabTerm(
 ): Promise<{ error?: string }> {
   // The catalog is house-curated: the owner and their staff, never clients.
   const u = await requireStaff();
-  if (kind !== "category" && kind !== "model" && kind !== "asset_type") return { error: "Unknown vocabulary kind" };
+  if (kind !== "category" && kind !== "model" && kind !== "asset_type" && kind !== "maker") return { error: "Unknown vocabulary kind" };
   const at = kind === "model" ? assetType.trim() : "";
   if (kind === "model" && !at) return { error: "Pick which asset type the model belongs to" };
   const n = name.trim();
@@ -7013,6 +7015,7 @@ export async function addVocabTerm(
     actor: u.email, entityType: "vocab", entityId: row.id,
     action: kind === "category" ? `defined system category "${n}"`
       : kind === "asset_type" ? `defined asset type "${n}"`
+      : kind === "maker" ? `added "${n}" to the manufacturer & vendor book`
       : `defined model "${n}"${manufacturer.trim() ? ` by ${manufacturer.trim()}` : ""} for ${at}${cats.length ? ` under ${cats.join(", ")}` : " (all system types)"}`,
   });
   revalidatePath("/settings/catalog");
@@ -8251,6 +8254,105 @@ export async function setVocabManufacturer(termId: number, manufacturer: string)
 }
 
 /**
+ * Rename a manufacturer/vendor everywhere the name is typed.
+ *
+ * The name lives as a bare string in eight columns - model catalog, systems,
+ * units, part book, part aliases, part rows, purchase orders, price book - and
+ * renaming used to mean chasing each spelling down its own link. This is the
+ * one operation the maker book exists for: case-insensitive match on the old
+ * name, the new spelling written everywhere at once, and the book's own entry
+ * kept in step (renamed, merged into an existing entry, or created so the new
+ * spelling is defined from here on).
+ *
+ * Deliberately NOT reversible-per-row: the audit line carries both names and
+ * the total, which is what makes an overreaching rename discoverable.
+ */
+export async function renameMaker(from: string, to: string): Promise<{ error?: string; changed?: number }> {
+  const u = await requireStaff();
+  const src = cleanMakerName(from);
+  const next = cleanMakerName(to);
+  if (!src) return { error: "Nothing to rename" };
+  if (!next) return { error: "The new name can't be empty" };
+  if (src === next) return {};
+  const t = readTenant(u);
+  const lower = src.toLowerCase();
+  let changed = 0;
+
+  changed += (await db.update(vocabTerms).set({ manufacturer: next })
+    .where(and(eq(vocabTerms.kind, "model"), sql`lower(${vocabTerms.manufacturer}) = ${lower}`, forTenant(vocabTerms.tenantOrgId, t)))
+    .returning({ id: vocabTerms.id })).length;
+  changed += (await db.update(instruments).set({ manufacturer: next })
+    .where(and(sql`lower(${instruments.manufacturer}) = ${lower}`, forTenant(instruments.tenantOrgId, t)))
+    .returning({ id: instruments.id })).length;
+  changed += (await db.update(assets).set({ manufacturer: next })
+    .where(and(sql`lower(${assets.manufacturer}) = ${lower}`, forTenant(assets.tenantOrgId, t)))
+    .returning({ id: assets.id })).length;
+  changed += (await db.update(partCatalog).set({ manufacturer: next })
+    .where(and(sql`lower(${partCatalog.manufacturer}) = ${lower}`, forTenant(partCatalog.tenantOrgId, t)))
+    .returning({ id: partCatalog.id })).length;
+  // Aliases carry no tenant stamp of their own; scope through their catalog entry.
+  const catIds = await tenantCatalogIds(t);
+  if (catIds === null || catIds.length) {
+    changed += (await db.update(partNumbers).set({ manufacturer: next })
+      .where(and(sql`lower(${partNumbers.manufacturer}) = ${lower}`,
+        catIds === null ? undefined : inArray(partNumbers.catalogId, catIds)))
+      .returning({ id: partNumbers.id })).length;
+  }
+  // parts carries no tenant stamp; a row belongs to the system or unit it sits
+  // on, so a tenanted sweep reaches only rows on that tenant's records.
+  if (t === null) {
+    changed += (await db.update(parts).set({ vendor: next })
+      .where(sql`lower(${parts.vendor}) = ${lower}`)
+      .returning({ id: parts.id })).length;
+  } else {
+    const [instIds, assetIds] = await Promise.all([
+      db.select({ id: instruments.id }).from(instruments).where(forTenant(instruments.tenantOrgId, t)),
+      db.select({ id: assets.id }).from(assets).where(forTenant(assets.tenantOrgId, t)),
+    ]);
+    const onMine = or(
+      instIds.length ? inArray(parts.instrumentId, instIds.map((r) => r.id)) : sql`false`,
+      assetIds.length ? inArray(parts.assetId, assetIds.map((r) => r.id)) : sql`false`,
+    );
+    changed += (await db.update(parts).set({ vendor: next })
+      .where(and(sql`lower(${parts.vendor}) = ${lower}`, onMine))
+      .returning({ id: parts.id })).length;
+  }
+  changed += (await db.update(purchaseOrders).set({ vendor: next })
+    .where(and(sql`lower(${purchaseOrders.vendor}) = ${lower}`, forTenant(purchaseOrders.tenantOrgId, t)))
+    .returning({ id: purchaseOrders.id })).length;
+  changed += (await db.update(partPrices).set({ vendor: next })
+    .where(and(sql`lower(${partPrices.vendor}) = ${lower}`, forTenant(partPrices.tenantOrgId, t)))
+    .returning({ id: partPrices.id })).length;
+
+  // Keep the book itself in step: rename the entry, or fold it into one that
+  // already carries the new spelling, or define the new spelling outright.
+  const bookRows = await db.select().from(vocabTerms)
+    .where(and(eq(vocabTerms.kind, "maker"), forTenant(vocabTerms.tenantOrgId, t)));
+  const oldTerm = bookRows.find((m) => m.name.toLowerCase() === lower);
+  const newTerm = bookRows.find((m) => m.name.toLowerCase() === next.toLowerCase());
+  if (oldTerm && newTerm && oldTerm.id !== newTerm.id) {
+    await db.delete(vocabTerms).where(eq(vocabTerms.id, oldTerm.id));
+  } else if (oldTerm) {
+    await db.update(vocabTerms).set({ name: next }).where(eq(vocabTerms.id, oldTerm.id));
+  } else if (!newTerm) {
+    await db.insert(vocabTerms).values({
+      tenantOrgId: myTenantOrgId(u), kind: "maker", assetType: "", name: next, categories: [], manufacturer: "",
+    });
+  }
+
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: `maker:${next}`,
+    action: `renamed manufacturer/vendor "${src}" to "${next}" across ${changed} record${changed === 1 ? "" : "s"}`,
+    field: "maker", oldValue: src, newValue: next,
+  });
+  revalidatePath("/settings/catalog");
+  revalidatePath("/settings/parts");
+  revalidatePath("/assets");
+  rev();
+  return { changed };
+}
+
+/**
  * Retag which system categories a model belongs to. Empty means every system
  * type, so clearing the tags widens a model rather than hiding it.
  */
@@ -8288,7 +8390,9 @@ export async function deleteVocabTerm(termId: number): Promise<{ error?: string 
       ? `removed system category "${t.name}" from the catalog (systems using it keep it)`
       : t.kind === "asset_type"
         ? `removed asset type "${t.name}" from the catalog (units recorded as it keep it)`
-        : `removed model "${t.name}" (${t.assetType}) from the catalog`,
+        : t.kind === "maker"
+          ? `removed "${t.name}" from the manufacturer & vendor book (records keep the name)`
+          : `removed model "${t.name}" (${t.assetType}) from the catalog`,
   });
   revalidatePath("/settings/catalog");
   revalidatePath("/settings/procedures");

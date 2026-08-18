@@ -542,6 +542,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               canEdit={canEdit}
               catalogModels={catalogModels} gridModels={gridModels}
               owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
+              // The maker book plus every maker on a catalog model - already
+              // loaded here, so no extra queries for a suggestion list.
+              makers={[...new Set(vocabRows.filter((t) => t.kind === "maker").map((t) => t.name)
+                .concat(vocabRows.filter((t) => t.kind === "model").map((t) => t.manufacturer))
+                .filter(Boolean))].sort()}
             />
           ) },
           // Where it physically is, and what a tech needs before driving there.
