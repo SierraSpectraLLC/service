@@ -155,6 +155,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     {
                       label: "Library",
                       items: [
+                        /* The equipment catalog is reference material the shop
+                           reaches for daily; burying it three taps into
+                           Settings made it feel like configuration. It still
+                           lives at its Settings URL - this is the short way in. */
+                        { href: "/settings/catalog", label: "Equipment catalog" },
+                        { href: "/settings/parts", label: "Parts book" },
                         { href: "/documents", label: "Files" },
                         { href: "/gallery", label: "Gallery" },
                         { href: "/pdf", label: "PDF studio" },
