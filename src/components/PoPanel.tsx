@@ -181,7 +181,13 @@ export default function PoPanel({ po, lines, canManage }: {
                 <PartNumberField value={newLine.partNumber}
                   onChange={(partNumber) => setNewLine({ ...newLine, partNumber })}
                   onPick={(part) => setNewLine((l) => ({
-                    ...l, partNumber: part.partNumber, name: l.name.trim() || part.name,
+                    ...l,
+                    partNumber: part.partNumber,
+                    name: l.name.trim() || part.name,
+                    // The price book's best offer, so a line is priced the
+                    // moment it is added rather than counted as unpriced and
+                    // typed in from a browser tab.
+                    price: l.price.trim() || (part.priceCents !== null ? centsToInput(part.priceCents) : ""),
                   }))} />
               </div>
               <div><label>Description</label><input value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} /></div>

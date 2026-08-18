@@ -19,8 +19,8 @@ import {
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
-  catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS, numberClash,
-  PART_KINDS, PART_KIND_LABEL, type PartAlias,
+  allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
+  numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
 } from "@/lib/partCatalog";
 // Aliased: lib/stock exports a KIND_LABEL too (shelf, van, ...), imported below
 // and lexically first, so the bare name here silently meant the wrong map -
@@ -84,7 +84,7 @@ import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
-import { mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
 import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
 import { alreadyHas, procedureCopy, refilePlan, refileSummary } from "@/lib/procedureMove";
@@ -8252,6 +8252,8 @@ export async function catalogForLookup(): Promise<{
   parts: {
     id: number; partNumber: string; name: string; manufacturer: string; mfrPartNumber: string;
     kind: string; archived: boolean; aliases: PartAlias[]; photoUrl: string;
+    /** Best known offer, staff only - see the redaction note below. */
+    vendor: string; priceCents: number | null; isOem: boolean;
   }[];
 }> {
   const u = await requireUser();
@@ -8262,20 +8264,40 @@ export async function catalogForLookup(): Promise<{
     .catch(() => []);
   if (!rows.length) return { parts: [] };
   const ids = rows.map((r) => r.id);
-  const [alias, photos] = await Promise.all([
+  // The price book rides along so a pick can fill cost and vendor, not just the
+  // number and its name - but ONLY for staff. This is a new way to read the
+  // shop's buying prices, and lib/redact's rule has to hold on it exactly as it
+  // holds on a part row: what a thing cost is the buyer's business. A client
+  // signing in gets the numbers and the names and no money at all.
+  const staff = isStaffRole(u.role);
+  const [alias, photos, book] = await Promise.all([
     db.select().from(partNumbers).where(inArray(partNumbers.catalogId, ids)).catch(() => []),
     db.select().from(partPhotos).where(inArray(partPhotos.catalogId, ids))
       .orderBy(asc(partPhotos.sortOrder), asc(partPhotos.id)).catch(() => []),
+    staff ? db.select().from(partPrices)
+      .where(forTenant(partPrices.tenantOrgId, readTenant(u))).catch(() => []) : [],
   ]);
   return {
-    parts: rows.map((r) => ({
-      id: r.id, partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
-      mfrPartNumber: r.mfrPartNumber, kind: r.kind, archived: r.archived,
-      aliases: alias.filter((a) => a.catalogId === r.id).map((a) => ({
+    parts: rows.map((r) => {
+      const aliases = alias.filter((a) => a.catalogId === r.id).map((a) => ({
         kind: a.kind, partNumber: a.partNumber, manufacturer: a.manufacturer, note: a.note,
-      })),
-      photoUrl: photos.find((ph) => ph.catalogId === r.id)?.url ?? "",
-    })),
+      }));
+      // Priced across ALL of the part's numbers, cheapest first: the price book
+      // is keyed by the string somebody typed when they entered a price, and
+      // that is as often the maker's number as ours. Looking only under the
+      // primary is how a part with a price reads as unpriced.
+      const best = allNumbers({ ...r, aliases })
+        .map((pn) => bestPrice(book, pn))
+        .filter((o): o is NonNullable<typeof o> => o !== null)
+        .sort((a, b) => a.priceCents - b.priceCents || Number(b.isOem) - Number(a.isOem))[0] ?? null;
+      return {
+        id: r.id, partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,
+        mfrPartNumber: r.mfrPartNumber, kind: r.kind, archived: r.archived,
+        aliases,
+        photoUrl: photos.find((ph) => ph.catalogId === r.id)?.url ?? "",
+        vendor: best?.vendor ?? "", priceCents: best?.priceCents ?? null, isOem: best?.isOem ?? false,
+      };
+    }),
   };
 }
 

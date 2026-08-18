@@ -3,8 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { catalogForLookup } from "@/app/actions";
 import { PART_KIND_LABEL, suggestParts, type CatalogEntry, type PartSuggestion } from "@/lib/partCatalog";
+import { formatCents } from "@/lib/money";
 
-export type LookupPart = CatalogEntry & { photoUrl: string };
+export type LookupPart = CatalogEntry & {
+  photoUrl: string;
+  /** Best known offer. Blank/null for anybody who may not see costs. */
+  vendor: string;
+  priceCents: number | null;
+  isOem: boolean;
+};
 
 /**
  * The catalog, fetched once per page rather than once per field.
@@ -120,6 +127,13 @@ export default function PartNumberField({
                 <span style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
                   <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{h.partNumber}</span>
                   <span style={{ fontSize: 12.5 }}>{h.name || <span className="mut">unnamed</span>}</span>
+                  {/* What it costs, where the reader is allowed to know - the
+                      answer to "is this the one to order" is half price. */}
+                  {h.entry.priceCents !== null && (
+                    <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>
+                      {formatCents(h.entry.priceCents)}{h.entry.vendor ? ` · ${h.entry.vendor}` : ""}
+                    </span>
+                  )}
                 </span>
                 {/* Why this row is here. Being offered 060-65005-91 after typing
                     060-65005-00 reads as the wrong answer unless it says why. */}

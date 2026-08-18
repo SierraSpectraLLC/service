@@ -179,7 +179,13 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               <PartNumberField value={draft.partNumber} placeholder="G6303-80060" className=""
                 onChange={(partNumber) => setDraft({ ...draft, partNumber })}
                 onPick={(part) => setDraft((d) => ({
-                  ...d, partNumber: part.partNumber, name: d.name.trim() || part.name,
+                  ...d,
+                  partNumber: part.partNumber,
+                  // Only into fields nobody has filled: a pick corrects the
+                  // number, it does not overwrite what somebody typed.
+                  name: d.name.trim() || part.name,
+                  vendor: d.vendor.trim() || part.vendor,
+                  cost: d.cost.trim() || (part.priceCents !== null ? centsToInput(part.priceCents) : ""),
                 }))} />
             </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="US12345678" /></div>
