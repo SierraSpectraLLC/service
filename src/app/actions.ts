@@ -2851,18 +2851,22 @@ export async function recordLibraryFiles(
   return {};
 }
 
-export async function updateAttachment(attachmentId: number, data: { fileName: string; kind: string; description: string; expiresOn?: string }) {
+export async function updateAttachment(
+  attachmentId: number, data: { fileName: string; kind: string; description: string; expiresOn?: string },
+): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const fileName = data.fileName.trim();
-  if (!fileName) throw new Error("File name required");
+  const fileName = data.fileName.trim().slice(0, 200);
+  // Returned rather than thrown: the only caller used to swallow the throw, so
+  // an empty name looked like a save that silently did nothing.
+  if (!fileName) return { error: "Give the file a name" };
   const kind = (ATTACH_KINDS as readonly string[]).includes(data.kind) ? data.kind : "Other";
   const description = data.description.trim();
   const [a] = await db.select().from(attachments).where(eq(attachments.id, attachmentId));
-  if (!a) return;
+  if (!a) return { error: "Not found" };
   // A validity date only sticks when it IS a date - a typo'd expiry that can
   // never fire is worse than none, because somebody believes it is being watched.
   const expiresOn = data.expiresOn !== undefined && isIsoDay(data.expiresOn) ? data.expiresOn : (data.expiresOn === "" ? "" : a.expiresOn);
-  if (a.fileName === fileName && a.kind === kind && a.description === description && a.expiresOn === expiresOn) return;
+  if (a.fileName === fileName && a.kind === kind && a.description === description && a.expiresOn === expiresOn) return {};
   await assertWorkEditable(u, a);
   await db.update(attachments).set({ fileName, kind, description, expiresOn }).where(eq(attachments.id, attachmentId));
   const changes: string[] = [];
@@ -2876,6 +2880,10 @@ export async function updateAttachment(attachmentId: number, data: { fileName: s
     field: "description", oldValue: a.description, newValue: description,
   });
   revWork(a);
+  // A loose file lives on the Files page and nowhere else, so revWork - which
+  // only knows about records - would leave a rename invisible until a reload.
+  revalidatePath("/documents");
+  return {};
 }
 
 /**

@@ -5,12 +5,14 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { promptReason } from "@/lib/reason";
 import {
-  createFolder, deleteAttachment, deleteFolder, moveFilesToFolder, renameFolder,
+  createFolder, deleteAttachment, deleteFolder, moveFilesToFolder, moveFolder, renameFolder,
+  updateAttachment,
 } from "@/app/actions";
-import { childrenOf, folderPath, type FolderLike } from "@/lib/folders";
+import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
+import { canMoveFolder, childrenOf, descendantIds, folderPath, type FolderLike } from "@/lib/folders";
 import { fmtBytes } from "@/lib/storage";
 import { isPhotoFile } from "@/lib/photos";
-import { ATTACH_META } from "@/lib/stages";
+
 import type { Place } from "@/lib/storeGroup";
 
 export type StoreFile = {
@@ -93,6 +95,12 @@ export default function StoreFileList({
   const [naming, setNaming] = useState(false);
   const [newName, setNewName] = useState("");
   const [moveOpen, setMoveOpen] = useState(false);
+  // The file whose details are open, and the draft being edited. A file you
+  // cannot rename is a file you have to re-upload to correct, which is how a
+  // store fills with "scan_0043 (1).pdf".
+  const [details, setDetails] = useState<StoreFile | null>(null);
+  const [draft, setDraft] = useState({ fileName: "", kind: "Other", description: "" });
+  const [folderMove, setFolderMove] = useState<number | null>(null);
 
   const here = childrenOf(folders, at);
   const trail = folderPath(folders, at);
@@ -297,9 +305,18 @@ export default function StoreFileList({
           </button>
           <span style={{ width: 190, flexShrink: 0 }}>
             {(() => {
-              const n = files.filter((f) => (f.folderId ?? null) === d.id).length
-                + childrenOf(folders, d.id).length;
-              return <span className="mut" style={{ fontSize: 11 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</span>;
+              // Everything at any depth, so a folder's line means the same
+              // thing whether somebody nested things inside it or not.
+              const scope = new Set([d.id, ...descendantIds(folders, d.id)]);
+              const inside = files.filter((f) => f.folderId !== null && scope.has(f.folderId));
+              const kids = descendantIds(folders, d.id).length;
+              const n = inside.length + kids;
+              return (
+                <span className="mut" style={{ fontSize: 11 }}>
+                  {n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}
+                  {inside.length > 0 ? ` · ${fmtBytes(inside.reduce((t, f) => t + f.size, 0))}` : ""}
+                </span>
+              );
             })()}
           </span>
           <span style={{ width: 72, flexShrink: 0 }} />
@@ -315,6 +332,8 @@ export default function StoreFileList({
                       setError(res?.error ?? "");
                     });
                   }}>rename</button>
+                <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }} disabled={pending}
+                  onClick={() => { setFolderMove(folderMove === d.id ? null : d.id); setError(""); }}>move</button>
                 <button className="btn link row-act" style={{ fontSize: 10.5, color: "#A32D2D", marginLeft: 6 }} disabled={pending}
                   onClick={() => startTransition(async () => {
                     const res = await deleteFolder(d.id);
@@ -325,6 +344,31 @@ export default function StoreFileList({
           </span>
         </div>
       ))}
+
+      {view === "list" && !searching && folderMove !== null && (
+        <div style={{ padding: "7px 10px", background: "#F8FAFD", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6 }}>
+          <div className="mut" style={{ fontSize: 11, marginBottom: 4 }}>
+            Move &ldquo;{folders.find((f) => f.id === folderMove)?.name}&rdquo; into:
+          </div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {[{ id: null as number | null, name: "Top level" },
+              ...folders.map((f) => ({ id: f.id as number | null, name: folderPath(folders, f.id).map((x) => x.name).join(" / ") }))]
+              // Only somewhere it can actually go: offering a destination the
+              // server would refuse is a button that exists to say no.
+              .filter((o) => canMoveFolder(folders, folderMove, o.id).ok
+                && o.id !== folders.find((f) => f.id === folderMove)?.parentId)
+              .map((o) => (
+                <button key={o.id ?? "root"} className="btn sm" disabled={pending} style={{ fontSize: 11 }}
+                  onClick={() => startTransition(async () => {
+                    const res = await moveFolder(folderMove, o.id);
+                    if (res?.error) { setError(res.error); return; }
+                    setFolderMove(null); setError("");
+                  })}>{o.name}</button>
+              ))}
+            <button className="btn link" style={{ fontSize: 11 }} onClick={() => setFolderMove(null)}>cancel</button>
+          </div>
+        </div>
+      )}
 
       {view === "list" && shown.map((f) => (
         <div key={f.url} className="row-hover file-row"
@@ -345,7 +389,18 @@ export default function StoreFileList({
             <WhereChips file={f} removable={removable} pending={pending}
               onRemoved={(err) => setError(err)} startTransition={startTransition} />
           </span>
-          <span className="mut" style={{ width: 72, flexShrink: 0, fontSize: 12, textAlign: "right" }}>{fmtBytes(f.size)}</span>
+          <span style={{ width: 72, flexShrink: 0, textAlign: "right" }}>
+            <span className="mut" style={{ fontSize: 12 }}>{fmtBytes(f.size)}</span>
+            {canOrganise && (
+              <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }}
+                aria-label={`Details for ${f.fileName}`}
+                onClick={() => {
+                  setDetails(f);
+                  setDraft({ fileName: f.fileName, kind: f.kind || "Other", description: f.description });
+                  setError("");
+                }}>edit</button>
+            )}
+          </span>
           {/* Two lines rather than one truncated one: who put a file there is
               worth as much as when, and an ellipsis was eating both. */}
           <span style={{ width: 150, flexShrink: 0, textAlign: "right", minWidth: 0 }}>
@@ -397,6 +452,57 @@ export default function StoreFileList({
         </div>
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+
+      {/* One file, close up: what it is called, what it is, and where it came
+          from. A store where a file cannot be renamed is a store that fills up
+          with "scan_0043 (1).pdf" and stays that way. */}
+      {details && (
+        <>
+          <div className="scrim" onClick={() => setDetails(null)} />
+          <div className="sheet" role="dialog" aria-modal="true" aria-label="File details">
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>File details</div>
+
+            <label>Name</label>
+            <input value={draft.fileName} autoFocus maxLength={200}
+              onChange={(e) => setDraft({ ...draft, fileName: e.target.value })}
+              style={{ marginBottom: 8 }} />
+
+            <label>What it is</label>
+            <div className="seg" role="group" aria-label="File kind" style={{ marginBottom: 8, flexWrap: "wrap" }}>
+              {ATTACH_KINDS.map((k) => (
+                <button key={k} type="button" aria-pressed={draft.kind === k}
+                  onClick={() => setDraft({ ...draft, kind: k })}>{k}</button>
+              ))}
+            </div>
+
+            <label>Description</label>
+            <textarea value={draft.description} rows={2} maxLength={500}
+              placeholder="What somebody looking for this in a year would search for"
+              onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+              style={{ width: "100%", marginBottom: 10, resize: "vertical" }} />
+
+            <div className="mut" style={{ fontSize: 11.5, marginBottom: 10 }}>
+              {fmtBytes(details.size)} · uploaded by {details.uploadedBy} · {details.when}
+              <br />
+              {details.places.some((pl) => pl.kind !== "shelf")
+                ? `Filed on ${details.places.filter((pl) => pl.kind !== "shelf").length} record(s). Renaming it here renames it there too.`
+                : "Not on any system."}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <a className="btn sm" href={`/api/files/${details.places[0].attachmentId}`} download
+                style={{ marginRight: "auto", textDecoration: "none" }}>Download</a>
+              <button className="btn sm" onClick={() => setDetails(null)} disabled={pending}>Cancel</button>
+              <button className="btn sm accent" disabled={pending || !draft.fileName.trim()}
+                onClick={() => startTransition(async () => {
+                  const res = await updateAttachment(details.places[0].attachmentId, draft);
+                  if (res?.error) { setError(res.error); return; }
+                  setDetails(null); setError("");
+                })}>{pending ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
