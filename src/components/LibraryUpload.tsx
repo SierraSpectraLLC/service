@@ -19,7 +19,12 @@ import { isFileDrag } from "@/lib/dropFiles";
  * row. Both ends check the storage quota, and the token mint refuses first so a
  * doomed 90MB transfer is never started.
  */
-export default function LibraryUpload({ full, maxBytes }: { full: boolean; maxBytes: number }) {
+export default function LibraryUpload({ full, maxBytes, folderId = null, folderName = "" }: {
+  full: boolean; maxBytes: number;
+  /** Where a drop lands: the folder that is open. Null = the top level. */
+  folderId?: number | null;
+  folderName?: string;
+}) {
   const router = useRouter();
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState("");
@@ -49,7 +54,7 @@ export default function LibraryUpload({ full, maxBytes }: { full: boolean; maxBy
         filed.push({ fileName: f.name, url: blob.url, size: f.size, description: "" });
         setDone((n) => n + 1);
       }
-      const res = await recordLibraryFiles(filed);
+      const res = await recordLibraryFiles(filed, folderId);
       if (res?.error) throw new Error(res.error);
       setNote(`${filed.length} file${filed.length === 1 ? "" : "s"} uploaded`);
       router.refresh();
@@ -93,7 +98,12 @@ export default function LibraryUpload({ full, maxBytes }: { full: boolean; maxBy
         <input ref={ref} type="file" multiple style={{ display: "none" }}
           onChange={(e) => { void send(e.target.files); e.target.value = ""; }} />
         <span className="mut" style={{ fontSize: 11.5 }}>
-          or drop them anywhere on this page · up to {fmtBytes(maxBytes)} each
+          {/* Naming the open folder here, not just on the drop overlay: this is
+              the line somebody reads BEFORE they drag, and "which folder does
+              this land in" is the question they are asking at that moment. */}
+          or drop them anywhere on this page
+          {folderName ? <> · into <b style={{ fontWeight: 700 }}>{folderName}</b></> : ""}
+          {" "}· up to {fmtBytes(maxBytes)} each
         </span>
         {busy && <span className="mut" style={{ fontSize: 12 }}>{busy}</span>}
         {note && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{note} ✓</span>}
@@ -113,7 +123,8 @@ export default function LibraryUpload({ full, maxBytes }: { full: boolean; maxBy
           }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>Drop to upload</div>
             <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
-              Files land in your storage. Nothing is attached to a system.
+              {folderName ? <>Files land in <b style={{ fontWeight: 700 }}>{folderName}</b>. </> : "Files land in your storage. "}
+              Nothing is attached to a system.
             </div>
           </div>
         </div>

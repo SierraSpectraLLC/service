@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { promptReason } from "@/lib/reason";
-import { deleteAttachment } from "@/app/actions";
+import {
+  createFolder, deleteAttachment, deleteFolder, moveFilesToFolder, renameFolder,
+} from "@/app/actions";
+import { childrenOf, folderPath, type FolderLike } from "@/lib/folders";
 import { fmtBytes } from "@/lib/storage";
 import { isPhotoFile } from "@/lib/photos";
 import { ATTACH_META } from "@/lib/stages";
@@ -22,7 +26,11 @@ export type StoreFile = {
   places: Place[];
   /** For a shelf file, whose shelf. Null = the operator's. */
   shelfOwnerId: number | null;
+  /** Which folder holds it, for a loose file. Null = the root. */
+  folderId: number | null;
 };
+
+export type StoreFolder = FolderLike;
 
 type SortKey = "name" | "size" | "when" | "where";
 
@@ -47,8 +55,18 @@ const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
  * charge on the meter, because listing it four times would make the page total
  * four times what the store actually holds.
  */
-export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, emptyNote }: {
+export default function StoreFileList({
+  files, folders = [], storeOrgId = null, openFolderId = null, canOrganise = false,
+  canRemoveShelf, canRemoveRecord, emptyNote,
+}: {
   files: StoreFile[];
+  /** The store's folders. Empty means this list is browsed flat. */
+  folders?: StoreFolder[];
+  /** Whose store, for creating folders in it. */
+  storeOrgId?: number | null;
+  /** The folder the URL says is open. Null = the top level. */
+  openFolderId?: number | null;
+  canOrganise?: boolean;
   canRemoveShelf: boolean;
   canRemoveRecord: boolean;
   emptyNote?: string;
@@ -60,10 +78,34 @@ export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, 
   const [view, setView] = useState<"list" | "grid">("list");
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "when", desc: true });
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Which folder is open lives in the URL rather than in state: it makes a
+  // folder a place you can link somebody to and the back button work, and it
+  // is how the upload button - which sits outside this component - knows where
+  // a drop should land.
+  const router = useRouter();
+  const params = useSearchParams();
+  const at = openFolderId;
+  const setAt = (id: number | null) => {
+    const q = new URLSearchParams(params.toString());
+    if (id === null) q.delete("folder"); else q.set("folder", String(id));
+    router.push(q.size ? `/documents?${q}` : "/documents", { scroll: false });
+  };
+  const [naming, setNaming] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [moveOpen, setMoveOpen] = useState(false);
+
+  const here = childrenOf(folders, at);
+  const trail = folderPath(folders, at);
+  // Searching looks through the whole store rather than the open folder: not
+  // finding a file you know you have, because you were standing in the wrong
+  // folder, is the thing search exists to prevent.
+  const searching = filter.trim().length > 0;
 
   const shown = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     const hit = files.filter((f) => {
+      // In a folder, show that folder. Searching, show the store.
+      if (!searching && folders.length > 0 && (f.folderId ?? null) !== at) return false;
       if (where === "shelf" && !onShelf(f)) return false;
       if (where === "records" && !f.places.some((p) => p.kind !== "shelf")) return false;
       if (!needle) return true;
@@ -79,7 +121,7 @@ export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, 
         default: return dir * (a.at - b.at);
       }
     });
-  }, [files, filter, where, sort]);
+  }, [files, filter, where, sort, at, folders, searching]);
 
   if (!files.length) {
     return (
@@ -108,9 +150,45 @@ export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, 
 
   return (
     <>
+      {folders.length > 0 || canOrganise ? (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <button className="btn link" style={{ fontSize: 12.5, fontWeight: trail.length ? 400 : 700 }}
+            onClick={() => setAt(null)}>All files</button>
+          {trail.map((f, i) => (
+            <span key={f.id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <span className="mut" style={{ fontSize: 12 }}>/</span>
+              <button className="btn link" style={{ fontSize: 12.5, fontWeight: i === trail.length - 1 ? 700 : 400 }}
+                onClick={() => setAt(f.id)}>{f.name}</button>
+            </span>
+          ))}
+          {canOrganise && (
+            <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
+              onClick={() => { setNaming((v) => !v); setNewName(""); setError(""); }}>
+              {naming ? "Cancel" : "＋ New folder"}
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      {naming && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+          <input value={newName} autoFocus placeholder="Folder name" aria-label="Folder name"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.form?.requestSubmit?.(); }}
+            style={{ flex: "1 1 200px", fontSize: 12 }} />
+          <button className="btn sm accent" disabled={pending || !newName.trim()}
+            onClick={() => startTransition(async () => {
+              const res = await createFolder(storeOrgId, at, newName);
+              if (res?.error) { setError(res.error); return; }
+              setNaming(false); setNewName(""); setError("");
+            })}>Create</button>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
         <input value={filter} onChange={(e) => setFilter(e.target.value)}
-          placeholder="Search files" aria-label="Search files"
+          placeholder={searching || folders.length === 0 ? "Search files" : "Search all files"}
+          aria-label="Search files"
           style={{ flex: "1 1 200px", fontSize: 12 }} />
         <span className="seg">
           {(["all", "shelf", "records"] as const).map((w) => (
@@ -138,6 +216,36 @@ export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, 
             {fmtBytes(shown.filter((f) => picked.has(f.url)).reduce((n, f) => n + f.size, 0))}
           </span>
           <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>clear</button>
+          {canOrganise && (
+            <span style={{ position: "relative" }}>
+              <button className="btn sm" disabled={pending} onClick={() => setMoveOpen((v) => !v)}>
+                Move to...
+              </button>
+              {moveOpen && (
+                <span style={{
+                  position: "absolute", zIndex: 30, top: "calc(100% + 4px)", left: 0, minWidth: 190,
+                  background: "#fff", border: "1px solid var(--line)", borderRadius: 8,
+                  boxShadow: "0 8px 24px rgba(15,23,42,.12)", maxHeight: 220, overflowY: "auto", display: "block",
+                }}>
+                  {[{ id: null as number | null, name: "All files (top level)" },
+                    ...folders.map((f) => ({ id: f.id as number | null, name: folderPath(folders, f.id).map((x) => x.name).join(" / ") }))]
+                    .filter((o) => o.id !== at)
+                    .map((o) => (
+                      <button key={o.id ?? "root"} className="btn link"
+                        style={{ display: "block", width: "100%", textAlign: "left", padding: "5px 9px", fontSize: 12 }}
+                        disabled={pending}
+                        onClick={() => startTransition(async () => {
+                          const ids = shown.filter((f) => picked.has(f.url))
+                            .flatMap((f) => { const p = f.places.find((x) => x.kind === "shelf"); return p ? [p.attachmentId] : []; });
+                          const res = await moveFilesToFolder(ids, o.id);
+                          if (res?.error) { setError(res.error); return; }
+                          setMoveOpen(false); setPicked(new Set()); setError("");
+                        })}>{o.name}</button>
+                    ))}
+                </span>
+              )}
+            </span>
+          )}
           {sweepable.length > 0 && (
             <button className="btn sm" disabled={pending} style={{ marginLeft: "auto", color: "#A32D2D" }}
               onClick={() => {
@@ -175,6 +283,48 @@ export default function StoreFileList({ files, canRemoveShelf, canRemoveRecord, 
           <span style={{ width: 150, flexShrink: 0, textAlign: "right" }}>{head("when", "Modified")}</span>
         </div>
       )}
+
+      {/* Folders first, the way every file list has done it since 1984. Hidden
+          while searching, because a search is about files. */}
+      {view === "list" && !searching && here.map((d) => (
+        <div key={`d${d.id}`} className="row-hover file-row"
+          style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)" }}>
+          <span style={{ width: 15, flexShrink: 0 }} />
+          <button className="btn link" onClick={() => { setAt(d.id); setPicked(new Set()); }}
+            style={{ flex: "1 1 200px", textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0 }}>
+            <span aria-hidden style={{ color: "#8A5410", flexShrink: 0 }}>▮</span>
+            <span style={{ fontSize: 13, fontWeight: 700, overflowWrap: "anywhere" }}>{d.name}</span>
+          </button>
+          <span style={{ width: 190, flexShrink: 0 }}>
+            {(() => {
+              const n = files.filter((f) => (f.folderId ?? null) === d.id).length
+                + childrenOf(folders, d.id).length;
+              return <span className="mut" style={{ fontSize: 11 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</span>;
+            })()}
+          </span>
+          <span style={{ width: 72, flexShrink: 0 }} />
+          <span style={{ width: 150, flexShrink: 0, textAlign: "right" }}>
+            {canOrganise && (
+              <>
+                <button className="btn link row-act" style={{ fontSize: 10.5 }} disabled={pending}
+                  onClick={() => {
+                    const next = window.prompt(`Rename "${d.name}" to?`, d.name);
+                    if (next === null) return;
+                    startTransition(async () => {
+                      const res = await renameFolder(d.id, next);
+                      setError(res?.error ?? "");
+                    });
+                  }}>rename</button>
+                <button className="btn link row-act" style={{ fontSize: 10.5, color: "#A32D2D", marginLeft: 6 }} disabled={pending}
+                  onClick={() => startTransition(async () => {
+                    const res = await deleteFolder(d.id);
+                    setError(res?.error ?? "");
+                  })}>delete</button>
+              </>
+            )}
+          </span>
+        </div>
+      ))}
 
       {view === "list" && shown.map((f) => (
         <div key={f.url} className="row-hover file-row"

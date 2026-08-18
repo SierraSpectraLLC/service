@@ -14,7 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
-  catalogRefs, taskResults,
+  catalogRefs, taskResults, folders,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
@@ -60,6 +60,9 @@ import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
 import { storeFiles, storeQuota, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
+import {
+  canMoveFolder, cleanFolderName, depthOf, descendantIds, MAX_DEPTH, nameTaken,
+} from "@/lib/folders";
 import { checkServes, cleanRole, moveFallout } from "@/lib/assetServes";
 import {
   houseOf, myTenantOrgId, requireUser, requireEditor, requireStaff, requireOwner, requirePlatformOwner,
@@ -2646,8 +2649,177 @@ export async function setPhotoFraming(attachmentId: number, framing: string): Pr
  * both write and read (see lib/fileAccess), so nothing a client files can be
  * seen by another client, and the house shelf stays the house's.
  */
+/**
+ * Which store this person may file into, or an error.
+ *
+ * A folder belongs to one organization's store, exactly as a loose file does.
+ * The house may work in any store it administers; everybody else works in
+ * their own and nowhere else.
+ */
+async function folderStoreGate(u: Awaited<ReturnType<typeof requireEditor>>, orgId: number | null) {
+  if (orgId === null) {
+    // The operator's own store. House staff only.
+    return isStaffRole(u.role) ? {} : { error: "Not found" };
+  }
+  if (u.orgId === orgId) return {};
+  if (!isStaffRole(u.role)) return { error: "Not found" };
+  const gate = await adminOrgGate(u, orgId);
+  return "error" in gate ? gate : {};
+}
+
+/** Every folder in one store, for the rules in lib/folders to reason over. */
+async function storeFolders(orgId: number | null) {
+  return db.select().from(folders)
+    .where(orgId === null ? isNull(folders.orgId) : eq(folders.orgId, orgId))
+    .catch(() => []);
+}
+
+export async function createFolder(
+  orgId: number | null, parentId: number | null, name: string,
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireEditor();
+  const gate = await folderStoreGate(u, orgId);
+  if ("error" in gate) return gate;
+  const clean = cleanFolderName(name);
+  if ("error" in clean) return clean;
+  const all = await storeFolders(orgId);
+  if (parentId !== null && !all.some((f) => f.id === parentId)) return { error: "That folder is gone" };
+  if (depthOf(all, parentId) >= MAX_DEPTH) return { error: `Folders only nest ${MAX_DEPTH} deep` };
+  if (nameTaken(all, parentId, clean.name)) return { error: `There is already a "${clean.name}" here` };
+  const [row] = await db.insert(folders).values({
+    orgId, parentId, name: clean.name,
+    // The workspace this store belongs to: the owning org's, or ours when the
+    // store is the operator's own.
+    tenantOrgId: orgId === null
+      ? myTenantOrgId(u)
+      : orgTenant((await db.select().from(orgs).where(eq(orgs.id, orgId)))[0]) ?? myTenantOrgId(u),
+    createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "folder", entityId: row.id,
+    action: `made the folder "${clean.name}"`,
+  });
+  revalidatePath("/documents");
+  return { id: row.id };
+}
+
+export async function renameFolder(id: number, name: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  if (!row) return { error: "Not found" };
+  const gate = await folderStoreGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  const clean = cleanFolderName(name);
+  if ("error" in clean) return clean;
+  const all = await storeFolders(row.orgId);
+  if (nameTaken(all, row.parentId, clean.name, id)) return { error: `There is already a "${clean.name}" here` };
+  if (clean.name === row.name) return {};
+  await db.update(folders).set({ name: clean.name }).where(eq(folders.id, id));
+  await audit({
+    actor: u.email, entityType: "folder", entityId: id,
+    action: `renamed the folder "${row.name}" to "${clean.name}"`,
+    field: "name", oldValue: row.name, newValue: clean.name,
+  });
+  revalidatePath("/documents");
+  return {};
+}
+
+export async function moveFolder(id: number, intoId: number | null): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  if (!row) return { error: "Not found" };
+  const gate = await folderStoreGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  if (row.parentId === intoId) return {};
+  const all = await storeFolders(row.orgId);
+  const ok = canMoveFolder(all, id, intoId);
+  if (!ok.ok) return { error: ok.error };
+  if (nameTaken(all, intoId, row.name, id)) return { error: `There is already a "${row.name}" there` };
+  await db.update(folders).set({ parentId: intoId }).where(eq(folders.id, id));
+  await audit({
+    actor: u.email, entityType: "folder", entityId: id,
+    action: `moved the folder "${row.name}" to ${intoId === null ? "the top level" : `"${all.find((f) => f.id === intoId)?.name ?? "another folder"}"`}`,
+  });
+  revalidatePath("/documents");
+  return {};
+}
+
+/**
+ * Delete an EMPTY folder.
+ *
+ * Non-empty is refused with the counts rather than cascaded: "delete folder"
+ * and "delete forty files" are different acts, and one confirmation should
+ * never be able to mean the second when somebody meant the first.
+ */
+export async function deleteFolder(id: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  if (!row) return { error: "Not found" };
+  const gate = await folderStoreGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  const all = await storeFolders(row.orgId);
+  const inside = [id, ...descendantIds(all, id)];
+  const held = await db.select({ id: attachments.id }).from(attachments)
+    .where(inArray(attachments.folderId, inside)).catch(() => []);
+  const kids = descendantIds(all, id).length;
+  if (kids || held.length) {
+    const bits = [
+      kids ? `${kids} folder${kids === 1 ? "" : "s"}` : "",
+      held.length ? `${held.length} file${held.length === 1 ? "" : "s"}` : "",
+    ].filter(Boolean).join(" and ");
+    return { error: `"${row.name}" still holds ${bits} - empty it first` };
+  }
+  await db.delete(folders).where(eq(folders.id, id));
+  await audit({
+    actor: u.email, entityType: "folder", entityId: id,
+    action: `deleted the empty folder "${row.name}"`,
+  });
+  revalidatePath("/documents");
+  return {};
+}
+
+/**
+ * Put files in a folder, or back at the root.
+ *
+ * Only LOOSE files move. A file that belongs to a system is already filed
+ * where it should be, and the ids of ones that aren't loose are skipped rather
+ * than refused - a selection spanning both is an ordinary thing to have, and
+ * failing the whole move over it would be unhelpful.
+ */
+export async function moveFilesToFolder(
+  attachmentIds: number[], folderId: number | null,
+): Promise<{ error?: string; moved?: number }> {
+  const u = await requireEditor();
+  if (!attachmentIds.length) return { moved: 0 };
+  const rows = await db.select().from(attachments).where(inArray(attachments.id, attachmentIds));
+  const loose = rows.filter((r) => r.instrumentId === null && r.assetId === null);
+  if (!loose.length) return { error: "Those files belong to records - they are already filed" };
+  // One store per move. Files from two stores in one call would need two gates
+  // and would mean somebody's selection spanned stores, which the page cannot
+  // produce.
+  const store = loose[0].orgId ?? null;
+  if (loose.some((r) => (r.orgId ?? null) !== store)) return { error: "Those files are in different stores" };
+  const gate = await folderStoreGate(u, store);
+  if ("error" in gate) return gate;
+  let dest: typeof folders.$inferSelect | undefined;
+  if (folderId !== null) {
+    [dest] = await db.select().from(folders).where(eq(folders.id, folderId));
+    if (!dest || (dest.orgId ?? null) !== store) return { error: "That folder is not in this store" };
+  }
+  await db.update(attachments).set({ folderId })
+    .where(inArray(attachments.id, loose.map((r) => r.id)));
+  await audit({
+    actor: u.email, entityType: "folder", entityId: folderId ?? 0,
+    action: `moved ${loose.length} file${loose.length === 1 ? "" : "s"} to ${dest ? `"${dest.name}"` : "the top level"}`,
+  });
+  revalidatePath("/documents");
+  return { moved: loose.length };
+}
+
 export async function recordLibraryFiles(
   files: { fileName: string; url: string; size: number; description: string }[],
+  /** The folder that was open when they were dropped. Null = the top level. */
+  folderId: number | null = null,
 ): Promise<{ error?: string }> {
   // Every organization has a shelf of its own, so this is no longer house-only.
   // An org's files land on its shelf; the house's land on the operator's.
@@ -2655,10 +2827,18 @@ export async function recordLibraryFiles(
   if (!files.length) return {};
   const guard = await guardStorage(u.orgId, files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
+  // Dropped into an open folder, they belong in it. Checked rather than
+  // trusted: the id comes from a URL, and a folder in somebody else's store
+  // would file this person's upload somewhere they cannot see it.
+  let dest: number | null = null;
+  if (folderId !== null) {
+    const [f] = await db.select().from(folders).where(eq(folders.id, folderId));
+    if (f && (f.orgId ?? null) === (u.orgId ?? null)) dest = f.id;
+  }
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
       ...f, description: f.description.trim(), kind: "Report", tenantOrgId: myTenantOrgId(u),
-      instrumentId: null, assetId: null, orgId: u.orgId, uploadedBy: u.name,
+      instrumentId: null, assetId: null, orgId: u.orgId, folderId: dest, uploadedBy: u.name,
     })))
     .returning();
   for (const a of rows) {

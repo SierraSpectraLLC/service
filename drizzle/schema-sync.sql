@@ -2388,3 +2388,36 @@ END $$;
 -- Resale is a business a handful of organizations are in and clutter for the
 -- rest, so the controls are off unless somebody turns them on.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "resale_enabled" boolean NOT NULL DEFAULT false;
+
+-- Folders in a file store. Scoped to loose files; a file on a record is
+-- already filed. Deleting a folder never deletes files - they surface at root.
+CREATE TABLE IF NOT EXISTS "folders" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "org_id" integer,
+  "parent_id" integer,
+  "name" text NOT NULL,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "folders_org_idx" ON "folders" ("org_id");
+CREATE INDEX IF NOT EXISTS "folders_parent_idx" ON "folders" ("parent_id");
+ALTER TABLE "attachments" ADD COLUMN IF NOT EXISTS "folder_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'folders_org_id_fk') THEN
+    ALTER TABLE "folders" ADD CONSTRAINT "folders_org_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'folders_parent_id_fk') THEN
+    ALTER TABLE "folders" ADD CONSTRAINT "folders_parent_id_fk"
+      FOREIGN KEY ("parent_id") REFERENCES "folders"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'folders_tenant_org_id_fk') THEN
+    ALTER TABLE "folders" ADD CONSTRAINT "folders_tenant_org_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachments_folder_id_fk') THEN
+    ALTER TABLE "attachments" ADD CONSTRAINT "attachments_folder_id_fk"
+      FOREIGN KEY ("folder_id") REFERENCES "folders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

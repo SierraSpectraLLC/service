@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs } from "@/db/schema";
+import { folders as foldersTable, orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
@@ -39,7 +39,7 @@ const MAX_FILE_BYTES = 100 * 1024 * 1024;
  * "what is LabZen actually holding" has to be answerable.
  */
 export default async function DocumentsPage(
-  { searchParams }: { searchParams: Promise<{ store?: string; cloud?: string }> },
+  { searchParams }: { searchParams: Promise<{ store?: string; cloud?: string; folder?: string }> },
 ) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
@@ -49,7 +49,7 @@ export default async function DocumentsPage(
   // here rather than left in the URL: the callback's only way to speak is this
   // parameter, and until something showed it a refused connection looked like
   // nothing at all happening.
-  const { store: storeParam, cloud: cloudNote } = await searchParams;
+  const { store: storeParam, cloud: cloudNote, folder: folderParam } = await searchParams;
   const wanted = storeParam && /^\d+$/.test(storeParam) ? parseInt(storeParam) : null;
   // Only the house may look at another store; everyone else gets their own,
   // whatever the query string says.
@@ -69,6 +69,18 @@ export default async function DocumentsPage(
     // outage must not take somebody's own files down with it.
     myCloudConnection().catch(() => ({ configured: false, account: "", brokenReason: "", setupProblem: "" })),
   ]);
+  // The store's folders. Loose files only - a file on a system is already
+  // filed where it belongs; see lib/folders.
+  const folderRows = await db.select({ id: foldersTable.id, name: foldersTable.name, parentId: foldersTable.parentId })
+    .from(foldersTable)
+    .where(viewing === null ? isNull(foldersTable.orgId) : eq(foldersTable.orgId, viewing))
+    .orderBy(asc(foldersTable.name))
+    .catch(() => []);
+  // A folder id from the URL only counts if it is one of this store's - a
+  // stale link after switching stores lands at the top level rather than in an
+  // empty folder that appears to have eaten everything.
+  const wantFolder = folderParam && /^\d+$/.test(folderParam) ? parseInt(folderParam) : null;
+  const openFolder = folderRows.find((f) => f.id === wantFolder) ?? null;
 
   const files = groupStoredFiles(rows);
   const guests = groupStoredFiles(guestRows);
@@ -122,18 +134,26 @@ export default async function DocumentsPage(
             Everything {quota.storeName} is storing.
           </div>
         )}
-        {canEdit && isOwnStore && <LibraryUpload full={quota.state === "full"} maxBytes={MAX_FILE_BYTES} />}
+        {canEdit && isOwnStore && (
+          <LibraryUpload full={quota.state === "full"} maxBytes={MAX_FILE_BYTES}
+            folderId={openFolder?.id ?? null} folderName={openFolder?.name ?? ""} />
+        )}
         <StoreFileList
           files={files.map((f) => ({
             url: f.url, size: f.size, fileName: f.fileName, description: f.description,
             kind: f.kind, uploadedBy: f.uploadedBy, when: shopTime(f.newest.createdAt),
             at: new Date(f.newest.createdAt).getTime(),
+            folderId: f.newest.folderId ?? null,
             places: f.places,
             // Mirrors deleteAttachment exactly: a shelf file is its own org's to
             // remove, a file on a record is the house's. Showing a button the
             // server would refuse is worse than showing none.
             shelfOwnerId: f.newest.orgId,
           }))}
+          folders={folderRows}
+          storeOrgId={viewing}
+          openFolderId={openFolder?.id ?? null}
+          canOrganise={canEdit && (isOwnStore || isHouseUser)}
           canRemoveShelf={canEdit && isOwnStore}
           canRemoveRecord={isHouseUser}
         />
@@ -178,6 +198,7 @@ export default async function DocumentsPage(
               url: f.url, size: f.size, fileName: f.fileName, description: f.description,
               kind: f.kind, uploadedBy: f.uploadedBy, when: shopTime(f.newest.createdAt),
               at: new Date(f.newest.createdAt).getTime(),
+              folderId: null,
               places: f.places, shelfOwnerId: f.newest.orgId,
             }))}
             // Not yours to delete. The buttons are simply absent.

@@ -764,6 +764,29 @@ export const parts = pgTable("parts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("parts_instrument_idx").on(t.instrumentId)]);
 
+/**
+ * Folders in an organization's file store.
+ *
+ * The primitive that turns a list of files into somewhere you can put things.
+ * Scoped to the LOOSE store on purpose: a file that belongs to a system is
+ * already in the only place it should be, and moving evidence into "Old stuff"
+ * is not filing, it is hiding. See lib/folders, which owns the rules.
+ *
+ * Deleting one never deletes files - attachments.folder_id goes null and they
+ * surface at the root. The action refuses a non-empty folder anyway; this is
+ * the backstop for the day something slips past it.
+ */
+export const folders = pgTable("folders", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Whose store. Null is the operator's, exactly as on attachments.org_id. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  parentId: integer("parent_id").references((): AnyPgColumn => folders.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("folders_org_idx").on(t.orgId), index("folders_parent_idx").on(t.parentId)]);
+
 export const attachments = pgTable("attachments", {
   /**
    * How this photo sits in a thumbnail: "rot,zoom,x,y", blank for untouched.
@@ -782,6 +805,12 @@ export const attachments = pgTable("attachments", {
   // the store of whoever owns that record, which is why a system joining a
   // client's roster brings its paperwork along. See lib/storage.
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /**
+   * Which folder in that store holds it. Null = the root, which is where every
+   * file was before folders existed and where one lands if its folder goes.
+   * Meaningless on a file that belongs to a record - see the folders table.
+   */
+  folderId: integer("folder_id").references((): AnyPgColumn => folders.id, { onDelete: "set null" }),
   fileName: text("file_name").notNull(),
   // Tune report | Test data | Report | Photo | Manual | Other
   kind: text("kind").notNull().default("Other"),
