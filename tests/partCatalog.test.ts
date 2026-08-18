@@ -222,3 +222,35 @@ describe("keeping the numbers honest", () => {
     expect(numberClash(catalog, { partNumber: "NEW-9", mfrPartNumber: "", aliases: [] })).toBeNull();
   });
 });
+
+describe("a retired part still owns its numbers", () => {
+  const retired = entry({
+    id: 7, partNumber: "OLD-SEAL", name: "Superseded seal", archived: true,
+    manufacturer: "Shimadzu", mfrPartNumber: "228-OLD",
+    aliases: [{ kind: "oem", partNumber: "5063-OLD", manufacturer: "Agilent" }],
+  });
+  const book = [...catalog, retired];
+
+  it("resolves by every one of them, aliases included", () => {
+    // A part retired last year is still what was fitted in March, and a history
+    // that suddenly forgot its name would be worse than one that never knew it.
+    for (const pn of ["OLD-SEAL", "228-OLD", "5063-OLD"]) {
+      expect(catalogEntry(book, pn)?.id).toBe(7);
+    }
+  });
+
+  it("is never asked to be described again", () => {
+    expect(uncatalogued(book, ["5063-OLD", "228-OLD", "OLD-SEAL"])).toEqual([]);
+  });
+
+  it("loses to a live entry that claims the same number", () => {
+    const both = [retired, entry({ id: 10, partNumber: "NEW", aliases: [{ kind: "oem", partNumber: "5063-OLD" }] })];
+    expect(catalogEntry(both, "5063-OLD")?.id).toBe(10);
+  });
+
+  it("still blocks somebody re-using the number", () => {
+    // Letting a new part take it would silently re-point every old record at
+    // the new description.
+    expect(numberClash(book, { partNumber: "5063-OLD", mfrPartNumber: "", aliases: [] })?.entry.id).toBe(7);
+  });
+});

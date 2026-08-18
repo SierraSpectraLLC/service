@@ -8039,6 +8039,21 @@ export type CatalogInput = {
 };
 
 /**
+ * Why a number is refused, in words somebody can act on.
+ *
+ * A RETIRED entry still holds its numbers - reusing one would silently
+ * re-point every old record at the new description - but it is filtered out of
+ * the list on screen, so naming it without saying it is retired sends somebody
+ * looking for an entry they cannot see.
+ */
+function clashMessage(clash: { number: string; entry: { partNumber: string; name: string; archived: boolean } }): string {
+  const who = `${clash.entry.partNumber}${clash.entry.name ? ` - ${clash.entry.name}` : ""}`;
+  return clash.entry.archived
+    ? `${clash.number} belongs to ${who}, which is retired. Restore it, or give this one a different number.`
+    : `${clash.number} already belongs to ${who}`;
+}
+
+/**
  * Attach each entry's other numbers, for a clash check that sees all of them.
  * One query for the whole book rather than one per row.
  */
@@ -8215,9 +8230,7 @@ export async function addCatalogPart(data: CatalogInput): Promise<{ error?: stri
   const aliases = cleanAliases(data.aliases ?? [], clean);
   const withAliases = await loadAliases(mine);
   const clash = numberClash(withAliases, { ...clean, aliases });
-  if (clash) {
-    return { error: `${clash.number} already belongs to ${clash.entry.partNumber}${clash.entry.name ? ` - ${clash.entry.name}` : ""}` };
-  }
+  if (clash) return { error: clashMessage(clash) };
   const [row] = await db.insert(partCatalog).values({
     ...clean, tenantOrgId: tenant, createdBy: u.email,
   }).returning();
@@ -8241,9 +8254,7 @@ export async function updateCatalogPart(id: number, data: CatalogInput): Promise
   const aliases = cleanAliases(data.aliases ?? [], clean);
   const others = await loadAliases(mine.filter((c) => c.id !== id));
   const clash = numberClash(others, { ...clean, aliases });
-  if (clash) {
-    return { error: `${clash.number} already belongs to ${clash.entry.partNumber}${clash.entry.name ? ` - ${clash.entry.name}` : ""}` };
-  }
+  if (clash) return { error: clashMessage(clash) };
   await db.update(partCatalog).set(clean).where(eq(partCatalog.id, id));
   await writeAliases(id, aliases);
   await audit({
