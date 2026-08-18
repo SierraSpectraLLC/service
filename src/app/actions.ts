@@ -3583,6 +3583,48 @@ export async function getUiLayout(viewKey: string): Promise<PanelArrangement | n
   return (row?.data as PanelArrangement) ?? null;
 }
 
+/**
+ * The file table's column widths, per person.
+ *
+ * Stored in ui_layouts beside the panel arrangements - same table, its own
+ * viewKey - because it is the same kind of fact: how THIS person likes THIS
+ * screen, worth nothing to anybody else and worth keeping for them. Clamped on
+ * the way in so a bad drag (or a bad payload) cannot save a zero-width column
+ * that looks like data loss.
+ */
+export type FileColumnWidths = { where: number; size: number; when: number };
+const FILE_COLUMN_BOUNDS: Record<keyof FileColumnWidths, [number, number]> = {
+  where: [90, 420], size: [56, 160], when: [90, 300],
+};
+const FILE_COLUMNS_KEY = "files-columns";
+
+export async function saveFileColumns(widths: FileColumnWidths): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const clean = Object.fromEntries(
+    (Object.keys(FILE_COLUMN_BOUNDS) as (keyof FileColumnWidths)[]).map((k) => {
+      const [lo, hi] = FILE_COLUMN_BOUNDS[k];
+      const n = Math.round(Number(widths?.[k]));
+      return [k, Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : lo];
+    }),
+  ) as FileColumnWidths;
+  await db.insert(uiLayouts)
+    .values({ email: u.email.toLowerCase(), viewKey: FILE_COLUMNS_KEY, data: clean, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [uiLayouts.email, uiLayouts.viewKey],
+      set: { data: clean, updatedAt: new Date() },
+    });
+  return {};
+}
+
+/** This person's saved widths, or null for the defaults. Read on the server. */
+export async function getFileColumns(): Promise<FileColumnWidths | null> {
+  const u = await requireUser();
+  const [row] = await db.select({ data: uiLayouts.data }).from(uiLayouts)
+    .where(and(eq(uiLayouts.email, u.email.toLowerCase()), eq(uiLayouts.viewKey, FILE_COLUMNS_KEY)))
+    .catch(() => []);
+  return (row?.data as FileColumnWidths) ?? null;
+}
+
 // ── Inbox ───────────────────────────────────────────────────────────────────
 // Read markers follow the markThreadRead precedent: your own inbox, no audit.
 // Rows are only ever touched through the caller's own email, so there's no id

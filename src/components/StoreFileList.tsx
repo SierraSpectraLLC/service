@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { promptReason } from "@/lib/reason";
 import {
   createFolder, deleteAttachment, deleteFolder, moveFilesToFolder, moveFolder, renameFolder,
-  updateAttachment,
+  saveFileColumns, updateAttachment, type FileColumnWidths,
 } from "@/app/actions";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { canMoveFolder, childrenOf, descendantIds, folderPath, type FolderLike } from "@/lib/folders";
@@ -36,6 +36,17 @@ export type StoreFolder = FolderLike;
 
 type SortKey = "name" | "size" | "when" | "where";
 
+const COL_DEFAULTS: FileColumnWidths = { where: 190, size: 72, when: 150 };
+/** Mirrors the server clamp, so a drag never shows a width the save rejects. */
+const COL_BOUNDS: Record<keyof FileColumnWidths, [number, number]> = {
+  where: [90, 420], size: [56, 160], when: [90, 300],
+};
+
+/** One line, however long the text: ellipsis, with the full text on hover. */
+const oneLine: React.CSSProperties = {
+  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+};
+
 const onShelf = (f: StoreFile) => f.places.some((p) => p.kind === "shelf");
 const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
 
@@ -58,8 +69,8 @@ const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
  * four times what the store actually holds.
  */
 export default function StoreFileList({
-  files, folders = [], storeOrgId = null, openFolderId = null, canOrganise = false,
-  canRemoveShelf, canRemoveRecord, emptyNote,
+  files, folders = [], storeOrgId = null, openFolderId = null, columnWidths = null,
+  canOrganise = false, canRemoveShelf, canRemoveRecord, emptyNote,
 }: {
   files: StoreFile[];
   /** The store's folders. Empty means this list is browsed flat. */
@@ -68,6 +79,8 @@ export default function StoreFileList({
   storeOrgId?: number | null;
   /** The folder the URL says is open. Null = the top level. */
   openFolderId?: number | null;
+  /** This person's saved column widths, read on the server. Null = defaults. */
+  columnWidths?: FileColumnWidths | null;
   canOrganise?: boolean;
   canRemoveShelf: boolean;
   canRemoveRecord: boolean;
@@ -101,6 +114,30 @@ export default function StoreFileList({
   const [details, setDetails] = useState<StoreFile | null>(null);
   const [draft, setDraft] = useState({ fileName: "", kind: "Other", description: "" });
   const [folderMove, setFolderMove] = useState<number | null>(null);
+  // Column widths, draggable at the header and remembered per person on the
+  // server - the same "how I like this screen" fact as a panel arrangement.
+  // Name is never a number: it flexes into whatever the fixed columns leave.
+  const [cols, setCols] = useState<FileColumnWidths>(columnWidths ?? COL_DEFAULTS);
+
+  const startResize = (key: keyof FileColumnWidths) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = cols[key];
+    let latest = cols;
+    const move = (ev: MouseEvent) => {
+      const [lo, hi] = COL_BOUNDS[key];
+      latest = { ...latest, [key]: Math.min(hi, Math.max(lo, startW + ev.clientX - startX)) };
+      setCols(latest);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      // Saved once, on release - not per pixel of drag.
+      void saveFileColumns(latest);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
 
   const here = childrenOf(folders, at);
   const trail = folderPath(folders, at);
@@ -285,10 +322,28 @@ export default function StoreFileList({
             checked={shown.length > 0 && shown.every((f) => picked.has(f.url))}
             onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((f) => f.url)) : new Set())}
             style={{ width: 15, height: 15, flexShrink: 0 }} />
-          <span style={{ flex: "1 1 200px" }}>{head("name", "Name")}</span>
-          <span style={{ width: 190, flexShrink: 0 }}>{head("where", "Where")}</span>
-          <span style={{ width: 72, flexShrink: 0, textAlign: "right" }}>{head("size", "Size")}</span>
-          <span style={{ width: 150, flexShrink: 0, textAlign: "right" }}>{head("when", "Modified")}</span>
+          <span style={{ flex: "1 1 200px", minWidth: 0 }}>{head("name", "Name")}</span>
+          {/* Each fixed column drags at its right edge; Name takes the slack. */}
+          {([["where", "Where", {}], ["size", "Size", { textAlign: "right" }], ["when", "Modified", { textAlign: "right" }]] as const)
+            .map(([key, label, extra]) => (
+              <span key={key} style={{ width: cols[key], flexShrink: 0, position: "relative", ...extra }}>
+                {head(key, label)}
+                <span role="separator" aria-orientation="vertical" aria-label={`Resize the ${label} column`}
+                  title="Drag to resize · double-click to reset"
+                  onMouseDown={startResize(key)}
+                  onDoubleClick={() => {
+                    // The way back, without a settings screen: the same gesture
+                    // every desktop file manager uses.
+                    const next = { ...cols, [key]: COL_DEFAULTS[key] };
+                    setCols(next);
+                    void saveFileColumns(next);
+                  }}
+                  style={{
+                    position: "absolute", top: -4, bottom: -4, right: -6, width: 11,
+                    cursor: "col-resize", zIndex: 5,
+                  }} />
+              </span>
+            ))}
         </div>
       )}
 
@@ -299,11 +354,12 @@ export default function StoreFileList({
           style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)" }}>
           <span style={{ width: 15, flexShrink: 0 }} />
           <button className="btn link" onClick={() => { setAt(d.id); setPicked(new Set()); }}
-            style={{ flex: "1 1 200px", textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0 }}>
+            style={{ flex: "1 1 200px", textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0 }}
+            title={d.name}>
             <span aria-hidden style={{ color: "#8A5410", flexShrink: 0 }}>▮</span>
-            <span style={{ fontSize: 13, fontWeight: 700, overflowWrap: "anywhere" }}>{d.name}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, minWidth: 0, ...oneLine }}>{d.name}</span>
           </button>
-          <span style={{ width: 190, flexShrink: 0 }}>
+          <span style={{ width: cols.where, flexShrink: 0, ...oneLine }}>
             {(() => {
               // Everything at any depth, so a folder's line means the same
               // thing whether somebody nested things inside it or not.
@@ -319,8 +375,8 @@ export default function StoreFileList({
               );
             })()}
           </span>
-          <span style={{ width: 72, flexShrink: 0 }} />
-          <span style={{ width: 150, flexShrink: 0, textAlign: "right" }}>
+          <span style={{ width: cols.size, flexShrink: 0 }} />
+          <span style={{ width: cols.when, flexShrink: 0, textAlign: "right", ...oneLine }}>
             {canOrganise && (
               <>
                 <button className="btn link row-act" style={{ fontSize: 10.5 }} disabled={pending}
@@ -375,21 +431,27 @@ export default function StoreFileList({
           style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)" }}>
           <input type="checkbox" checked={picked.has(f.url)} onChange={() => toggle(f.url)}
             aria-label={`Select ${f.fileName}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
-          <span style={{ flex: "1 1 200px", minWidth: 0, display: "flex", gap: 7, alignItems: "baseline" }}>
+          {/* One line, whatever the name's length. The full name and the
+              description ride on the hover title, so truncating costs a squint
+              and never the information. */}
+          <span style={{ flex: "1 1 200px", minWidth: 0, display: "flex", gap: 7, alignItems: "baseline" }}
+            title={f.description ? `${f.fileName} - ${f.description}` : f.fileName}>
             <span aria-hidden style={{ color: glyph(f).fg, flexShrink: 0 }}>{glyph(f).glyph}</span>
-            <span style={{ minWidth: 0 }}>
-              <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
-                style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", overflowWrap: "anywhere" }}>
-                {f.fileName}
-              </a>
-              {f.description && <div className="mut" style={{ fontSize: 11.5 }}>{f.description}</div>}
-            </span>
+            <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
+              style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", minWidth: 0, flexShrink: 1, ...oneLine }}>
+              {f.fileName}
+            </a>
+            {f.description && (
+              <span className="mut" style={{ fontSize: 11.5, minWidth: 0, flex: "0 1 auto", ...oneLine }}>
+                {f.description}
+              </span>
+            )}
           </span>
-          <span style={{ width: 190, flexShrink: 0, display: "flex", gap: 4, flexWrap: "wrap" }}>
+          <span style={{ width: cols.where, flexShrink: 0, display: "flex", gap: 4, alignItems: "baseline", overflow: "hidden", whiteSpace: "nowrap" }}>
             <WhereChips file={f} removable={removable} pending={pending}
               onRemoved={(err) => setError(err)} startTransition={startTransition} />
           </span>
-          <span style={{ width: 72, flexShrink: 0, textAlign: "right" }}>
+          <span style={{ width: cols.size, flexShrink: 0, textAlign: "right", whiteSpace: "nowrap" }}>
             <span className="mut" style={{ fontSize: 12 }}>{fmtBytes(f.size)}</span>
             {canOrganise && (
               <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }}
@@ -401,13 +463,11 @@ export default function StoreFileList({
                 }}>edit</button>
             )}
           </span>
-          {/* Two lines rather than one truncated one: who put a file there is
-              worth as much as when, and an ellipsis was eating both. */}
-          <span style={{ width: 150, flexShrink: 0, textAlign: "right", minWidth: 0 }}>
-            <span className="mut" style={{ fontSize: 11, display: "block" }}>{f.when}</span>
-            <span className="mut" style={{ fontSize: 10.5, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {f.uploadedBy}
-            </span>
+          {/* One line; widen the column when you want the uploader too - the
+              hover title always carries both. */}
+          <span className="mut" title={`${f.when} · ${f.uploadedBy}`}
+            style={{ width: cols.when, flexShrink: 0, fontSize: 11, textAlign: "right", ...oneLine }}>
+            {f.when} · {f.uploadedBy}
           </span>
         </div>
       ))}

@@ -14,7 +14,7 @@ import StoreFileList from "@/components/StoreFileList";
 import LibraryUpload from "@/components/LibraryUpload";
 import StorageMeter from "@/components/StorageMeter";
 import CloudLibraryCard from "@/components/CloudLibraryCard";
-import { myCloudConnection } from "@/app/actions";
+import { getFileColumns, myCloudConnection } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +81,9 @@ export default async function DocumentsPage(
   // empty folder that appears to have eaten everything.
   const wantFolder = folderParam && /^\d+$/.test(folderParam) ? parseInt(folderParam) : null;
   const openFolder = folderRows.find((f) => f.id === wantFolder) ?? null;
+  // How this person likes their columns. Read here so the table renders at
+  // their widths on the first frame instead of snapping after hydration.
+  const savedCols = await getFileColumns().catch(() => null);
 
   const files = groupStoredFiles(rows);
   const guests = groupStoredFiles(guestRows);
@@ -153,6 +156,7 @@ export default async function DocumentsPage(
           folders={folderRows}
           storeOrgId={viewing}
           openFolderId={openFolder?.id ?? null}
+          columnWidths={savedCols}
           canOrganise={canEdit && (isOwnStore || isHouseUser)}
           canRemoveShelf={canEdit && isOwnStore}
           canRemoveRecord={isHouseUser}
@@ -203,6 +207,7 @@ export default async function DocumentsPage(
             }))}
             // Not yours to delete. The buttons are simply absent.
             canRemoveShelf={false} canRemoveRecord={false}
+            columnWidths={savedCols}
             emptyNote="Nothing shared with you yet."
           />
         </div>
