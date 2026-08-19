@@ -1880,6 +1880,10 @@ export const appSettings = pgTable("app_settings", {
   // stands up the relay host and sets REMOTE_URL - the pages check both, so a
   // flag flipped before the infrastructure exists says so instead of failing.
   remoteEnabled: boolean("remote_enabled").notNull().default(false),
+  // The public, indexable equipment library (app/equipment). Off until an
+  // operator decides to be on the open web - and off means OFF: the pages 404
+  // and the sitemap empties, not merely that the publish button is hidden.
+  publicCatalogEnabled: boolean("public_catalog_enabled").notNull().default(false),
 });
 
 /**

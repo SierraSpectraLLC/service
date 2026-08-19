@@ -3,6 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { vocabTerms } from "@/db/schema";
 import { appUrl } from "@/lib/appUrl";
+import { getModules } from "@/lib/flags";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,8 @@ export const dynamic = "force-dynamic";
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const url = appUrl();
-  if (!url) return [];
+  // Nothing to offer a crawler while the library is off.
+  if (!url || !(await getModules()).publicCatalog) return [];
   const rows = await db.select({ slug: vocabTerms.publicSlug }).from(vocabTerms)
     .where(and(eq(vocabTerms.published, true), eq(vocabTerms.kind, "model")))
     .orderBy(asc(vocabTerms.publicSlug))

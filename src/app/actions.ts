@@ -7079,6 +7079,7 @@ const MODULES = {
   eod: { col: "eodEnabled", label: "EOD client report" },
   digest: { col: "digestEnabled", label: "daily digest" },
   remote: { col: "remoteEnabled", label: "remote support" },
+  publicCatalog: { col: "publicCatalogEnabled", label: "public equipment library" },
 } as const;
 
 export async function setModule(

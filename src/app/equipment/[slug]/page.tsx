@@ -5,6 +5,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { catalogRefs, partCatalog, partKitLines, procedures, vocabTerms } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
+import { getModules } from "@/lib/flags";
 import { appUrl } from "@/lib/appUrl";
 import { parseModelSpecs } from "@/lib/modelSpecs";
 import { parseProcParts, partsForModel } from "@/lib/procedures";
@@ -27,6 +28,11 @@ export const dynamic = "force-dynamic";
  * is the one fact a service company can never publish.
  */
 async function load(slug: string) {
+  // The module gate comes first: while the library is off, these pages do not
+  // exist at all - not "empty", not "noindex". A page that answers 200 with
+  // nothing on it is worse for the eventual launch than one that was never
+  // there, because it gets crawled and remembered that way.
+  if (!(await getModules()).publicCatalog) return null;
   const [term] = await db.select().from(vocabTerms)
     .where(and(eq(vocabTerms.publicSlug, slug), eq(vocabTerms.published, true), eq(vocabTerms.kind, "model")));
   if (!term) return null;

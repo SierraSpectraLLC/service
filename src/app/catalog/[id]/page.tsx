@@ -14,6 +14,7 @@ import ModelSpecsCard from "@/components/ModelSpecsCard";
 import PublishModelCard from "@/components/PublishModelCard";
 import { publishBlockers, publishWarnings } from "@/lib/publicCatalog";
 import { appUrl } from "@/lib/appUrl";
+import { getModules } from "@/lib/flags";
 import { parseModelSpecs, specNameSuggestions } from "@/lib/modelSpecs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 import ReferencePanel from "@/components/ReferencePanel";
@@ -58,6 +59,9 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
       .orderBy(asc(partCatalog.partNumber)),
   ]);
 
+  // The public library is a module: off means the control isn't here and the
+  // pages aren't there either (app/equipment). See lib/flags.
+  const { publicCatalog } = await getModules();
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
   // Only this model's slice of the procedure book: empty scope = every model.
@@ -129,7 +133,7 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
         )}
       />
 
-      <PublishModelCard
+      {publicCatalog && <PublishModelCard
         termId={term.id} modelName={term.name}
         published={term.published} slug={term.publicSlug} summary={term.publicSummary}
         blockers={publishBlockers({
@@ -141,7 +145,7 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
           specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
         })}
         siteUrl={appUrl()}
-      />
+      />}
 
       <ProceduresPanel
         focus={{ assetType: term.assetType, model: term.name }}

@@ -4,8 +4,10 @@ import { asc, eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { vocabTerms } from "@/db/schema";
 import { getBrand } from "@/lib/brand";
+import { getModules } from "@/lib/flags";
 import { appUrl } from "@/lib/appUrl";
 import { metaDescription } from "@/lib/publicCatalog";
+import { notFound } from "next/navigation";
 import { stockSrc } from "@/lib/photos";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +19,9 @@ export const dynamic = "force-dynamic";
  * in from the site's root.
  */
 export async function generateMetadata(): Promise<Metadata> {
+  // Same reasoning as the model page: notFound() in metadata, which resolves
+  // before the render streams and so can still set the status.
+  if (!(await getModules()).publicCatalog) notFound();
   const brand = await getBrand();
   const url = appUrl();
   const title = `Equipment library - specs, parts and maintenance intervals | ${brand.name}`;
@@ -29,6 +34,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function EquipmentIndexPage() {
+  if (!(await getModules()).publicCatalog) notFound();
   const [rows, brand] = await Promise.all([
     db.select().from(vocabTerms)
       .where(and(eq(vocabTerms.published, true), eq(vocabTerms.kind, "model")))

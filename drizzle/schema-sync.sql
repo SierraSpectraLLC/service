@@ -2502,3 +2502,7 @@ ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "published" boolean NOT NULL 
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "public_slug" text NOT NULL DEFAULT '';
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "public_summary" text NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS "vocab_public_slug_idx" ON "vocab_terms" ("public_slug") WHERE "public_slug" <> '';
+
+-- The public, indexable equipment library (app/equipment). Off by default:
+-- being on the open web is a decision an operator makes, not a default.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "public_catalog_enabled" boolean NOT NULL DEFAULT false;
