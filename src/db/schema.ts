@@ -44,6 +44,15 @@ export const users = pgTable("users", {
    * that clearing it is a way to ask somebody to look again.
    */
   onboardedAt: timestamp("onboarded_at"),
+  /**
+   * The last time this person actually did something in the app, not the last
+   * time they signed in. Sessions last a month (lib/sessionCookie), so sign-ins
+   * count how often somebody is LOCKED OUT, not how often they work here -
+   * whoever uses the portal every morning signs in twelve times a year. Written
+   * at most once an hour per person (lib/loginLog.touchLastSeen), so a busy day
+   * costs eight writes rather than eight hundred.
+   */
+  lastSeenAt: timestamp("last_seen_at"),
 });
 
 export const accounts = pgTable("accounts", {
@@ -92,6 +101,48 @@ export const verificationTokens = pgTable("verification_tokens", {
   token: text("token").notNull(),
   expires: timestamp("expires", { mode: "date" }).notNull(),
 }, (t) => [primaryKey({ columns: [t.identifier, t.token] })]);
+
+/**
+ * One row every time somebody gets in. Append-only, like the audit log.
+ *
+ * There are two doors - a code from an email and a password (lib/passwordAuth)
+ * - and the second one leaves no trace anywhere else: no mail is sent, so the
+ * operator's own inbox stops being an accidental record of who is using the
+ * platform. This table is the record, and both doors write to it.
+ *
+ * The email is stored alongside the user id rather than only joined to it,
+ * because history has to outlive the account: "who was signing in last spring"
+ * must still answer for somebody offboarded since. Same reason the audit log
+ * keeps an actor string.
+ *
+ * `operatorOrgId` is who to show it to, resolved at sign-in from house
+ * membership or the person's own organization. Not called tenantOrgId: nothing
+ * stamps it, it is settled once when the row is written and never moves.
+ */
+export const loginEvents = pgTable("login_events", {
+  id: serial("id").primaryKey(),
+  // Null once the account is deleted; the email below still names who it was.
+  userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+  email: text("email").notNull(),
+  // code | password. What door they came through, which is the whole reason
+  // this exists - a password sign-in is otherwise invisible.
+  method: text("method").notNull().default("code"),
+  // Role and organization as they stood at that moment. A person promoted in
+  // March should not rewrite what they were in January.
+  role: text("role").notNull().default(""),
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  orgName: text("org_name").notNull().default(""),
+  operatorOrgId: integer("operator_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  // Coarse client detail: enough to tell a phone in a lab from a desktop in an
+  // office, and to notice a sign-in from somewhere nobody expected. Truncated
+  // on write - a full user-agent string is noise at this size.
+  ip: text("ip").notNull().default(""),
+  userAgent: text("user_agent").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("login_events_email_idx").on(t.email),
+  index("login_events_created_idx").on(t.createdAt),
+]);
 
 // ---------------------------------------------------------------------------
 // Domain tables

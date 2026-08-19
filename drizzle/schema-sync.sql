@@ -2518,3 +2518,40 @@ DO $$ BEGIN
       FOREIGN KEY ("parent_part_id") REFERENCES "parts"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- Who signs in, when, and through which door. The password path sends no mail,
+-- so without this a service provider running the instance has no way to know
+-- whether anybody is using it. Append-only; see lib/loginLog.
+CREATE TABLE IF NOT EXISTS "login_events" (
+  "id" serial PRIMARY KEY,
+  "user_id" text,
+  "email" text NOT NULL,
+  "method" text NOT NULL DEFAULT 'code',
+  "role" text NOT NULL DEFAULT '',
+  "org_id" integer,
+  "org_name" text NOT NULL DEFAULT '',
+  "operator_org_id" integer,
+  "ip" text NOT NULL DEFAULT '',
+  "user_agent" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "login_events_email_idx" ON "login_events" ("email");
+CREATE INDEX IF NOT EXISTS "login_events_created_idx" ON "login_events" ("created_at");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'login_events_user_id_fk') THEN
+    ALTER TABLE "login_events" ADD CONSTRAINT "login_events_user_id_fk"
+      FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'login_events_org_id_fk') THEN
+    ALTER TABLE "login_events" ADD CONSTRAINT "login_events_org_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'login_events_operator_org_id_fk') THEN
+    ALTER TABLE "login_events" ADD CONSTRAINT "login_events_operator_org_id_fk"
+      FOREIGN KEY ("operator_org_id") REFERENCES "orgs"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Last time somebody actually used the app, not last time they signed in.
+-- A month-long session means the two are nothing like the same number.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamp;

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { landingFor } from "@/lib/welcome";
-import { CHANNEL_COOKIE, signIn, signInAllowed } from "@/auth";
+import { CHANNEL_COOKIE, logSignIn, signIn, signInAllowed } from "@/auth";
 import { getBrand } from "@/lib/brand";
 import { checkTryAllowed, clearAttempts, recordFailure, takeSendSlot } from "@/lib/loginGate";
 import { checkPassword } from "@/lib/passwordAuth";
@@ -73,6 +73,11 @@ export default async function LoginPage({ searchParams }: {
     }
     await clearAttempts(e);
     await startSession(found.userId);
+    // The password door leaves no other trace - no code is mailed, so nothing
+    // in anybody's inbox says this happened. Recorded here rather than inside
+    // startSession so a failure to write the bookkeeping row can never be the
+    // thing that stops somebody signing in (lib/loginLog).
+    await logSignIn(e, "password", found.userId).catch(() => {});
     // Where, rather than a redirect from in here. A server action's redirect is
     // a client-side navigation, and the session cookie was set on THIS response
     // - so the router could serve the dashboard it already had, which is the
