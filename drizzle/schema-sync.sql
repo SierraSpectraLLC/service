@@ -2555,3 +2555,7 @@ END $$;
 -- Last time somebody actually used the app, not last time they signed in.
 -- A month-long session means the two are nothing like the same number.
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamp;
+
+-- Scheduled vs advisory maintenance per system. '' follows the owning org's
+-- resale flag; an explicit value overrides it. See lib/pmPosture.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "pm_posture" text NOT NULL DEFAULT '';

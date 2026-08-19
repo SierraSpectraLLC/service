@@ -41,6 +41,7 @@ import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
 import WorkOrdersPanel from "@/components/WorkOrdersPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
+import { pmPosture, postureLine } from "@/lib/pmPosture";
 import HoursPanel from "@/components/HoursPanel";
 import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
@@ -159,7 +160,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // Costs follow the owner of whatever the part sits on: the home system's
   // owning org while installed, the asset's own org on the shelf.
   const [homeOwner] = asset.instrumentId !== null
-    ? await db.select({ ownerOrgId: instruments.ownerOrgId }).from(instruments).where(eq(instruments.id, asset.instrumentId))
+    ? await db.select({ ownerOrgId: instruments.ownerOrgId, pmPosture: instruments.pmPosture })
+        .from(instruments).where(eq(instruments.id, asset.instrumentId))
     : [];
   const showCosts = canSeeCosts(user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId);
 
@@ -383,6 +385,14 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}
               catalogHint={isStaff}
+              // The unit follows the system it sits on today (lib/pmPosture);
+              // the toggle lives on the system page, so no instrumentId here.
+              posture={homeOwner ? {
+                effective: pmPosture(homeOwner.pmPosture, resaleFlagFor(homeOwner.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null)),
+                stored: homeOwner.pmPosture,
+                note: postureLine(homeOwner.pmPosture, resaleFlagFor(homeOwner.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null), ""),
+                instrumentId: null, canToggle: false,
+              } : undefined}
               people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => ({
                 id: s.id, title: s.title, body: s.body, assignee: s.assignee,

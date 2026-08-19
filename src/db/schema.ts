@@ -318,6 +318,15 @@ export const instruments = pgTable("instruments", {
   // platform ("unclaimed"). The owner's editors approve access requests;
   // visibility itself still comes only from system_shares.
   ownerOrgId: integer("owner_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /**
+   * How this system relates to its maintenance calendar. '' = follow the owning
+   * org: resellers get "advisory", everyone else "scheduled". An explicit
+   * 'scheduled' or 'advisory' overrides that, either direction, at any time.
+   * Advisory keeps every schedule - cadence, kit, last-done history - but the
+   * machine stops acting on them: no generated tasks, no queue handoffs, no
+   * overdue tint. Knowledge, not obligation. See lib/pmPosture.
+   */
+  pmPosture: text("pm_posture").notNull().default(""),
   // WHOSE QUEUE the system is sitting in - a third axis, independent of both
   // ownership and access. A refurbished system parked with the client while
   // they run application tests is still ours to own and everyone's to see, but

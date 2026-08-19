@@ -28,6 +28,7 @@ import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { clientOptions } from "@/lib/clientNames";
 import { canOfferResale, resaleFlagFor } from "@/lib/owner";
+import { pmPosture, postureLine } from "@/lib/pmPosture";
 import { sitesFor } from "@/lib/sites";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
@@ -594,6 +595,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
               catalogHint={isStaff}
+              // Scheduled vs advisory (lib/pmPosture): a reseller's systems
+              // carry their calendar as reference. The toggle is the house's -
+              // it changes what the cron does, which is operator machinery.
+              posture={{
+                effective: pmPosture(inst.pmPosture, resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null)),
+                stored: inst.pmPosture,
+                note: postureLine(inst.pmPosture,
+                  resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null),
+                  inst.ownerOrgId !== null ? orgName.get(inst.ownerOrgId) ?? "" : ""),
+                instrumentId: inst.id,
+                canToggle: isStaff,
+              }}
               people={directoryNames(peopleRows)}
               schedules={pmRows.map((s) => {
                 const onAsset = s.assetId !== null ? assetRows.find((a) => a.id === s.assetId) : undefined;

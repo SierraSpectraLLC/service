@@ -26,6 +26,7 @@ import { audit } from "@/lib/audit";
 import { parseChecklist } from "@/lib/checklist";
 import { getBrand } from "@/lib/brand";
 import { pmHandoff } from "@/lib/pmQueue";
+import { pmPosture } from "@/lib/pmPosture";
 import { notifyTaskAssigned } from "@/lib/notify";
 import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
@@ -112,8 +113,19 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
         id: instruments.id, externalId: instruments.externalId,
         queueOrgId: instruments.queueOrgId, archived: instruments.archived,
         tenantOrgId: instruments.tenantOrgId,
+        ownerOrgId: instruments.ownerOrgId, pmPosture: instruments.pmPosture,
       }).from(instruments).where(inArray(instruments.id, instIds))
     : [];
+  // Advisory systems keep their calendar as reference: due dates pass without
+  // a task and without a queue move. lib/pmPosture says whose systems those
+  // are; an off-system spare has no posture and stays scheduled.
+  const resaleOrgs = instRows.some((i) => i.ownerOrgId !== null)
+    ? await db.select({ id: orgs.id, resaleEnabled: orgs.resaleEnabled }).from(orgs)
+        .where(inArray(orgs.id, [...new Set(instRows.flatMap((i) => (i.ownerOrgId !== null ? [i.ownerOrgId] : [])))]))
+    : [];
+  const advisory = new Set(instRows
+    .filter((i) => pmPosture(i.pmPosture, resaleOrgs.find((o) => o.id === i.ownerOrgId)?.resaleEnabled ?? false) === "advisory")
+    .map((i) => i.id));
   // Who could take the next move on each of these systems. Read once for the
   // whole run rather than per schedule - a fleet of due filters is one query.
   const shareRows = instIds.length
@@ -132,6 +144,7 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
   for (const s of due) {
     if (alreadyOpen.has(s.id)) continue;
     const onSystem = s.instrumentId ?? assetRows.find((r) => r.id === s.assetId)?.instrumentId ?? null;
+    if (onSystem !== null && advisory.has(onSystem)) continue;
     // The parts travel on the task, so whoever picks it up has the numbers in
     // front of them instead of in a binder.
     const t = await createPmTask(s, onSystem, s.nextDue, actor,
