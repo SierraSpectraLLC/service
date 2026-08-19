@@ -11,7 +11,7 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
-import { requireUser } from "@/lib/authz";
+import { requireUser, viewContext } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
@@ -198,9 +198,16 @@ export default async function Home() {
 
   // The changelog the platform shows its own users, on the one page everyone
   // lands on. Cards this person has already dismissed never come back.
-  const [me] = await db.select({ seen: users.whatsNewSeen }).from(users)
+  //
+  // Never under a persona: "view as" borrows a client's eyes but keeps the
+  // owner's account, so a dismissal there would mark the whole batch seen and
+  // swallow the staff and owner cards before the owner ever saw them as
+  // themselves. The impersonated walk-through is for checking the portal, not
+  // for reading news.
+  const { persona } = await viewContext();
+  const [me] = persona ? [] : await db.select({ seen: users.whatsNewSeen }).from(users)
     .where(eq(users.email, user.email.toLowerCase())).catch(() => []);
-  const newsCards = unseenFor(WHATS_NEW, user.role, me?.seen ?? "");
+  const newsCards = persona ? [] : unseenFor(WHATS_NEW, user.role, me?.seen ?? "");
 
   return (
     <>

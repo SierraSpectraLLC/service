@@ -61,3 +61,21 @@ describe("the real entries", () => {
     }
   });
 });
+
+describe("once per user, per batch", () => {
+  it("after a dismissal records the latest key, nothing shows for any role", () => {
+    const seen = latestKey(LIST);
+    for (const role of ["owner", "staff", "client_editor", "client_viewer"]) {
+      expect(unseenFor(LIST, role, seen)).toEqual([]);
+    }
+  });
+
+  it("a later batch shows exactly the new cards, once, and only the relevant ones", () => {
+    const seen = latestKey(LIST);                       // dismissed today...
+    const later = [entry("e", "all"), entry("d", "owner"), ...LIST]; // ...two ship next month
+    expect(unseenFor(later, "client_viewer", seen).map((x) => x.key)).toEqual(["e"]);
+    expect(unseenFor(later, "owner", seen).map((x) => x.key)).toEqual(["e", "d"]);
+    // and dismissing the new batch ends it again
+    expect(unseenFor(later, "owner", latestKey(later))).toEqual([]);
+  });
+});
