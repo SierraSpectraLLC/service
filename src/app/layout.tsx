@@ -20,6 +20,7 @@ import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { unreadDiscussions } from "@/lib/discussionUnread";
 import { unreadMessages } from "@/lib/messageUnread";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -232,6 +233,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             PT
           </div>
         </div>
+        <Analytics />
       </body>
     </html>
   );
