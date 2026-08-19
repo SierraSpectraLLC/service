@@ -9,6 +9,7 @@ import {
 import { requireUser } from "@/lib/authz";
 import { assetAccess, assertSystemVisible, canEditSystem, isHouse, readTenant } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
+import { visitFlag } from "@/lib/entitlementFlags";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
@@ -74,6 +75,13 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     { isHouse: staff, orgId: user.orgId, houseOrgId: staff ? readTenant(user) : null },
     wo, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null,
   );
+
+  // The standing entitlement note on an OPEN job: recomputed, never stored, so
+  // it appears the day the allowance runs dry and disappears if paper is added.
+  // Staff only - the client's own view of their contract lives on their pages.
+  const entFlag = staff && (wo.state === "open" || wo.state === "active" || wo.state === "waiting") && wo.orgId !== null
+    ? await visitFlag(wo.orgId, wo.instrumentId).catch(() => "")
+    : "";
 
   const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.workOrderId, woId))
@@ -190,6 +198,12 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           {wo.assignee ? ` · with ${wo.assignee}` : " · nobody assigned"}
           {minutes ? ` · ${formatHours(minutes)} logged` : ""}
         </div>
+
+        {entFlag && (
+          <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginTop: 10 }}>
+            {entFlag}
+          </div>
+        )}
 
         {wo.body && (
           <div style={{ fontSize: 13, whiteSpace: "pre-wrap", borderLeft: "3px solid var(--line)", padding: "4px 10px", margin: "10px 0" }}>

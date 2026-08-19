@@ -73,6 +73,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
   const [draft, setDraft] = useState<typeof empty>(empty);
   const [specPairs, setSpecPairs] = useState<SpecPair[]>([]);
+  const [flag, setFlag] = useState("");
   const [pending, startTransition] = useTransition();
 
   // Which day's heading is being renamed, and to what.
@@ -129,8 +130,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
     if (!draft.name.trim() || !form) return;
     const payload = { ...draft, specs: serializeSpecs(specPairs) };
     startTransition(async () => {
-      if (form.mode === "new") await createPart(target, payload);
-      else await updatePart(form.id, payload);
+      if (form.mode === "new") {
+        const res = await createPart(target, payload);
+        // Allowance heads-up rides the save; the record always lands.
+        setFlag(res?.flag ?? "");
+      } else await updatePart(form.id, payload);
       close();
     });
   };
@@ -145,6 +149,13 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           </button>
         )}
       </div>
+
+      {flag && (
+        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginBottom: 8, display: "flex", gap: 8 }}>
+          <span style={{ flex: 1 }}><b>Recorded.</b> {flag}</span>
+          <button className="btn link" style={{ fontSize: 11, color: "#8A5410" }} onClick={() => setFlag("")}>dismiss</button>
+        </div>
+      )}
 
       {form && (
         <div className="dash-form">

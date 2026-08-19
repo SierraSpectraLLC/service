@@ -110,6 +110,7 @@ import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import { cleanMakerName } from "@/lib/makers";
 import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenance";
+import { partsFlag, visitFlag } from "@/lib/entitlementFlags";
 import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
 import { MAX_SUMMARY, modelSlug, publishBlockers, uniqueSlug } from "@/lib/publicCatalog";
 import { tenantCatalogIds } from "@/lib/makersData";
@@ -2373,7 +2374,7 @@ export async function nameServiceVisit(
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
 
-export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string }> {
+export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string; flag?: string }> {
   const u = await requireEditor();
   const data = cleanPartInput(raw);
   if (!data.name.trim()) return { error: "Name required" };
@@ -2406,7 +2407,10 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
       : `added ${noun} '${p.name}'${qty}${pn} - ${p.status}`) + (taggedAsset ? ` [${assetLabel(taggedAsset)}]` : "") + note,
   });
   revWork(p);
-  return {};
+  // Same posture as the visit flag on a work order: warn about the allowance
+  // at the moment of commitment, never refuse the record.
+  const flag = await partsFlag(payer, t0.instrumentId, p.costCents).catch(() => "");
+  return { flag: flag || undefined };
 }
 
 export async function updatePart(partId: number, raw: PartInput) {
@@ -5179,7 +5183,7 @@ async function fileWorkOrder(opts: {
 export async function openWorkOrder(
   target: WorkTarget,
   data: { title: string; body: string; severity: string; assignee?: string },
-): Promise<{ error?: string; id?: number; number?: string }> {
+): Promise<{ error?: string; id?: number; number?: string; flag?: string }> {
   const u = await requireEditor();
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say briefly what the job is" };
@@ -5212,7 +5216,11 @@ export async function openWorkOrder(
     });
   }
   revWo(wo);
-  return { id: wo.id, number: wo.number };
+  // The entitlement check rides the answer, never blocks the job: the client's
+  // instrument is down either way, but a visit spent beyond the contract must
+  // not be spent silently. Failure to compute = no flag, not no work order.
+  const flag = await visitFlag(orgId, t0.instrumentId).catch(() => "");
+  return { id: wo.id, number: wo.number, flag: flag || undefined };
 }
 
 /**
@@ -8099,7 +8107,7 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
  */
 export async function orderNeededParts(
   partIds: number[], data: { vendor: string; stockroomId: number },
-): Promise<{ error?: string; id?: number; number?: string }> {
+): Promise<{ error?: string; id?: number; number?: string; flag?: string }> {
   const u = await requireEditor();
   if (!partIds.length) return { error: "Pick at least one part" };
   const rows = await db.select().from(parts).where(inArray(parts.id, partIds));
@@ -8140,7 +8148,23 @@ export async function orderNeededParts(
     revWork(r);
   }
   revalidatePath("/purchasing");
-  return { id: res.id, number: po?.number ?? "" };
+  // Whose money this order draws on: sum the committed cost per owning org and
+  // ask each allowance whether it can absorb its share. Worst answer travels.
+  let flag = "";
+  try {
+    const byOrg = new Map<number, { instrumentId: number | null; cents: number }>();
+    for (const r of rows) {
+      if (r.ownerOrgId === null) continue;
+      const at = byOrg.get(r.ownerOrgId) ?? { instrumentId: r.instrumentId, cents: 0 };
+      at.cents += r.costCents ?? 0;
+      byOrg.set(r.ownerOrgId, at);
+    }
+    for (const [orgId, at] of byOrg) {
+      const f = await partsFlag(orgId, at.instrumentId, at.cents > 0 ? at.cents : null);
+      if (f) { flag = f; break; }
+    }
+  } catch { /* a failed check is no flag, never a failed order */ }
+  return { id: res.id, number: po?.number ?? "", flag: flag || undefined };
 }
 
 /**

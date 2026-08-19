@@ -116,7 +116,8 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
                 const res = await orderNeededParts([...picked], { vendor: vendors[0], stockroomId: parseInt(roomId) });
                 if (res?.error) { done(res.error, true); return; }
                 setPicked(new Set());
-                done(`Drafted ${res.number} - open it in Purchasing to send it`);
+                // The allowance heads-up rides along; the order stands either way.
+                done(`Drafted ${res.number} - open it in Purchasing to send it${res.flag ? `. ${res.flag}` : ""}`);
               })}>
               {pending ? "Drafting..." : vendors.length === 1 ? `Draft a ${vendors[0]} order` : "Draft an order"}
             </button>

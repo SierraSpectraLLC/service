@@ -48,6 +48,10 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
   const [past, setPast] = useState(false);
   const [pastDraft, setPastDraft] = useState({ title: "", summary: "", date: "", reference: "", doneBy: "" });
   const [error, setError] = useState("");
+  // The entitlement heads-up that rode back on the filing - "out of included
+  // visits". Amber, persistent until the next action: it must outlive the
+  // form closing, because it is the one thing worth remembering afterwards.
+  const [flag, setFlag] = useState("");
   const [pending, startTransition] = useTransition();
 
   const live = orders.filter((o) => woOpen(o.state) || o.state === "resolved");
@@ -59,6 +63,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
     startTransition(async () => {
       const res = await openWorkOrder(target, { title, body, severity, assignee });
       if (res?.error) { setError(res.error); return; }
+      setFlag(res?.flag ?? "");
       setOpen(false); setTitle(""); setBody(""); setSeverity("Degraded"); setAssignee("");
     });
   };
@@ -179,6 +184,12 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
         </div>
       )}
       {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+      {flag && (
+        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginBottom: 8, display: "flex", gap: 8 }}>
+          <span style={{ flex: 1 }}><b>Filed.</b> {flag}</span>
+          <button className="btn link" style={{ fontSize: 11, color: "#8A5410" }} onClick={() => setFlag("")}>dismiss</button>
+        </div>
+      )}
 
       {live.map(row)}
       {live.length === 0 && (
