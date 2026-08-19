@@ -5,9 +5,10 @@ import { promptReason } from "@/lib/reason";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
-  alignMaintenance, undoRunPmNow, logPastPm,
+  alignMaintenance, undoRunPmNow, logPastPm, setPmPosture,
 } from "@/app/actions";
-import { cadenceLabel } from "@/lib/pm";
+import { addDays, cadenceLabel } from "@/lib/pm";
+import { postureIsDefault, type PmPosture } from "@/lib/pmPosture";
 import { partLabel, type ProcPart } from "@/lib/procedures";
 import { pmGroups } from "@/lib/pmGroups";
 import PartNumberField from "./PartNumberField";
@@ -39,10 +40,16 @@ const mdy = (iso: string) => {
  * ordinary task in the Tasks panel; completing that task books the next cycle.
  * This panel is the calendar, not the work.
  */
-export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false }: {
+export default function MaintenancePanel({ target, schedules, people, today, canEdit, catalogHint = false, posture }: {
   target: WorkTarget; schedules: PmRow[]; people: string[]; today: string; canEdit: boolean;
   /** Staff only: point at the catalog, where per-model upkeep is defined ONCE. */
   catalogHint?: boolean;
+  /**
+   * Scheduled vs advisory (lib/pmPosture). `effective` decides how due dates
+   * read; the rest drives the toggle, offered only where `instrumentId` and
+   * `canToggle` say the viewer may. Absent = scheduled, exactly as before.
+   */
+  posture?: { effective: PmPosture; stored: string; note: string; instrumentId: number | null; canToggle: boolean };
 }) {
   const [open, setOpen] = useState(false);
   // Yearly by default, like the procedure catalog: most upkeep worth writing
@@ -50,7 +57,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   // (see the reset below) for shops whose rhythm is something else.
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", everyDays: "365", firstDue: today, partName: "", partNumber: "" });
   const [requested, setRequested] = useState<Record<string, string>>({});
-  const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string }>>({});
+  const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string; lastDone: string }>>({});
   const [error, setError] = useState("");
   const [showLater, setShowLater] = useState(false);
   const [aligning, setAligning] = useState(false);
@@ -68,6 +75,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   // due, rather than as a screenful of work nobody has to do yet.
   const { active, months, paused, next, allClear } = pmGroups(schedules, today);
   const laterCount = months.reduce((n, m) => n + m.rows.length, 0) + paused.length;
+  const advisory = posture?.effective === "advisory";
 
   const submit = () => {
     if (!draft.title.trim()) return;
@@ -109,12 +117,21 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           ) : s.openTaskId !== null ? (
             <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
           ) : (
+            /* Advisory: the same date without the siren. A passed date on a
+               reseller's bench is information ("a cycle has elapsed"), not a
+               failure, so it never goes red and never says "overdue". */
+            advisory ? (
+              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>
+                {overdue || dueToday ? `cycle elapsed ${mdy(s.nextDue)}` : `next cycle ${mdy(s.nextDue)}`}
+              </span>
+            ) : (
             <span className="pill" style={{
               background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
               color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
             }}>
               {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
             </span>
+            )
           )}
           {s.onAsset && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
           {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
@@ -133,7 +150,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                       const res = await runPmNow(s.id);
                       setError(res?.error ?? "");
                     });
-                  }}>{overdue || dueToday ? "Start" : "Do it now"}</button>
+                  }}>{!advisory && (overdue || dueToday) ? "Start" : "Do it now"}</button>
               )}
               {s.openTaskId !== null && (
                 <span className="mut" style={{ fontSize: 11 }}>in Tasks</span>
@@ -158,7 +175,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               )}
               <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                 onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({
-                  ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue },
+                  ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue, lastDone: s.lastDone },
                 }))}>{e ? "cancel" : "edit"}</button>
               <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                 onClick={() => startTransition(async () => {
@@ -235,6 +252,21 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             <input type="date" value={e.nextDue}
               onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, nextDue: ev.target.value } }))}
               style={{ width: "auto", fontSize: 12 }} />
+            {/* The date off the sticker, or the seller's word at intake.
+                Setting it re-suggests next due one cadence later - still
+                editable, because "we know when, not by whom" is the fact
+                being recorded and the calendar is a consequence of it. */}
+            <span className="mut" style={{ fontSize: 11 }}>last done</span>
+            <input type="date" value={e.lastDone} aria-label="Last done"
+              onChange={(ev) => {
+                const lastDone = ev.target.value;
+                const days = parseInt(e.everyDays);
+                setEditing((m) => ({ ...m, [s.id]: {
+                  ...e, lastDone,
+                  nextDue: lastDone && Number.isFinite(days) && days > 0 ? addDays(lastDone, days) : e.nextDue,
+                } }));
+              }}
+              style={{ width: "auto", fontSize: 12 }} />
             <select value={e.assignee} onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, assignee: ev.target.value } }))}
               style={{ width: "auto", fontSize: 12 }}>
               <option value="">unassigned</option>
@@ -306,6 +338,46 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           </div>
         </div>
       )}
+      {/* Which of the schedule's two meanings applies here: the knowledge
+          always, the obligation only on a scheduled system. lib/pmPosture. */}
+      {posture && (advisory || !postureIsDefault(posture.stored)) && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8, padding: "7px 10px", borderRadius: 8, background: advisory ? "#F5F7FA" : "#E7F2FA" }}>
+          <span className="pill" style={{ background: advisory ? "#EEF1F5" : "#E7F2FA", color: advisory ? "#475569" : "#1D6396" }}>
+            {advisory ? "reference only" : "on a schedule"}
+          </span>
+          <span className="mut" style={{ fontSize: 11.5, flex: "1 1 200px" }}>{posture.note}</span>
+          {posture.canToggle && posture.instrumentId !== null && (
+            <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const res = await setPmPosture(posture.instrumentId!, advisory ? "scheduled" : "advisory");
+                  if (res?.error) setError(res.error);
+                })}>{advisory ? "put on a schedule" : "make reference only"}</button>
+              {!postureIsDefault(posture.stored) && (
+                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  title="Follow the owning organization again"
+                  onClick={() => startTransition(async () => {
+                    const res = await setPmPosture(posture.instrumentId!, "");
+                    if (res?.error) setError(res.error);
+                  })}>use owner default</button>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+      {/* The quiet counterpart: a scheduled-by-default system offers the way
+          out without a banner about a state it is already in. */}
+      {posture && !advisory && postureIsDefault(posture.stored) && posture.canToggle && posture.instrumentId !== null && schedules.length > 0 && (
+        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+          Due work turns into tasks.{" "}
+          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+            title="Keep every schedule as reference - nothing comes due, nothing nags"
+            onClick={() => startTransition(async () => {
+              const res = await setPmPosture(posture.instrumentId!, "advisory");
+              if (res?.error) setError(res.error);
+            })}>Make reference only</button>
+        </div>
+      )}
       {/* A hand-made schedule here covers THIS record only. Ten similar systems
           means ten copies - which is exactly what the catalog exists to avoid. */}
       {catalogHint && (
@@ -367,10 +439,14 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       {laterCount > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
           <span style={{ fontSize: 12.5, fontWeight: allClear ? 700 : 400 }}>
-            {allClear ? "All maintenance done" : `${laterCount} not due yet`}
+            {allClear ? (advisory ? "Nothing has cycled around" : "All maintenance done") : `${laterCount} ${advisory ? "more as reference" : "not due yet"}`}
           </span>
           {next && (
-            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>next due {next.label}</span>
+            <span className="pill" style={advisory
+              ? { background: "#EEF1F5", color: "#475569" }
+              : { background: "#E5F3E5", color: "#2E6B2E" }}>
+              {advisory ? `next cycle ${next.label}` : `next due ${next.label}`}
+            </span>
           )}
           <button className="btn link" style={{ marginLeft: "auto", fontSize: 11 }}
             onClick={() => setShowLater((v) => !v)}>{showLater ? "hide" : "show"}</button>

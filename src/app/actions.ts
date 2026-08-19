@@ -87,6 +87,7 @@ import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
+import { isPmPosture } from "@/lib/pmPosture";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
@@ -1662,7 +1663,7 @@ export async function addPmSchedule(
 
 export async function updatePmSchedule(
   id: number,
-  data: { assignee: string; everyDays: number | string; nextDue: string },
+  data: { assignee: string; everyDays: number | string; nextDue: string; lastDone?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, id));
@@ -1673,15 +1674,55 @@ export async function updatePmSchedule(
   const nextDue = data.nextDue.trim();
   if (!isIsoDay(nextDue)) return { error: "Pick a next due date" };
   const assignee = data.assignee.trim();
-  if (s.everyDays === cadence.days && s.nextDue === nextDue && s.assignee === assignee) return {};
-  await db.update(pmSchedules).set({ everyDays: cadence.days, nextDue, assignee }).where(eq(pmSchedules.id, id));
+  // "We know when it was last done" is a fact worth holding on its own - the
+  // date off a sticker on the panel, or the seller's word at intake. Unlike
+  // logPastPm it files nothing: a known date is not a record of who did what.
+  // Blank leaves the stored value alone rather than erasing it.
+  const lastDone = (data.lastDone ?? "").trim();
+  if (lastDone && !isIsoDay(lastDone)) return { error: "Pick a real last-done date" };
+  const lastChanged = !!lastDone && lastDone !== s.lastDone;
+  if (s.everyDays === cadence.days && s.nextDue === nextDue && s.assignee === assignee && !lastChanged) return {};
+  await db.update(pmSchedules).set({
+    everyDays: cadence.days, nextDue, assignee,
+    ...(lastChanged ? { lastDone } : {}),
+  }).where(eq(pmSchedules.id, id));
   await audit({
     actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: id,
-    action: `rescheduled maintenance '${s.title}': ${cadenceLabel(cadence.days)}, next due ${nextDue}${assignee !== s.assignee ? `, assigned ${assignee || "nobody"}` : ""}`,
+    action: `rescheduled maintenance '${s.title}': ${cadenceLabel(cadence.days)}, next due ${nextDue}${lastChanged ? `, last done ${lastDone}` : ""}${assignee !== s.assignee ? `, assigned ${assignee || "nobody"}` : ""}`,
     field: "nextDue", oldValue: `${s.nextDue} (${cadenceLabel(s.everyDays)})`, newValue: `${nextDue} (${cadenceLabel(cadence.days)})`,
   });
   await generateDuePmTasks(shopToday(), u.email);
   revWork(s);
+  return {};
+}
+
+/**
+ * Scheduled or advisory maintenance for one system, toggled any time.
+ *
+ * '' hands the answer back to the owning org's default (lib/pmPosture) rather
+ * than being a third posture, so "clear the override" survives the system
+ * being sold to a different kind of company. Existing open tasks stay - they
+ * are real work somebody may be mid-way through; the toggle governs what the
+ * generator does from now on.
+ */
+export async function setPmPosture(instrumentId: number, posture: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!isPmPosture(posture)) return { error: "Not a maintenance posture" };
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!houseOf(u, inst.tenantOrgId)) return { error: "Not yours to change" };
+  if (inst.pmPosture === posture) return {};
+  await db.update(instruments).set({ pmPosture: posture }).where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: instrumentId,
+    action: posture === ""
+      ? "maintenance posture follows the owner again"
+      : `maintenance is ${posture === "advisory" ? "advisory now - schedules stay as reference, nothing comes due" : "on a schedule now - due work turns into tasks"}`,
+    field: "pmPosture", oldValue: inst.pmPosture, newValue: posture,
+  });
+  // Flipping to scheduled makes anything already past its date due today.
+  if (posture !== "advisory") await generateDuePmTasks(shopToday(), u.email);
+  revalidatePath(`/instruments/${instrumentId}`);
   return {};
 }
 
