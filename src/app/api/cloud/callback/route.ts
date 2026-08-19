@@ -2,10 +2,9 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { audit } from "@/lib/audit";
 import { currentUser, myTenantOrgId } from "@/lib/authz";
-import { exchangeCode, graphBaseUrl, graphConfig } from "@/lib/msgraph";
+import { HANDSHAKE_COOKIE, exchangeCode, graphBaseUrl, graphConfig } from "@/lib/msgraph";
 import { open, sameSecret } from "@/lib/secretBox";
 import { saveConnection } from "@/lib/cloudStore";
-import { HANDSHAKE_COOKIE } from "../connect/route";
 
 export const dynamic = "force-dynamic";
 

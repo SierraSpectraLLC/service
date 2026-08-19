@@ -123,6 +123,16 @@ export function graphSetupProblem(): string {
 // The handshake
 // ---------------------------------------------------------------------------
 
+/**
+ * Where the in-flight handshake is kept for the two minutes it lives.
+ *
+ * Here rather than in the route that sets it: a route file may only export the
+ * handlers and Next's own config fields, so exporting a constant from one -
+ * even one the sibling route legitimately needs - fails the production build's
+ * route-type check while `tsc` says nothing.
+ */
+export const HANDSHAKE_COOKIE = "cloud-oauth";
+
 /** PKCE: a secret this server keeps, and the hash of it that travels. */
 export function pkcePair(): { verifier: string; challenge: string } {
   const verifier = randomBytes(48).toString("base64url");
