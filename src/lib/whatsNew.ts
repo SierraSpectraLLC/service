@@ -10,10 +10,11 @@
 // beside them, and the history is the git history. There is no admin UI to
 // forget to fill in.
 //
-// HOW TO ADD A BATCH: append entries at the TOP (newest first), each with a
-// fresh unique key. Screenshots go in public/whatsnew/ (login-gated by the
-// middleware like every other page - they show real UI). A viewer's marker is
-// the newest key they have dismissed; everything above it is unseen.
+// HOW TO ADD A BATCH: docs/WHATS_NEW_GUIDE.md is the full recipe. Short
+// version: append entries at the TOP (newest first), each with a fresh unique
+// key; screenshots go in public/whatsnew/ (login-gated by the middleware like
+// every other page - they show real UI). A viewer's marker is the newest key
+// they have dismissed; everything above it is unseen.
 
 export type WhatsNewAudience = "all" | "staff" | "owner";
 
@@ -33,49 +34,22 @@ export type WhatsNewEntry = {
   audience: WhatsNewAudience;
 };
 
-/** Newest first. See HOW TO ADD A BATCH above. */
+/**
+ * Newest first. Empty right now, on purpose: the batch that shipped with the
+ * feature was dismissed before launch, and entries from here on are the
+ * operator's own words. The full recipe is docs/WHATS_NEW_GUIDE.md; the short
+ * version is the template below.
+ */
 export const WHATS_NEW: WhatsNewEntry[] = [
-  {
-    key: "2026-08-19-advisory-maintenance",
-    date: "2026-08-19",
-    title: "Maintenance can be reference, not homework",
-    body: "Reseller-owned systems keep every schedule - cadence, kit, last-done history - but nothing comes due: no tasks, no red, no queue moves. Toggle any system between \"on a schedule\" and \"reference only\" from its Maintenance card, any time.",
-    image: "/whatsnew/advisory.png",
-    audience: "staff",
-  },
-  {
-    key: "2026-08-19-usage",
-    date: "2026-08-19",
-    title: "See who is actually using the portal",
-    body: "Settings → Access → Usage shows everyone with a way in, graded active, quiet, dormant, or never signed in - including password sign-ins, which used to leave no trace. A first-ever sign-in pings you, and a Monday email sums up the week.",
-    image: "/whatsnew/usage.png",
-    href: "/settings/activity",
-    audience: "owner",
-  },
-  {
-    key: "2026-08-19-search",
-    date: "2026-08-19",
-    title: "Search half a serial, get the whole system",
-    body: "Every search box now works the same way: each word can match a different field, and punctuation doesn't matter - \"sil40\" finds the SIL-40, and finds the system it's bolted to. Try a scrap of a serial number on the dashboard.",
-    image: "/whatsnew/search.png",
-    audience: "all",
-  },
-  {
-    key: "2026-08-18-dispatch",
-    date: "2026-08-18",
-    title: "Dispatch while the phone is still warm",
-    body: "Opening a work order now takes the engineer's name right on the intake form - the job lands in their queue and they get notified the moment it files. Down systems read red and sort first, and My systems shows each person their own plate.",
-    image: "/whatsnew/dispatch.png",
-    audience: "staff",
-  },
-  {
-    key: "2026-08-17-model-pages",
-    date: "2026-08-17",
-    title: "Every model has a page now",
-    body: "Click any model chip in the equipment catalog: photo, spec sheet, procedures, references, and parts in one place. Specs follow the unit onto system and asset pages, and a G6117A can copy its procedures straight from the G6117B.",
-    image: "/whatsnew/model-pages.png",
-    audience: "staff",
-  },
+  // {
+  //   key: "2026-09-01-my-change",          // unique, never reused
+  //   date: "2026-09-01",
+  //   title: "One line that names the change",
+  //   body: "Two or three sentences, benefit first. What can I do now that I couldn't?",
+  //   image: "/whatsnew/my-change.png",     // optional - file in public/whatsnew/
+  //   href: "/somewhere",                   // optional "Take a look" link
+  //   audience: "staff",                    // "all" | "staff" | "owner"
+  // },
 ];
 
 /** May this role see this entry? Staff cards are for staff and the owner. */
