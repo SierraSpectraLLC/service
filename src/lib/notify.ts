@@ -483,6 +483,35 @@ export async function notifyInvite(opts: { to: string; inviterName: string; orgN
   }
 }
 
+/**
+ * Somebody recorded a unit whose model the catalog has never heard of.
+ *
+ * Deliberately NOT an error anywhere - the unit in front of somebody always
+ * gets recorded (the same 2am rule parts live by). This is the other half of
+ * that bargain: the house hears about it while it is fresh, and the catalog
+ * page holds the review queue where the name is accepted or corrected.
+ */
+export async function notifyModelProposed(opts: {
+  actorEmail: string; actorName: string; kind: string; model: string; where: string;
+}) {
+  try {
+    const to = (await houseEmails()).filter((e) => e !== opts.actorEmail.toLowerCase());
+    if (!to.length) return;
+    const url = appUrl();
+    await deliver({
+      to, kind: "model_proposal", href: "/settings/catalog",
+      title: `${opts.actorName} recorded "${opts.model}" (${opts.kind}) - not in the catalog yet`,
+      subject: `New model to review: ${opts.model}`,
+      body: `${esc(opts.actorName)} recorded a ${esc(opts.kind.toLowerCase())} as
+        <b>${esc(opts.model)}</b>${opts.where ? ` on ${esc(opts.where)}` : ""} - a model the catalog doesn't know yet.
+        ${mutedLine("Review it on the catalog page: accept it into the book, or fold it into an existing model's spelling.")}
+        ${url ? btn(`${url}/settings/catalog`, "Review the model") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] model-proposal email failed:", (e as Error).message);
+  }
+}
+
 export async function notifyGasEmpty(opts: { actorEmail: string; actorName: string; gas: string; instrumentId: number; externalId: string }) {
   try {
     const to = (await houseEmails()).filter((e) => e !== opts.actorEmail.toLowerCase());

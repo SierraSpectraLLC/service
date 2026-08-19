@@ -8,6 +8,7 @@ import { forTenant, readTenant } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
 import MakersCard from "@/components/MakersCard";
+import PendingModelsCard from "@/components/PendingModelsCard";
 import { makerBook } from "@/lib/makersData";
 import CatalogPhotosCard from "@/components/CatalogPhotosCard";
 import ReferencePanel from "@/components/ReferencePanel";
@@ -83,9 +84,26 @@ export default async function CatalogPage() {
     })),
   ].sort((a, b) => a.name.localeCompare(b.name));
 
+  // Freehand models: on real units, unknown to the book. The review queue -
+  // sits above the catalog because it is the catalog's inbox.
+  const pendingModels = Object.values(
+    assetRows.reduce<Record<string, { kind: string; model: string; count: number }>>((acc, a) => {
+      const model = a.model.trim();
+      if (!model) return acc;
+      if (models.some((m) => m.name.toLowerCase() === model.toLowerCase()
+        && m.assetType.toLowerCase() === a.kind.trim().toLowerCase())) return acc;
+      const k = `${a.kind.toLowerCase()}|${model.toLowerCase()}`;
+      acc[k] = acc[k] ? { ...acc[k], count: acc[k].count + 1 } : { kind: a.kind, model, count: 1 };
+      return acc;
+    }, {}),
+  ).sort((a, b) => a.model.localeCompare(b.model));
+  const modelsByTypeName: Record<string, string[]> = {};
+  for (const m of models) (modelsByTypeName[m.assetType] ??= []).push(m.name);
+
   return (
     <div className="container settings">
       <SettingsTabs active="catalog" isOwner={user.role === "owner"} isPlatform={isPlatform} />
+      <PendingModelsCard pending={pendingModels} modelOptions={modelsByTypeName} makers={makerRows.map((m) => m.name)} />
       <CatalogForm categories={categories} models={models} types={types} makers={makerRows.map((m) => m.name)} />
       <MakersCard makers={makerRows} />
       <CatalogPhotosCard entries={terms.map((t) => ({

@@ -23,6 +23,7 @@ export const NOTIFY_KINDS = [
   { kind: "parts_request", label: "We're asked to order parts for our systems" },
   { kind: "message", label: "Somebody messages me directly" },
   { kind: "drop", label: "Files arrive through a drop link I made" },
+  { kind: "model_proposal", label: "A model not in the catalog gets recorded" },
 ] as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];

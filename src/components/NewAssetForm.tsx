@@ -60,7 +60,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
             </div>
             <div>
               <label>Model</label>
-              <CatalogSelect value={draft.model} options={models[draft.kind] ?? []} ariaLabel="Model"
+              <CatalogSelect value={draft.model} options={models[draft.kind] ?? []} ariaLabel="Model" allowNew="+ New model..."
                 onChange={(model) => setDraft({ ...draft, model })}
                 hint={`No ${draft.kind || "?"} models defined yet - add them in Settings → Catalog`} />
             </div>

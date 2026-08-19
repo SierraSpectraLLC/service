@@ -134,7 +134,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
             </div>
             <div>
               <label>Model</label>
-              <CatalogSelect value={draft.model} options={catalogModels[draft.kind] ?? []} ariaLabel="Model"
+              <CatalogSelect value={draft.model} options={catalogModels[draft.kind] ?? []} ariaLabel="Model" allowNew="+ New model..."
                 onChange={(model) => setDraft({ ...draft, model })}
                 hint={`No ${draft.kind || "?"} models for this system type yet - add them in Settings → Catalog`} />
             </div>

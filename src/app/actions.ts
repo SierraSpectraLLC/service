@@ -53,7 +53,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyMessage, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -665,6 +665,21 @@ async function generateCheckout(
   return fresh.length;
 }
 
+/**
+ * Is this model in the catalog for this module type? The pickers offer the
+ * catalog but never require it (the unit in front of somebody always gets
+ * recorded); this is how the ones that arrived freehand get noticed. Matched
+ * by name across the type, case-insensitive, tenant-scoped.
+ */
+async function modelInCatalog(kind: string, model: string, tenantOrgId: number | null): Promise<boolean> {
+  const m = model.trim().toLowerCase();
+  if (!m) return true; // nothing typed = nothing to review
+  const rows = await db.select({ name: vocabTerms.name, assetType: vocabTerms.assetType }).from(vocabTerms)
+    .where(and(eq(vocabTerms.kind, "model"), forTenant(vocabTerms.tenantOrgId, tenantOrgId)));
+  return rows.some((r) => r.name.trim().toLowerCase() === m
+    && r.assetType.trim().toLowerCase() === kind.trim().toLowerCase());
+}
+
 export async function createAsset(instrumentId: number | null, data: AssetInput): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
   const a = cleanAsset(data);
@@ -718,6 +733,14 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
     instrumentId !== null ? { instrumentId, assetId: null } : { instrumentId: null, assetId: row.id },
     row.tenantOrgId,
   );
+  // A model the catalog doesn't know: recorded anyway (never blocked), and
+  // flagged to the house so the review queue on the catalog page picks it up.
+  if (row.model && !(await modelInCatalog(row.kind, row.model, row.tenantOrgId))) {
+    await notifyModelProposed({
+      actorEmail: u.email, actorName: u.name || u.email,
+      kind: row.kind, model: row.model, where: externalId,
+    });
+  }
   revalidatePath("/assets");
   revalidatePath(`/assets/${row.id}`);
   return { id: row.id };
@@ -780,6 +803,13 @@ export async function updateAsset(assetId: number, data: AssetInput): Promise<{ 
     actor: u.email, instrumentId: before.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
     action: `edited ${assetLabel({ ...before, ...fields })}`,
   });
+  if (a.model && a.model.toLowerCase() !== before.model.trim().toLowerCase()
+      && !(await modelInCatalog(a.kind, a.model, before.tenantOrgId))) {
+    await notifyModelProposed({
+      actorEmail: u.email, actorName: u.name || u.email,
+      kind: a.kind, model: a.model, where: a.serial ? `SN ${a.serial}` : "",
+    });
+  }
   if (before.instrumentId !== null) rev(before.instrumentId);
   revalidatePath("/assets");
   revalidatePath(`/assets/${assetId}`);
@@ -8465,6 +8495,34 @@ export async function setVocabCategories(termId: number, categories: string[]): 
   revalidatePath("/settings/catalog");
   rev();
   return {};
+}
+
+/**
+ * Fold a freehand model spelling into a catalog model: every unit recorded
+ * under `from` becomes `to`. The review queue's "suggest a change" - the
+ * other resolution besides accepting the new name into the book. Tenant-wide
+ * and audited with the count, like renameMaker.
+ */
+export async function renameAssetModel(kind: string, from: string, to: string): Promise<{ error?: string; changed?: number }> {
+  const u = await requireStaff();
+  const src = from.trim(), next = to.trim();
+  if (!src || !next) return { error: "Both names are needed" };
+  if (src.toLowerCase() === next.toLowerCase()) return {};
+  const changed = (await db.update(assets).set({ model: next })
+    .where(and(
+      sql`lower(${assets.kind}) = ${kind.trim().toLowerCase()}`,
+      sql`lower(${assets.model}) = ${src.toLowerCase()}`,
+      forTenant(assets.tenantOrgId, readTenant(u)),
+    ))
+    .returning({ id: assets.id })).length;
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: `model:${next}`,
+    action: `folded ${changed} unit${changed === 1 ? "" : "s"} recorded as "${src}" (${kind}) into "${next}"`,
+    field: "model", oldValue: src, newValue: next,
+  });
+  revalidatePath("/settings/catalog");
+  revalidatePath("/assets");
+  return { changed };
 }
 
 export async function deleteVocabTerm(termId: number): Promise<{ error?: string }> {
