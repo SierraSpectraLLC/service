@@ -17,6 +17,9 @@ type Row = {
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
   /** An open Down work order, or a unit on it marked Down. Reads red, sorts first. */
   down: boolean;
+  /** Mine: I lead it, or work on it is assigned to me. `mineNote` says which. */
+  mine: boolean;
+  mineNote: string;
   // Whose move it is. Parked rows stay on the board but read as somebody
   // else's, and "Ours to move" filters them away.
   queueMine: boolean; queueWith: string; queueReason: string;
@@ -26,15 +29,11 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-type MyWorkItem = { href: string; title: string; sub: string; tone: "down" | "due" | "normal" };
-
-export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, myWork = [], myQueueHref = "/work" }: {
+export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, myQueueHref = "/work" }: {
   data: Row[]; stageDefs: StageDefLite[]; people: string[];
   clients: string[]; categories: string[]; canEdit: boolean; isStaff: boolean;
   /** Ship-pipeline tile: the shop and reseller accounts; clutter for lab clients. */
   showShipping: boolean;
-  /** What is assigned to the signed-in person: open orders, then dated tasks. */
-  myWork?: MyWorkItem[];
   myQueueHref?: string;
 }) {
   const router = useRouter();
@@ -49,7 +48,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
 
   // "Docs expiring" appears only when some visible system could raise it -
   // a fleet with no regulated systems never sees the filter at all.
-  const FLAGS = ["Down / urgent", "Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention",
+  const FLAGS = [...(data.some((i) => i.mine) ? ["Mine"] : []), "Down / urgent", "Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention",
     ...(data.some((i) => i.docIssues.length > 0) ? ["Docs expiring"] : []),
     ...(isStaff ? ["Not on sheet"] : [])];
   const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
@@ -60,7 +59,8 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
 
   const matchesFlag = (i: Row, f: string) =>
-    f === "Down / urgent" ? i.down
+    f === "Mine" ? i.mine
+    : f === "Down / urgent" ? i.down
     : f === "Ours to move" ? i.queueMine
     : f === "With someone else" ? !i.queueMine
     : f === "Overdue tasks" ? i.overdue > 0
@@ -96,6 +96,12 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     return [...list].sort((a, b) =>
       Number(b.down) - Number(a.down) || Number(b.queueMine) - Number(a.queueMine));
   }, [data, selected, q]);
+
+  // Worst first, then most overdue, then the shop's own priority - the order
+  // somebody would actually work them.
+  const MINE_SHOWN = 6;
+  const mine = useMemo(() => data.filter((i) => i.mine).sort((a, b) =>
+    Number(b.down) - Number(a.down) || b.overdue - a.overdue || a.priority - b.priority), [data]);
 
   const counts = {
     total: data.length,
@@ -142,22 +148,35 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         ))}
       </div>
 
-      {/* What is MINE, without hiding the fleet: a card, not a tab - the
-          shared picture stays on screen, and this only exists when something
-          is actually assigned to you. */}
-      {myWork.length > 0 && (
+      {/* The instruments that are MINE, without hiding the fleet: a card, not a
+          tab - the shared picture stays on screen. Systems rather than tickets,
+          because a day is planned by which machines you are touching, and the
+          system page is where the job, the tasks and the history already are.
+          A capped preview; "all N" is the same set as the Mine filter. */}
+      {mine.length > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
-            <div className="card-title">My work</div>
-            <Link href={myQueueHref} className="btn link" style={{ fontSize: 11, marginLeft: "auto" }}>my queue →</Link>
+            <div className="card-title">My systems</div>
+            <span className="mut" style={{ fontSize: 11 }}>{mine.length}</span>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+              {mine.length > MINE_SHOWN && (
+                <button className="btn link" style={{ fontSize: 11 }}
+                  onClick={() => setSelected((s) => (s.includes("Mine") ? s : [...s, "Mine"]))}>
+                  all {mine.length} on the board →
+                </button>
+              )}
+              <Link href={myQueueHref} className="btn link" style={{ fontSize: 11 }}>my work orders →</Link>
+            </span>
           </div>
-          {myWork.map((m) => (
-            <Link key={m.href + m.title} href={m.href} className="row-hover"
+          {mine.slice(0, MINE_SHOWN).map((i) => (
+            <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
               style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
-              {m.tone === "down" && <Pill bg="#A32D2D" fg="#fff">DOWN</Pill>}
-              {m.tone === "due" && <Pill bg="#FBE9E9" fg="#A32D2D">due</Pill>}
-              <span style={{ fontSize: 13, fontWeight: 600, flex: "1 1 200px" }}>{m.title}</span>
-              <span className="mut" style={{ fontSize: 11.5 }}>{m.sub}</span>
+              {i.down && <Pill bg="#A32D2D" fg="#fff">DOWN</Pill>}
+              <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
+              <span style={{ fontSize: 13, flex: "1 1 200px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {i.label || <span className="mut">No assets listed yet</span>}
+              </span>
+              {i.mineNote && <span className="mut" style={{ fontSize: 11.5 }}>{i.mineNote}</span>}
             </Link>
           ))}
         </div>

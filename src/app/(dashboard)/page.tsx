@@ -110,32 +110,38 @@ export default async function Home() {
   const downByWo = new Set(openWos.filter((w) => w.severity === "Down" && w.instrumentId !== null)
     .map((w) => w.instrumentId as number));
 
-  // What is on MY plate: my open orders worst-first, then my dated open tasks
-  // due soonest. Matching by the signed-in name, same as assignment does.
+  // What makes a SYSTEM mine: I lead it, or work on it is assigned to me.
+  // System-level rather than item-level on purpose - a day is planned by which
+  // instruments you are touching, and the system page is where the tasks, the
+  // orders, the parts and the history already live. Matching by the signed-in
+  // name, the same string assignment writes.
   const meName = (user.name || "").trim().toLowerCase();
-  const sysLabelOf = (id: number | null) =>
-    id === null ? "" : rows.find((r) => r.id === id)?.externalId ?? "";
-  const myWos = meName ? openWos.filter((w) => w.assignee.trim().toLowerCase() === meName) : [];
-  const myTasks = meName ? taskRows.filter((t) => t.state !== "Done"
-    && t.assignee.trim().toLowerCase() === meName && t.dueDate) : [];
-  const myWork = [
-    ...myWos
-      .sort((a, b) => severityOf(a.severity).rank - severityOf(b.severity).rank)
-      .map((w) => ({
-        href: `/work/${w.id}`,
-        title: `${w.number} ${w.title}`,
-        sub: [sysLabelOf(w.instrumentId), severityOf(w.severity).label].filter(Boolean).join(" · "),
-        tone: w.severity === "Down" ? "down" as const : "normal" as const,
-      })),
-    ...myTasks
-      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-      .map((t) => ({
-        href: t.instrumentId !== null ? `/instruments/${t.instrumentId}` : t.assetId !== null ? `/assets/${t.assetId}` : "/work",
-        title: t.title,
-        sub: [sysLabelOf(t.instrumentId), t.dueDate < today ? `overdue since ${t.dueDate}` : t.dueDate === today ? "due today" : `due ${t.dueDate}`].filter(Boolean).join(" · "),
-        tone: t.dueDate <= today ? "due" as const : "normal" as const,
-      })),
-  ].slice(0, 8);
+  const isMine = (x: string) => !!meName && x.trim().toLowerCase() === meName;
+  const myWoBySys = new Map<number, typeof openWos>();
+  for (const w of openWos) {
+    if (w.instrumentId === null || !isMine(w.assignee)) continue;
+    myWoBySys.set(w.instrumentId, [...(myWoBySys.get(w.instrumentId) ?? []), w]);
+  }
+  const myTaskBySys = new Map<number, { overdue: number; total: number }>();
+  for (const t of taskRows) {
+    if (t.instrumentId === null || t.state === "Done" || !isMine(t.assignee)) continue;
+    const at = myTaskBySys.get(t.instrumentId) ?? { overdue: 0, total: 0 };
+    at.total++;
+    if (t.dueDate && t.dueDate < today) at.overdue++;
+    myTaskBySys.set(t.instrumentId, at);
+  }
+
+  /** "DOWN · WO-1002" / "2 tasks · 1 overdue" / "you're the lead" - why it's mine. */
+  const mineNoteFor = (i: { id: number; lead: string }) => {
+    const wos = myWoBySys.get(i.id) ?? [];
+    const tasks = myTaskBySys.get(i.id);
+    const bits: string[] = [];
+    const worst = [...wos].sort((a, b) => severityOf(a.severity).rank - severityOf(b.severity).rank)[0];
+    if (worst) bits.push(`${wos.length > 1 ? `${wos.length} jobs · ` : ""}${worst.number}`);
+    if (tasks) bits.push(`${tasks.total} task${tasks.total === 1 ? "" : "s"}${tasks.overdue ? ` · ${tasks.overdue} overdue` : ""}`);
+    if (!bits.length && isMine(i.lead)) bits.push("you're the lead");
+    return bits.join(" · ");
+  };
 
   const data = rows.map((i) => {
     const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
@@ -174,6 +180,8 @@ export default async function Home() {
       // hiding it would just move the forgetting somewhere else - but it reads
       // as theirs, and the "Ours to move" filter takes it off the board.
       down: downByWo.has(i.id) || assetRows.some((a) => a.instrumentId === i.id && a.status === "Down"),
+      mine: myWoBySys.has(i.id) || myTaskBySys.has(i.id) || isMine(i.lead),
+      mineNote: mineNoteFor(i),
       queueMine: queueView(user, i) === "mine",
       queueWith: queueName(i.queueOrgId),
       queueReason: i.queueReason,
@@ -197,7 +205,6 @@ export default async function Home() {
         categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
-        myWork={myWork}
         myQueueHref={user.name ? `/work?who=${encodeURIComponent(user.name)}` : "/work"}
         // The ship pipeline is the shop's own axis, and a reseller client's.
         // For everyone else "Ship queue + shipped" is a tile about a business
