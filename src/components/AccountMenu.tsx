@@ -40,6 +40,8 @@ export default function AccountMenu({ name, email, orgName, roleLabel, settingsH
       {settingsHref && <Link href={settingsHref}>Settings</Link>}
       <Link href="/inbox">Notifications &amp; email</Link>
       <Link href="/documents">My files</Link>
+      {/* The changelog, re-readable after its one appearance as an overlay. */}
+      <Link href="/whats-new">What&apos;s new</Link>
       {/* The persona switcher opens a second step inside the menu, so its clicks
           must not reach the panel's close-on-choose handler. */}
       {viewAs && <div className="menu-sub" onClick={(e) => e.stopPropagation()}>{viewAs}</div>}

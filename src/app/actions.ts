@@ -88,6 +88,7 @@ import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
+import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
@@ -7425,6 +7426,19 @@ export async function clearMyPassword(): Promise<{ error?: string }> {
     action: "removed the sign-in password from their own account",
   });
   revalidatePath("/inbox");
+  return {};
+}
+
+/**
+ * "Got it" on the What's new cards. Records the newest key that existed at
+ * dismissal, so the next batch shows and this one never does again. No audit
+ * line: closing a changelog is not an event anybody will ever ask about.
+ */
+export async function dismissWhatsNew(): Promise<{ error?: string }> {
+  const u = await requireUser();
+  await db.update(users).set({ whatsNewSeen: latestKey(WHATS_NEW) })
+    .where(eq(users.email, u.email.toLowerCase()));
+  revalidatePath("/");
   return {};
 }
 

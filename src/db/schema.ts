@@ -45,6 +45,13 @@ export const users = pgTable("users", {
    */
   onboardedAt: timestamp("onboarded_at"),
   /**
+   * The newest "What's new" card this person has dismissed (lib/whatsNew).
+   * Blank = never dismissed any, which for a new account simply means the
+   * current batch shows once. On the user rather than in localStorage so a
+   * dismissal on the desk PC holds on the phone in the lab.
+   */
+  whatsNewSeen: text("whats_new_seen").notNull().default(""),
+  /**
    * The last time this person actually did something in the app, not the last
    * time they signed in. Sessions last a month (lib/sessionCookie), so sign-ins
    * count how often somebody is LOCKED OUT, not how often they work here -

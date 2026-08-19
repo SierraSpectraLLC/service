@@ -2559,3 +2559,6 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamp;
 -- Scheduled vs advisory maintenance per system. '' follows the owning org's
 -- resale flag; an explicit value overrides it. See lib/pmPosture.
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "pm_posture" text NOT NULL DEFAULT '';
+
+-- The newest "What's new" card each person has dismissed. See lib/whatsNew.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whats_new_seen" text NOT NULL DEFAULT '';
