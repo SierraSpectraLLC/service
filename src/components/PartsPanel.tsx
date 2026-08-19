@@ -19,6 +19,8 @@ type Part = {
   installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
   /** Set on a part that came out of a kit - rendered under it, never on its own. */
   parentPartId?: number | null;
+  /** The maintenance job this part belongs to, if somebody said. */
+  pmScheduleId?: number | null;
 };
 
 function PartStatusSelect({ part }: { part: Part }) {
@@ -55,11 +57,11 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
   );
 }
 
-const empty = { kind: "part", expandKit: true, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
+const empty = { kind: "part", expandKit: true, pmScheduleId: null as number | null, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {} }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [] }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
   /** Jobs completed, by day, so a visit can be named after the work it was. */
   serviceEvents?: ServiceEvent[];
@@ -70,6 +72,12 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   showCosts: boolean;
   // House price book entries; the server only sends these alongside showCosts.
   priceBook?: PriceEntry[];
+  /**
+   * Maintenance jobs on this record, so a part fitted during one can say so.
+   * That attribution is what keeps a PM's own parts off the parts allowance on
+   * a contract that includes them - see lib/agreementUsage.
+   */
+  pmJobs?: { id: number; title: string }[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -85,7 +93,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const openEdit = (p: Part) => {
     // A date input only accepts a calendar day, so a row still carrying one of
     // the old year-less strings opens blank and says what is stored underneath.
-    setDraft({ kind: p.kind, expandKit: false, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
+    setDraft({ kind: p.kind, expandKit: false, pmScheduleId: p.pmScheduleId ?? null, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -312,6 +320,24 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             </div>
           )}
           <div style={{ marginBottom: 8 }}>
+            {/* Which PM this belongs to. Offered only when the record has any -
+                and only to staff, since it is a billing attribution. */}
+            {pmJobs.length > 0 && isStaff && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                <label style={{ margin: 0 }}>Part of maintenance</label>
+                <select value={draft.pmScheduleId ?? ""} aria-label="Part of maintenance"
+                  onChange={(e) => setDraft({ ...draft, pmScheduleId: e.target.value ? parseInt(e.target.value) : null })}
+                  style={{ width: "auto", fontSize: 12, maxWidth: 280 }}>
+                  <option value="">Not part of a maintenance job</option>
+                  {pmJobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
+                </select>
+                {draft.pmScheduleId !== null && (
+                  <span className="mut" style={{ fontSize: 11 }}>
+                    stays off the parts allowance where the contract includes PM parts
+                  </span>
+                )}
+              </div>
+            )}
             <label>Install / swap note</label>
             <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
               placeholder='e.g. "From stock; replaced failing unit SN 4411, old one returned for RMA"' />
@@ -401,6 +427,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {dayText(p.installedAt)}</span>}
                   {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {dayText(p.removedAt)}</span>}
                 </div>
+              )}
+              {p.pmScheduleId != null && pmJobs.some((j) => j.id === p.pmScheduleId) && (
+                <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E", fontSize: 10, marginTop: 4, display: "inline-block" }}>
+                  {pmJobs.find((j) => j.id === p.pmScheduleId)!.title}
+                </span>
               )}
               {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
               {inside.length > 0 && (

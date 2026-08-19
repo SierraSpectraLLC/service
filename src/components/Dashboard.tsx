@@ -42,6 +42,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const [selected, setSelected] = useState<string[]>([]);
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState<"default" | "owner" | "id">("default");
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", lead: "" });
   const [pending, startTransition] = useTransition();
@@ -55,8 +56,20 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const CATS = [...new Set(data.map((i) => i.category).filter(Boolean))].sort();
   const catKey = (c: string) => `cat:${c}`;
   const leadKey = (l: string) => `lead:${l}`;
+  /**
+   * Flags cycle: off -> include -> EXCLUDE -> off, an exclusion stored as
+   * "!Flag". One mechanism rather than a second list of "Not ..." flags, which
+   * would double the menu and still miss whichever combination somebody wanted
+   * - "hide what's in somebody else's queue" and "hide what isn't mine" are the
+   * same control read twice.
+   */
   const toggleFilter = (f: string) =>
-    setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
+    setSelected((s) => (
+      s.includes(f) ? s.map((x) => (x === f ? `!${f}` : x))
+      : s.includes(`!${f}`) ? s.filter((x) => x !== `!${f}`)
+      : [...s, f]));
+  /** "" | "in" | "out" - what state a flag is currently in. */
+  const flagState = (f: string) => (selected.includes(f) ? "in" : selected.includes(`!${f}`) ? "out" : "");
 
   const matchesFlag = (i: Row, f: string) =>
     f === "Mine" ? i.mine
@@ -81,7 +94,11 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     if (stageSel.length) list = list.filter((i) => stageSel.some((s) => i.stages.includes(s)));
     if (leadSel.length) list = list.filter((i) => leadSel.includes(i.lead));
     if (catSel.length) list = list.filter((i) => catSel.includes(i.category));
-    for (const f of flagSel) list = list.filter((i) => matchesFlag(i, f));
+    for (const f of flagSel) {
+      const no = f.startsWith("!");
+      const key = no ? f.slice(1) : f;
+      list = list.filter((i) => matchesFlag(i, key) !== no);
+    }
     if (q.trim()) {
       const s = q.toLowerCase();
       list = list.filter((i) =>
@@ -90,12 +107,18 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           i.queueMine ? "" : `with ${i.queueWith}`, i.queueReason].join(" ").toLowerCase().includes(s)
       );
     }
-    // Parked systems sink: they're not nothing, but they're not this week's
-    // work either, and the top of the board should be what we can move. A
-    // stable sort, so priority order survives inside each group.
+    // An explicit sort is obeyed exactly: a person who asked to group by owner
+    // does not want one row yanked out of its group for being urgent - it is
+    // still red, and there is a Down filter for that. The DEFAULT is the one
+    // that editorialises: worst first, then parked systems sink, because they
+    // are not nothing but they are not this week's work either. Stable, so the
+    // shop's own priority order survives inside every group.
+    const by = (f: (r: Row) => string) => (a: Row, b: Row) => f(a).localeCompare(f(b));
+    if (sortBy === "owner") return [...list].sort(by((r) => `${r.client || "~"}|`.toLowerCase()));
+    if (sortBy === "id") return [...list].sort(by((r) => r.externalId.toLowerCase()));
     return [...list].sort((a, b) =>
       Number(b.down) - Number(a.down) || Number(b.queueMine) - Number(a.queueMine));
-  }, [data, selected, q]);
+  }, [data, selected, q, sortBy]);
 
   // Worst first, then most overdue, then the shop's own priority - the order
   // somebody would actually work them.
@@ -209,13 +232,29 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
                   </label>
                 ))}
                 <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Flags</div>
-                {FLAGS.map((f) => (
-                  <label key={f} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
-                    <input type="checkbox" checked={selected.includes(f)} onChange={() => toggleFilter(f)}
-                      style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
-                    {f}
-                  </label>
-                ))}
+                <div className="mut" style={{ fontSize: 10, marginBottom: 2 }}>click once to keep, twice to hide</div>
+                {FLAGS.map((f) => {
+                  const st = flagState(f);
+                  return (
+                    <button key={f} type="button" onClick={() => toggleFilter(f)} className="row-hover"
+                      aria-pressed={st !== ""}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: 13,
+                        cursor: "pointer", width: "100%", textAlign: "left", border: "none",
+                        background: "none", borderRadius: 6,
+                        color: st === "out" ? "#A32D2D" : "var(--ink)",
+                      }}>
+                      <span aria-hidden style={{
+                        width: 15, height: 15, borderRadius: 4, flexShrink: 0, fontSize: 11, lineHeight: "15px",
+                        textAlign: "center", fontWeight: 700,
+                        border: st === "" ? "1px solid #C7D2E0" : "none",
+                        background: st === "in" ? "var(--coral, #E2574C)" : st === "out" ? "#A32D2D" : "transparent",
+                        color: "#fff",
+                      }}>{st === "in" ? "✓" : st === "out" ? "−" : ""}</span>
+                      <span style={{ textDecoration: st === "out" ? "line-through" : "none" }}>{f}</span>
+                    </button>
+                  );
+                })}
                 {LEADS.length > 0 && (
                   <>
                     <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Lead</div>
@@ -235,17 +274,35 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
             </>
           )}
         </div>
-        {selected.map((f) => (
-          <button key={f} className="pill" onClick={() => toggleFilter(f)} title="Remove filter"
-            style={{ background: "#EDEBFA", color: "#4F45A3", border: "none", cursor: "pointer" }}>
-            {f.startsWith("lead:") ? f.slice(5) : f} ×
-          </button>
-        ))}
-        {canEdit && (
-          <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => setShowNew((v) => !v)}>
-            {showNew ? "Cancel" : "+ New instrument"}
-          </button>
-        )}
+        {selected.map((f) => {
+          const no = f.startsWith("!");
+          const key = no ? f.slice(1) : f;
+          return (
+            <button key={f} className="pill" title={no ? "Hiding these - click to clear" : "Remove filter"}
+              onClick={() => setSelected((sx) => sx.filter((x) => x !== f))}
+              style={{
+                background: no ? "#FBE9E9" : "#EDEBFA", color: no ? "#A32D2D" : "#4F45A3",
+                border: "none", cursor: "pointer",
+              }}>
+              {no ? "− " : ""}{key.startsWith("lead:") ? key.slice(5) : key} ×
+            </button>
+          );
+        })}
+        <span style={{ display: "flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
+          <label className="mut" style={{ margin: 0, fontSize: 11 }} htmlFor="board-sort">Sort</label>
+          <select id="board-sort" value={sortBy} aria-label="Sort the board"
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            style={{ width: "auto", fontSize: 12 }}>
+            <option value="default">Urgency</option>
+            <option value="owner">Owner</option>
+            <option value="id">System ID</option>
+          </select>
+          {canEdit && (
+            <button className="btn sm primary" onClick={() => setShowNew((v) => !v)}>
+              {showNew ? "Cancel" : "+ New instrument"}
+            </button>
+          )}
+        </span>
       </div>
 
       {showNew && (

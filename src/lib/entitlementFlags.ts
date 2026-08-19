@@ -81,6 +81,14 @@ export async function visitFlag(orgId: number | null, instrumentId: number | nul
  */
 export async function partsFlag(
   orgId: number | null, instrumentId: number | null, addCents: number | null,
+  /**
+   * Fitted as part of a maintenance job. On a contract whose PM includes its
+   * parts, this one never touches the allowance (usageFor splits it out), so
+   * warning that it "goes past" would be warning about money nobody spends.
+   * On a contract that does NOT include them it draws down like any other, and
+   * the warning stands.
+   */
+  isPmPart = false,
 ): Promise<string> {
   if (orgId === null) return "";
   const covers = await covering(orgId, instrumentId);
@@ -94,10 +102,11 @@ export async function partsFlag(
     if (!best || remaining > best.remaining) best = { a, spent: u.partsCents, remaining };
   }
   if (!best) return "";
-  if (best.remaining <= 0) {
+  const covered = isPmPart && best.a.pmPartsIncluded;
+  if (best.remaining <= 0 && !covered) {
     return `Parts allowance exhausted on "${label(best.a)}": ${formatCents(best.spent)} of ${formatCents(best.a.partsAllowanceCents)} spent - this part is billable.`;
   }
-  if (addCents !== null && addCents > best.remaining) {
+  if (!covered && addCents !== null && addCents > best.remaining) {
     return `This part (${formatCents(addCents)}) goes past the allowance on "${label(best.a)}" - ${formatCents(best.remaining)} left of ${formatCents(best.a.partsAllowanceCents)}.`;
   }
   return "";

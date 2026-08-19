@@ -396,7 +396,8 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               parts={redactParts(taggedParts, user, asset.instrumentId !== null ? homeOwner?.ownerOrgId ?? null : asset.ownerOrgId, asset.tenantOrgId)
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
-              serviceEvents={serviceEvents} visitNames={visitNames} />
+              serviceEvents={serviceEvents} visitNames={visitNames}
+              pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={target} coverId={coverId}

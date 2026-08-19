@@ -611,7 +611,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
               canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
-              serviceEvents={serviceEvents} visitNames={visitNames} />
+              serviceEvents={serviceEvents} visitNames={visitNames}
+              pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
           { key: "custody", label: "Ownership history", node: (

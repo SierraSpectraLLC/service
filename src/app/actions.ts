@@ -2237,6 +2237,14 @@ type PartInput = {
   installedAt?: string; removedAt?: string;
   /** Recording a KIT: also write the parts it contains beneath it. */
   expandKit?: boolean;
+  /**
+   * The maintenance job this part belongs to. A PM's own parts are part of the
+   * PM, so on a contract that says so they are reported but never drawn from
+   * the parts allowance (lib/agreementUsage) - which only worked for parts the
+   * schedule itself requested. A part fitted by hand during that same PM was
+   * billed against the allowance, and this is what lets somebody say otherwise.
+   */
+  pmScheduleId?: number | null;
   // "Removed - request new?": also file a Needed twin so the reorder isn't forgotten.
   requestReplacement?: boolean;
 };
@@ -2305,6 +2313,7 @@ function cleanPartInput(data: PartInput): PartInput {
   return {
     ...data,
     kind: data.kind === "consumable" || data.kind === "kit" ? data.kind : "part",
+    pmScheduleId: data.pmScheduleId ?? null,
     qty: data.qty.trim(),
     specs: serializeSpecs(parseSpecs(data.specs)),
   };
@@ -2389,8 +2398,15 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status,
     { installedAt: raw.installedAt, removedAt: raw.removedAt });
   const taggedAsset = t0.asset;
+  // Only a schedule that actually belongs to this record - a stale id from an
+  // open tab must not attribute somebody's part to another system's PM.
+  const pmId = data.pmScheduleId ?? null;
+  const pmOk = pmId === null ? null : (await db.select({ id: pmSchedules.id }).from(pmSchedules).where(and(
+    eq(pmSchedules.id, pmId),
+    t0.instrumentId !== null ? eq(pmSchedules.instrumentId, t0.instrumentId) : eq(pmSchedules.assetId, t0.assetId!),
+  )))[0]?.id ?? null;
   const [p] = await db.insert(parts).values({
-    ...data, ...stamps, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
+    ...data, ...stamps, pmScheduleId: pmOk, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
     // The summable copy, parsed after the redaction strip so it follows cost.
     costCents: parseMoney(data.cost),
     // Whose money this was. Stamped now so a later handoff can't reveal it to
@@ -2447,7 +2463,7 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   revWork(p);
   // Same posture as the visit flag on a work order: warn about the allowance
   // at the moment of commitment, never refuse the record.
-  const flag = await partsFlag(payer, t0.instrumentId, p.costCents).catch(() => "");
+  const flag = await partsFlag(payer, t0.instrumentId, p.costCents, p.pmScheduleId !== null).catch(() => "");
   return { flag: flag || undefined, expanded: expanded || undefined };
 }
 
@@ -2467,9 +2483,19 @@ export async function updatePart(partId: number, raw: PartInput) {
   if (!canSeeCosts(u, await costOwnerOrg(before), await tenantOfWork(before))) {
     data.cost = before.cost; data.po = before.po;
   }
+  // Same guard as on create: the schedule has to belong to the record this
+  // part sits on. `undefined` from a caller that doesn't know about maintenance
+  // leaves whatever is there alone.
+  const pmNext = raw.pmScheduleId === undefined ? before.pmScheduleId
+    : raw.pmScheduleId === null ? null
+    : (await db.select({ id: pmSchedules.id }).from(pmSchedules).where(and(
+        eq(pmSchedules.id, raw.pmScheduleId),
+        before.instrumentId !== null ? eq(pmSchedules.instrumentId, before.instrumentId)
+          : eq(pmSchedules.assetId, before.assetId!),
+      )))[0]?.id ?? null;
   await db.update(parts).set({
     ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim(),
-    costCents: parseMoney(data.cost),
+    costCents: parseMoney(data.cost), pmScheduleId: pmNext,
   }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);
   const action = before.status !== data.status
