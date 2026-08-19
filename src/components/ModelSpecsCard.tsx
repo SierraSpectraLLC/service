@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setModelSpecs } from "@/app/actions";
 import { MAX_SPECS, mergeModelSpecs, type Spec } from "@/lib/modelSpecs";
+import SpecTable from "./SpecTable";
 
 /**
  * The model's spec sheet: max pressure, flow range, operating temperature -
@@ -64,18 +65,7 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
         The numbers you&apos;d otherwise open the manual for. Rows are yours to define - add what matters for a {modelName}.
       </div>
 
-      {!editing && specs.length > 0 && (
-        <table style={{ borderCollapse: "collapse", width: "100%", maxWidth: 560 }}>
-          <tbody>
-            {specs.map((s) => (
-              <tr key={s.name}>
-                <td className="mut" style={{ fontSize: 12, padding: "5px 14px 5px 0", borderTop: "1px solid var(--line)", whiteSpace: "nowrap", verticalAlign: "top" }}>{s.name}</td>
-                <td style={{ fontSize: 13, fontWeight: 600, padding: "5px 0", borderTop: "1px solid var(--line)" }}>{s.value}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {!editing && specs.length > 0 && <SpecTable specs={specs} />}
       {!editing && specs.length === 0 && (
         <div className="mut" style={{ fontSize: 12 }}>
           No specs recorded yet{siblings.length ? " - or start by copying a sibling's sheet and editing the differences" : ""}.

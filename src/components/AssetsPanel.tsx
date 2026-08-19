@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { ASSET_COLOR } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
 import { servesLine } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
+import SpecTable from "./SpecTable";
 import AssetGrid, { type GridModel } from "./AssetGrid";
 import PhotoThumb from "./PhotoThumb";
 
@@ -22,11 +23,14 @@ export type AssetRow = {
   photoSrc?: string;
   /** How that photo sits in a tile this small. See lib/photoFrame. */
   photoFraming?: string;
+  /** The model's spec sheet (lib/modelSpecs), for the row's fold-out. */
+  specs?: { name: string; value: string }[];
+  specTermId?: number | null;
 };
 
 const empty = { kind: "Pump", model: "", serial: "", manufacturer: "", owner: "", asFound: "", location: "", note: "" };
 
-export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels, gridModels, owners, makers }: {
+export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, canEdit, catalogModels, gridModels, owners, makers, staff }: {
   // `unassigned`: every asset not currently on a system (spares, shelf stock).
   instrumentId: number; assets: AssetRow[]; unassigned: { id: number; label: string }[];
   kinds: string[]; canEdit: boolean;
@@ -38,6 +42,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
   owners: string[];
   /** The maker/vendor book (Settings → Catalog), suggested on the Manufacturer field. */
   makers?: string[];
+  /** Staff get the "full sheet" link into /catalog; clients can't open it. */
+  staff?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [grid, setGrid] = useState(false);
@@ -45,6 +51,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
   const [checked, setChecked] = useState<number[]>([]);
   const [filter, setFilter] = useState("");
   const [draft, setDraft] = useState<typeof empty>(empty);
+  // Which rows have their spec sheet unfolded.
+  const [specsOpen, setSpecsOpen] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -163,7 +171,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
         const serving = a.servesAssetId ? assets.find((x) => x.id === a.servesAssetId) : null;
         const servers = assets.filter((x) => x.servesAssetId === a.id);
         return (
-          <Link key={a.id} href={`/assets/${a.id}`} className="row-hover"
+          <Fragment key={a.id}>
+          <Link href={`/assets/${a.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 4px", borderTop: "1px solid var(--line)", flexWrap: "wrap", textDecoration: "none", color: "inherit" }}>
             <span title={a.status} style={{ width: 10, height: 10, borderRadius: "50%", background: c.fg, flexShrink: 0 }} />
             {/* A thumbnail here is what makes the list read as the bench rather
@@ -193,10 +202,37 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
               </span>
             )}
             <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+              {(a.specs?.length ?? 0) > 0 && (
+                /* Inside the row Link, so it can't be a button or an anchor -
+                   it stops the navigation and unfolds the sheet below. */
+                <span role="button" tabIndex={0} aria-expanded={specsOpen.includes(a.id)}
+                  aria-label={`Specs for ${a.model || a.kind}`}
+                  className="pill" style={{ background: "#E7F2FA", color: "#1D6396", cursor: "pointer" }}
+                  onClick={(e) => {
+                    e.preventDefault(); e.stopPropagation();
+                    setSpecsOpen((o) => (o.includes(a.id) ? o.filter((x) => x !== a.id) : [...o, a.id]));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.preventDefault(); e.stopPropagation();
+                    setSpecsOpen((o) => (o.includes(a.id) ? o.filter((x) => x !== a.id) : [...o, a.id]));
+                  }}>
+                  specs {specsOpen.includes(a.id) ? "▴" : "▾"}
+                </span>
+              )}
               {a.openItems > 0 && <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{a.openItems} open</span>}
               <span className="mut" style={{ fontSize: 12 }}>→</span>
             </span>
           </Link>
+          {specsOpen.includes(a.id) && (a.specs?.length ?? 0) > 0 && (
+            <div style={{ padding: "2px 8px 8px 32px", background: "#FBFDFF", borderTop: "1px dashed var(--line)" }}>
+              <SpecTable specs={a.specs!} compact />
+              {staff && a.specTermId != null && (
+                <Link href={`/catalog/${a.specTermId}`} className="btn link" style={{ fontSize: 10 }}>full sheet →</Link>
+              )}
+            </div>
+          )}
+        </Fragment>
         );
       })}
     </div>

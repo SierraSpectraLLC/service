@@ -47,6 +47,7 @@ import SiteCard from "@/components/SiteCard";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import ReferencePanel from "@/components/ReferencePanel";
 import { refsForUnits } from "@/lib/catalogRefs";
+import { parseModelSpecs } from "@/lib/modelSpecs";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import HoursPanel from "@/components/HoursPanel";
 import DiscussionPanel from "@/components/DiscussionPanel";
@@ -524,16 +525,23 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "assets", label: "Assets", node: (
             <AssetsPanel
               instrumentId={inst.id}
-              assets={assetRows.map((a) => ({
+              assets={assetRows.map((a) => {
+                // The model's spec sheet rides along, for the row's fold-out.
+                const term = a.model ? vocabRows.find((v) => v.kind === "model"
+                  && v.assetType.trim().toLowerCase() === a.kind.trim().toLowerCase()
+                  && v.name.trim().toLowerCase() === a.model.trim().toLowerCase()) : undefined;
+                return ({
                 id: a.id, kind: a.kind, model: a.model, serial: a.serial, status: a.status, note: a.note,
                 servesAssetId: a.servesAssetId, servesRole: a.servesRole,
+                specs: term ? parseModelSpecs(term.specs) : [],
+                specTermId: term?.id ?? null,
                 ...unitPhoto(a),
                 openItems:
                   taskRows.filter((t) => t.assetId === a.id && t.state !== "Done").length +
                   partRows.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length +
                   ownTasks.filter((t) => t.assetId === a.id && t.state !== "Done").length +
                   ownParts.filter((pt) => pt.assetId === a.id && partOpen(pt.status)).length,
-              }))}
+              });})}
               unassigned={unassignedRows.map((a) => ({
                 id: a.id,
                 label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
@@ -544,6 +552,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               owners={[...new Set([inst.client, ...systemRows.map((r) => r.client)].filter(Boolean))]}
               // The maker book plus every maker on a catalog model - already
               // loaded here, so no extra queries for a suggestion list.
+              staff={isStaff}
               makers={[...new Set(vocabRows.filter((t) => t.kind === "maker").map((t) => t.name)
                 .concat(vocabRows.filter((t) => t.kind === "model").map((t) => t.manufacturer))
                 .filter(Boolean))].sort()}

@@ -23,6 +23,8 @@ import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import { unitLabel } from "@/lib/assetServes";
 import ReferencePanel from "@/components/ReferencePanel";
+import SpecTable from "@/components/SpecTable";
+import { parseModelSpecs } from "@/lib/modelSpecs";
 import { refsForUnits } from "@/lib/catalogRefs";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { canOfferResale, resaleFlagFor } from "@/lib/owner";
@@ -211,6 +213,11 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // What the catalog says this model looks like, while nobody has photographed
   // this one. Never a file, never billed - see lib/photos.
   const unitStock = stockPhotoForUnit(vocab.filter((v) => v.photoUrl), asset.kind, asset.model);
+  // The catalog entry behind this unit's model, for the Specs panel.
+  const specTerm = asset.model ? vocab.find((v) => v.kind === "model"
+    && v.assetType.trim().toLowerCase() === asset.kind.trim().toLowerCase()
+    && v.name.trim().toLowerCase() === asset.model.trim().toLowerCase()) ?? null : null;
+  const modelSpecs = specTerm ? parseModelSpecs(specTerm.specs) : [];
   const coverSrc = coverId !== null ? fileSrc(coverId) : unitStock ? stockSrc(unitStock.id) : "";
   // The unit's own recurring upkeep, wherever it currently sits.
   const pmRows = await db.select().from(pmSchedules).where(eq(pmSchedules.assetId, assetId)).orderBy(asc(pmSchedules.nextDue));
@@ -279,7 +286,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
             keys: ["workorders", "tasks", "maintenance", "parts"],
             badge: taggedTasks.filter((t) => t.state !== "Done").length || undefined,
             badgeTone: taggedTasks.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < shopToday()) ? "bad" : "info" },
-          { key: "documents", label: "Documents", keys: ["photos", "files", "reference"] },
+          { key: "documents", label: "Documents", keys: ["specs", "photos", "files", "reference"] },
           { key: "log", label: "Log", keys: ["hours", "update", "history", "activity"] },
         ]}
         panels={[
@@ -412,6 +419,26 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               combineTitle={`${asset.kind}${asset.model ? ` ${asset.model}` : ""} report packet`}
               combineLines={[asset.serial ? `SN ${asset.serial}` : "", asset.owner, `Prepared by ${user.name}`].filter(Boolean)} />
           ) },
+          // What this model IS, by the numbers: the spec sheet lives on the
+          // catalog model; every unit of the model reads the same sheet.
+          ...(specTerm && (modelSpecs.length || isStaff) ? [{ key: "specs", label: "Specs", node: (
+            <div className="card">
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                <div className="card-title">Specifications</div>
+                {isStaff && (
+                  <Link href={`/catalog/${specTerm.id}`} className="btn link" style={{ fontSize: 11, marginLeft: "auto" }}>
+                    {modelSpecs.length ? "Edit on the model page" : "Add on the model page"}
+                  </Link>
+                )}
+              </div>
+              <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+                The {asset.model} sheet - the same numbers on every unit of the model.
+              </div>
+              {modelSpecs.length
+                ? <SpecTable specs={modelSpecs} />
+                : <div className="mut" style={{ fontSize: 12 }}>No specs recorded for this model yet.</div>}
+            </div>
+          ) }] : []),
           // The model's shelf: manuals and field notes filed on the catalog,
           // identical on every unit of this model.
           { key: "reference", label: "Reference", node: (
