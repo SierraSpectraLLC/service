@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { addProcedure, updateProcedure, deleteProcedure, reorderProcedures,
+import { addProcedure, updateProcedure, deleteProcedure, forkProcedureForModel, reorderProcedures,
   copyProcedureToTypes, moveTypeToCategory,
 } from "@/app/actions";
 import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
@@ -121,20 +121,30 @@ function ScopeField({ scope, options, onChange }: {
  * row's badges say everything - kind, when it fires, scope, parts - and every
  * badge maps to a control in the one sheet that both adds and edits.
  */
-export default function ProceduresPanel({ items, assetTypes, modelOptions, categories, categoriesByType }: {
+export default function ProceduresPanel({ items, assetTypes, modelOptions, categories, categoriesByType, focus }: {
   items: ProcedureRow[];
   assetTypes: string[]; // from Settings > Catalog
   modelOptions: Record<string, string[]>;
   categories: string[];                            // system categories, from the catalog
   categoriesByType: Record<string, string[]>;      // which categories each module type serves
+  /**
+   * One-model mode, for the model's own page: only the focused type shows, a
+   * new procedure starts scoped to this model, and editing a shared procedure
+   * offers "apply to all covered models" vs "only this one" - the latter forks
+   * (see actions.forkProcedureForModel).
+   */
+  focus?: { assetType: string; model: string };
 }) {
-  const [openBand, setOpenBand] = useState<string | null>("system");
+  const [openBand, setOpenBand] = useState<string | null>(focus ? "__focus" : "system");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   // Snapshot of the timing at sheet-open, to detect a change worth warning about.
   const [timingBefore, setTimingBefore] = useState<{ intervalDays: number | null } | null>(null);
   const [applyNow, setApplyNow] = useState(false);
+  // Focus mode, editing a procedure other models also use: does this edit go
+  // to all of them, or does this model fork off its own version?
+  const [applyScope, setApplyScope] = useState<"all" | "only">("all");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [flashId, setFlashId] = useState<number | null>(null);
@@ -160,18 +170,23 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   // System first - instrument-level procedures run once per system. Types with
   // rows but no catalog entry still render, so nothing predating the catalog
   // goes invisible. Order is the catalog's; it never reshuffles by content.
-  const GROUPS: { type: string; label: string; subtitle?: string }[] = [
-    { type: "system", label: "System", subtitle: "The whole instrument, not a unit inside it - at intake, on a schedule, or both." },
-    ...[...new Set([...assetTypes, ...items.map((i) => i.assetType)])]
-      .filter((t) => t && t !== "system")
-      .map((k) => ({ type: k, label: k })),
-  ];
+  const GROUPS: { type: string; label: string; subtitle?: string }[] = focus
+    ? [{ type: focus.assetType, label: focus.assetType }]
+    : [
+      { type: "system", label: "System", subtitle: "The whole instrument, not a unit inside it - at intake, on a schedule, or both." },
+      ...[...new Set([...assetTypes, ...items.map((i) => i.assetType)])]
+        .filter((t) => t && t !== "system")
+        .map((k) => ({ type: k, label: k })),
+    ];
 
   // The Catalog tab's own shape: category, then module type. A type that serves
   // more than one category appears under each, exactly as a model does there -
   // it is the same underlying list either way, so an edit or a reorder in one
   // place is an edit in both.
   const BANDS = useMemo(() => {
+    // One band, always open, in one-model mode - the category split is about
+    // navigating a whole book, and this page IS one entry of it.
+    if (focus) return [{ key: "__focus", label: focus.assetType, types: [focus.assetType], subtitle: "" }];
     const typesOf = (cat: string) =>
       GROUPS.filter((g) => g.type !== "system" && (categoriesByType[g.type] ?? []).includes(cat))
         .map((g) => g.type);
@@ -186,7 +201,8 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         : []),
     ];
   // GROUPS is derived from the same inputs, so recomputing on those is enough.
-  }, [categories, categoriesByType, assetTypes, items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, categoriesByType, assetTypes, items, focus?.assetType]);
 
   const grouped = useMemo(() => {
     const by = new Map<string, ProcedureRow[]>();
@@ -204,7 +220,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   // different lists instead of one list drawn twice.
   const rowsIn = (bandKey: string, type: string): ProcedureRow[] => {
     const all = grouped.get(type) ?? [];
-    if (bandKey === "system" || bandKey === "__loose" || type === "system") return all;
+    if (bandKey === "system" || bandKey === "__loose" || bandKey === "__focus" || type === "system") return all;
     return all.filter((p) => p.categoryScope.length === 0
       || p.categoryScope.some((c) => c.toLowerCase() === bandKey.toLowerCase()));
   };
@@ -247,10 +263,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     // TOC means a TOC procedure when the type serves more than one system
     // type. Without this, adding under LC-MS also added it to TOC.
     const served = categoriesByType[assetType] ?? [];
-    const scoped = bandKey && bandKey !== "system" && bandKey !== "__loose" && served.length > 1;
-    setDraft({ ...emptyDraft, categoryScope: scoped ? [bandKey] : [] });
+    const scoped = bandKey && bandKey !== "system" && bandKey !== "__loose" && bandKey !== "__focus" && served.length > 1;
+    // On a model's page, new work starts scoped to that model; widen from there.
+    setDraft({ ...emptyDraft, categoryScope: scoped ? [bandKey] : [], modelScope: focus ? [focus.model] : [] });
     setTimingBefore(null);
     setApplyNow(false);
+    setApplyScope("all");
     setError("");
     setSheet({ assetType });
   };
@@ -269,6 +287,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     setDraft(draftFrom(i));
     setTimingBefore({ intervalDays: i.intervalDays });
     setApplyNow(false);
+    setApplyScope("all");
     setError("");
     setSheet({ assetType: i.assetType, id: i.id });
   };
@@ -314,7 +333,11 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     };
     startTransition(async () => {
       const res = sheet.id
-        ? await updateProcedure(sheet.id, payload, timingChange !== null && applyNow)
+        ? (focus && sharedBeyondFocus && applyScope === "only"
+          // Fork: the shared version loses this model; a copy scoped to it
+          // carries the edit, and its stamped schedules follow.
+          ? await forkProcedureForModel(sheet.id, focus.model, { ...payload, modelScope: [focus.model] })
+          : await updateProcedure(sheet.id, payload, timingChange !== null && applyNow))
         : await addProcedure(payload);
       if (res?.error) { setError(res.error); return; }
       setSheet(null);
@@ -363,6 +386,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     // so reordering one band's view of a type is safe.
     if (d?.dirty) startTransition(() => reorderProcedures(d.assetType, d.ids));
   };
+
+  // In focus mode: is the procedure on the sheet also somebody else's? Empty
+  // scope means every model of the type, so that counts too.
+  const editingRow = sheet?.id ? items.find((x) => x.id === sheet.id) : undefined;
+  const sharedBeyondFocus = !!(focus && editingRow
+    && (editingRow.modelScope.length === 0 || editingRow.modelScope.length > 1));
 
   const sentence = describeProcedure({
     assetType: sheet?.assetType ?? "", runsAtIntake: draft.runsAtIntake,
@@ -1079,6 +1108,27 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             }}>
               {sentence ?? "Never runs - switch on at least one timing above."}
             </div>
+            {/* One-model mode, shared procedure: where does this edit land? */}
+            {focus && sharedBeyondFocus && (
+              <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "#F5F2FB" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>Apply this edit to</span>
+                  <div className="seg" role="group" aria-label="Apply this edit to">
+                    <button type="button" aria-pressed={applyScope === "all"} onClick={() => setApplyScope("all")}>
+                      All covered models
+                    </button>
+                    <button type="button" aria-pressed={applyScope === "only"} onClick={() => setApplyScope("only")}>
+                      Only {focus.model}
+                    </button>
+                  </div>
+                </div>
+                <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                  {applyScope === "all"
+                    ? `Other models using this procedure get the change too${editingRow?.modelScope.length ? ` (${editingRow.modelScope.length} models)` : " (every model of the type)"}.`
+                    : `${focus.model} gets its own copy with this edit; the shared version stays as it was for everyone else, and ${focus.model}'s existing schedules follow the copy.`}
+                </div>
+              </div>
+            )}
             {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
 
             <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>

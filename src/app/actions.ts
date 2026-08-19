@@ -4118,6 +4118,89 @@ export async function addProcedure(data: ProcedureInput): Promise<{ error?: stri
   return { applied };
 }
 
+/**
+ * "Apply to only this model": fork a shared procedure at the point of edit.
+ *
+ * A procedure covering many models is one definition on purpose - but the day
+ * the G6495C's teardown grows a step the others don't need, the edit must be
+ * able to land on just that model without the person re-creating the whole
+ * thing by hand. So: the original loses this model from its scope, a copy
+ * scoped to only this model is created carrying the edited content, and the
+ * schedules already stamped onto units of this model are re-pointed at the
+ * copy - their history, cadence and next-due stay exactly where they were.
+ *
+ * An empty scope means "every model of the type", including future ones; the
+ * fork has to materialize that to today's list minus this model. That loss of
+ * "and whatever comes later" is real and deliberate - it is what "this model
+ * is different now" means - and the audit line records it.
+ */
+export async function forkProcedureForModel(
+  procedureId: number, model: string, data: ProcedureInput,
+): Promise<{ error?: string; newId?: number; repointed?: number }> {
+  const u = await requireStaff();
+  const m = model.trim();
+  if (!m) return { error: "No model given" };
+  const [orig] = await db.select().from(procedures).where(eq(procedures.id, procedureId));
+  if (!orig) return { error: "Not found" };
+  if (readTenant(u) !== null && orig.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  if (orig.assetType === "system") return { error: "System procedures are scoped by category, not model" };
+  const covers = orig.modelScope.length === 0
+    || orig.modelScope.some((x) => x.toLowerCase() === m.toLowerCase());
+  if (!covers) return { error: `This procedure doesn't cover ${m}` };
+
+  const clean = cleanProcedure({ ...data, assetType: orig.assetType });
+  if ("error" in clean) return clean;
+  if (data.provenance === undefined) clean.provenance = orig.provenance;
+
+  // What the original keeps: its explicit scope minus this model, or - for an
+  // all-models row - today's catalog list minus this model.
+  let keep: string[];
+  if (orig.modelScope.length) {
+    keep = orig.modelScope.filter((x) => x.toLowerCase() !== m.toLowerCase());
+  } else {
+    const models = await db.select({ name: vocabTerms.name }).from(vocabTerms)
+      .where(and(eq(vocabTerms.kind, "model"), eq(vocabTerms.assetType, orig.assetType),
+        forTenant(vocabTerms.tenantOrgId, readTenant(u))));
+    keep = models.map((r) => r.name).filter((x) => x.toLowerCase() !== m.toLowerCase());
+  }
+  if (!keep.length) return { error: `It only covers ${m} - just save the edit normally` };
+
+  await db.update(procedures).set({ modelScope: keep }).where(eq(procedures.id, procedureId));
+  const siblings = await db.select().from(procedures).where(eq(procedures.assetType, orig.assetType));
+  const position = Math.max(0, ...siblings.map((i) => i.position)) + 1;
+  const [copy] = await db.insert(procedures).values({
+    ...clean, modelScope: [m], position, tenantOrgId: orig.tenantOrgId,
+  }).returning();
+
+  // Schedules the original stamped onto units of this model follow the fork,
+  // keeping their own cadence and history - only the definition they answer
+  // to changes.
+  const stamped = await db.select({ id: pmSchedules.id, assetId: pmSchedules.assetId })
+    .from(pmSchedules).where(eq(pmSchedules.procedureId, procedureId));
+  const assetIds = stamped.map((r) => r.assetId).filter((x): x is number => x !== null);
+  let repointed = 0;
+  if (assetIds.length) {
+    const units = await db.select({ id: assets.id, model: assets.model }).from(assets)
+      .where(inArray(assets.id, assetIds));
+    const mine = new Set(units.filter((a) => a.model.toLowerCase() === m.toLowerCase()).map((a) => a.id));
+    const ids = stamped.filter((r) => r.assetId !== null && mine.has(r.assetId)).map((r) => r.id);
+    if (ids.length) {
+      await db.update(pmSchedules).set({ procedureId: copy.id }).where(inArray(pmSchedules.id, ids));
+      repointed = ids.length;
+    }
+  }
+
+  await audit({
+    actor: u.email, entityType: "procedure", entityId: copy.id,
+    action: `split "${clean.name}" (${orig.assetType}) off for ${m} only - the shared version now covers `
+      + `${keep.length} model${keep.length === 1 ? "" : "s"}${orig.modelScope.length ? "" : " (was: every model)"}`
+      + `${repointed ? `; ${repointed} schedule${repointed === 1 ? "" : "s"} follow${repointed === 1 ? "s" : ""} the ${m} version` : ""}`,
+  });
+  revalidatePath("/settings/procedures");
+  revalidatePath("/maintenance");
+  return { newId: copy.id, repointed };
+}
+
 export async function updateProcedure(
   procedureId: number,
   data: ProcedureInput,
