@@ -32,5 +32,12 @@ export const config = {
   // drop link's sender view, a share link's recipient view - plus the API
   // routes that serve them. Every one of them treats its unguessable token as
   // the credential and 404s anything it doesn't explicitly allow.
-  matcher: ["/((?!api/auth|api/cron|api/upload|api/files|api/drop|api/share|login|listing|drop|share|_next/static|_next/image|favicon.ico).*)"],
+  //
+  // /equipment is the other kind of public: the indexable catalog library,
+  // deliberately open to everyone including crawlers, which is why the sitemap
+  // and robots.txt come out here too. It renders only models an operator has
+  // explicitly published, and reads nothing that depends on who is asking -
+  // see app/equipment and lib/publicCatalog. api/catalog serves the stock
+  // photos those pages show.
+  matcher: ["/((?!api/auth|api/cron|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|equipment|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).*)"],
 };

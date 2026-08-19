@@ -11,6 +11,9 @@ import { PART_KIND_LABEL } from "@/lib/partCatalog";
 import { shopDay } from "@/lib/shopday";
 import ModelHeaderCard from "@/components/ModelHeaderCard";
 import ModelSpecsCard from "@/components/ModelSpecsCard";
+import PublishModelCard from "@/components/PublishModelCard";
+import { publishBlockers, publishWarnings } from "@/lib/publicCatalog";
+import { appUrl } from "@/lib/appUrl";
 import { parseModelSpecs, specNameSuggestions } from "@/lib/modelSpecs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 import ReferencePanel from "@/components/ReferencePanel";
@@ -124,6 +127,20 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
           terms.filter((t) => t.kind === "model" && same(t.assetType, term.assetType))
             .map((t) => parseModelSpecs(t.specs)),
         )}
+      />
+
+      <PublishModelCard
+        termId={term.id} modelName={term.name}
+        published={term.published} slug={term.publicSlug} summary={term.publicSummary}
+        blockers={publishBlockers({
+          manufacturer: term.manufacturer, name: term.name, summary: term.publicSummary,
+          specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
+        })}
+        warnings={publishWarnings({
+          manufacturer: term.manufacturer, name: term.name, summary: term.publicSummary,
+          specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
+        })}
+        siteUrl={appUrl()}
       />
 
       <ProceduresPanel

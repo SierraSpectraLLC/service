@@ -1460,6 +1460,16 @@ export const vocabTerms = pgTable("vocab_terms", {
    * spellings converge. See lib/specs.
    */
   specs: text("specs").notNull().default(""),
+  /**
+   * The public catalog page (lib/publicCatalog). `published` is the operator's
+   * explicit "this may be indexed" - never automatic; `publicSlug` is the URL
+   * it lives at, stable once minted so a rename can't orphan a ranked page;
+   * `publicSummary` is the one piece of writing on the page that exists
+   * nowhere else, which is what earns the indexing.
+   */
+  published: boolean("published").notNull().default(false),
+  publicSlug: text("public_slug").notNull().default(""),
+  publicSummary: text("public_summary").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Unique on identity only, not on categories: FID is one model that happens
   // to apply to several system types, not a row per type.

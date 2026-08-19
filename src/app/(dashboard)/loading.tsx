@@ -1,3 +1,13 @@
+// The dashboard's own skeleton - a metric grid and a list, because that is
+// what this page is.
+//
+// It lives in the (dashboard) route group rather than at the app root, and the
+// reason is not cosmetic: a loading.tsx at the root opens a Suspense boundary
+// around EVERY route, so the shell (and a 200) flushes before any page can
+// call notFound() - which turned every missing URL into a "soft 404", a page
+// that says 404 while answering 200. The public equipment pages exist to be
+// crawled, so that status has to be true. Keeping the skeleton scoped to the
+// page it was drawn for fixes both.
 export default function Loading() {
   return (
     <div className="container page">

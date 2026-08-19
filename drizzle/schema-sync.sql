@@ -2494,3 +2494,11 @@ ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "provenance" text NOT NULL DEF
 -- entry ("Max pressure: 1300 bar"), so pump-vs-pump questions stop being a
 -- manual lookup. See lib/specs.
 ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "specs" text NOT NULL DEFAULT '';
+
+-- The public, indexable face of a catalog model (lib/publicCatalog): an
+-- explicit publish flag, the slug its page lives at, and the original summary
+-- that earns the page its place in an index.
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "published" boolean NOT NULL DEFAULT false;
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "public_slug" text NOT NULL DEFAULT '';
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "public_summary" text NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS "vocab_public_slug_idx" ON "vocab_terms" ("public_slug") WHERE "public_slug" <> '';

@@ -111,6 +111,7 @@ import { composeSystemDossier } from "@/lib/dossier";
 import { cleanMakerName } from "@/lib/makers";
 import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenance";
 import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
+import { MAX_SUMMARY, modelSlug, publishBlockers, uniqueSlug } from "@/lib/publicCatalog";
 import { tenantCatalogIds } from "@/lib/makersData";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
@@ -8871,6 +8872,94 @@ export async function setModelSpecs(
   revalidatePath("/settings/catalog");
   revalidatePath(`/catalog/${termId}`);
   return {};
+}
+
+/**
+ * The public summary: the paragraph that makes a model's public page worth
+ * indexing, because it is the only part of it that exists nowhere else.
+ * Saved separately from publishing, so it can be drafted before anyone
+ * decides the page goes out.
+ */
+export async function setModelSummary(termId: number, summary: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!term || term.kind !== "model") return { error: "Not found" };
+  if (readTenant(u) !== null && term.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const next = summary.replace(/[ \t]+/g, " ").trim().slice(0, MAX_SUMMARY);
+  if (next === term.publicSummary) return {};
+  await db.update(vocabTerms).set({ publicSummary: next }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: term.tenantOrgId,
+    action: next ? `wrote the public summary for ${term.name}` : `cleared ${term.name}'s public summary`,
+    field: "public_summary", oldValue: term.publicSummary.slice(0, 300), newValue: next.slice(0, 300),
+  });
+  revalidatePath(`/catalog/${termId}`);
+  if (term.published && term.publicSlug) revalidatePath(`/equipment/${term.publicSlug}`);
+  return {};
+}
+
+/**
+ * Put a model's page on the public web, or take it back off.
+ *
+ * Publishing is refused unless the page has something to say (publishBlockers):
+ * a maker, a real summary, and specs. That refusal is the whole point - a
+ * catalog dumped into an index as hundreds of near-identical stubs is what
+ * search engines punish, and one shop's reputation with them is not worth a
+ * few extra URLs.
+ *
+ * The slug is minted once and then kept, even through a rename: a page that
+ * has earned its place in an index must not lose it because somebody fixed a
+ * capital letter.
+ */
+export async function setModelPublished(termId: number, published: boolean): Promise<{ error?: string; slug?: string }> {
+  const u = await requireStaff();
+  const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!term || term.kind !== "model") return { error: "Not found" };
+  if (readTenant(u) !== null && term.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+
+  if (!published) {
+    if (!term.published) return {};
+    await db.update(vocabTerms).set({ published: false }).where(eq(vocabTerms.id, termId));
+    await audit({
+      actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: term.tenantOrgId,
+      action: `took ${term.name}'s public page down`,
+      field: "published", oldValue: "true", newValue: "false",
+    });
+    revalidatePath(`/catalog/${termId}`);
+    revalidatePath("/equipment");
+    if (term.publicSlug) revalidatePath(`/equipment/${term.publicSlug}`);
+    return {};
+  }
+
+  const blockers = publishBlockers({
+    manufacturer: term.manufacturer, name: term.name, summary: term.publicSummary,
+    specs: parseModelSpecs(term.specs), hasPhoto: !!term.photoUrl,
+  });
+  if (blockers.length) return { error: blockers[0] };
+
+  // Only the operator's own library is published: one canonical page per model,
+  // rather than a race between two tenants' versions of the same pump.
+  const brand = await getBrand();
+  if (brand.operatorOrgId !== null && term.tenantOrgId !== null && term.tenantOrgId !== brand.operatorOrgId) {
+    return { error: "Only the operator's own catalog is published publicly" };
+  }
+
+  let slug = term.publicSlug;
+  if (!slug) {
+    const taken = await db.select({ slug: vocabTerms.publicSlug }).from(vocabTerms)
+      .where(ne(vocabTerms.publicSlug, ""));
+    slug = uniqueSlug(modelSlug(term.manufacturer, term.name), taken.map((r) => r.slug));
+  }
+  await db.update(vocabTerms).set({ published: true, publicSlug: slug }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: term.tenantOrgId,
+    action: `published ${term.name} to the public catalog at /equipment/${slug}`,
+    field: "published", oldValue: "false", newValue: "true",
+  });
+  revalidatePath(`/catalog/${termId}`);
+  revalidatePath("/equipment");
+  revalidatePath(`/equipment/${slug}`);
+  return { slug };
 }
 
 export async function addCatalogRef(data: CatalogRefInput): Promise<{ error?: string; id?: number }> {
