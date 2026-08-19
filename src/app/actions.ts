@@ -4202,6 +4202,75 @@ export async function addProcedure(data: ProcedureInput): Promise<{ error?: stri
 }
 
 /**
+ * Copy one model's procedures onto another - the G6117A/G6117B case.
+ *
+ * Two sibling models are usually 90% the same job with three differences, and
+ * writing the 90% out a second time by hand is how a second model ends up with
+ * a thinner book than the first. So: duplicate, don't widen. Each copy is
+ * scoped to the destination model alone and is free to be edited from the
+ * moment it lands, which is the whole point - widening the original's scope
+ * would mean every later edit hit the fork prompt instead.
+ *
+ * Two things are deliberately skipped rather than copied. A procedure with NO
+ * model scope already covers the destination (it covers every model of the
+ * type), so copying it would create a duplicate that fires twice on the same
+ * unit. And a name already used on the destination is left alone - somebody
+ * has written that one already, and overwriting their words is not a copy.
+ */
+export async function copyProceduresToModel(
+  assetType: string, fromModel: string, toModel: string,
+): Promise<{ error?: string; copied?: number; skipped?: number; applied?: number }> {
+  const u = await requireStaff();
+  const from = fromModel.trim(), to = toModel.trim();
+  if (!from || !to) return { error: "Pick a model to copy from" };
+  if (from.toLowerCase() === to.toLowerCase()) return { error: "That's the same model" };
+  const t = readTenant(u);
+  const rows = await db.select().from(procedures)
+    .where(and(eq(procedures.assetType, assetType), forTenant(procedures.tenantOrgId, t)));
+
+  const covers = (p: typeof rows[number], m: string) =>
+    p.modelScope.length === 0 || p.modelScope.some((x) => x.trim().toLowerCase() === m.toLowerCase());
+  const source = rows.filter((p) => covers(p, from));
+  const takenNames = new Set(rows.filter((p) => covers(p, to))
+    .map((p) => `${p.kind}|${p.name.trim().toLowerCase()}`));
+
+  let copied = 0, skipped = 0, position = Math.max(0, ...rows.map((p) => p.position));
+  let anyRecurring = false;
+  for (const p of source) {
+    // Already the destination's, one way or another.
+    if (covers(p, to) || takenNames.has(`${p.kind}|${p.name.trim().toLowerCase()}`)) { skipped++; continue; }
+    position++;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { id: _id, createdAt: _createdAt, tenantOrgId: _t, ...rest } = p;
+    await db.insert(procedures).values({
+      ...rest, modelScope: [to], position,
+      // Explicit, not inherited through the spread: the copy belongs to the
+      // workspace the original does, and a stamp that rides on a destructure
+      // is one refactor away from being silently dropped.
+      tenantOrgId: p.tenantOrgId,
+    });
+    if (p.intervalDays !== null) anyRecurring = true;
+    copied++;
+  }
+  if (!copied) {
+    return { copied: 0, skipped, error: skipped ? `${to} already has all of ${from}'s procedures` : `Nothing on ${from} to copy` };
+  }
+  // Recurring work reaches the fleet the same way a hand-written one does.
+  const applied = anyRecurring
+    ? await backfillProcedure(assetType, shopToday(), u.email, myTenantOrgId(u))
+    : 0;
+  await audit({
+    actor: u.email, entityType: "procedure", entityId: `${assetType}:${to}`,
+    action: `copied ${copied} procedure${copied === 1 ? "" : "s"} from ${from} to ${to}`
+      + `${skipped ? ` (${skipped} already covered)` : ""}${applied ? `; scheduled on ${applied} unit${applied === 1 ? "" : "s"}` : ""}`,
+    field: "modelScope", oldValue: from, newValue: to,
+  });
+  revalidatePath("/settings/procedures");
+  revalidatePath("/maintenance");
+  return { copied, skipped, applied };
+}
+
+/**
  * "Apply to only this model": fork a shared procedure at the point of edit.
  *
  * A procedure covering many models is one definition on purpose - but the day

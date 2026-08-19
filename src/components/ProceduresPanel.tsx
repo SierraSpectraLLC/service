@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { addProcedure, updateProcedure, deleteProcedure, forkProcedureForModel, reorderProcedures,
+import { addProcedure, updateProcedure, deleteProcedure, copyProceduresToModel, forkProcedureForModel, reorderProcedures,
   copyProcedureToTypes, moveTypeToCategory,
 } from "@/app/actions";
 import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
@@ -121,7 +121,7 @@ function ScopeField({ scope, options, onChange }: {
  * row's badges say everything - kind, when it fires, scope, parts - and every
  * badge maps to a control in the one sheet that both adds and edits.
  */
-export default function ProceduresPanel({ items, assetTypes, modelOptions, categories, categoriesByType, focus }: {
+export default function ProceduresPanel({ items, assetTypes, modelOptions, categories, categoriesByType, focus, copyFrom = [] }: {
   items: ProcedureRow[];
   assetTypes: string[]; // from Settings > Catalog
   modelOptions: Record<string, string[]>;
@@ -134,6 +134,11 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
    * (see actions.forkProcedureForModel).
    */
   focus?: { assetType: string; model: string };
+  /**
+   * Sibling models to seed this one from, with how many of their procedures
+   * this model does not have. Focus mode only - see the copy row below.
+   */
+  copyFrom?: { name: string; count: number }[];
 }) {
   const [openBand, setOpenBand] = useState<string | null>(focus ? "__focus" : "system");
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -145,6 +150,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   // Focus mode, editing a procedure other models also use: does this edit go
   // to all of them, or does this model fork off its own version?
   const [applyScope, setApplyScope] = useState<"all" | "only">("all");
+  // Seeding this model from a sibling: which one, and what came of it.
+  const [seedFrom, setSeedFrom] = useState("");
+  const [seedNote, setSeedNote] = useState("");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [flashId, setFlashId] = useState<number | null>(null);
@@ -551,6 +559,41 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         existing and new; anything marked &ldquo;at intake&rdquo; is created as checkout work when
         a matching unit arrives. Nothing needs copying onto individual systems.
       </div>
+
+      {/* Two sibling models are usually the same job with three differences.
+          Copy the sibling's book across, then edit the differences here - the
+          copies belong to this model alone, so editing one never touches the
+          model it came from. */}
+      {focus && copyFrom.length > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "8px 10px", borderRadius: 8, background: "#F5F2FB" }}>
+          <label style={{ margin: 0 }}>Copy from</label>
+          <select value={seedFrom} onChange={(e) => { setSeedFrom(e.target.value); setSeedNote(""); }}
+            aria-label="Copy procedures from" style={{ width: "auto", fontSize: 12 }}>
+            <option value="">another model...</option>
+            {copyFrom.map((m) => (
+              <option key={m.name} value={m.name}>{m.name} ({m.count} to copy)</option>
+            ))}
+          </select>
+          <button className="btn sm accent" disabled={pending || !seedFrom}
+            onClick={() => {
+              setError(""); setSeedNote("");
+              startTransition(async () => {
+                const res = await copyProceduresToModel(focus.assetType, seedFrom, focus.model);
+                if (res?.error) { setError(res.error); return; }
+                setSeedNote(`Copied ${res.copied} from ${seedFrom}`
+                  + `${res.skipped ? ` · ${res.skipped} already covered` : ""}`
+                  + `${res.applied ? ` · scheduled on ${res.applied} unit${res.applied === 1 ? "" : "s"}` : ""}`);
+                setSeedFrom("");
+              });
+            }}>
+            {pending ? "Copying..." : `Copy to ${focus.model}`}
+          </button>
+          <span className="mut" style={{ fontSize: 11 }}>
+            {focus.model} gets its own copies - edit them here without touching the model they came from.
+          </span>
+          {seedNote && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, width: "100%" }}>{seedNote} ✓</span>}
+        </div>
+      )}
 
       {/* Copy one procedure onto other module types. Several at once, because
           "this belongs on the stack and the detector too" is one thought. */}
