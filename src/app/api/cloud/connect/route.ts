@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { currentUser } from "@/lib/authz";
-import { authorizeUrl, graphBaseUrl, graphConfig, pkcePair } from "@/lib/msgraph";
+import { HANDSHAKE_COOKIE, authorizeUrl, graphBaseUrl, graphConfig, pkcePair } from "@/lib/msgraph";
 import { seal, vaultConfigured } from "@/lib/secretBox";
 
 export const dynamic = "force-dynamic";
 
-/** The handshake's own state, sealed into a cookie for the two minutes it lives. */
-export const HANDSHAKE_COOKIE = "cloud-oauth";
 const HANDSHAKE_TTL_S = 600;
 
 /**
