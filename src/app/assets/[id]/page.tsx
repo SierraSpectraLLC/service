@@ -364,6 +364,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           { key: "workorders", label: "Work orders", node: (
             <WorkOrdersPanel
               target={target} today={shopToday()} canEdit={canEdit}
+              people={isStaff ? directoryNames(peopleRows) : []}
               orders={woRows.map((w) => {
                 const mine = fullTasks.filter((t) => t.workOrderId === w.id);
                 return {

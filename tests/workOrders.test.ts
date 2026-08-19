@@ -232,3 +232,18 @@ describe("numbering", () => {
     expect(nextWoNumber(["WO-1001", "not a number"])).toBe("WO-1002");
   });
 });
+
+describe("platform staff are the house everywhere", () => {
+  // readTenant is null for root-operator staff - "no restriction". The strict
+  // tenant comparison used to turn that null into "nobody", which took every
+  // button off every work order for the platform owner.
+  const platform = { isHouse: true, orgId: null, houseOrgId: null };
+
+  it("moves a tenant-stamped order", () => {
+    expect(moverOf(platform, { tenantOrgId: 2, orgId: 7 }, 7)).toBe("house");
+  });
+
+  it("moves an unstamped one too", () => {
+    expect(moverOf(platform, { tenantOrgId: null, orgId: null }, null)).toBe("house");
+  });
+});

@@ -5201,6 +5201,16 @@ export async function openWorkOrder(
     origin: "", assignee: (data.assignee ?? "").trim(),
     externalId: targetLabel(t0.externalId, t0.asset),
   });
+  // Dispatched at intake: the engineer hears about it now, not when somebody
+  // remembers to edit the order later. The link goes to the job itself.
+  if ((data.assignee ?? "").trim()) {
+    await notifyTaskAssigned({
+      actorEmail: u.email, actorName: u.name || u.email, assignee: data.assignee!.trim(),
+      taskTitle: `${wo.number} ${title}`,
+      instrumentId: t0.instrumentId ?? undefined, assetId: t0.assetId ?? undefined,
+      externalId: targetLabel(t0.externalId, t0.asset), workOrderId: wo.id,
+    });
+  }
   revWo(wo);
   return { id: wo.id, number: wo.number };
 }
@@ -5297,11 +5307,12 @@ export async function updateWorkOrder(
       field, oldValue: before, newValue: after,
     });
   }
-  if (next.assignee && next.assignee !== wo.assignee && wo.instrumentId !== null) {
+  if (next.assignee && next.assignee !== wo.assignee) {
     await notifyTaskAssigned({
       actorEmail: u.email, actorName: u.name, assignee: next.assignee,
-      taskTitle: `${wo.number} ${next.title}`, instrumentId: wo.instrumentId,
-      externalId: found.inst?.externalId ?? "",
+      taskTitle: `${wo.number} ${next.title}`, instrumentId: wo.instrumentId ?? undefined,
+      assetId: wo.assetId ?? undefined,
+      externalId: found.inst?.externalId ?? "", workOrderId: wo.id,
     });
   }
   revWo(wo);

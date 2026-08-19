@@ -577,6 +577,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             <WorkOrdersPanel
               target={{ instrumentId: inst.id, assetId: null }}
               today={shopToday()} canEdit={canEdit}
+              people={isStaff ? directoryNames(peopleRows) : []}
               orders={woRows.map((w) => {
                 const mine = taskRows.filter((t) => t.workOrderId === w.id);
                 return {

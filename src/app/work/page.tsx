@@ -4,6 +4,7 @@ import { desc, eq, inArray, isNull, or, sql, type AnyColumn, type SQL } from "dr
 import { db } from "@/db";
 import { assets, instruments, orgs, tasks, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { isHouse } from "@/lib/tenancy";
 import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { getSystemLabels } from "@/lib/systemLabel";
@@ -24,10 +25,14 @@ export const dynamic = "force-dynamic";
  * order on a system shared in from another operator appears here for the people
  * doing the work - which is the whole reason the sharing exists.
  */
-export default async function WorkPage() {
+export default async function WorkPage({ searchParams }: { searchParams: Promise<{ who?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const today = shopToday();
+  // ?who=Name is an engineer's queue - bookmarkable, shareable, and the page
+  // the dispatch notification can stand behind. "-" means the triage pile:
+  // jobs nobody has taken yet.
+  const { who } = await searchParams;
 
   const [sysIds, unitIds] = await Promise.all([visibleSystemIds(user), visibleAssetIds(user)]);
   const scoped = (col: AnyColumn, ids: number[] | null): SQL | undefined =>
@@ -74,8 +79,32 @@ export default async function WorkPage() {
   };
 
   const sorted = sortWorkOrders(rows, today);
-  const live = sorted.filter((w) => woOpen(w.state) || w.state === "resolved");
-  const filed = sorted.filter((w) => !live.includes(w));
+  const wanted = (w: typeof rows[number]) =>
+    !who ? true
+    : who === "-" ? !w.assignee.trim()
+    : w.assignee.trim().toLowerCase() === who.trim().toLowerCase();
+  const live = sorted.filter((w) => (woOpen(w.state) || w.state === "resolved") && wanted(w));
+  const filed = sorted.filter((w) => !(woOpen(w.state) || w.state === "resolved") && wanted(w));
+
+  // The queue chips: everyone with open work, plus the viewer even when their
+  // plate is clean - "my queue is empty" is an answer worth being able to get.
+  const staff = isHouse(user.role);
+  const names = [...new Set([
+    ...(user.name ? [user.name] : []),
+    ...sorted.filter((w) => woOpen(w.state)).map((w) => w.assignee.trim()).filter(Boolean),
+  ])].sort((a, b) => a.localeCompare(b));
+  const openFor = (name: string) =>
+    sorted.filter((w) => woOpen(w.state) && w.assignee.trim().toLowerCase() === name.toLowerCase()).length;
+  const unassignedOpen = sorted.filter((w) => woOpen(w.state) && !w.assignee.trim()).length;
+  const chip = (href: string, label: string, active: boolean, count?: number) => (
+    <Link key={href} href={href} className="pill" style={{
+      textDecoration: "none",
+      background: active ? "var(--navy)" : "#EEF1F5",
+      color: active ? "#fff" : "#475569",
+    }}>
+      {label}{count !== undefined && count > 0 ? ` · ${count}` : ""}
+    </Link>
+  );
 
   const row = (w: typeof rows[number]) => {
     const color = WO_COLOR[w.state] ?? WO_COLOR.open;
@@ -101,13 +130,25 @@ export default async function WorkPage() {
       <div className="page-head">
         <h1 className="page-title">Work orders</h1>
       </div>
+      {/* Whose queue you're looking at. Staff only - a client's list is already
+          just their own jobs, and the shop's roster is not their furniture. */}
+      {staff && (names.length > 0 || unassignedOpen > 0) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {chip("/work", "Everyone", !who)}
+          {names.map((n) => chip(`/work?who=${encodeURIComponent(n)}`,
+            n === user.name ? `Mine (${n})` : n,
+            who?.trim().toLowerCase() === n.toLowerCase(), openFor(n)))}
+          {chip("/work?who=-", "Unassigned", who === "-", unassignedOpen)}
+        </div>
+      )}
       <div className="card">
         {live.map(row)}
         {live.length === 0 && (
           <div className="empty">
-            <b>Nothing outstanding</b>
-            A work order opens when somebody asks for service on a system,
-            or from the Work orders panel on the system itself.
+            <b>{who ? (who === "-" ? "Nothing waiting for an owner" : `Nothing on ${who}'s plate`) : "Nothing outstanding"}</b>
+            {who
+              ? "Open jobs land here the moment one is dispatched."
+              : "A work order opens when somebody asks for service on a system, or from the Work orders panel on the system itself."}
           </div>
         )}
         {filed.length > 0 && (

@@ -31,16 +31,19 @@ export type WorkOrderRow = {
  * the question this panel answers is "what is outstanding" - the archive is one
  * click below it for the day somebody asks what happened in March.
  */
-export default function WorkOrdersPanel({ target, orders, today, canEdit }: {
+export default function WorkOrdersPanel({ target, orders, today, canEdit, people = [] }: {
   target: { instrumentId: number | null; assetId: number | null };
   orders: WorkOrderRow[];
   today: string;
   canEdit: boolean;
+  /** Who a job can be dispatched to, right at intake - the phone-call flow. */
+  people?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [severity, setSeverity] = useState("Degraded");
+  const [assignee, setAssignee] = useState("");
   // Backfilling: work that already happened, filed closed on its real date.
   const [past, setPast] = useState(false);
   const [pastDraft, setPastDraft] = useState({ title: "", summary: "", date: "", reference: "", doneBy: "" });
@@ -54,9 +57,9 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit }: {
     if (!title.trim()) { setError("Say briefly what the job is"); return; }
     setError("");
     startTransition(async () => {
-      const res = await openWorkOrder(target, { title, body, severity });
+      const res = await openWorkOrder(target, { title, body, severity, assignee });
       if (res?.error) { setError(res.error); return; }
-      setOpen(false); setTitle(""); setBody(""); setSeverity("Degraded");
+      setOpen(false); setTitle(""); setBody(""); setSeverity("Degraded"); setAssignee("");
     });
   };
 
@@ -155,8 +158,22 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit }: {
                 title={s.hint} style={{ flex: "1 1 90px" }}>{s.label}</button>
             ))}
           </div>
+          {/* Dispatch at intake: the call is still live, the engineer's name is
+              known - filing and assigning in two screens was two too many.
+              Optional, because triage-later is also a real workflow. */}
+          {people.length > 0 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <label style={{ margin: 0 }}>Dispatch to</label>
+              <select value={assignee} onChange={(e) => setAssignee(e.target.value)}
+                aria-label="Dispatch to" style={{ width: "auto", fontSize: 13 }}>
+                <option value="">Decide later</option>
+                {people.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+              {assignee && <span className="mut" style={{ fontSize: 11 }}>{assignee} gets notified the moment it files.</span>}
+            </div>
+          )}
           <button className="btn sm accent" onClick={file} disabled={pending || !title.trim()}>
-            {pending ? "Opening..." : "Open work order"}
+            {pending ? "Opening..." : assignee ? `Open & dispatch to ${assignee}` : "Open work order"}
           </button>
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
         </div>

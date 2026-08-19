@@ -97,6 +97,8 @@ export async function notifyTaskAssigned(opts: {
   // A task lives on a system, on a standalone asset, or both - the link points
   // at whichever page owns it.
   taskTitle: string; instrumentId?: number; assetId?: number; externalId: string;
+  /** Set when the assignment IS a work order - the link goes to the job, not the system. */
+  workOrderId?: number;
 }) {
   try {
     const staff = await houseEmails();
@@ -107,7 +109,8 @@ export async function notifyTaskAssigned(opts: {
     const to = resolveAssigneeEmail(opts.assignee, staff, userRows, directory);
     if (!to || to === opts.actorEmail.toLowerCase()) return; // unknown assignee or self-assign
     const url = appUrl();
-    const href = opts.instrumentId ? `/instruments/${opts.instrumentId}` : opts.assetId ? `/assets/${opts.assetId}` : "";
+    const href = opts.workOrderId ? `/work/${opts.workOrderId}`
+      : opts.instrumentId ? `/instruments/${opts.instrumentId}` : opts.assetId ? `/assets/${opts.assetId}` : "";
     await deliver({
       to: [to], kind: "task_assigned", href,
       title: `${opts.actorName} assigned you "${opts.taskTitle}" on ${opts.externalId}`,

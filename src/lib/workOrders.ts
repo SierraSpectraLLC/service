@@ -117,9 +117,12 @@ export function moverOf(
   wo: { tenantOrgId: number | null; orgId: number | null },
   ownerOrgId: number | null,
 ): Mover | null {
-  // Staff of the company whose workspace this order lives in. On a single-house
-  // instance both sides are null, which is the same statement.
-  if (v.isHouse) return v.houseOrgId === wo.tenantOrgId ? "house" : null;
+  // Staff of the company whose workspace this order lives in. Platform staff
+  // carry houseOrgId null - "no restriction", same convention as readTenant -
+  // and are the house EVERYWHERE. The strict === was a real bug: the moment
+  // tenant stamping started writing real org ids onto orders, null === 2
+  // failed and the platform owner lost every control on every job.
+  if (v.isHouse) return v.houseOrgId === null || v.houseOrgId === wo.tenantOrgId ? "house" : null;
   if (v.orgId === null) return null;
   return v.orgId === wo.orgId || v.orgId === ownerOrgId ? "requester" : null;
 }
