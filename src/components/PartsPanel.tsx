@@ -17,6 +17,8 @@ type Part = {
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
   installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
+  /** Set on a part that came out of a kit - rendered under it, never on its own. */
+  parentPartId?: number | null;
 };
 
 function PartStatusSelect({ part }: { part: Part }) {
@@ -53,7 +55,7 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
   );
 }
 
-const empty = { kind: "part", assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
+const empty = { kind: "part", expandKit: true, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
@@ -83,7 +85,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const openEdit = (p: Part) => {
     // A date input only accepts a calendar day, so a row still carrying one of
     // the old year-less strings opens blank and says what is stored underneath.
-    setDraft({ kind: p.kind, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
+    setDraft({ kind: p.kind, expandKit: false, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -132,8 +134,13 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
     startTransition(async () => {
       if (form.mode === "new") {
         const res = await createPart(target, payload);
-        // Allowance heads-up rides the save; the record always lands.
-        setFlag(res?.flag ?? "");
+        // Allowance heads-up rides the save; the record always lands. A kit
+        // says how many parts came in with it, because that is the surprising
+        // part of what just happened.
+        setFlag([
+          res?.expanded ? `${res.expanded} part${res.expanded === 1 ? "" : "s"} from the kit recorded underneath it.` : "",
+          res?.flag ?? "",
+        ].filter(Boolean).join(" "));
       } else await updatePart(form.id, payload);
       close();
     });
@@ -164,7 +171,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               {form.mode === "new" ? "New" : "Edit"}
             </div>
             <div style={{ display: "flex", gap: 4 }}>
-              {[["part", "Part"], ["consumable", "Consumable"]].map(([k, label]) => (
+              {[["part", "Part"], ["consumable", "Consumable"], ["kit", "Kit"]].map(([k, label]) => (
                 <button key={k} className="pill" onClick={() => setKind(k)}
                   style={{
                     border: "none", cursor: "pointer",
@@ -175,6 +182,16 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             </div>
             {draft.kind === "consumable" && (
               <span className="mut" style={{ fontSize: 11 }}>ferrules, septa, liners... defaults to Installed</span>
+            )}
+            {draft.kind === "kit" && (
+              <>
+                <span className="mut" style={{ fontSize: 11 }}>the box as sold</span>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0, fontSize: 11.5, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--ink)", cursor: "pointer" }}>
+                  <input type="checkbox" checked={draft.expandKit} style={{ width: 14, height: 14 }}
+                    onChange={(e) => setDraft({ ...draft, expandKit: e.target.checked })} />
+                  also record what&apos;s inside it
+                </label>
+              </>
             )}
           </div>
           <div className="pf2" style={{ marginBottom: 8 }}>
@@ -191,6 +208,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 onChange={(partNumber) => setDraft({ ...draft, partNumber })}
                 onPick={(part) => setDraft((d) => ({
                   ...d,
+                  // The book already knows this number is a kit; making
+                  // somebody also say so is a question with a known answer.
+                  kind: part.kind === "kit" ? "kit" : d.kind,
                   partNumber: part.partNumber,
                   // Only into fields nobody has filled: a pick corrects the
                   // number, it does not overwrite what somebody typed.
@@ -336,6 +356,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         const renderRow = (p: Part) => {
           const link = trackUrl(p.carrier, p.tracking);
           const specs = parseSpecs(p.specs);
+          // What came in this box. Listed, not repeated as rows: the kit is the
+          // thing that was bought and fitted; these are what it contained.
+          const inside = p.kind === "kit" ? parts.filter((x) => x.parentPartId === p.id) : [];
           return (
             <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#FAFBFD" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -380,6 +403,21 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 </div>
               )}
               {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
+              {inside.length > 0 && (
+                <details style={{ marginTop: 6 }}>
+                  <summary style={{ cursor: "pointer", fontSize: 11.5, color: "var(--mut)" }}>
+                    contains {inside.length} part{inside.length === 1 ? "" : "s"}
+                  </summary>
+                  <div style={{ paddingLeft: 12, marginTop: 4 }}>
+                    {inside.map((c) => (
+                      <div key={c.id} style={{ fontSize: 12, padding: "2px 0", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <span>{c.name}{c.qty ? <span className="mut"> × {c.qty}</span> : null}</span>
+                        {c.partNumber && <span className="mono mut" style={{ fontSize: 11 }}>{c.partNumber}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
             </div>
           );
         };
@@ -437,8 +475,10 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             </>
           );
         };
-        const proper = parts.filter((p) => p.kind !== "consumable");
-        const consumables = parts.filter((p) => p.kind === "consumable");
+        // Kit contents are never their own row: they belong under the box they
+        // came in, which is how the work actually happened.
+        const proper = parts.filter((p) => p.kind !== "consumable" && !p.parentPartId);
+        const consumables = parts.filter((p) => p.kind === "consumable" && !p.parentPartId);
         const both = proper.length > 0 && consumables.length > 0;
         return (
           <>
@@ -451,12 +491,17 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
       })()}
       {(() => {
         if (!showCosts) return null; // server blanks costs too - this just skips an empty row
-        const priced = parts.filter((p) => !isNaN(money(p.cost)));
+        // Kit contents are priced at nothing on purpose - the kit carries the
+        // money. Counting them here would read "1 of 4 priced" on a kit that
+        // is fully priced, which looks like missing data rather than design.
+        const billable = parts.filter((p) => !p.parentPartId);
+        const priced = billable.filter((p) => !isNaN(money(p.cost)));
         if (!priced.length) return null;
         const total = priced.reduce((sum, p) => sum + money(p.cost), 0);
+        const missing = billable.length - priced.length;
         return (
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, fontSize: 12, marginTop: 2 }}>
-            <span className="mut">Parts total{priced.length < parts.length ? ` (${priced.length} of ${parts.length} priced)` : ""}:</span>
+            <span className="mut">Parts total{missing > 0 ? ` (${priced.length} of ${billable.length} priced)` : ""}:</span>
             <b>${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
           </div>
         );

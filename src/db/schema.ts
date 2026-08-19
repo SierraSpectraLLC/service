@@ -719,9 +719,22 @@ export const instrumentGases = pgTable("instrument_gases", {
 export const parts = pgTable("parts", {
   id: serial("id").primaryKey(),
   instrumentId: integer("instrument_id").references(() => instruments.id, { onDelete: "cascade" }),
-  // part | consumable - consumables (ferrules, septa, liners) share the same
-  // lifecycle/cost/audit but get a lighter-weight form.
+  // part | consumable | kit - consumables (ferrules, septa, liners) share the
+  // same lifecycle/cost/audit but get a lighter-weight form. A KIT is the box
+  // as sold: one line carrying the money and the PO, with the parts it
+  // contains recorded beneath it (see parentPartId) so "when did we last
+  // change the plunger seals" is still answerable a year later.
   kind: text("kind").notNull().default("part"),
+  /**
+   * The kit line this part came out of. Contents are stamped at zero cost -
+   * the kit holds the money, and charging both would bill a client twice for
+   * one box. Null = an ordinary part somebody fitted on its own.
+   *
+   * Cascading in the DATABASE, not only in deletePart: contents left behind
+   * read as loose parts somebody fitted, which is a worse record than none,
+   * and the invariant should not depend on every future caller remembering.
+   */
+  parentPartId: integer("parent_part_id").references((): AnyPgColumn => parts.id, { onDelete: "cascade" }),
   assetId: integer("asset_id").references(() => assets.id, { onDelete: "set null" }), // optional: which asset it went into
   name: text("name").notNull(),
   partNumber: text("part_number").notNull().default(""),

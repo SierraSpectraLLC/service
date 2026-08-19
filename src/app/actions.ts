@@ -2235,6 +2235,8 @@ type PartInput = {
   // is stored alone rather than clearing it: a service date is a fact about the
   // machine, and an unrelated edit to the note must not quietly erase one.
   installedAt?: string; removedAt?: string;
+  /** Recording a KIT: also write the parts it contains beneath it. */
+  expandKit?: boolean;
   // "Removed - request new?": also file a Needed twin so the reorder isn't forgotten.
   requestReplacement?: boolean;
 };
@@ -2302,7 +2304,7 @@ async function tenantOfWork(row: { instrumentId: number | null; assetId?: number
 function cleanPartInput(data: PartInput): PartInput {
   return {
     ...data,
-    kind: data.kind === "consumable" ? "consumable" : "part",
+    kind: data.kind === "consumable" || data.kind === "kit" ? data.kind : "part",
     qty: data.qty.trim(),
     specs: serializeSpecs(parseSpecs(data.specs)),
   };
@@ -2374,7 +2376,7 @@ export async function nameServiceVisit(
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
 
-export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string; flag?: string }> {
+export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string; flag?: string; expanded?: number }> {
   const u = await requireEditor();
   const data = cleanPartInput(raw);
   if (!data.name.trim()) return { error: "Name required" };
@@ -2406,11 +2408,47 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
       ? `${verb} ${noun} '${p.name}'${qty}${pn}`
       : `added ${noun} '${p.name}'${qty}${pn} - ${p.status}`) + (taggedAsset ? ` [${assetLabel(taggedAsset)}]` : "") + note,
   });
+  // A kit is a box of parts, and the box is not the record anybody needs a year
+  // later - "when did we last change the plunger seals" is. So the contents go
+  // in beneath it, at ZERO cost: the kit line holds the money, and charging
+  // both would bill one box twice against an allowance. Same dates, same unit,
+  // same status, so they read as one act of work.
+  let expanded = 0;
+  if (p.kind === "kit" && raw.expandKit !== false && p.partNumber.trim()) {
+    const [kit] = await db.select({ id: partCatalog.id }).from(partCatalog).where(and(
+      sql`lower(${partCatalog.partNumber}) = ${p.partNumber.trim().toLowerCase()}`,
+      forTenant(partCatalog.tenantOrgId, t0.tenantOrgId),
+    ));
+    const lines = kit
+      ? await db.select().from(partKitLines).where(eq(partKitLines.kitId, kit.id))
+          .orderBy(asc(partKitLines.sortOrder), asc(partKitLines.id))
+      : [];
+    for (const l of lines) {
+      await db.insert(parts).values({
+        instrumentId: p.instrumentId, assetId: p.assetId,
+        kind: "part", parentPartId: p.id,
+        name: l.name || l.partNumber, partNumber: l.partNumber,
+        qty: l.qty > 1 ? String(l.qty) : "",
+        status: p.status, installedAt: p.installedAt, removedAt: p.removedAt,
+        // The kit carries the cost. Not null - null means "nobody priced it",
+        // and these are priced, at nothing, on purpose.
+        costCents: 0, ownerOrgId: payer, pmScheduleId: p.pmScheduleId,
+        note: `from ${p.name}`,
+      });
+      expanded++;
+    }
+    if (expanded) {
+      await audit({
+        actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "part", entityId: p.id,
+        action: `recorded the ${expanded} part${expanded === 1 ? "" : "s"} inside '${p.name}'`,
+      });
+    }
+  }
   revWork(p);
   // Same posture as the visit flag on a work order: warn about the allowance
   // at the moment of commitment, never refuse the record.
   const flag = await partsFlag(payer, t0.instrumentId, p.costCents).catch(() => "");
-  return { flag: flag || undefined };
+  return { flag: flag || undefined, expanded: expanded || undefined };
 }
 
 export async function updatePart(partId: number, raw: PartInput) {
@@ -2497,10 +2535,19 @@ export async function deletePart(partId: number, reason: string): Promise<{ erro
   const [p] = await db.select().from(parts).where(eq(parts.id, partId));
   if (!p) return {};
   await assertWorkEditable(u, p);
+  // A kit's contents came in with it and go out with it - left behind they
+  // would read as loose parts somebody fitted, which is a worse record than
+  // no record. No cascade in the column: the parent is a plain id, so the
+  // sweep is here where the reason is written.
+  const inside = p.kind === "kit"
+    ? await db.select({ id: parts.id }).from(parts).where(eq(parts.parentPartId, partId))
+    : [];
+  if (inside.length) await db.delete(parts).where(eq(parts.parentPartId, partId));
   await db.delete(parts).where(eq(parts.id, partId));
   await audit({
     actor: u.email, instrumentId: p.instrumentId, assetId: p.assetId, entityType: "part", entityId: partId,
-    action: `deleted part record '${p.name}' - reason: ${why}`, field: "reason", newValue: why,
+    action: `deleted part record '${p.name}'${inside.length ? ` and the ${inside.length} part${inside.length === 1 ? "" : "s"} inside it` : ""} - reason: ${why}`,
+    field: "reason", newValue: why,
   });
   revWork(p);
   return {};

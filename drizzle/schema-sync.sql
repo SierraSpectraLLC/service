@@ -2506,3 +2506,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS "vocab_public_slug_idx" ON "vocab_terms" ("pub
 -- The public, indexable equipment library (app/equipment). Off by default:
 -- being on the open web is a decision an operator makes, not a default.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "public_catalog_enabled" boolean NOT NULL DEFAULT false;
+
+-- A PM kit recorded as one line, with the parts it contained beneath it.
+-- Contents carry the kit's id and zero cost: the kit holds the money, so an
+-- allowance is never charged twice for one box.
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "parent_part_id" integer;
+CREATE INDEX IF NOT EXISTS "parts_parent_idx" ON "parts" ("parent_part_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parts_parent_part_id_fk') THEN
+    ALTER TABLE "parts" ADD CONSTRAINT "parts_parent_part_id_fk"
+      FOREIGN KEY ("parent_part_id") REFERENCES "parts"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
