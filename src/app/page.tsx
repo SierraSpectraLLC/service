@@ -2,7 +2,7 @@ import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL 
 import { db } from "@/db";
 import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments } from "@/db/schema";
-import { daysSince, queueView } from "@/lib/queue";
+import { queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
 import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
@@ -134,7 +134,6 @@ export default async function Home() {
       // as theirs, and the "Ours to move" filter takes it off the board.
       queueMine: queueView(user, i) === "mine",
       queueWith: queueName(i.queueOrgId),
-      queueDays: daysSince(i.queueSince ?? i.createdAt, new Date()),
       queueReason: i.queueReason,
     };
   });

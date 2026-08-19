@@ -2489,3 +2489,8 @@ END $$;
 -- See lib/provenance.
 ALTER TABLE "catalog_refs" ADD COLUMN IF NOT EXISTS "provenance" text NOT NULL DEFAULT '';
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "provenance" text NOT NULL DEFAULT '';
+
+-- A model's specification sheet: JSON [{name, value}] rows on the catalog
+-- entry ("Max pressure: 1300 bar"), so pump-vs-pump questions stop being a
+-- manual lookup. See lib/specs.
+ALTER TABLE "vocab_terms" ADD COLUMN IF NOT EXISTS "specs" text NOT NULL DEFAULT '';

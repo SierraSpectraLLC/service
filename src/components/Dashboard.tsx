@@ -17,7 +17,7 @@ type Row = {
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
   // Whose move it is. Parked rows stay on the board but read as somebody
   // else's, and "Ours to move" filters them away.
-  queueMine: boolean; queueWith: string; queueDays: number; queueReason: string;
+  queueMine: boolean; queueWith: string; queueReason: string;
 };
 
 const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
@@ -257,7 +257,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               </span>
               {!i.queueMine && (
                 <span style={{ display: "block", fontSize: 11, color: "#8A5410" }}>
-                  with <b>{i.queueWith}</b> {i.queueDays > 0 && `${i.queueDays}d`}
+                  with <b>{i.queueWith}</b>
                   {i.queueReason ? ` · ${i.queueReason}` : ""}
                 </span>
               )}

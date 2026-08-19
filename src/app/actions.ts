@@ -110,6 +110,7 @@ import { assignableNames, visibleDirectory } from "@/lib/directory";
 import { composeSystemDossier } from "@/lib/dossier";
 import { cleanMakerName } from "@/lib/makers";
 import { cleanProvenance, isPublishable, PROVENANCE_LABEL } from "@/lib/provenance";
+import { parseModelSpecs, serializeModelSpecs } from "@/lib/modelSpecs";
 import { tenantCatalogIds } from "@/lib/makersData";
 import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
@@ -8780,6 +8781,37 @@ export async function setCatalogGases(termId: number, gases: string[]): Promise<
     field: "gases", oldValue: term.gases.join(", "), newValue: clean.join(", "),
   });
   revalidatePath("/settings/catalog");
+  return {};
+}
+
+/**
+ * Replace a model's specification sheet. Whole-sheet on purpose: the editor
+ * works on the full list (add, remove, reorder by retyping, copy from a
+ * sibling), and per-row actions would just be a chattier way to lose a race
+ * with yourself. serializeSpecs drops blank rows and dedupes names, so what
+ * is stored is exactly what renders back.
+ */
+export async function setModelSpecs(
+  termId: number, specs: { name: string; value: string }[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [term] = await db.select().from(vocabTerms).where(eq(vocabTerms.id, termId));
+  if (!term || term.kind !== "model") return { error: "Not found" };
+  if (readTenant(u) !== null && term.tenantOrgId !== readTenant(u)) return { error: "Not found" };
+  const next = serializeModelSpecs(specs);
+  if (next === term.specs) return {};
+  const before = parseModelSpecs(term.specs);
+  const after = parseModelSpecs(next);
+  await db.update(vocabTerms).set({ specs: next }).where(eq(vocabTerms.id, termId));
+  await audit({
+    actor: u.email, entityType: "vocab", entityId: termId, tenantOrgId: term.tenantOrgId,
+    action: `updated ${term.name}'s spec sheet: ${after.length} row${after.length === 1 ? "" : "s"} (was ${before.length})`,
+    field: "specs",
+    oldValue: before.map((s) => `${s.name}: ${s.value}`).join("; ").slice(0, 500),
+    newValue: after.map((s) => `${s.name}: ${s.value}`).join("; ").slice(0, 500),
+  });
+  revalidatePath("/settings/catalog");
+  revalidatePath(`/catalog/${termId}`);
   return {};
 }
 

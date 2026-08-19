@@ -10,6 +10,8 @@ import { parseProcParts } from "@/lib/procedures";
 import { PART_KIND_LABEL } from "@/lib/partCatalog";
 import { shopDay } from "@/lib/shopday";
 import ModelHeaderCard from "@/components/ModelHeaderCard";
+import ModelSpecsCard from "@/components/ModelSpecsCard";
+import { parseModelSpecs, specNameSuggestions } from "@/lib/modelSpecs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 import ReferencePanel from "@/components/ReferencePanel";
 
@@ -108,6 +110,20 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
         termId={term.id} name={term.name} assetType={term.assetType}
         manufacturer={term.manufacturer} categories={term.categories} gases={term.gases}
         hasPhoto={!!term.photoUrl} unitCount={mine.length}
+      />
+
+      <ModelSpecsCard
+        termId={term.id} modelName={term.name}
+        specs={parseModelSpecs(term.specs)}
+        // Copy sources: same-type siblings that actually have a sheet.
+        siblings={terms
+          .filter((t) => t.kind === "model" && t.id !== term.id
+            && same(t.assetType, term.assetType) && parseModelSpecs(t.specs).length > 0)
+          .map((t) => ({ name: t.name, specs: parseModelSpecs(t.specs) }))}
+        nameSuggestions={specNameSuggestions(
+          terms.filter((t) => t.kind === "model" && same(t.assetType, term.assetType))
+            .map((t) => parseModelSpecs(t.specs)),
+        )}
       />
 
       <ProceduresPanel

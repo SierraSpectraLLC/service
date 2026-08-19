@@ -1454,6 +1454,12 @@ export const vocabTerms = pgTable("vocab_terms", {
   // package is derived at read time, never copied onto systems, so refining it
   // updates every checklist at once.
   docTypes: text("doc_types").array().notNull().default([]),
+  /**
+   * Models only: the specification sheet - JSON [{name, value}] rows like
+   * "Max pressure: 1300 bar". Freeform names, suggested across siblings so
+   * spellings converge. See lib/specs.
+   */
+  specs: text("specs").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Unique on identity only, not on categories: FID is one model that happens
   // to apply to several system types, not a row per type.
