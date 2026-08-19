@@ -365,7 +365,7 @@ export default function TasksPanel({
                   <>
                     <span className="mut" style={{ fontSize: 12 }}>For:</span>
                     <select value={t.assetId ?? ""} onChange={(e) => startTransition(() => setTaskAsset(t.id, e.target.value ? parseInt(e.target.value) : null))}
-                      style={{ width: "auto", fontSize: 12 }}>
+                      style={{ width: "auto", maxWidth: 180, fontSize: 12 }}>
                       <option value="">Whole system</option>
                       {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
                     </select>
@@ -527,23 +527,33 @@ export default function TasksPanel({
           <label>Body</label>
           <textarea value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} rows={2}
             placeholder="What, for whom, done means what. e.g. Test/compile Reserpine for GMI, submit to Pradeep." style={{ marginBottom: 8, resize: "vertical" }} />
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span className="mut" style={{ fontSize: 12 }}>Assign:</span>
-            <select value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })} style={{ width: "auto" }}>
-              {["", ...people].map((p) => <option key={p} value={p}>{p || "-"}</option>)}
-            </select>
-            <span className="mut" style={{ fontSize: 12 }}>Due:</span>
-            <input type="date" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
-              style={{ width: "auto", fontSize: 12 }} />
+          {/* Wraps. A select sized `auto` is as wide as its longest option, so
+              one module called "Mass Spec - ACQUITY SQD" used to push Create
+              task clean off the card and underneath the next column, where it
+              could not be seen or clicked. The widths are capped for the same
+              reason: no single label may decide the layout. */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span className="mut" style={{ fontSize: 12 }}>Assign:</span>
+              <select value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })}
+                style={{ width: "auto", maxWidth: 150 }}>
+                {["", ...people].map((p) => <option key={p} value={p}>{p || "-"}</option>)}
+              </select>
+            </span>
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span className="mut" style={{ fontSize: 12 }}>Due:</span>
+              <input type="date" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
+                style={{ width: "auto", fontSize: 12 }} />
+            </span>
             {systemAssets.length > 0 && (
-              <>
+              <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
                 <span className="mut" style={{ fontSize: 12 }}>For:</span>
                 <select value={draft.assetId ?? ""} onChange={(e) => setDraft({ ...draft, assetId: e.target.value ? parseInt(e.target.value) : null })}
-                  style={{ width: "auto", fontSize: 12 }}>
+                  style={{ width: "auto", maxWidth: 180, fontSize: 12 }}>
                   <option value="">Whole system</option>
                   {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
                 </select>
-              </>
+              </span>
             )}
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submitNew} disabled={pending}>
               {pending ? "Creating..." : "Create task"}
