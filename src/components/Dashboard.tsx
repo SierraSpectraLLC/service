@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import PickOrAdd from "./PickOrAdd";
 import CatalogSelect from "./CatalogSelect";
 import { createInstrument } from "@/app/actions";
+import { matchesQuery } from "@/lib/search";
 
 type StageDefLite = { name: string; bg: string; fg: string };
 
@@ -15,6 +16,8 @@ type Row = {
   /** Expired / expiring dated documents - regulated (GxP) systems only. */
   docIssues: string[];
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
+  /** One string per module: type, maker, model, serial. Searchable, not shown. */
+  assetText: string[];
   /** An open Down work order, or a unit on it marked Down. Reads red, sorts first. */
   down: boolean;
   /** Mine: I lead it, or work on it is assigned to me. `mineNote` says which. */
@@ -99,13 +102,17 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       const key = no ? f.slice(1) : f;
       list = list.filter((i) => matchesFlag(i, key) !== no);
     }
+    // lib/search decides what a match is, here and everywhere else: every term
+    // must land somewhere, punctuation optional, and never across the seam
+    // between two fields.
     if (q.trim()) {
-      const s = q.toLowerCase();
-      list = list.filter((i) =>
-        [i.externalId, i.client, i.category, i.label, i.lead, i.notes, i.stages.join(" "), i.gasIssues.join(" "), i.assetIssues.join(" "), i.docIssues.join(" "),
-          i.missingFromSheet ? "not on sheet" : "", i.lastActivity,
-          i.queueMine ? "" : `with ${i.queueWith}`, i.queueReason].join(" ").toLowerCase().includes(s)
-      );
+      list = list.filter((i) => matchesQuery(q, [
+        i.externalId, i.client, i.category, i.label, i.lead, i.notes,
+        ...i.stages, ...i.gasIssues, ...i.assetIssues, ...i.docIssues,
+        ...i.assetText,
+        i.missingFromSheet ? "not on sheet" : "", i.lastActivity,
+        i.queueMine ? "" : `with ${i.queueWith}`, i.queueReason,
+      ]));
     }
     // An explicit sort is obeyed exactly: a person who asked to group by owner
     // does not want one row yanked out of its group for being urgent - it is
@@ -342,7 +349,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         </div>
       )}
 
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ID, asset, client, stage..." style={{ marginBottom: 12 }} />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ID, module, serial, client, stage..." style={{ marginBottom: 12 }} />
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <div className="grid-row eyebrow" style={{ padding: "9px 14px", borderBottom: "1px solid var(--line)" }}>

@@ -43,7 +43,7 @@ export default async function Home() {
     // works with. See lib/directory.
     visibleDirectory(user),
     db.select({ instrumentId: tasks.instrumentId, assetId: tasks.assetId, dueDate: tasks.dueDate, state: tasks.state, assignee: tasks.assignee, title: tasks.title }).from(tasks).where(mine(tasks.instrumentId)),
-    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
+    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, serial: assets.serial, manufacturer: assets.manufacturer, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
     // Archived systems included, so retiring the last system for a client (or
     // in a category) doesn't drop it out of the pickers.
     db.select({ client: instruments.client, category: instruments.category }).from(instruments).where(mine(instruments.id)),
@@ -180,6 +180,12 @@ export default async function Home() {
       // hiding it would just move the forgetting somewhere else - but it reads
       // as theirs, and the "Ours to move" filter takes it off the board.
       down: downByWo.has(i.id) || assetRows.some((a) => a.instrumentId === i.id && a.status === "Down"),
+      // What its modules are, so searching a serial or a model finds the
+      // SYSTEM it sits on - which is how somebody with a part number in hand
+      // actually looks for a machine. Kept as separate strings so a query can
+      // never match across the join between two unrelated units.
+      assetText: assetRows.filter((a) => a.instrumentId === i.id)
+        .map((a) => [a.kind, a.manufacturer, a.model, a.serial].filter(Boolean).join(" ")),
       mine: myWoBySys.has(i.id) || myTaskBySys.has(i.id) || isMine(i.lead),
       mineNote: mineNoteFor(i),
       queueMine: queueView(user, i) === "mine",
