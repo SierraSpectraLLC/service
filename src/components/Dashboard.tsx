@@ -15,6 +15,8 @@ type Row = {
   /** Expired / expiring dated documents - regulated (GxP) systems only. */
   docIssues: string[];
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
+  /** An open Down work order, or a unit on it marked Down. Reads red, sorts first. */
+  down: boolean;
   // Whose move it is. Parked rows stay on the board but read as somebody
   // else's, and "Ours to move" filters them away.
   queueMine: boolean; queueWith: string; queueReason: string;
@@ -24,11 +26,16 @@ const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.Re
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping }: {
+type MyWorkItem = { href: string; title: string; sub: string; tone: "down" | "due" | "normal" };
+
+export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, myWork = [], myQueueHref = "/work" }: {
   data: Row[]; stageDefs: StageDefLite[]; people: string[];
   clients: string[]; categories: string[]; canEdit: boolean; isStaff: boolean;
   /** Ship-pipeline tile: the shop and reseller accounts; clutter for lab clients. */
   showShipping: boolean;
+  /** What is assigned to the signed-in person: open orders, then dated tasks. */
+  myWork?: MyWorkItem[];
+  myQueueHref?: string;
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
@@ -42,7 +49,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
 
   // "Docs expiring" appears only when some visible system could raise it -
   // a fleet with no regulated systems never sees the filter at all.
-  const FLAGS = ["Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention",
+  const FLAGS = ["Down / urgent", "Ours to move", "With someone else", "Overdue tasks", "Awaiting parts", "Gas attention", "Asset attention",
     ...(data.some((i) => i.docIssues.length > 0) ? ["Docs expiring"] : []),
     ...(isStaff ? ["Not on sheet"] : [])];
   const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
@@ -53,7 +60,8 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     setSelected((s) => (s.includes(f) ? s.filter((x) => x !== f) : [...s, f]));
 
   const matchesFlag = (i: Row, f: string) =>
-    f === "Ours to move" ? i.queueMine
+    f === "Down / urgent" ? i.down
+    : f === "Ours to move" ? i.queueMine
     : f === "With someone else" ? !i.queueMine
     : f === "Overdue tasks" ? i.overdue > 0
     : f === "Awaiting parts" ? i.openParts > 0
@@ -85,11 +93,13 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     // Parked systems sink: they're not nothing, but they're not this week's
     // work either, and the top of the board should be what we can move. A
     // stable sort, so priority order survives inside each group.
-    return [...list].sort((a, b) => Number(b.queueMine) - Number(a.queueMine));
+    return [...list].sort((a, b) =>
+      Number(b.down) - Number(a.down) || Number(b.queueMine) - Number(a.queueMine));
   }, [data, selected, q]);
 
   const counts = {
     total: data.length,
+    down: data.filter((i) => i.down).length,
     blocked: data.filter((i) => i.stages.includes("Waiting / blocked")).length,
     waiting: data.filter((i) => i.openParts > 0).length,
     gas: data.filter((i) => i.gasIssues.length > 0).length,
@@ -115,6 +125,8 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {([
           ["Total systems", counts.total, "var(--navy)"],
+          // The one number that overrides every other on this screen.
+          ["Down", counts.down, "#A32D2D"],
           // Reads as "how much of the board isn't ours to move" - the number
           // this whole axis exists to make visible.
           ["With someone else", counts.parked, "#8A5410"],
@@ -129,6 +141,27 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           </div>
         ))}
       </div>
+
+      {/* What is MINE, without hiding the fleet: a card, not a tab - the
+          shared picture stays on screen, and this only exists when something
+          is actually assigned to you. */}
+      {myWork.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
+            <div className="card-title">My work</div>
+            <Link href={myQueueHref} className="btn link" style={{ fontSize: 11, marginLeft: "auto" }}>my queue →</Link>
+          </div>
+          {myWork.map((m) => (
+            <Link key={m.href + m.title} href={m.href} className="row-hover"
+              style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
+              {m.tone === "down" && <Pill bg="#A32D2D" fg="#fff">DOWN</Pill>}
+              {m.tone === "due" && <Pill bg="#FBE9E9" fg="#A32D2D">due</Pill>}
+              <span style={{ fontSize: 13, fontWeight: 600, flex: "1 1 200px" }}>{m.title}</span>
+              <span className="mut" style={{ fontSize: 11.5 }}>{m.sub}</span>
+            </Link>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
         <div style={{ position: "relative" }}>
@@ -244,8 +277,10 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
             style={{
               padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none",
               color: "inherit",
-              // Parked rows read as somebody else's without being hidden.
-              ...(i.queueMine ? {} : { background: "#FCFAF5", borderLeft: "3px solid #E8C99B", paddingLeft: 11 }),
+              // Down reads red and beats parked; parked reads as somebody
+              // else's without being hidden.
+              ...(i.down ? { background: "#FDF1F1", borderLeft: "3px solid #C94A4A", paddingLeft: 11 }
+                : i.queueMine ? {} : { background: "#FCFAF5", borderLeft: "3px solid #E8C99B", paddingLeft: 11 }),
             }}>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
             <span style={{ minWidth: 0 }}>
@@ -268,6 +303,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               ))}
             </span>
             <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {i.down && <Pill bg="#A32D2D" fg="#fff">DOWN</Pill>}
               {i.missingFromSheet && <Pill bg="#FBE9E9" fg="#A32D2D">not on sheet</Pill>}
               {i.overdue > 0 && <Pill bg="#FBE9E9" fg="#A32D2D">{i.overdue} overdue</Pill>}
               {i.assetIssues.map((x) => (

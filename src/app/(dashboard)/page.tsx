@@ -1,7 +1,7 @@
 import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders } from "@/db/schema";
 import { queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
@@ -15,6 +15,7 @@ import { requireUser } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
+import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 
@@ -41,7 +42,7 @@ export default async function Home() {
     // Who work can be assigned to: the logins of the organizations this viewer
     // works with. See lib/directory.
     visibleDirectory(user),
-    db.select({ instrumentId: tasks.instrumentId, dueDate: tasks.dueDate, state: tasks.state }).from(tasks).where(mine(tasks.instrumentId)),
+    db.select({ instrumentId: tasks.instrumentId, assetId: tasks.assetId, dueDate: tasks.dueDate, state: tasks.state, assignee: tasks.assignee, title: tasks.title }).from(tasks).where(mine(tasks.instrumentId)),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
     // Archived systems included, so retiring the last system for a client (or
     // in a category) doesn't drop it out of the pickers.
@@ -49,6 +50,13 @@ export default async function Home() {
     db.select({ name: vocabTerms.name }).from(vocabTerms)
       .where(and(eq(vocabTerms.kind, "category"), forTenant(vocabTerms.tenantOrgId, await viewTenant(user)))),
   ]);
+  // Open work orders, for two things the board was blind to: which systems are
+  // DOWN right now, and what is on MY plate. Scoped like everything else.
+  const woRows = await db.select({
+    id: workOrders.id, number: workOrders.number, title: workOrders.title,
+    severity: workOrders.severity, state: workOrders.state, assignee: workOrders.assignee,
+    instrumentId: workOrders.instrumentId, assetId: workOrders.assetId,
+  }).from(workOrders).where(mine(workOrders.instrumentId));
   // Dated paper on regulated systems only - the whole point of the GxP flag is
   // that a loaner's expired delivery note never nags anybody.
   const gxpIds = rows.filter((i) => i.gxp).map((i) => i.id);
@@ -96,6 +104,39 @@ export default async function Home() {
     overdueBy.set(t.instrumentId, (overdueBy.get(t.instrumentId) ?? 0) + 1);
   }
 
+  const openWos = woRows.filter((w) => woOpen(w.state));
+  // A system is DOWN when an open order says so. An asset marked Down already
+  // raises its own red pill; the row treats either as down.
+  const downByWo = new Set(openWos.filter((w) => w.severity === "Down" && w.instrumentId !== null)
+    .map((w) => w.instrumentId as number));
+
+  // What is on MY plate: my open orders worst-first, then my dated open tasks
+  // due soonest. Matching by the signed-in name, same as assignment does.
+  const meName = (user.name || "").trim().toLowerCase();
+  const sysLabelOf = (id: number | null) =>
+    id === null ? "" : rows.find((r) => r.id === id)?.externalId ?? "";
+  const myWos = meName ? openWos.filter((w) => w.assignee.trim().toLowerCase() === meName) : [];
+  const myTasks = meName ? taskRows.filter((t) => t.state !== "Done"
+    && t.assignee.trim().toLowerCase() === meName && t.dueDate) : [];
+  const myWork = [
+    ...myWos
+      .sort((a, b) => severityOf(a.severity).rank - severityOf(b.severity).rank)
+      .map((w) => ({
+        href: `/work/${w.id}`,
+        title: `${w.number} ${w.title}`,
+        sub: [sysLabelOf(w.instrumentId), severityOf(w.severity).label].filter(Boolean).join(" · "),
+        tone: w.severity === "Down" ? "down" as const : "normal" as const,
+      })),
+    ...myTasks
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+      .map((t) => ({
+        href: t.instrumentId !== null ? `/instruments/${t.instrumentId}` : t.assetId !== null ? `/assets/${t.assetId}` : "/work",
+        title: t.title,
+        sub: [sysLabelOf(t.instrumentId), t.dueDate < today ? `overdue since ${t.dueDate}` : t.dueDate === today ? "due today" : `due ${t.dueDate}`].filter(Boolean).join(" · "),
+        tone: t.dueDate <= today ? "due" as const : "normal" as const,
+      })),
+  ].slice(0, 8);
+
   const data = rows.map((i) => {
     const openParts = allParts.filter((p) => p.instrumentId === i.id && partOpen(p.status)).length;
     const gasIssues = allGases
@@ -132,6 +173,7 @@ export default async function Home() {
       // Whose move it is. A system parked with the client is still visible -
       // hiding it would just move the forgetting somewhere else - but it reads
       // as theirs, and the "Ours to move" filter takes it off the board.
+      down: downByWo.has(i.id) || assetRows.some((a) => a.instrumentId === i.id && a.status === "Down"),
       queueMine: queueView(user, i) === "mine",
       queueWith: queueName(i.queueOrgId),
       queueReason: i.queueReason,
@@ -155,6 +197,8 @@ export default async function Home() {
         categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
+        myWork={myWork}
+        myQueueHref={user.name ? `/work?who=${encodeURIComponent(user.name)}` : "/work"}
         // The ship pipeline is the shop's own axis, and a reseller client's.
         // For everyone else "Ship queue + shipped" is a tile about a business
         // they aren't in - same burial as the resale controls.
