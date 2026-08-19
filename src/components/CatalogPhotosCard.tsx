@@ -8,6 +8,7 @@ import { stockSrc } from "@/lib/photos";
 import { fmtBytes } from "@/lib/storage";
 import PhotoThumb from "./PhotoThumb";
 import PhotoFramer from "./PhotoFramer";
+import { matchesQuery } from "@/lib/search";
 
 export type CatalogEntry = {
   id: number;
@@ -55,7 +56,7 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
     return entries.filter((e) => {
       if (only === "missing" && e.hasPhoto) return false;
       if (!needle) return true;
-      return `${e.name} ${e.assetType} ${e.manufacturer}`.toLowerCase().includes(needle);
+      return matchesQuery(filter, [e.name, e.assetType, e.manufacturer]);
     });
   }, [entries, filter, only]);
 

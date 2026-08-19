@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import NextAuth from "next-auth";
 import Resend from "next-auth/providers/resend";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
@@ -12,6 +12,9 @@ import { getBrand } from "@/lib/brand";
 import { emailShell, esc, codePanel, mutedLine } from "@/lib/emailTheme";
 import { houseIdentityForEmail, houseRoleForEmail, rootOperatorOrgId } from "@/lib/house";
 import { CODE_TTL_MINUTES, newCode } from "@/lib/loginCode";
+import { type Method } from "@/lib/loginLog";
+import { recordLogin, touchLastSeen } from "@/lib/loginLogData";
+import { notifyFirstSignIn } from "@/lib/notify";
 import { sendSms, smsConfigured } from "@/lib/sms";
 
 export { parseList, matchesEntry, roleForEmail };
@@ -33,19 +36,19 @@ export async function emailInClientAllowlist(email: string): Promise<boolean> {
  * simple WHERE), but the org comes back on the same join rather than costing a
  * second query. Every hop here is on the sign-in path, where latency is felt.
  */
-export async function orgForEmail(email: string): Promise<{ id: number; name: string; kind: string; canEdit: boolean } | null> {
+export async function orgForEmail(email: string): Promise<{ id: number; name: string; kind: string; canEdit: boolean; parentOrgId: number | null } | null> {
   const e = email.toLowerCase();
   const rows = await db
     .select({
       entry: clientAllowlist.entry, canEdit: clientAllowlist.canEdit,
-      id: orgs.id, name: orgs.name, kind: orgs.kind,
+      id: orgs.id, name: orgs.name, kind: orgs.kind, parentOrgId: orgs.parentOrgId,
     })
     .from(clientAllowlist)
     .innerJoin(orgs, eq(orgs.id, clientAllowlist.orgId));
   const hits = rows.filter((r) => matchesEntry(e, r.entry));
   if (!hits.length) return null;
   const hit = hits.find((r) => !r.entry.trim().startsWith("@")) ?? hits[0];
-  return { id: hit.id, name: hit.name, kind: hit.kind, canEdit: hit.canEdit };
+  return { id: hit.id, name: hit.name, kind: hit.kind, canEdit: hit.canEdit, parentOrgId: hit.parentOrgId };
 }
 
 /**
@@ -161,6 +164,61 @@ export async function signInAllowed(rawEmail: string): Promise<boolean> {
   return allowed;
 }
 
+/**
+ * Who somebody is at the moment they get in, frozen onto the login record.
+ *
+ * The same two lookups the session callback does, pulled out because there are
+ * two doors into this app and both have to describe the arrival the same way -
+ * a password sign-in that recorded a blank role would be a hole in exactly the
+ * report this exists to feed.
+ */
+export async function signInIdentity(rawEmail: string): Promise<{
+  role: string; orgId: number | null; orgName: string; operatorOrgId: number | null;
+}> {
+  const email = rawEmail.trim().toLowerCase();
+  const house = await houseIdentityForEmail(email);
+  // House staff belong to the company they work for, not to a client org.
+  if (house) return { role: house.role, orgId: null, orgName: "", operatorOrgId: house.orgId ?? house.rootOrgId };
+  const org = await orgForEmail(email);
+  return {
+    role: org?.canEdit ? "client_editor" : "client_viewer",
+    orgId: org?.id ?? null,
+    orgName: org?.name ?? "",
+    // A client belongs on the report of whichever operator services them.
+    operatorOrgId: org?.parentOrgId ?? null,
+  };
+}
+
+/** The request's own details, for the login record. Never throws. */
+async function requestOrigin(): Promise<{ ip: string; userAgent: string }> {
+  try {
+    const h = await headers();
+    return {
+      ip: (h.get("x-forwarded-for") ?? "").split(",")[0].trim(),
+      userAgent: h.get("user-agent") ?? "",
+    };
+  } catch {
+    return { ip: "", userAgent: "" };
+  }
+}
+
+/**
+ * Write the login record, and ping the house the first time an address ever
+ * gets in. Shared by both doors; wrapped by each caller so a bookkeeping
+ * failure can never be the reason somebody cannot sign in.
+ */
+export async function logSignIn(email: string, method: Method, userId?: string | null): Promise<void> {
+  const [who, origin] = await Promise.all([signInIdentity(email), requestOrigin()]);
+  const { first } = await recordLogin({ email, method, userId, ...who, ...origin });
+  if (!first) return;
+  // Only the first one. A notification per sign-in would be ignored inside a
+  // week, and the page and the weekly report are where the rest of it lives.
+  await notifyFirstSignIn({
+    email, role: who.role, orgName: who.orgName,
+    operatorOrgId: who.operatorOrgId, method,
+  }).catch(() => {});
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: DrizzleAdapter(db, {
     usersTable: users,
@@ -184,6 +242,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
   ],
   pages: { signIn: "/login", verifyRequest: "/login?sent=1" },
+  events: {
+    // Fires once per actual sign-in, after the gate below has allowed it. The
+    // password door does not come through Auth.js at all and logs itself - see
+    // app/login's withPassword.
+    async signIn({ user }) {
+      try { await logSignIn(user.email ?? "", "code", user.id); }
+      catch (e) { console.error("[auth] sign-in not recorded:", (e as Error).message); }
+    },
+  },
   callbacks: {
     // Gate who is allowed to sign in at all.
     async signIn({ user }) {
@@ -194,6 +261,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // in BOTH directions. Only ever promoting would mean a revoked owner kept
       // their powers until someone thought to edit the row by hand.
       const email = user.email?.toLowerCase() || "";
+      // Usage, as opposed to sign-ins. Free here: this callback runs on every
+      // authenticated request and already has the row, so the throttle in
+      // touchLastSeen turns a day of work into at most eight writes.
+      void touchLastSeen(user.id, (user as { lastSeenAt?: Date | null }).lastSeenAt);
       const house = await houseIdentityForEmail(email);
       const stored = (user as { role?: string }).role || "client_viewer";
       let role = house?.role ?? "client_viewer";

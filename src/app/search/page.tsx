@@ -11,6 +11,7 @@ import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { findOutsideMatches } from "@/lib/serialLookup";
 import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
+import { alnum, searchTerms } from "@/lib/search";
 import SearchBox from "@/components/SearchBox";
 import { RequestAccessCard, CreateSystemForm } from "@/components/LookupPanels";
 
@@ -31,7 +32,53 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { q: raw } = await searchParams;
   const q = (raw ?? "").trim();
-  const like = `%${q}%`;
+  const terms = searchTerms(q);
+  /**
+   * The same rule the client-side lists use (lib/search): EVERY term has to
+   * land somewhere on the record, and each one may land in any column. So
+   * "trace 1310" finds the system whose ID is one and whose module is the
+   * other - which the old single-substring match could not.
+   */
+  const every = (cols: (AnyColumn | undefined)[]): SQL | undefined => {
+    const use = cols.filter(Boolean) as AnyColumn[];
+    if (!use.length || !terms.length) return undefined;
+    return and(...terms.map((t) => or(...use.map((c) => ilike(c, `%${t}%`)))));
+  };
+  /**
+   * Identifiers, where punctuation is the manufacturer's whim: also compared
+   * with every non-alphanumeric removed, so "sil40" finds SIL-40 and
+   * "22852708" finds 228-52708-91. Text columns don't get this - nobody
+   * searches prose with the spaces taken out, and it would cost a scan.
+   */
+  const everyIdent = (cols: AnyColumn[], idents: AnyColumn[], extra?: (t: string) => SQL): SQL | undefined => {
+    if (!cols.length || !terms.length) return undefined;
+    return and(...terms.map((t) => {
+      const a = alnum(t);
+      return or(
+        ...cols.map((c) => ilike(c, `%${t}%`)),
+        ...(a.length >= 2
+          ? idents.map((c) => ilike(sql`regexp_replace(${c}, '[^A-Za-z0-9]', '', 'g')`, `%${a}%`))
+          : []),
+        ...(extra ? [extra(t)] : []),
+      );
+    }));
+  };
+  /**
+   * A term that lands on a module counts as landing on the system it's bolted
+   * to. Typing half a serial and getting back the system it belongs to is the
+   * whole point - a module found alone is an answer to a different question.
+   * Per term, so "thermo 1310" matches a system with a Thermo oven and a 1310
+   * detector, exactly as the dashboard's own filter does.
+   */
+  const onAModule = (t: string): SQL => {
+    const a = alnum(t);
+    const squash = (c: AnyColumn) => sql`regexp_replace(${c}, '[^A-Za-z0-9]', '', 'g') ILIKE ${`%${a}%`}`;
+    return sql`exists (select 1 from ${assets} where ${assets.instrumentId} = ${instruments.id} and (${or(
+      ilike(assets.model, `%${t}%`), ilike(assets.serial, `%${t}%`),
+      ilike(assets.manufacturer, `%${t}%`), ilike(assets.kind, `%${t}%`),
+      ...(a.length >= 2 ? [squash(assets.model), squash(assets.serial)] : []),
+    )}))`;
+  };
 
   let hits: Hit[] = [];
   let labels = new Map<number, string>();
@@ -49,26 +96,28 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   if (q.length >= 2) {
     const [instRows, taskRows, partRows, attachRows, postRows, moduleRows, auditRows] = await Promise.all([
-      db.select().from(instruments).where(and(inSystems(instruments.id), or(
-        // Asset models/serials are searched through the assets table below;
-        // the system itself is found by ID, client, notes, location or lead.
-        ilike(instruments.externalId, like), ilike(instruments.client, like),
-        ilike(instruments.notes, like), ilike(instruments.location, like), ilike(instruments.lead, like),
+      db.select().from(instruments).where(and(inSystems(instruments.id),
+        // By ID, client, notes, location, lead - or by anything bolted to it.
+        everyIdent(
+          [instruments.externalId, instruments.client, instruments.notes, instruments.location, instruments.lead],
+          [instruments.externalId],
+          onAModule,
+        ))).limit(25),
+      db.select().from(tasks).where(and(workScope(tasks.instrumentId, tasks.assetId), every([tasks.title, tasks.body, tasks.assignee]))).limit(25),
+      db.select().from(parts).where(and(workScope(parts.instrumentId, parts.assetId), everyIdent(
+        [parts.name, parts.partNumber, parts.serial, parts.vendor, parts.note, parts.specs,
+          // PO numbers are redacted business data - matching on them would let a
+          // non-owner probe values it can't see, so only staff search by PO.
+          ...(user.role === "owner" || user.role === "staff" ? [parts.po] : [])],
+        [parts.partNumber, parts.serial],
       ))).limit(25),
-      db.select().from(tasks).where(and(workScope(tasks.instrumentId, tasks.assetId), or(ilike(tasks.title, like), ilike(tasks.body, like), ilike(tasks.assignee, like)))).limit(25),
-      db.select().from(parts).where(and(workScope(parts.instrumentId, parts.assetId), or(
-        ilike(parts.name, like), ilike(parts.partNumber, like), ilike(parts.serial, like),
-        ilike(parts.vendor, like), ilike(parts.note, like), ilike(parts.specs, like),
-        // PO numbers are redacted business data - matching on them would let a
-        // non-owner probe values it can't see, so only staff search by PO.
-        user.role === "owner" || user.role === "staff" ? ilike(parts.po, like) : undefined,
+      db.select().from(attachments).where(and(workScope(attachments.instrumentId, attachments.assetId), every([attachments.fileName, attachments.description]))).limit(25),
+      db.select().from(discussionPosts).where(and(inSystems(discussionPosts.instrumentId), every([discussionPosts.body]))).orderBy(desc(discussionPosts.createdAt)).limit(25),
+      db.select().from(assets).where(and(inAssets(assets.id), everyIdent(
+        [assets.model, assets.serial, assets.note, assets.manufacturer, assets.kind],
+        [assets.model, assets.serial],
       ))).limit(25),
-      db.select().from(attachments).where(and(workScope(attachments.instrumentId, attachments.assetId), or(ilike(attachments.fileName, like), ilike(attachments.description, like)))).limit(25),
-      db.select().from(discussionPosts).where(and(inSystems(discussionPosts.instrumentId), ilike(discussionPosts.body, like))).orderBy(desc(discussionPosts.createdAt)).limit(25),
-      db.select().from(assets).where(and(inAssets(assets.id), or(
-        ilike(assets.model, like), ilike(assets.serial, like), ilike(assets.note, like), ilike(assets.manufacturer, like),
-      ))).limit(25),
-      db.select().from(auditLog).where(and(inSystems(auditLog.instrumentId), ilike(auditLog.action, like))).orderBy(desc(auditLog.createdAt)).limit(15),
+      db.select().from(auditLog).where(and(inSystems(auditLog.instrumentId), every([auditLog.action]))).orderBy(desc(auditLog.createdAt)).limit(15),
     ]);
 
     const ids = new Set<number>([

@@ -5,6 +5,7 @@ import { promptReason } from "@/lib/reason";
 import { issueStock, receiveStock, recountStock, transferStock } from "@/app/actions";
 import { needsReorder, shortBy } from "@/lib/stock";
 import { formatCents } from "@/lib/money";
+import { matchesQuery } from "@/lib/search";
 
 export type ShelfItem = {
   id: number; partNumber: string; name: string; qty: number; minQty: number; bin: string;
@@ -40,7 +41,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
     const needle = filter.trim().toLowerCase();
     if (!needle) return items;
     return items.filter((i) =>
-      i.partNumber.toLowerCase().includes(needle) || i.name.toLowerCase().includes(needle) || i.bin.toLowerCase().includes(needle));
+      matchesQuery(filter, [i.partNumber, i.name, i.bin]));
   }, [items, filter]);
 
   const start = (id: number, mode: "issue" | "receive" | "move") => {

@@ -9,6 +9,7 @@ import CatalogSelect from "./CatalogSelect";
 import SpecTable from "./SpecTable";
 import AssetGrid, { type GridModel } from "./AssetGrid";
 import PhotoThumb from "./PhotoThumb";
+import { matchesQuery } from "@/lib/search";
 
 export type AssetRow = {
   id: number; kind: string; model: string; serial: string; status: string; note: string; openItems: number;
@@ -75,7 +76,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
     });
   };
 
-  const shown = unassigned.filter((s) => s.label.toLowerCase().includes(filter.trim().toLowerCase()));
+  const shown = unassigned.filter((s) => matchesQuery(filter, [s.label]));
 
   if (!canEdit && assets.length === 0) return null;
 

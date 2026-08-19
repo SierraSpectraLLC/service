@@ -24,6 +24,8 @@ export const NOTIFY_KINDS = [
   { kind: "message", label: "Somebody messages me directly" },
   { kind: "drop", label: "Files arrive through a drop link I made" },
   { kind: "model_proposal", label: "A model not in the catalog gets recorded" },
+  { kind: "sign_in", label: "Somebody signs in to the portal for the first time" },
+  { kind: "usage_report", label: "The weekly report of who is using the portal" },
 ] as const;
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];

@@ -15,7 +15,7 @@ import Link from "next/link";
  * simply sees fewer entries rather than a different component.
  */
 
-type TabKey = "configuration" | "organizations" | "catalog" | "procedures" | "parts" | "agreements" | "admin" | "tenants";
+type TabKey = "configuration" | "organizations" | "catalog" | "procedures" | "parts" | "agreements" | "admin" | "tenants" | "activity";
 
 type Tab = { key: TabKey; href: string; label: string; ownerOnly: boolean; platformOnly?: boolean };
 type Group = { name: string; tabs: Tab[] };
@@ -46,7 +46,11 @@ const GROUPS: Group[] = [
   },
   {
     name: "Access",
-    tabs: [{ key: "admin", href: "/settings/admin", label: "People & ownership", ownerOnly: true }],
+    tabs: [
+      { key: "admin", href: "/settings/admin", label: "People & ownership", ownerOnly: true },
+      // Whether the people we let in ever come in. See lib/loginLog.
+      { key: "activity", href: "/settings/activity", label: "Usage", ownerOnly: true },
+    ],
   },
 ];
 

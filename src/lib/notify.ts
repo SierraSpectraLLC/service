@@ -13,6 +13,7 @@ import { getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { namedLogins } from "@/lib/directory";
 import { emailShell, esc, btn, quote, mutedLine } from "@/lib/emailTheme";
+import { STATUS_LABEL, sinceWords, type PersonUsage } from "@/lib/loginLog";
 
 export type Person = { name: string; email: string };
 
@@ -560,5 +561,98 @@ export async function notifyRenewalDue(opts: {
     });
   } catch (e) {
     console.error("[notify] renewal email failed:", (e as Error).message);
+  }
+}
+
+/**
+ * Somebody got in for the first time.
+ *
+ * Only the first: an alert per sign-in becomes a filter rule inside a week, and
+ * then the one arrival that mattered is in a folder nobody opens. The first is
+ * the one that answers a real question - did the person we gave access to in
+ * March ever actually turn up.
+ */
+export async function notifyFirstSignIn(opts: {
+  email: string; role: string; orgName: string;
+  operatorOrgId: number | null; method: string;
+}) {
+  try {
+    const to = await houseEmails(opts.operatorOrgId);
+    // Never to the arriving person themselves - on a one-person instance the
+    // owner's own first sign-in would otherwise mail them about themselves.
+    const others = to.filter((e) => e.toLowerCase() !== opts.email.toLowerCase());
+    if (!others.length) return;
+    const url = appUrl();
+    const who = opts.orgName ? `${opts.email} (${opts.orgName})` : opts.email;
+    await deliver({
+      to: others, kind: "sign_in", href: "/settings/activity",
+      title: `${who} signed in for the first time`,
+      subject: `First sign-in: ${opts.email}`,
+      body: `<b>${esc(opts.email)}</b> signed in for the first time${opts.orgName ? ` for <b>${esc(opts.orgName)}</b>` : ""}.
+        ${mutedLine(`Signed in with a ${opts.method === "password" ? "password" : "code"} · ${esc(opts.role || "no role")}`)}
+        ${url ? btn(`${url}/settings/activity`, "See who is using the portal") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] first-sign-in email failed:", (e as Error).message);
+  }
+}
+
+const usageRow = (r: PersonUsage, now: Date) => `
+  <tr>
+    <td style="padding:7px 10px;border-top:1px solid #E2E8F0;font-family:Helvetica,Arial,sans-serif;font-size:13px;">
+      ${esc(r.name || r.email.split("@")[0])}<br/>
+      <span style="font-size:11px;color:#64748B;">${esc(r.orgName || r.role || "")}</span>
+    </td>
+    <td style="padding:7px 10px;border-top:1px solid #E2E8F0;font-family:Helvetica,Arial,sans-serif;font-size:12px;white-space:nowrap;">${esc(sinceWords(r.lastSeenAt ?? r.lastLoginAt, now))}</td>
+    <td style="padding:7px 10px;border-top:1px solid #E2E8F0;font-family:Helvetica,Arial,sans-serif;font-size:12px;white-space:nowrap;">${r.logins7 || "-"}</td>
+  </tr>`;
+
+/**
+ * The weekly answer to "is anybody using this".
+ *
+ * Two lists, because they prompt two different actions: who was here (the
+ * platform is earning its keep, and by whom), and who has gone quiet (somebody
+ * to call before they churn, or a licence to stop paying for). Nobody active
+ * and nobody quiet means no email - a report that says nothing every week
+ * trains people not to open the one that says something.
+ */
+export function usageReportBody(opts: {
+  active: PersonUsage[]; dormant: PersonUsage[]; logins: number; now: Date;
+}): { title: string; body: string } {
+  const url = appUrl();
+  const head = (label: string) =>
+    `<th align="left" style="padding:6px 10px;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:.06em;">${label}</th>`;
+  const table = (rows: PersonUsage[]) => `
+    <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-bottom:14px;">
+      <tr>${head("Person")}${head("Last seen")}${head("Sign-ins")}</tr>
+      ${rows.map((r) => usageRow(r, opts.now)).join("")}
+    </table>`;
+  return {
+    title: `${opts.active.length} ${opts.active.length === 1 ? "person" : "people"} used the portal this week`,
+    body: `${opts.active.length
+      ? `<b>Here this week</b> (${opts.logins} sign-in${opts.logins === 1 ? "" : "s"})
+         ${table(opts.active)}`
+      : `<b>Nobody opened the portal this week.</b>`}
+      ${opts.dormant.length ? `<b>Not seen in a month</b>
+         ${table(opts.dormant)}` : ""}
+      ${mutedLine(`Sign-ins are not visits: a session lasts 30 days, so somebody working here
+        daily signs in about once a month. "Last seen" is the number that means usage.`)}
+      ${url ? btn(`${url}/settings/activity`, "Open the full picture") : ""}`,
+  };
+}
+
+export async function notifyUsageReport(opts: {
+  to: string[]; active: PersonUsage[]; dormant: PersonUsage[];
+  logins: number; now: Date;
+}) {
+  try {
+    if (!opts.to.length || (!opts.active.length && !opts.dormant.length)) return;
+    const { title, body } = usageReportBody(opts);
+    await deliver({
+      to: opts.to, kind: "usage_report", href: "/settings/activity",
+      title, subject: `Portal usage: ${title.toLowerCase()}`, body,
+    });
+  } catch (e) {
+    console.error("[notify] usage report email failed:", (e as Error).message);
   }
 }

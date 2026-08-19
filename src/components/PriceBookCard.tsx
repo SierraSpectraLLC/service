@@ -5,6 +5,7 @@ import { addPartPrices, deletePartPrice } from "@/app/actions";
 import { formatCents, centsToInput } from "@/lib/money";
 import { groupByPn, normalizePn } from "@/lib/priceBook";
 import { toCsv } from "@/lib/csv";
+import { matchesQuery } from "@/lib/search";
 
 export type PriceBookRow = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string; note: string;
@@ -46,7 +47,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     const shown = needle
-      ? prices.filter((p) => p.partNumber.toLowerCase().includes(needle) || p.vendor.toLowerCase().includes(needle))
+      ? prices.filter((p) => matchesQuery(filter, [p.partNumber, p.vendor]))
       : prices;
     // groupByPn keys by normalized PN; display the first row's spelling.
     return [...groupByPn(shown).values()].sort((a, b) => a[0].partNumber.localeCompare(b[0].partNumber));

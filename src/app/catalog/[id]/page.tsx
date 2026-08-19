@@ -67,6 +67,8 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
   // Only this model's slice of the procedure book: empty scope = every model.
   const covering = procRows.filter((r) => r.modelScope.length === 0
     || r.modelScope.some((m) => same(m, term.name)));
+  // What this model already has BY NAME - the other half of what a copy skips.
+  const mineByName = new Set(covering.map((r) => `${r.kind}|${r.name.trim().toLowerCase()}`));
 
   // The same setup data the settings page hands the panel, so the sheet's
   // model multiselect and category logic behave identically here.
@@ -149,6 +151,24 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
 
       <ProceduresPanel
         focus={{ assetType: term.assetType, model: term.name }}
+        // Siblings worth copying from, counted by exactly what the action would
+        // actually create: procedures the sibling has, that this model does not
+        // already cover AND has not already got a procedure of that name. The
+        // name half matters - without it a model that has just been copied to
+        // still advertises "3 to copy" and delivers nothing, which is worse
+        // than not offering at all.
+        copyFrom={terms
+          .filter((t) => t.kind === "model" && t.id !== term.id && same(t.assetType, term.assetType))
+          .map((t) => ({
+            name: t.name,
+            count: procRows.filter((r) =>
+              r.modelScope.length > 0
+              && r.modelScope.some((m) => same(m, t.name))
+              && !r.modelScope.some((m) => same(m, term.name))
+              && !mineByName.has(`${r.kind}|${r.name.trim().toLowerCase()}`)).length,
+          }))
+          .filter((m) => m.count > 0)
+          .sort((a, b) => b.count - a.count)}
         assetTypes={[term.assetType]}
         modelOptions={modelOptions}
         categories={terms.filter((t) => t.kind === "category").map((t) => t.name)}
