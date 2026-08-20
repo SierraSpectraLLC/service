@@ -5,6 +5,8 @@ import { useState, useTransition } from "react";
 import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
 import ThreadSeen from "./ThreadSeen";
+import MentionBox from "./MentionBox";
+import type { Candidate } from "@/lib/mentions";
 
 export type Post = {
   id: number; author: string; authorEmail: string; body: string; createdAt: string;
@@ -31,7 +33,7 @@ const renderBody = (body: string) =>
  */
 export default function DiscussionPanel({
   instrumentId, posts, canEdit, newCount = 0, title, subtitle,
-  threadId, roomOrgId = null, partyName, sharedWith,
+  threadId, roomOrgId = null, partyName, sharedWith, people = [],
 }: {
   instrumentId: number | null; posts: Post[]; canEdit: boolean; newCount?: number;
   title?: string; subtitle?: string;
@@ -43,6 +45,8 @@ export default function DiscussionPanel({
   partyName: string;
   /** Who a shared post reaches, for the composer's hint. */
   sharedWith: string;
+  /** Who can be @mentioned from this board. */
+  people?: Candidate[];
 }) {
   const [draft, setDraft] = useState("");
   const [internal, setInternal] = useState(false);
@@ -123,7 +127,9 @@ export default function DiscussionPanel({
       </div>
 
       <div style={{ display: "flex", gap: 6, alignItems: "flex-end" }}>
-        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={2}
+        {/* Cmd/Ctrl+Enter posts; plain Enter is a newline here, so MentionBox
+            gets no onEnter and only steals the key while its list is open. */}
+        <MentionBox multiline people={people} value={draft} onChange={setDraft} rows={2}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
           placeholder="Write an update or question... @name to notify someone"
           style={{ flex: 1, fontSize: 13, resize: "vertical" }} />

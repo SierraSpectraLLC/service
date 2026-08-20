@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { addWorkOrderNote, deleteWorkOrderNote, updateWorkOrderNote } from "@/app/actions";
 import { canDeleteNote, canEditNote } from "@/lib/notes";
+import MentionBox from "./MentionBox";
+import type { Candidate } from "@/lib/mentions";
 import { fmtWhen } from "@/lib/when";
 
 export type WoNote = {
@@ -21,10 +23,12 @@ export type WoNote = {
  * says so - a client reads this thread, and a changed line shown as the
  * original would be the one dishonest thing a service record could do.
  */
-export default function WorkOrderNotes({ workOrderId, notes, canPost, me }: {
+export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people = [] }: {
   workOrderId: number; notes: WoNote[]; canPost: boolean;
   /** The signed-in reader, for deciding which comments they may touch. */
   me: { email: string; name: string; isHouse: boolean };
+  /** Who can be @mentioned from this thread. */
+  people?: Candidate[];
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -112,8 +116,8 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me }: {
       {notes.length === 0 && <div className="mut" style={{ fontSize: 12.5, marginBottom: 6 }}>Nothing yet. @mention somebody to make sure they see it.</div>}
       {canPost && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment... @name to notify"
-            onKeyDown={(e) => { if (e.key === "Enter") post(); }} style={{ flex: 1, fontSize: 13 }} />
+          <MentionBox people={people} value={text} onChange={setText} onEnter={post}
+            placeholder="Add a comment... @name to notify" style={{ flex: 1, fontSize: 13 }} />
           <button className="btn sm primary" onClick={post} disabled={pending || !text.trim()}>
             {pending ? "Posting..." : "Post"}
           </button>

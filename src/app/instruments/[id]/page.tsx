@@ -64,6 +64,7 @@ import { canKick, daysSince, queueView } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { expiryAttention, packageComplete, packageForSystem, qualsOf, qualStanding } from "@/lib/gxp";
 import ValidationPanel from "@/components/ValidationPanel";
+import { mentionableOn } from "@/lib/mentionAudience";
 
 export const dynamic = "force-dynamic";
 
@@ -376,6 +377,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     notes: tNotes.filter((n) => n.taskId === t.id).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
   }));
 
+  // Who the composer may offer for an @mention: this record's readers, and
+  // nobody else - see lib/mentionAudience.
+  const mentionable = await mentionableOn(peopleRows, { instrumentId: instId, assetId: null });
+
   return (
     <div className="container split">
       {/* Wraps: these are four or five buttons that cannot shrink (flexShrink 0
@@ -591,7 +596,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               })} />
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets}
+            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} mentionable={mentionable} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets}
               // Open jobs, so their tasks fold under one band per job here.
               jobs={woRows.filter((w) => woOpen(w.state)).map((w) => ({ id: w.id, number: w.number, title: w.title, state: w.state }))} />
           ) },
@@ -709,7 +714,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             )
           ) },
           { key: "discussion", label: "Discussion", node: (
-            <DiscussionPanel
+            <DiscussionPanel people={mentionable}
               instrumentId={inst.id}
               threadId={inst.id}
               posts={visiblePosts.map((p) => ({

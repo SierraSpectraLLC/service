@@ -35,6 +35,7 @@ import { coversSystem } from "@/lib/procedureRole";
 import { scopeMatches } from "@/lib/checkout";
 import { parseChecklist } from "@/lib/checklist";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
+import { mentionableOn } from "@/lib/mentionAudience";
 
 export const dynamic = "force-dynamic";
 
@@ -210,6 +211,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   const canAttach = canAdd || (canEdit && staff);
   const fileQuota = await storeQuota(inst?.ownerOrgId ?? asset?.ownerOrgId ?? null);
 
+  // Who the composer may offer for an @mention: this record's readers, and
+  // nobody else - see lib/mentionAudience.
+  const mentionable = await mentionableOn(people, { instrumentId: wo.instrumentId, assetId: wo.assetId });
+
   return (
     <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -265,14 +270,14 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         />
       </div>
 
-      <WorkOrderNotes workOrderId={wo.id} canPost={canEdit}
+      <WorkOrderNotes workOrderId={wo.id} canPost={canEdit} people={mentionable}
         me={{ email: user.email, name: user.name, isHouse: staff }}
         notes={noteRows.map((n) => ({
           id: n.id, author: n.author, authorEmail: n.authorEmail, text: n.text,
           createdAt: n.createdAt.toISOString(), editedAt: n.editedAt?.toISOString() ?? null,
         }))} />
 
-      <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)}
+      <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)} mentionable={mentionable}
         systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
         today={today} canEdit={canAdd} isStaff={staff} copyTargets={[]}
         procedureChoices={procedureChoices} />

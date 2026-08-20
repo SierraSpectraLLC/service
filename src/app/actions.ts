@@ -89,6 +89,7 @@ import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
 import { canDeleteNote, canEditNote, isAuthor } from "@/lib/notes";
+import { readersOf } from "@/lib/mentionAudience";
 import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
@@ -2173,22 +2174,11 @@ export async function deleteChecklistItem(itemId: number) {
  * task's readership and never wider - same discipline as discussion emails.
  */
 async function taskMentionAudience(t: { instrumentId: number | null; assetId: number | null }): Promise<string[]> {
-  if (t.instrumentId !== null) {
-    return postAudience({
-      instrumentId: t.instrumentId, audience: "all", authorOrgId: null, roomOrgId: null,
-      tenantOrgId: await tenantOfSystem(t.instrumentId),
-    });
-  }
-  const [a] = t.assetId
-    ? await db.select({ ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId }).from(assets).where(eq(assets.id, t.assetId))
-    : [];
-  const staff = await houseEmails(a?.tenantOrgId);
-  if (!t.assetId) return staff;
-  const shares = await db.select({ orgId: assetShares.orgId }).from(assetShares).where(eq(assetShares.assetId, t.assetId));
-  const orgIds = [...new Set([...(a?.ownerOrgId !== null && a?.ownerOrgId !== undefined ? [a.ownerOrgId] : []), ...shares.map((s) => s.orgId)])];
-  if (!orgIds.length) return staff;
-  const entries = await db.select().from(clientAllowlist).where(inArray(clientAllowlist.orgId, orgIds));
-  return [...new Set([...staff, ...entries.filter((e) => !e.entry.trim().startsWith("@")).map((e) => e.entry.toLowerCase())])];
+  // lib/mentionAudience, so the dropdown a name is picked from and the list
+  // this notifies are the same list. They used to be two, and the system half
+  // forgot owners - a client could read a note on the instrument it owns and
+  // never be mentionable on it.
+  return [...(await readersOf(t))];
 }
 
 const noteHref = (t: { instrumentId: number | null; assetId: number | null }) =>
@@ -3815,10 +3805,19 @@ async function postAudience(p: {
   if (p.instrumentId === null) {
     return p.roomOrgId === null ? staff : [...new Set([...staff, ...emailsFor(p.roomOrgId)])];
   }
+  // The owner counts, not only the orgs it was shared WITH: a client that owns
+  // the system can open it, so a post there reaches them. Leaving them out is
+  // how a discussion notification went missing on a client's own instrument.
+  const [inst] = await db.select({ ownerOrgId: instruments.ownerOrgId })
+    .from(instruments).where(eq(instruments.id, p.instrumentId));
   const shares = await db.select({ orgId: systemShares.orgId }).from(systemShares)
     .where(eq(systemShares.instrumentId, p.instrumentId));
-  if (!shares.length) return staff;
-  return [...new Set([...staff, ...shares.flatMap((s) => emailsFor(s.orgId))])];
+  const orgIds = [...new Set([
+    ...(inst?.ownerOrgId != null ? [inst.ownerOrgId] : []),
+    ...shares.map((s) => s.orgId),
+  ])];
+  if (!orgIds.length) return staff;
+  return [...new Set([...staff, ...orgIds.flatMap(emailsFor)])];
 }
 
 /**

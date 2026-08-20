@@ -14,6 +14,8 @@ import {
 import { RESULT_LABEL } from "@/lib/checkout";
 import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResult";
 import { checklistProgress } from "@/lib/checklist";
+import MentionBox from "./MentionBox";
+import type { Candidate } from "@/lib/mentions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; heading?: boolean; thread: Note[] };
@@ -203,7 +205,7 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
 }
 
 export default function TasksPanel({
-  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [], jobs = [],
+  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [], jobs = [], mentionable = [],
 }: {
   target: WorkTarget; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
@@ -222,6 +224,12 @@ export default function TasksPanel({
    * rows deep. The job's own page passes nothing and stays flat.
    */
   jobs?: { id: number; number: string; title: string; state: string }[];
+  /**
+   * The directory with emails and orgs, for the @mention dropdown. `people`
+   * stays the plain name list the assignee selects want; this is the same
+   * folks with enough detail to tell two Nicks apart.
+   */
+  mentionable?: Candidate[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -488,9 +496,9 @@ export default function TasksPanel({
                       {c.thread.map((m) => renderNote(m, "item"))}
                       {canEdit && (
                         <div style={{ display: "flex", gap: 6 }}>
-                          <input value={(inputs["itemnote-" + c.id] as string) || ""}
-                            onChange={(e) => setInput("itemnote-" + c.id, e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); } }}
+                          <MentionBox people={mentionable} value={(inputs["itemnote-" + c.id] as string) || ""}
+                            onChange={(v) => setInput("itemnote-" + c.id, v)}
+                            onEnter={() => { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); }}
                             placeholder={n > 0 ? "Reply on this item..." : 'e.g. "passed at 101% of spec"'} style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
                           <button className="btn sm" onClick={() => { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); }}>Post</button>
                         </div>
@@ -515,10 +523,10 @@ export default function TasksPanel({
             {t.notes.length === 0 && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>No notes yet.</div>}
             {canEdit && (
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <input value={(inputs["note-" + t.id] as string) || ""}
-                  onChange={(e) => setInput("note-" + t.id, e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); } }}
-                  placeholder="Add a note..." style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+                <MentionBox people={mentionable} value={(inputs["note-" + t.id] as string) || ""}
+                  onChange={(v) => setInput("note-" + t.id, v)}
+                  onEnter={() => { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); }}
+                  placeholder="Add a note... @name to notify" style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
                 <button className="btn sm" onClick={() => { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); }}>Post</button>
               </div>
             )}

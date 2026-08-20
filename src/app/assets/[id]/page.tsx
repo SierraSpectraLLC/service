@@ -50,6 +50,7 @@ import TrackAsSystem from "@/components/TrackAsSystem";
 import PanelLayout from "@/components/PanelLayout";
 import { getUiLayout } from "@/app/actions";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
+import { mentionableOn } from "@/lib/mentionAudience";
 
 export const dynamic = "force-dynamic";
 
@@ -249,6 +250,10 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     formatHours,
   );
 
+  // Who the composer may offer for an @mention: this record's readers, and
+  // nobody else - see lib/mentionAudience.
+  const mentionable = await mentionableOn(peopleRows, { instrumentId: null, assetId });
+
   return (
     <div className="container split">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
@@ -379,7 +384,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               })} />
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={target} tasks={fullTasks} people={directoryNames(peopleRows)}
+            <TasksPanel target={target} tasks={fullTasks} people={directoryNames(peopleRows)} mentionable={mentionable}
               systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff}
               copyTargets={copyTargets}
               // Open jobs, so their tasks fold under one band per job here.
