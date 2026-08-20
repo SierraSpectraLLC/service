@@ -27,7 +27,7 @@ export type TaskTests = {
  * procedure behind it are read.
  */
 export async function loadTaskTests(
-  rows: { id: number; procedureId: number | null }[],
+  rows: { id: number; procedureId: number | null; resultType?: string }[],
 ): Promise<TaskTests> {
   const tests = new Map<number, TaskTestSpec>();
   const results = new Map<number, TaskTestResult>();
@@ -50,6 +50,11 @@ export async function loadTaskTests(
     // recording what happened, so both get the result block and the gate.
     if (p && needsResult(p.kind, p.resultType)) {
       tests.set(t.id, { resultType: p.resultType, target: p.target, tolerancePct: p.tolerancePct });
+    } else if (t.resultType) {
+      // A hand-made task that demands an outcome (tasks.result_type): same
+      // block, same gate, no target - "did the button toggle" has no
+      // tolerance band, just an answer.
+      tests.set(t.id, { resultType: t.resultType, target: null, tolerancePct: null });
     }
   }
   for (const r of resultRows) {

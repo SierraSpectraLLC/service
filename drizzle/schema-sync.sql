@@ -2559,3 +2559,36 @@ ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamp;
 -- Scheduled vs advisory maintenance per system. '' follows the owning org's
 -- resale flag; an explicit value overrides it. See lib/pmPosture.
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "pm_posture" text NOT NULL DEFAULT '';
+
+-- The newest "What's new" card each person has dismissed. See lib/whatsNew.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "whats_new_seen" text NOT NULL DEFAULT '';
+
+-- A hand-made task can demand an outcome: pass/fail, a number, or a note,
+-- gated exactly like a procedure's test. See lib/testResult and lib/taskTests.
+ALTER TABLE "tasks" ADD COLUMN IF NOT EXISTS "result_type" text NOT NULL DEFAULT '';
+
+-- The conversation on a work order: comments above any one task.
+CREATE TABLE IF NOT EXISTS "work_order_notes" (
+  "id" serial PRIMARY KEY,
+  "work_order_id" integer NOT NULL,
+  "author" text NOT NULL,
+  "text" text NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "wo_notes_wo_idx" ON "work_order_notes" ("work_order_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'work_order_notes_work_order_id_fk') THEN
+    ALTER TABLE "work_order_notes" ADD CONSTRAINT "work_order_notes_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- Parts recorded from a work order carry the job, like tasks and hours do.
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+CREATE INDEX IF NOT EXISTS "parts_work_order_idx" ON "parts" ("work_order_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'parts_work_order_id_fk') THEN
+    ALTER TABLE "parts" ADD CONSTRAINT "parts_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

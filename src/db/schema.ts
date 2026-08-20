@@ -45,6 +45,13 @@ export const users = pgTable("users", {
    */
   onboardedAt: timestamp("onboarded_at"),
   /**
+   * The newest "What's new" card this person has dismissed (lib/whatsNew).
+   * Blank = never dismissed any, which for a new account simply means the
+   * current batch shows once. On the user rather than in localStorage so a
+   * dismissal on the desk PC holds on the phone in the lab.
+   */
+  whatsNewSeen: text("whats_new_seen").notNull().default(""),
+  /**
    * The last time this person actually did something in the app, not the last
    * time they signed in. Sessions last a month (lib/sessionCookie), so sign-ins
    * count how often somebody is LOCKED OUT, not how often they work here -
@@ -648,6 +655,14 @@ export const tasks = pgTable("tasks", {
   // Which catalog procedure generated it (intake work). Kept so sign-off can
   // tell which tasks are mandatory without matching on titles.
   procedureId: integer("procedure_id").references(() => procedures.id, { onDelete: "set null" }),
+  /**
+   * What "done" means for a hand-made task: '' = a checkbox, or one of the
+   * result vocabulary (pass_fail | measured | note) - "try toggling the button
+   * and NOTE whether it toggles" is a pass/fail, not a checkbox. Procedure-made
+   * tasks carry their spec on the procedure; this exists so an ad-hoc task can
+   * demand an outcome too. The procedure's spec wins when both are set.
+   */
+  resultType: text("result_type").notNull().default(""),
   sortOrder: integer("sort_order").notNull().default(0),
   // The job this is part of, when it is part of one. Null is the normal state:
   // most tasks are just the shop's own list. Set null rather than cascade - a
@@ -681,6 +696,17 @@ export const itemNotes = pgTable("item_notes", {
   text: text("text").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("item_notes_item_idx").on(t.itemId)]);
+
+// The conversation on a work order - the job-level thread, above any one task.
+// "Client says it worked over the weekend", "bring the long torx" - context an
+// engineer needs before they leave, which fits neither a task nor the close-out.
+export const workOrderNotes = pgTable("work_order_notes", {
+  id: serial("id").primaryKey(),
+  workOrderId: integer("work_order_id").notNull().references((): AnyPgColumn => workOrders.id, { onDelete: "cascade" }),
+  author: text("author").notNull(),
+  text: text("text").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("wo_notes_wo_idx").on(t.workOrderId)]);
 
 // Task-level notes thread (commentary about the whole job)
 export const taskNotes = pgTable("task_notes", {
@@ -829,6 +855,12 @@ export const parts = pgTable("parts", {
   // what lets a contract whose PM includes its parts stop those parts from
   // eating the client's parts allowance (see lib/agreementUsage).
   pmScheduleId: integer("pm_schedule_id").references((): AnyPgColumn => pmSchedules.id, { onDelete: "set null" }),
+  /**
+   * The job this part was recorded on, when it was recorded from one - the
+   * "potential parts" list an engineer builds while diagnosing. Set null on
+   * delete: the part outlives its wrapper exactly like a task does.
+   */
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   carrier: text("carrier").notNull().default(""),
   tracking: text("tracking").notNull().default(""),
   orderedAt: text("ordered_at").notNull().default(""),

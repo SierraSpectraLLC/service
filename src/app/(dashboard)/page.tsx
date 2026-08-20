@@ -1,7 +1,7 @@
 import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders, users } from "@/db/schema";
 import { queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
@@ -11,13 +11,15 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
-import { requireUser } from "@/lib/authz";
+import { requireUser, viewContext } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
+import WhatsNew from "@/components/WhatsNew";
+import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
 export const dynamic = "force-dynamic";
 
@@ -194,8 +196,26 @@ export default async function Home() {
     };
   });
 
+  // The changelog the platform shows its own users, on the one page everyone
+  // lands on. Cards this person has already dismissed never come back.
+  //
+  // Never under a persona: "view as" borrows a client's eyes but keeps the
+  // owner's account, so a dismissal there would mark the whole batch seen and
+  // swallow the staff and owner cards before the owner ever saw them as
+  // themselves. The impersonated walk-through is for checking the portal, not
+  // for reading news.
+  const { persona } = await viewContext();
+  const [me] = persona ? [] : await db.select({ seen: users.whatsNewSeen }).from(users)
+    .where(eq(users.email, user.email.toLowerCase())).catch(() => []);
+  const newsCards = persona ? [] : unseenFor(WHATS_NEW, user.role, me?.seen ?? "");
+
   return (
     <>
+      {newsCards.length > 0 && (
+        <WhatsNew cards={newsCards.map((c) => ({
+          key: c.key, date: c.date, title: c.title, body: c.body, image: c.image, href: c.href,
+        }))} />
+      )}
       <Dashboard
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}

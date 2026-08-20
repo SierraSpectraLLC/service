@@ -203,18 +203,24 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
 }
 
 export default function TasksPanel({
-  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [],
+  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [],
 }: {
   target: WorkTarget; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
   /** Records this person may write to, for copying a batch of tasks across. */
   copyTargets?: { key: string; label: string }[];
+  /**
+   * Catalog procedures that apply to this record, offered as starting points
+   * for a new task: picking one pre-fills the form, and the server stamps its
+   * checklist and carries its test spec (pass/fail, target) onto the task.
+   */
+  procedureChoices?: { id: number; title: string; body: string; brings: string }[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
-  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null });
+  const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null, resultType: "", procedureId: null as number | null });
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
   const [inputs, setInputs] = useState<Record<string, string | boolean>>({});
@@ -276,12 +282,15 @@ export default function TasksPanel({
   const submitNew = () => {
     if (!draft.title.trim()) return;
     startTransition(async () => {
+      // Spread, not rebuild: this panel also sits on a work order's page, and
+      // rebuilding the target from named fields silently dropped workOrderId -
+      // so a task filed from the job landed on the system but not the job.
       const res = await createTask(
-        { instrumentId: target.instrumentId, assetId: draft.assetId ?? target.assetId },
-        { title: draft.title, body: draft.body, assignee: draft.assignee, dueDate: draft.dueDate },
+        { ...target, assetId: draft.assetId ?? target.assetId },
+        { title: draft.title, body: draft.body, assignee: draft.assignee, dueDate: draft.dueDate, resultType: draft.resultType, procedureId: draft.procedureId },
       );
       if (res?.error) return;
-      setDraft({ title: "", body: "", assignee: "", dueDate: "", assetId: null });
+      setDraft({ title: "", body: "", assignee: "", dueDate: "", assetId: null, resultType: "", procedureId: null });
       setShowNew(false);
     });
   };
@@ -318,7 +327,12 @@ export default function TasksPanel({
               : t.result ? { background: "#EEF1F5", color: "#475569" }
               : { background: "#FAF0DC", color: "#8A5410" }
             }>
-              {t.result ? (t.result.passed === true ? `pass ${t.result.value}` : t.result.passed === false ? `fail ${t.result.value}` : t.result.value)
+              {/* For a pass/fail the value IS the verdict, so printing both
+                  read "fail Fail". The verdict word alone for those; for a
+                  measurement the number, with its verdict when there is one. */}
+              {t.result ? (t.result.passed === true ? (/^pass$/i.test(t.result.value) ? "Pass" : `pass ${t.result.value}`)
+                  : t.result.passed === false ? (/^fail$/i.test(t.result.value) ? "Fail" : `fail ${t.result.value}`)
+                  : t.result.value)
                 : t.test.resultType === "inspect_replace" ? "outcome needed" : "no result"}
             </span>
           )}
@@ -522,6 +536,33 @@ export default function TasksPanel({
 
       {showNew && (
         <div className="dash-form">
+          {procedureChoices.length > 0 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <label style={{ margin: 0 }}>Start from</label>
+              <select value={draft.procedureId ?? ""} aria-label="Start from a procedure"
+                onChange={(e) => {
+                  const id = e.target.value ? parseInt(e.target.value) : null;
+                  const c = procedureChoices.find((x) => x.id === id);
+                  // Pre-fill, don't lock: the engineer sharpens the ask ("...on
+                  // the LEFT pump") and the catalog still brings its checklist.
+                  setDraft((d) => ({
+                    ...d, procedureId: id,
+                    title: c ? c.title : d.title,
+                    body: c ? c.body : d.body,
+                    resultType: id ? "" : d.resultType,
+                  }));
+                }}
+                style={{ width: "auto", maxWidth: 320, fontSize: 12 }}>
+                <option value="">scratch</option>
+                {procedureChoices.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </select>
+              {draft.procedureId !== null && (
+                <span className="mut" style={{ fontSize: 11 }}>
+                  {procedureChoices.find((x) => x.id === draft.procedureId)?.brings}
+                </span>
+              )}
+            </div>
+          )}
           <label>Title *</label>
           <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="e.g. Perform Reserpine tests" style={{ marginBottom: 8 }} />
           <label>Body</label>
@@ -554,6 +595,23 @@ export default function TasksPanel({
                   {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
                 </select>
               </span>
+            )}
+            {/* What closing this task requires. A checkbox is the default;
+                the rest demand a recorded outcome before Done, exactly like a
+                procedure's test - "note whether the button toggles" is a
+                pass/fail with a note, not a tick. */}
+            {draft.procedureId === null && (
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span className="mut" style={{ fontSize: 12 }}>Done means:</span>
+              <select value={draft.resultType} aria-label="Done means"
+                onChange={(e) => setDraft({ ...draft, resultType: e.target.value })}
+                style={{ width: "auto", fontSize: 12 }}>
+                <option value="">ticking it off</option>
+                <option value="pass_fail">recording pass / fail</option>
+                <option value="measured">recording a measurement</option>
+                <option value="note">writing down what was found</option>
+              </select>
+            </span>
             )}
             <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submitNew} disabled={pending}>
               {pending ? "Creating..." : "Create task"}

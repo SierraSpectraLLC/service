@@ -13,7 +13,7 @@ import {
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
-  workOrders, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
+  workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
 } from "@/db/schema";
@@ -88,6 +88,7 @@ import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
+import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
 import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
@@ -1326,22 +1327,46 @@ async function validAssetTag(assetId: number | null | undefined, instrumentId: n
 
 export async function createTask(
   target: WorkTarget,
-  data: { title: string; body: string; assignee: string; dueDate?: string },
+  data: {
+    title: string; body: string; assignee: string; dueDate?: string; resultType?: string;
+    /**
+     * Start from this catalog procedure: its checklist is stamped on, and its
+     * test spec (pass/fail, target, tolerance) rides along via the id - the
+     * same way intake and PM tasks carry theirs. Title/body still come from
+     * the form, pre-filled client-side, so the engineer can sharpen the ask.
+     */
+    procedureId?: number | null;
+  },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   if (!data.title.trim()) return { error: "Title required" };
+  // What "done" means: '' = tick it, otherwise an outcome must be recorded
+  // (lib/testResult). Unknown strings are refused rather than stored - a typo
+  // here would gate the task on a result nobody can enter.
+  const resultType = (data.resultType ?? "").trim();
+  if (!["", "pass_fail", "measured", "note"].includes(resultType)) return { error: "Not a result type" };
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
+  // Only a procedure this workspace can see - a stale id from another tenant's
+  // catalog must not put their checklist on our job.
+  const [proc] = data.procedureId
+    ? await db.select().from(procedures).where(and(
+        eq(procedures.id, data.procedureId), forTenant(procedures.tenantOrgId, readTenant(u))))
+    : [];
+  if (data.procedureId && !proc) return { error: "That procedure isn't in the catalog" };
   const [t] = await db.insert(tasks).values({
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     title: data.title.trim(), body: data.body.trim(), assignee: data.assignee.trim(),
     dueDate: (data.dueDate ?? "").trim(),
+    resultType,
+    procedureId: proc?.id ?? null,
     workOrderId: t0.workOrderId,
   }).returning();
+  if (proc) await stampChecklist(t.id, proc.checklist);
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "task", entityId: t.id,
-    action: `created task '${t.title}'${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
+    action: `created task '${t.title}'${proc ? ` from procedure '${proc.name}'` : ""}${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}${t.assignee ? ` (assigned ${t.assignee})` : ""}${t.dueDate ? ` due ${t.dueDate}` : ""}`,
   });
   if (t.assignee) {
     await notifyTaskAssigned({
@@ -1522,13 +1547,18 @@ export async function deleteTask(taskId: number, reason: string): Promise<{ erro
  * (see lib/taskCopy), which means a copy is ordinary work - correct, because a
  * copy is a new job, not a second reading of the original.
  */
-async function testSpecFor(t: { procedureId: number | null }) {
-  if (t.procedureId === null) return null;
-  const [p] = await db.select({
-    kind: procedures.kind, resultType: procedures.resultType,
-    target: procedures.target, tolerancePct: procedures.tolerancePct,
-  }).from(procedures).where(eq(procedures.id, t.procedureId));
-  return p && needsResult(p.kind, p.resultType) ? p : null;
+async function testSpecFor(t: { procedureId: number | null; resultType?: string }) {
+  if (t.procedureId !== null) {
+    const [p] = await db.select({
+      kind: procedures.kind, resultType: procedures.resultType,
+      target: procedures.target, tolerancePct: procedures.tolerancePct,
+    }).from(procedures).where(eq(procedures.id, t.procedureId));
+    if (p && needsResult(p.kind, p.resultType)) return p;
+  }
+  // A hand-made task demanding an outcome (tasks.result_type). kind "test"
+  // because that is the word the gate understands; no target, no band.
+  if (t.resultType) return { kind: "test", resultType: t.resultType, target: null, tolerancePct: null };
+  return null;
 }
 
 /**
@@ -2185,6 +2215,32 @@ export async function addItemNote(itemId: number, text: string) {
   }
 }
 
+/**
+ * A comment on the job itself - context above any one task. Editors only, but
+ * that includes the client's own editors: "it worked over the weekend" is
+ * exactly what the engineer needs to read before driving out.
+ */
+export async function addWorkOrderNote(workOrderId: number, text: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const body = text.trim();
+  if (!body) return {};
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
+  if (!wo) return { error: "Not found" };
+  await assertWorkEditable(u, wo);
+  await db.insert(workOrderNotes).values({ workOrderId, author: u.name, text: body });
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId, entityType: "wo_note", entityId: workOrderId,
+    action: `commented on ${wo.number}: "${body}"`,
+  });
+  await notifyMention({
+    actorEmail: u.email, actorName: u.name, body,
+    where: `${wo.number} '${wo.title}'`, href: `/work/${wo.id}`,
+    allowedEmails: await taskMentionAudience(wo),
+  });
+  revalidatePath(`/work/${wo.id}`);
+  return {};
+}
+
 export async function addTaskNote(taskId: number, text: string) {
   const u = await requireEditor();
   if (!text.trim()) return;
@@ -2430,7 +2486,10 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   const u = await requireEditor();
   const data = cleanPartInput(raw);
   if (!data.name.trim()) return { error: "Name required" };
-  const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: raw.assetId ?? target.assetId ?? null });
+  // Spread, not rebuild: from a work order's page the target carries the job,
+  // and dropping it here is how a "potential part" would vanish from the job
+  // that needs it (the same slip the task form had).
+  const t0 = await resolveTarget({ ...target, assetId: raw.assetId ?? target.assetId ?? null });
   if ("error" in t0) return t0;
   const [payer, tenant] = await Promise.all([costOwnerOrg(t0), tenantOfWork(t0)]);
   // Staff of the tenant see prices; a partner from another workspace does not,
@@ -2448,6 +2507,7 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   )))[0]?.id ?? null;
   const [p] = await db.insert(parts).values({
     ...data, ...stamps, pmScheduleId: pmOk, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
+    workOrderId: t0.workOrderId,
     // The summable copy, parsed after the redaction strip so it follows cost.
     costCents: parseMoney(data.cost),
     // Whose money this was. Stamped now so a later handoff can't reveal it to
@@ -2489,7 +2549,7 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
         status: p.status, installedAt: p.installedAt, removedAt: p.removedAt,
         // The kit carries the cost. Not null - null means "nobody priced it",
         // and these are priced, at nothing, on purpose.
-        costCents: 0, ownerOrgId: payer, pmScheduleId: p.pmScheduleId,
+        costCents: 0, ownerOrgId: payer, pmScheduleId: p.pmScheduleId, workOrderId: p.workOrderId,
         note: `from ${p.name}`,
       });
       expanded++;
@@ -7425,6 +7485,19 @@ export async function clearMyPassword(): Promise<{ error?: string }> {
     action: "removed the sign-in password from their own account",
   });
   revalidatePath("/inbox");
+  return {};
+}
+
+/**
+ * "Got it" on the What's new cards. Records the newest key that existed at
+ * dismissal, so the next batch shows and this one never does again. No audit
+ * line: closing a changelog is not an event anybody will ever ask about.
+ */
+export async function dismissWhatsNew(): Promise<{ error?: string }> {
+  const u = await requireUser();
+  await db.update(users).set({ whatsNewSeen: latestKey(WHATS_NEW) })
+    .where(eq(users.email, u.email.toLowerCase()));
+  revalidatePath("/");
   return {};
 }
 
