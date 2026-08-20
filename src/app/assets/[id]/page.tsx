@@ -39,6 +39,7 @@ import PhotosPanel from "@/components/PhotosPanel";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
 import { storeQuota } from "@/lib/storeUsage";
 import TasksPanel from "@/components/TasksPanel";
+import { woOpen } from "@/lib/workOrders";
 import WorkOrdersPanel from "@/components/WorkOrdersPanel";
 import MaintenancePanel from "@/components/MaintenancePanel";
 import { pmPosture, postureLine } from "@/lib/pmPosture";
@@ -380,7 +381,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           { key: "tasks", label: "Tasks", node: (
             <TasksPanel target={target} tasks={fullTasks} people={directoryNames(peopleRows)}
               systemAssets={[]} today={shopToday()} canEdit={canEdit} isStaff={isStaff}
-              copyTargets={copyTargets} />
+              copyTargets={copyTargets}
+              // Open jobs, so their tasks fold under one band per job here.
+              jobs={woRows.filter((w) => woOpen(w.state)).map((w) => ({ id: w.id, number: w.number, title: w.title, state: w.state }))} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
             <MaintenancePanel target={target} today={shopToday()} canEdit={canEdit}

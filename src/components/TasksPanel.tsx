@@ -24,7 +24,7 @@ type TaskResult = {
 };
 type Task = {
   id: number; title: string; body: string; state: string; assignee: string; dueDate: string;
-  assetId: number | null; origin: string;
+  assetId: number | null; origin: string; workOrderId?: number | null;
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
   test?: TestSpec | null; result?: TaskResult | null;
 };
@@ -203,7 +203,7 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
 }
 
 export default function TasksPanel({
-  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [],
+  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [], jobs = [],
 }: {
   target: WorkTarget; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
@@ -215,11 +215,19 @@ export default function TasksPanel({
    * checklist and carries its test spec (pass/fail, target) onto the task.
    */
   procedureChoices?: { id: number; title: string; body: string; brings: string }[];
+  /**
+   * Open work orders on this record. When given, tasks belonging to a job fold
+   * under one band per job instead of reading as loose shop tasks - the job is
+   * the unit of work here, and its internals are one click away, not fifteen
+   * rows deep. The job's own page passes nothing and stays flat.
+   */
+  jobs?: { id: number; number: string; title: string; state: string }[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [openJobs, setOpenJobs] = useState<number[]>([]);
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null, resultType: "", procedureId: null as number | null });
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
@@ -236,8 +244,17 @@ export default function TasksPanel({
 
   // Auto-generated checkout tests sit under their own header until done.
   const checkout = tasks.filter((t) => t.state !== "Done" && t.origin === "checkout");
-  const active = tasks.filter((t) => t.state !== "Done" && t.origin !== "checkout");
-  const complete = tasks.filter((t) => t.state === "Done");
+  // A task inside a listed job renders under that job's band, not loose - the
+  // system's list answers "what does the shop owe", and the answer is the JOB,
+  // not its internals. Tasks of jobs not listed (closed, or none given) stay
+  // loose so nothing ever disappears.
+  const jobOf = (t: Task) => jobs.find((j) => j.id === t.workOrderId);
+  const undone = tasks.filter((t) => t.state !== "Done" && t.origin !== "checkout");
+  const active = undone.filter((t) => !jobOf(t));
+  const jobBands = jobs
+    .map((j) => ({ job: j, rows: tasks.filter((t) => t.workOrderId === j.id) }))
+    .filter((b) => b.rows.length > 0);
+  const complete = tasks.filter((t) => t.state === "Done" && !jobOf(t));
 
   // One renderer for both note threads; staff get inline edit / delete.
   const renderNote = (m: Note, kind: "item" | "task") => {
@@ -630,9 +647,31 @@ export default function TasksPanel({
           {active.length > 0 && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Tasks</div>}
         </div>
       )}
+      {jobBands.map(({ job, rows }) => {
+        const done = rows.filter((t) => t.state === "Done").length;
+        const unfolded = openJobs.includes(job.id);
+        return (
+          <div key={`job-${job.id}`} style={{ border: "1px solid var(--line)", borderRadius: 8, marginBottom: 8, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#F5F7FA", flexWrap: "wrap" }}>
+              <a href={`/work/${job.id}`} className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
+              <span style={{ fontSize: 13, flex: "1 1 140px" }}>{job.title}</span>
+              <span className="pill" style={done === rows.length
+                ? { background: "#E5F3E5", color: "#2E6B2E" }
+                : { background: "#EEF1F5", color: "#475569" }}>
+                {done} of {rows.length} done
+              </span>
+              <button className="btn link" style={{ fontSize: 11 }} aria-expanded={unfolded}
+                onClick={() => setOpenJobs((o) => (unfolded ? o.filter((x) => x !== job.id) : [...o, job.id]))}>
+                {unfolded ? "fold" : "show"}
+              </button>
+            </div>
+            {unfolded && rows.map((t) => renderTask(t, false))}
+          </div>
+        );
+      })}
       {active.map((t) => renderTask(t, false))}
-      {checkout.length === 0 && active.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
-      {checkout.length === 0 && active.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
+      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
+      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
 
       {complete.length > 0 && (
         <div style={{ marginTop: active.length ? 8 : 0 }}>

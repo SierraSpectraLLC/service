@@ -5646,6 +5646,15 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
       .where(and(eq(parts.instrumentId, wo.instrumentId), eq(parts.status, "Installed"),
         sql`${parts.installedAt} >= ${wo.openedOn}`)),
   ]);
+  // Resolved means the work is done, and the job's own list is the record of
+  // the work - so a job cannot claim done over open tasks, the same way a test
+  // cannot close without its result. Finish them or delete them; either is one
+  // click on tasks that turned out not to apply.
+  const stillOpen = doneRows.filter((t) => t.state !== "Done").length;
+  if (stillOpen) {
+    return { error: `${stillOpen} task${stillOpen === 1 ? " on this job is" : "s on this job are"} still open - finish or remove ${stillOpen === 1 ? "it" : "them"} first.` };
+  }
+
   const line = closeLine(said, {
     tasks: doneRows.filter((t) => t.state === "Done").length,
     minutes: timeRows.reduce((n, t) => n + t.minutes, 0),
