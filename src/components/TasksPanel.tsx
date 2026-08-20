@@ -228,6 +228,8 @@ export default function TasksPanel({
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [openJobs, setOpenJobs] = useState<number[]>([]);
+  const toggleJob = (id: number) =>
+    setOpenJobs((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null, resultType: "", procedureId: null as number | null });
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
@@ -652,18 +654,31 @@ export default function TasksPanel({
         const unfolded = openJobs.includes(job.id);
         return (
           <div key={`job-${job.id}`} style={{ border: "1px solid var(--line)", borderRadius: 8, marginBottom: 8, overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#F5F7FA", flexWrap: "wrap" }}>
-              <a href={`/work/${job.id}`} className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
+            {/* The whole header toggles, with the same ▸/▾ every other fold in
+                this panel uses - a word saying "fold" is a control nobody has
+                to learn twice. A div rather than a button because the job
+                number inside is a link, and a link inside a button is invalid
+                markup that swallows its own clicks; the link stops the event
+                so tapping the number still opens the job. */}
+            <div role="button" tabIndex={0} aria-expanded={unfolded}
+              aria-label={`${job.number} ${job.title}, ${done} of ${rows.length} done`}
+              className="row-hover"
+              onClick={() => toggleJob(job.id)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                toggleJob(job.id);
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#F5F7FA", flexWrap: "wrap", cursor: "pointer" }}>
+              <a href={`/work/${job.id}`} className="mono" onClick={(e) => e.stopPropagation()}
+                style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
               <span style={{ fontSize: 13, flex: "1 1 140px" }}>{job.title}</span>
               <span className="pill" style={done === rows.length
                 ? { background: "#E5F3E5", color: "#2E6B2E" }
                 : { background: "#EEF1F5", color: "#475569" }}>
                 {done} of {rows.length} done
               </span>
-              <button className="btn link" style={{ fontSize: 11 }} aria-expanded={unfolded}
-                onClick={() => setOpenJobs((o) => (unfolded ? o.filter((x) => x !== job.id) : [...o, job.id]))}>
-                {unfolded ? "fold" : "show"}
-              </button>
+              <span className="mut" style={{ fontSize: 12 }}>{unfolded ? "▾" : "▸"}</span>
             </div>
             {unfolded && rows.map((t) => renderTask(t, false))}
           </div>
