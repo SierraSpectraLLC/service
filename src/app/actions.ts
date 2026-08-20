@@ -5685,6 +5685,62 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
 }
 
 /**
+ * Delete a work order outright - the one opened by mistake, the duplicate, the
+ * test row from a Tuesday afternoon. Cancelling is the tool for a job that was
+ * real and then called off; this is for one that should never have existed.
+ *
+ * What it deliberately does NOT do is delete the work. Tasks, hours, parts,
+ * files and purchase orders all point at the order with ON DELETE SET NULL, so
+ * they survive as the system's own records - a job is a wrapper around work
+ * that happened, and throwing away the wrapper must not throw away the work.
+ * Only the comment thread goes, because it is about the wrapper.
+ *
+ * Refused once the order is resolved or closed. That state published a
+ * close-out to the client's own feed and is the history a service record is
+ * made of; re-opening it first is a deliberate act, and having to perform it
+ * is the point.
+ */
+export async function deleteWorkOrder(woId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "Only the service team deletes a job." };
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  if (wo.state === "resolved" || wo.state === "closed") {
+    return { error: `${wo.number} is ${WO_LABEL[wo.state].toLowerCase()} - its close-out is on the client's record. Re-open it first if it really has to go.` };
+  }
+
+  // Count what is about to be set loose, so the audit line says where it went
+  // rather than leaving somebody to wonder why tasks appeared unattached.
+  const [taskRows, timeRows, partRows, fileRows] = await Promise.all([
+    db.select({ id: tasks.id }).from(tasks).where(eq(tasks.workOrderId, woId)),
+    db.select({ id: timeEntries.id }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
+    db.select({ id: parts.id }).from(parts).where(eq(parts.workOrderId, woId)),
+    db.select({ id: attachments.id }).from(attachments).where(eq(attachments.workOrderId, woId)),
+  ]);
+  const freed = [
+    taskRows.length ? `${taskRows.length} task${taskRows.length === 1 ? "" : "s"}` : "",
+    timeRows.length ? `${timeRows.length} time entr${timeRows.length === 1 ? "y" : "ies"}` : "",
+    partRows.length ? `${partRows.length} part${partRows.length === 1 ? "" : "s"}` : "",
+    fileRows.length ? `${fileRows.length} file${fileRows.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(", ");
+
+  await db.delete(workOrders).where(eq(workOrders.id, woId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "work_order", entityId: woId,
+    action: `deleted ${wo.number} '${wo.title}' (was ${WO_LABEL[wo.state] ?? wo.state})`
+      + (freed ? ` - ${freed} released to the record` : "")
+      + ` - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revWo(wo);
+  return {};
+}
+
+/**
  * Put an existing task into a job, or take it out of one.
  *
  * The common case is a job that grew: an order was opened, and the three tasks
