@@ -2752,12 +2752,14 @@ export async function addPhotos(
     uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
   }))).returning();
 
-  // The first photo a record ever gets becomes its cover - but a record sharing
-  // its photos with a unit that already has one is not empty, and should not
-  // quietly take the picture over.
+  // Uploading a photo does not choose the cover, even the first one. The
+  // catalog's stock picture of the model is a deliberate default - it is what
+  // the equipment looks like - and a shot of a cable run or a serial plate
+  // taken on the way past should not replace it because it happened to be
+  // first. Somebody makes it the cover on purpose, or nobody does; a record
+  // with no chosen cover keeps falling back to the stock photo (lib/photos
+  // livingCover, and the pages' stockSrc behind it).
   const twin = await photoTwin(t0);
-  const held = sharedCover(await coverOf(t0), twin ? await coverOf(twin) : null);
-  if (held === null) await setCoverRow(onSystem, t0, rows[0].id);
   if (twin) revWork(twin);
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
@@ -2788,6 +2790,29 @@ async function setCoverRow(
  * system becomes a bench, whose photo is the bench and not one module of it.
  */
 /** Which of a record's photos leads. The rest stay exactly where they are. */
+/**
+ * Put the cover back to the default - the catalog's stock picture of the model.
+ * The counterpart to choosing one: a cover is an override, and an override
+ * nobody can undo is a decision, not a preference.
+ */
+export async function clearCoverPhoto(target: WorkTarget): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const me = photoRecord(t0);
+  const twin = await photoTwin(t0);
+  await setCoverRow(me.instrumentId !== null, me, null);
+  if (twin) await setCoverRow(twin.instrumentId !== null, twin, null);
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: 0,
+    action: "cleared the cover photo - back to the catalog's picture",
+  });
+  if (twin) revWork(twin);
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
 export async function setCoverPhoto(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
   const u = await requireEditor();
   const t0 = await resolveTarget(target);
