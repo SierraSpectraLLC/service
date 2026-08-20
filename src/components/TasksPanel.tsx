@@ -7,7 +7,7 @@ import type { WorkTarget } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
-  toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
+  toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote, setTaskWorkOrder,
   updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, setTaskDue, setTaskAsset, copyTasksTo,
   recordTaskResult,
 } from "@/app/actions";
@@ -228,6 +228,7 @@ export default function TasksPanel({
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
   const [openJobs, setOpenJobs] = useState<number[]>([]);
+  const [jobNote, setJobNote] = useState<null | { id: number; text: string }>(null);
   const toggleJob = (id: number) =>
     setOpenJobs((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null, resultType: "", procedureId: null as number | null });
@@ -392,6 +393,35 @@ export default function TasksPanel({
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <span className="mut" style={{ fontSize: 12 }}>Status:</span>
                 <TaskStateSelect task={t} />
+                {/* Which job this belongs to, if any. The common case is a job
+                    that grew - the order was opened and the tasks answering it
+                    were written before anybody filed them under it - and it is
+                    also how work predating the work-order tag gets adopted. */}
+                {jobs.length > 0 && (
+                  <>
+                    <span className="mut" style={{ fontSize: 12 }}>Job:</span>
+                    <select value={t.workOrderId ?? ""} aria-label={`Job for ${t.title}`}
+                      onChange={(e) => {
+                        const to = e.target.value ? parseInt(e.target.value) : null;
+                        // Unfold the band it lands in, or the task appears to
+                        // vanish: it hops out of the loose list into a fold
+                        // that is closed by default.
+                        if (to !== null) setOpenJobs((o) => (o.includes(to) ? o : [...o, to]));
+                        startTransition(async () => {
+                          const res = await setTaskWorkOrder(t.id, to);
+                          if (res?.error) setJobNote({ id: t.id, text: res.error });
+                          else setJobNote(null);
+                        });
+                      }}
+                      style={{ width: "auto", maxWidth: 200, fontSize: 12 }}>
+                      <option value="">on its own</option>
+                      {jobs.map((j) => <option key={j.id} value={j.id}>{j.number}</option>)}
+                    </select>
+                    {jobNote?.id === t.id && (
+                      <span style={{ fontSize: 11, color: "#A32D2D" }}>{jobNote.text}</span>
+                    )}
+                  </>
+                )}
                 <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
                 <AssigneeSelect task={t} people={people} />
                 {systemAssets.length > 0 && (
