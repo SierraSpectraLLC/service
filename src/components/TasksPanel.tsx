@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { promptReason } from "@/lib/reason";
-import { useOptimistic, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
@@ -237,6 +238,24 @@ export default function TasksPanel({
   const [showDone, setShowDone] = useState(false);
   const [openJobs, setOpenJobs] = useState<number[]>([]);
   const [jobNote, setJobNote] = useState<null | { id: number; text: string }>(null);
+  // Arriving from a system's job band: #task-N names which one to open. Read
+  // once on mount rather than watched, because after that the person is
+  // working the page and a stale hash must not keep yanking it about.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (landed.current) return;
+    landed.current = true;
+    const m = /^#task-(\d+)$/.exec(window.location.hash);
+    if (!m) return;
+    const id = parseInt(m[1]);
+    if (!tasks.some((t) => t.id === id)) return;
+    setExpanded(id);
+    // After the row has unfolded, or it scrolls to where it used to be.
+    requestAnimationFrame(() => {
+      document.getElementById(`task-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [tasks]);
+
   const toggleJob = (id: number) =>
     setOpenJobs((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null, resultType: "", procedureId: null as number | null });
@@ -326,15 +345,19 @@ export default function TasksPanel({
   const toggle = (id: number) =>
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const renderTask = (t: Task, isDone: boolean) => {
-    const open = expanded === t.id;
+  /**
+   * One task row. `linkTo` turns it into a signpost instead of a workbench:
+   * inside a job's band on a system page the row does not unfold, it takes you
+   * to that task on the job's own page. A job's work is done in one place, and
+   * a half-editable copy of it on the system was two.
+   */
+  const renderTask = (t: Task, isDone: boolean, linkTo?: string) => {
+    const open = !linkTo && expanded === t.id;
     // Headings are labels, not boxes - counting them reports a finished job as
     // 12/14 forever. See lib/checklist.
     const progress = checklistProgress(t.checklist);
-    return (
-      <div key={t.id} style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden", opacity: isDone && !open ? 0.7 : 1 }}>
-        <div className="row-hover" onClick={() => (picking ? toggle(t.id) : setExpanded(open ? null : t.id))}
-          style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
+    const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" } as const;
+    const inner = (<>
           {picking && (
             <input type="checkbox" checked={picked.has(t.id)} readOnly tabIndex={-1}
               aria-label={`Copy ${t.title}`} style={{ width: 15, height: 15, flexShrink: 0, pointerEvents: "none" }} />
@@ -374,8 +397,20 @@ export default function TasksPanel({
           )}
           <DueChip due={t.dueDate} done={isDone} today={today} />
           <span style={{ fontSize: 12, fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
-          <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
-        </div>
+          <span className="mut" style={{ fontSize: 12 }}>{linkTo ? "→" : open ? "▾" : "▸"}</span>
+      </>);
+    return (
+      <div key={t.id} id={`task-${t.id}`}
+        style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden", opacity: isDone && !open ? 0.7 : 1 }}>
+        {linkTo ? (
+          <Link href={linkTo} className="row-hover" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>
+            {inner}
+          </Link>
+        ) : (
+          <div className="row-hover" onClick={() => (picking ? toggle(t.id) : setExpanded(open ? null : t.id))} style={rowStyle}>
+            {inner}
+          </div>
+        )}
 
         {open && (
           <div style={{ borderTop: "1px solid var(--line)", padding: 12, background: "#FAFBFD" }}>
@@ -718,7 +753,7 @@ export default function TasksPanel({
               </span>
               <span className="mut" style={{ fontSize: 12 }}>{unfolded ? "▾" : "▸"}</span>
             </div>
-            {unfolded && rows.map((t) => renderTask(t, false))}
+            {unfolded && rows.map((t) => renderTask(t, t.state === "Done", `/work/${job.id}#task-${t.id}`))}
           </div>
         );
       })}
