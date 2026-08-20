@@ -63,7 +63,12 @@ export function gasAttention(status: string): boolean {
 }
 
 export const TASK_STATES = ["Open", "In progress", "Blocked", "Done"] as const;
-export const PART_STATES = ["Needed", "Ordered", "In transit", "Received", "Backordered", "Installed", "Removed"] as const;
+// "Suggested" comes before commitment: the engineer diagnosing thinks the
+// switch assembly is the fix, but nobody has agreed to buy anything yet. It
+// never counts against a parts allowance (lib/agreementUsage counts Installed)
+// and never trips the entitlement flag - promoting it to Needed is the moment
+// of commitment, and that is where the machinery wakes up.
+export const PART_STATES = ["Suggested", "Needed", "Ordered", "In transit", "Received", "Backordered", "Installed", "Removed"] as const;
 /** True while a part still needs someone to do something (order, chase, install). */
 export function partOpen(status: string): boolean {
   return status !== "Received" && status !== "Installed" && status !== "Removed";
@@ -149,6 +154,7 @@ export const TASK_COLOR: Record<string, { bg: string; fg: string }> = {
   Done: { bg: "#E5F3E5", fg: "#2E6B2E" },
 };
 export const PART_COLOR: Record<string, { bg: string; fg: string }> = {
+  Suggested: { bg: "#FAF0DC", fg: "#8A5410" },
   Needed: { bg: "#EEF1F5", fg: "#475569" },
   Ordered: { bg: "#EDEBFA", fg: "#4F45A3" },
   "In transit": { bg: "#E7F2FA", fg: "#1D6396" },

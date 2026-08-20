@@ -28,6 +28,8 @@ import TasksPanel from "@/components/TasksPanel";
 import WorkOrderControls from "@/components/WorkOrderControls";
 import WorkOrderNotes from "@/components/WorkOrderNotes";
 import PartsPanel from "@/components/PartsPanel";
+import PhotosPanel from "@/components/PhotosPanel";
+import { isPhotoFile } from "@/lib/photos";
 import { procedures } from "@/db/schema";
 import { coversSystem } from "@/lib/procedureRole";
 import { scopeMatches } from "@/lib/checkout";
@@ -295,6 +297,20 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         canEdit={canAttach} isStaff={staff} listingCuration={false} storage={fileQuota}
         combineTitle={`${wo.number} packet`}
         combineLines={[wo.title, place.label, `Prepared by ${user.name}`].filter(Boolean)} />
+
+      {/* The job's pictures - the error dialog, the scored seal, the bench
+          after. Same panel the system page has; uploads land tagged with both
+          the system and the job, so they read in either gallery. No cover
+          here: a job is an event, not a thing with a face. */}
+      {(canAttach || fileRows.some(isPhotoFile)) && (
+        <PhotosPanel target={target} coverId={null}
+          photos={fileRows.filter(isPhotoFile).map((a) => ({
+            id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+            uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
+          }))}
+          label={`${wo.number} - ${wo.title}`}
+          canEdit={canAttach} storageFull={fileQuota.state === "full"} />
+      )}
 
       {poRows.length > 0 && (
         <div className="card">

@@ -2480,7 +2480,8 @@ export async function nameServiceVisit(
 }
 
 const partStatusVerb = (status: string) =>
-  status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
+  status === "Installed" ? "installed" : status === "Removed" ? "pulled"
+    : status === "Suggested" ? "suggested" : null;
 
 export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string; flag?: string; expanded?: number }> {
   const u = await requireEditor();
@@ -2564,7 +2565,10 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   revWork(p);
   // Same posture as the visit flag on a work order: warn about the allowance
   // at the moment of commitment, never refuse the record.
-  const flag = await partsFlag(payer, t0.instrumentId, p.costCents, p.pmScheduleId !== null).catch(() => "");
+  // A suggestion is not a commitment: the allowance warning waits for the
+  // moment somebody marks it Needed or beyond (see PART_STATES).
+  const flag = p.status === "Suggested" ? ""
+    : await partsFlag(payer, t0.instrumentId, p.costCents, p.pmScheduleId !== null).catch(() => "");
   return { flag: flag || undefined, expanded: expanded || undefined };
 }
 
@@ -2750,6 +2754,9 @@ export async function addPhotos(
   const rows = await db.insert(attachments).values(files.map((f) => ({
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+    // The job, when shot from one - the before/after pictures belong to the
+    // repair as much as to the system (the same tag tasks and parts carry).
+    workOrderId: t0.workOrderId,
     fileName: f.fileName.slice(0, 200), kind: "Photo", url: f.url, size: f.size,
     uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
   }))).returning();

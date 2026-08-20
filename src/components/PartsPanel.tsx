@@ -205,8 +205,19 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div style={{ gridColumn: "1 / -1" }}>
               <label>Name *</label>
-              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder={draft.kind === "consumable" ? "e.g. Vespel ferrule 1/4in" : "e.g. 10kV HED supply"} />
+              {/* The same book lookup the number field has, from the name side
+                  - most people know what the thing is called, not its number. */}
+              <PartNumberField value={draft.name} insert="name" className="" ariaLabel="Part name"
+                placeholder={draft.kind === "consumable" ? "e.g. Vespel ferrule 1/4in" : "e.g. 10kV HED supply"}
+                onChange={(name) => setDraft({ ...draft, name })}
+                onPick={(part) => setDraft((d) => ({
+                  ...d,
+                  kind: part.kind === "kit" ? "kit" : d.kind,
+                  name: part.name || part.partNumber,
+                  partNumber: d.partNumber.trim() || part.partNumber,
+                  vendor: d.vendor.trim() || part.vendor,
+                  cost: d.cost.trim() || (part.priceCents !== null ? centsToInput(part.priceCents) : ""),
+                }))} />
             </div>
             <div>
               <label>Part number</label>
@@ -525,7 +536,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         // Kit contents are priced at nothing on purpose - the kit carries the
         // money. Counting them here would read "1 of 4 priced" on a kit that
         // is fully priced, which looks like missing data rather than design.
-        const billable = parts.filter((p) => !p.parentPartId);
+        // Suggestions are not money either: nobody agreed to buy them, and a
+        // total that includes them reads as spend that never happened.
+        const billable = parts.filter((p) => !p.parentPartId && p.status !== "Suggested");
         const priced = billable.filter((p) => !isNaN(money(p.cost)));
         if (!priced.length) return null;
         const total = priced.reduce((sum, p) => sum + money(p.cost), 0);

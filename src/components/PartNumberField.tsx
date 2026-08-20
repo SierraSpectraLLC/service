@@ -47,7 +47,7 @@ export const forgetCatalog = () => { cache = null; };
  */
 export default function PartNumberField({
   value, onChange, onPick, placeholder = "Part number", className = "mono",
-  disabled = false, ariaLabel = "Part number", style, autoFocus = false,
+  disabled = false, ariaLabel = "Part number", style, autoFocus = false, insert = "number",
 }: {
   value: string;
   onChange: (partNumber: string) => void;
@@ -59,6 +59,13 @@ export default function PartNumberField({
   ariaLabel?: string;
   style?: React.CSSProperties;
   autoFocus?: boolean;
+  /**
+   * Which half of the catalog row this field holds. The book answers to a
+   * name as readily as to a number ("uv bulb" finds the bulb), so a NAME
+   * field deserves the same dropdown - it just inserts the name on pick and
+   * lets onPick carry the number to its own field.
+   */
+  insert?: "number" | "name";
 }) {
   const [parts, setParts] = useState<LookupPart[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -84,7 +91,7 @@ export default function PartNumberField({
   const worth = hits.filter((h) => h.partNumber.toLowerCase() !== value.trim().toLowerCase() || h.wasQuoted);
 
   const choose = (h: PartSuggestion<LookupPart>) => {
-    onChange(h.partNumber);
+    onChange(insert === "name" ? h.entry.name || h.partNumber : h.partNumber);
     onPick?.(h.entry);
     setOpen(false);
   };
