@@ -88,6 +88,7 @@ import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
+import { canDeleteNote, canEditNote, isAuthor } from "@/lib/notes";
 import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
@@ -2227,7 +2228,7 @@ export async function addWorkOrderNote(workOrderId: number, text: string): Promi
   const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
   if (!wo) return { error: "Not found" };
   await assertWorkEditable(u, wo);
-  await db.insert(workOrderNotes).values({ workOrderId, author: u.name, text: body });
+  await db.insert(workOrderNotes).values({ workOrderId, author: u.name, authorEmail: u.email.toLowerCase(), text: body });
   await audit({
     actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId, entityType: "wo_note", entityId: workOrderId,
     action: `commented on ${wo.number}: "${body}"`,
@@ -5681,6 +5682,59 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
     });
   }
   revWo(wo);
+  return {};
+}
+
+/** The actor as lib/notes wants them. isHouse decides moderation, not editing. */
+const noteActor = (u: SessionUser) => ({ email: u.email, name: u.name, isHouse: isHouse(u.role) });
+
+/**
+ * Fix a comment you posted. Yours alone - see lib/notes for why the house is
+ * deliberately not given this. The old text goes to the audit log and the row
+ * is stamped edited, so a client-visible sentence never changes in silence.
+ */
+export async function updateWorkOrderNote(noteId: number, text: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const body = text.trim();
+  if (!body) return { error: "Say something, or delete it instead." };
+  const [n] = await db.select().from(workOrderNotes).where(eq(workOrderNotes.id, noteId));
+  if (!n) return { error: "Not found" };
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, n.workOrderId));
+  if (!wo) return { error: "Not found" };
+  await assertWorkEditable(u, wo);
+  if (!canEditNote(n, noteActor(u))) return { error: "Only whoever wrote a comment can change it." };
+  if (n.text === body) return {};
+  await db.update(workOrderNotes).set({ text: body, editedAt: new Date() }).where(eq(workOrderNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "wo_note", entityId: noteId,
+    action: `edited their comment on ${wo.number}`, field: "text", oldValue: n.text, newValue: body,
+  });
+  revalidatePath(`/work/${wo.id}`);
+  return {};
+}
+
+/**
+ * Withdraw a comment - your own, or, for the house, anyone's on a record it is
+ * accountable for. The text survives in the audit log either way: the point is
+ * that it stops standing on the job, not that it never happened.
+ */
+export async function deleteWorkOrderNote(noteId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [n] = await db.select().from(workOrderNotes).where(eq(workOrderNotes.id, noteId));
+  if (!n) return {};
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, n.workOrderId));
+  if (!wo) return { error: "Not found" };
+  await assertWorkEditable(u, wo);
+  if (!canDeleteNote(n, noteActor(u))) return { error: "That comment isn't yours to remove." };
+  await db.delete(workOrderNotes).where(eq(workOrderNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "wo_note", entityId: noteId,
+    action: `deleted ${isAuthor(n, noteActor(u)) ? "their" : `${n.author}'s`} comment on ${wo.number}`,
+    field: "text", oldValue: n.text,
+  });
+  revalidatePath(`/work/${wo.id}`);
   return {};
 }
 

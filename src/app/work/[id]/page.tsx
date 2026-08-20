@@ -266,7 +266,11 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       </div>
 
       <WorkOrderNotes workOrderId={wo.id} canPost={canEdit}
-        notes={noteRows.map((n) => ({ id: n.id, author: n.author, text: n.text, createdAt: n.createdAt.toISOString() }))} />
+        me={{ email: user.email, name: user.name, isHouse: staff }}
+        notes={noteRows.map((n) => ({
+          id: n.id, author: n.author, authorEmail: n.authorEmail, text: n.text,
+          createdAt: n.createdAt.toISOString(), editedAt: n.editedAt?.toISOString() ?? null,
+        }))} />
 
       <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)}
         systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}

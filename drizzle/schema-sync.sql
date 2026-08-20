@@ -2592,3 +2592,8 @@ DO $$ BEGIN
       FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Who wrote a work-order comment, and whether it has been edited since.
+-- Identity by email because that is what decides who may change it.
+ALTER TABLE "work_order_notes" ADD COLUMN IF NOT EXISTS "author_email" text NOT NULL DEFAULT '';
+ALTER TABLE "work_order_notes" ADD COLUMN IF NOT EXISTS "edited_at" timestamp;

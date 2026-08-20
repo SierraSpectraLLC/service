@@ -704,7 +704,16 @@ export const workOrderNotes = pgTable("work_order_notes", {
   id: serial("id").primaryKey(),
   workOrderId: integer("work_order_id").notNull().references((): AnyPgColumn => workOrders.id, { onDelete: "cascade" }),
   author: text("author").notNull(),
+  /**
+   * Who wrote it, by the one identifier that cannot be two people - the name
+   * is for reading. This decides who may edit it: a thread a client's own
+   * editors post in must not let one company rewrite another's words.
+   * Blank on rows written before this column existed; see lib/notes.
+   */
+  authorEmail: text("author_email").notNull().default(""),
   text: text("text").notNull(),
+  /** Set the first time it is changed, so a client-visible edit is never silent. */
+  editedAt: timestamp("edited_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("wo_notes_wo_idx").on(t.workOrderId)]);
 
