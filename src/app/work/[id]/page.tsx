@@ -4,17 +4,17 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, parts, poLines,
-  purchaseOrders, taskNotes, tasks, timeEntries, workOrders,
+  purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { assetAccess, assertSystemVisible, canEditSystem, isHouse, readTenant } from "@/lib/tenancy";
+import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, readTenant } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { visitFlag } from "@/lib/entitlementFlags";
+import { canSeeCosts, redactParts } from "@/lib/redact";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
 import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
-import { canSeeCosts } from "@/lib/redact";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { systemLabel } from "@/lib/systemLabel";
@@ -26,6 +26,12 @@ import AttachmentsPanel from "@/components/AttachmentsPanel";
 import HoursPanel from "@/components/HoursPanel";
 import TasksPanel from "@/components/TasksPanel";
 import WorkOrderControls from "@/components/WorkOrderControls";
+import WorkOrderNotes from "@/components/WorkOrderNotes";
+import PartsPanel from "@/components/PartsPanel";
+import { procedures } from "@/db/schema";
+import { coversSystem } from "@/lib/procedureRole";
+import { scopeMatches } from "@/lib/checkout";
+import { parseChecklist } from "@/lib/checklist";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 
 export const dynamic = "force-dynamic";
@@ -83,7 +89,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await visitFlag(wo.orgId, wo.instrumentId).catch(() => "")
     : "";
 
-  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows] = await Promise.all([
+  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.workOrderId, woId))
       .orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(timeEntries).where(eq(timeEntries.workOrderId, woId))
@@ -95,6 +101,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     getBrand(),
     wo.instrumentId === null ? Promise.resolve([]) : db.select().from(assets)
       .where(eq(assets.instrumentId, wo.instrumentId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
+    db.select().from(workOrderNotes).where(eq(workOrderNotes.workOrderId, woId))
+      .orderBy(asc(workOrderNotes.createdAt), asc(workOrderNotes.id)),
+    db.select().from(parts).where(eq(parts.workOrderId, woId))
+      .orderBy(asc(parts.id)),
   ]);
 
   const taskIds = taskRows.map((t) => t.id);
@@ -163,6 +173,33 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     workOrderId: wo.id,
   };
   const canAdd = canEdit && woAcceptsWork(wo.state);
+  // Catalog procedures that apply to whatever this job is on, offered as
+  // starting points for a task. Same coverage rules the PM generator uses:
+  // system procedures scoped by category, module procedures by unit kind and
+  // model - so "Leak test" appears on an LC job and not on a TOC's.
+  const procRows = canAdd
+    ? await db.select().from(procedures).where(forTenant(procedures.tenantOrgId, readTenant(user)))
+    : [];
+  const procedureChoices = procRows
+    .filter((pr) => {
+      if (inst) {
+        if (pr.assetType === "system") return coversSystem(pr.categoryScope, inst.category);
+        return unitRows.some((a) => a.kind === pr.assetType
+          && (pr.modelScope.length === 0 || scopeMatches(pr.modelScope, a.model)));
+      }
+      return asset !== undefined && pr.assetType === asset!.kind
+        && (pr.modelScope.length === 0 || scopeMatches(pr.modelScope, asset!.model));
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((pr) => {
+      const steps = parseChecklist(pr.checklist).filter((l) => !l.heading).length;
+      const brings = [
+        steps ? `brings a ${steps}-step checklist` : "",
+        pr.kind === "test" ? `${pr.resultType === "pass_fail" ? "pass/fail" : pr.resultType} result required` : "",
+      ].filter(Boolean).join(" · ");
+      return { id: pr.id, title: pr.name, body: pr.notes, brings };
+    });
+
   // Files alone stay writable on a settled order, house staff only: the
   // signed report arrives weeks after the job is filed, and reopening a
   // closed job to carry one PDF pollutes its state history. The server
@@ -226,9 +263,26 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         />
       </div>
 
+      <WorkOrderNotes workOrderId={wo.id} canPost={canEdit}
+        notes={noteRows.map((n) => ({ id: n.id, author: n.author, text: n.text, createdAt: n.createdAt.toISOString() }))} />
+
       <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)}
         systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
-        today={today} canEdit={canAdd} isStaff={staff} copyTargets={[]} />
+        today={today} canEdit={canAdd} isStaff={staff} copyTargets={[]}
+        procedureChoices={procedureChoices} />
+
+      {/* The job's own parts list - what this repair looks like needing, and
+          then what it took. Rows carry the work order, so they read here and
+          on the system's full parts panel alike; "potential" is just status
+          Needed, the same word the rest of the shop already uses. */}
+      {(canAdd || woPartRows.length > 0) && (
+        <PartsPanel target={target}
+          parts={redactParts(woPartRows, user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)
+            .map((pp) => ({ ...pp, createdAt: pp.createdAt.toISOString() }))}
+          systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
+          canEdit={canAdd} isStaff={staff}
+          showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
+      )}
 
       <HoursPanel target={target}
         entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
