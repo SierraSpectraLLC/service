@@ -40,16 +40,16 @@ describe("handed off is not blocked", () => {
     queueOrgId: 5, queueReason: "Caffeine Checkout passed", queueSince: days(7), createdAt: days(90),
   };
 
-  it("a system in another org's queue is a handoff: holder, reason, age", () => {
-    expect(handoffFor(queued, ctx().orgName, now)).toEqual({
-      systemId: 1, externalId: "P-001", holder: "LabZen",
+  it("a system in another org's queue is a handoff: name, holder, reason, age", () => {
+    expect(handoffFor(queued, "Shimadzu LC-2040C Plus", ctx().orgName, now)).toEqual({
+      systemId: 1, externalId: "P-001", label: "Shimadzu LC-2040C Plus", holder: "LabZen",
       reason: "Caffeine Checkout passed", days: 7,
     });
   });
 
   it("no queueSince falls back to createdAt; our own queue is no handoff", () => {
-    expect(handoffFor({ ...queued, queueSince: null }, ctx().orgName, now)?.days).toBe(90);
-    expect(handoffFor({ ...queued, queueOrgId: null }, ctx().orgName, now)).toBeNull();
+    expect(handoffFor({ ...queued, queueSince: null }, "", ctx().orgName, now)?.days).toBe(90);
+    expect(handoffFor({ ...queued, queueOrgId: null }, "", ctx().orgName, now)).toBeNull();
   });
 
   it("a handed-off system chases nothing, even blocked with parts in limbo", () => {
@@ -129,11 +129,12 @@ describe("the chase list", () => {
   const ours = (stages: string[] = ["Refurbishment"], lead = "Joe") =>
     ({ id: 1, externalId: "T-003", stages, queueOrgId: null, lead });
 
-  it("ordered with no tracking is chased daily, naming the vendor", () => {
+  it("ordered with no tracking is chased daily, naming the vendor - and the partner may see it", () => {
     const [f] = followUpsForSystem(ours(), [
       { name: "H-ESI Needle Seal", status: "Ordered", tracking: "", vendor: "Thermo" },
     ], 0);
-    expect(f.text).toBe("No tracking yet for H-ESI Needle Seal - chase Thermo until we have a number");
+    expect(f.text).toBe("No tracking yet for H-ESI Needle Seal - chasing Thermo until we have a number");
+    expect(f.internalOnly).toBeUndefined();
   });
 
   it("tracking in hand ends the chase; no vendor recorded still names somebody to call", () => {
@@ -143,19 +144,20 @@ describe("the chase list", () => {
     const [f] = followUpsForSystem(ours(), [
       { name: "Seal", status: "In transit", tracking: "", vendor: "" },
     ], 0);
-    expect(f.text).toMatch(/chase the supplier/);
+    expect(f.text).toMatch(/chasing the supplier/);
   });
 
   it("a backorder is chased for a firm ETA", () => {
     const [f] = followUpsForSystem(ours(), [
       { name: "Filament", status: "Backordered", tracking: "", vendor: "Agilent" },
     ], 0);
-    expect(f.text).toBe("Filament backordered - chase Agilent for a firm ETA");
+    expect(f.text).toBe("Filament backordered - chasing Agilent for a firm ETA");
   });
 
-  it("blocked with no recorded reason pesters the lead for one; a blocked task IS the reason", () => {
+  it("blocked with no recorded reason pesters the lead for one - internally, never the partner", () => {
     const [f] = followUpsForSystem(ours(["Waiting / blocked"]), [], 0);
     expect(f.text).toBe("Blocked with no recorded reason - ask Joe what's blocking and what clears it");
+    expect(f.internalOnly).toBe(true);
     expect(followUpsForSystem(ours(["Waiting / blocked"]), [], 1)).toEqual([]);
     const [anon] = followUpsForSystem(ours(["Waiting / blocked"], ""), [], 0);
     expect(anon.text).toMatch(/ask the team/);
@@ -183,7 +185,7 @@ describe("grouping and totals", () => {
     const section = {
       orgId: 5, name: "LabZen", board: [{} as never, {} as never], pending: mixed,
       followUps: [{ systemId: 1, externalId: "T-003", text: "chase" }],
-      handoffs: [{ systemId: 2, externalId: "P-001", holder: "LabZen", reason: "", days: 3 }],
+      handoffs: [{ systemId: 2, externalId: "P-001", label: "LC-2040C", holder: "LabZen", reason: "", days: 3 }],
       gas: [{ externalId: "T-003", gas: "Helium", status: "Low", note: "" }],
       work: [], activity: "",
     };
