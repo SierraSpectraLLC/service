@@ -33,7 +33,7 @@ const ctx = (over: Partial<PendingCtx> = {}): PendingCtx => ({
 
 const part = (over: Partial<PendingCtx["openParts"][number]> = {}) => ({
   name: "Rotor seal", status: "Needed", eta: "", tracking: "",
-  requestedOrgId: null, requestedAt: null, ...over,
+  requestedOrgId: null, requestedAt: null, poId: null, ...over,
 });
 
 describe("handed off is not blocked", () => {
@@ -101,8 +101,23 @@ describe("whose court a wait sits in", () => {
     expect(item).toMatchObject({ court: "partner", who: "LabZen", what: "Part to order: Turbo pump", days: 5 });
   });
 
-  it("a part we still need to order is ours", () => {
-    const [item] = pendingForSystem(sys(), ctx({ openParts: [part()] }));
+  // The default nobody had set: a part needed for a client's own instrument
+  // is bought with the client's money. Reading every unrequested part as ours
+  // told them their purchasing was our job.
+  it("an unrequested part on a partner's system is theirs to buy - their machine, their money", () => {
+    const [item] = pendingForSystem(sys(), ctx({ openParts: [part({ name: "AOC-20S Mounting Bracket" })] }));
+    expect(item).toMatchObject({
+      court: "partner", who: "LabZen", what: "Part to order: AOC-20S Mounting Bracket", days: null,
+    });
+  });
+
+  it("a part we put on one of our own purchase orders is ours, whosever system it is", () => {
+    const [item] = pendingForSystem(sys(), ctx({ openParts: [part({ poId: 42 })] }));
+    expect(item).toMatchObject({ court: "us", who: "Sierra Spectra", what: "Part needed: Rotor seal" });
+  });
+
+  it("on the house's own work every part is ours, purchase order or not", () => {
+    const [item] = pendingForSystem(sys(), ctx({ sectionOrgId: null, openParts: [part()] }));
     expect(item).toMatchObject({ court: "us", what: "Part needed: Rotor seal" });
   });
 
@@ -113,22 +128,22 @@ describe("whose court a wait sits in", () => {
     expect(moving).toMatchObject({ court: "supplier", what: "Part on order: Ion gauge - ETA Aug 28" });
   });
 
-  it("no tracking is a plain stated fact in the court of whoever ordered - no invented vendor-chasing", () => {
-    // We ordered it (nobody was asked): ours to produce a number.
-    const ours = pendingForSystem(sys(), ctx({
+  it("no tracking is a plain stated fact in the buyer's court - no invented vendor-chasing", () => {
+    // Their instrument, no purchase order of ours: their order, their number.
+    const theirs = pendingForSystem(sys(), ctx({
       openParts: [part({ name: "H-ESI Needle Seal", status: "Ordered", tracking: "" })],
     }))[0];
-    expect(ours).toMatchObject({ court: "us", what: "No tracking yet for H-ESI Needle Seal" });
-    // The partner ordered it (we asked them): the tracking is theirs to share.
-    const theirs = pendingForSystem(sys(), ctx({
-      openParts: [part({ name: "H-ESI Needle Seal", status: "Ordered", tracking: "", requestedOrgId: 5, requestedAt: days(3) })],
+    expect(theirs).toMatchObject({ court: "partner", who: "LabZen", what: "No tracking yet for H-ESI Needle Seal" });
+    // We raised the purchase order, so the number is ours to produce.
+    const ours = pendingForSystem(sys(), ctx({
+      openParts: [part({ name: "H-ESI Needle Seal", status: "Ordered", tracking: "", poId: 42 })],
     }))[0];
-    expect(theirs).toMatchObject({ court: "partner", who: "LabZen", what: "No tracking yet for H-ESI Needle Seal", days: 3 });
+    expect(ours).toMatchObject({ court: "us", who: "Sierra Spectra" });
   });
 
-  it("a backorder with no date reads the same way, courted by the orderer", () => {
+  it("a backorder with no date reads the same way, courted by the buyer", () => {
     const ours = pendingForSystem(sys(), ctx({
-      openParts: [part({ name: "Filament", status: "Backordered" })],
+      sectionOrgId: null, openParts: [part({ name: "Filament", status: "Backordered" })],
     }))[0];
     expect(ours).toMatchObject({ court: "us", what: "Backordered: Filament - no firm ETA yet" });
     const theirs = pendingForSystem(sys(), ctx({

@@ -88,6 +88,8 @@ export type PendingCtx = {
   openParts: {
     name: string; status: string; eta: string; tracking: string;
     requestedOrgId: number | null; requestedAt: Date | null;
+    /** Set when the part sits on one of OUR purchase orders. */
+    poId: number | null;
   }[];
   now: Date;
 };
@@ -117,10 +119,16 @@ export const handoffFor = (
  * Parts read literally, because the record can't know who is on the phone to
  * whom: a part moving with tracking rides with the supplier; one stuck
  * without tracking (or backordered with no date) is a plain stated fact -
- * "No tracking yet for X" - in the court of whoever placed the order. A part
- * requested of the partner was ordered by them, so the tracking is theirs to
- * provide; everything else is ours. Repeating the line each morning IS the
- * follow-up.
+ * "No tracking yet for X" - in the court of whoever is buying it. Repeating
+ * the line each morning IS the follow-up.
+ *
+ * Who that is, in order of how much the record actually knows: a formal
+ * request names who was asked and when; failing that, a part on one of our
+ * purchase orders is ours, because we went and bought it; failing that, in a
+ * partner engagement it belongs to the owner of the instrument - their
+ * machine, their money, their vendor account - and only the house's own work
+ * falls to us by default. Before this, an unrequested part read as ours on
+ * every engagement, which told a client their own purchasing was our job.
  */
 export function pendingForSystem(
   i: { id: number; externalId: string; stages: string[] },
@@ -140,14 +148,14 @@ export function pendingForSystem(
       `Work order${w.number ? ` ${w.number}` : ""} waiting: ${w.title}`);
   }
   for (const p of ctx.openParts) {
-    const theirOrder = p.requestedOrgId !== null;
-    const court: Court = theirOrder ? "partner" : "us";
-    const who = theirOrder ? ctx.orgName(p.requestedOrgId) : ctx.operatorName;
-    const asked = theirOrder && p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null;
-    if (p.status === "Needed" && theirOrder) {
-      add("partner", who, `Part to order: ${p.name}`, asked);
-    } else if (p.status === "Needed") {
-      add("us", who, `Part needed: ${p.name}`);
+    const buyer = p.requestedOrgId ?? (p.poId === null ? ctx.sectionOrgId : null);
+    const theirs = buyer !== null;
+    const court: Court = theirs ? "partner" : "us";
+    const who = theirs ? ctx.orgName(buyer) : ctx.operatorName;
+    // Only a formal request carries a date, so only it can be aged.
+    const asked = p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null;
+    if (p.status === "Needed") {
+      add(court, who, theirs ? `Part to order: ${p.name}` : `Part needed: ${p.name}`, asked);
     } else if ((p.status === "Ordered" || p.status === "In transit") && p.tracking) {
       add("supplier", "supplier",
         `Part ${p.status === "Ordered" ? "on order" : "in transit"}: ${p.name}${p.eta ? ` - ETA ${p.eta}` : ""}`);
@@ -308,7 +316,7 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
               .map((w) => ({ number: w.number, title: w.title, orgId: w.orgId })),
             openParts: openParts.map((p) => ({
               name: p.name, status: p.status, eta: p.eta, tracking: p.tracking,
-              requestedOrgId: p.requestedOrgId, requestedAt: p.requestedAt,
+              requestedOrgId: p.requestedOrgId, requestedAt: p.requestedAt, poId: p.poId,
             })),
           }));
           section.followUps.push(...followUpsForSystem(i, blockedTasks.length));
