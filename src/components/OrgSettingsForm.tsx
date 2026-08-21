@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  setOrgAppearance, updateEodRecipients, addClientAccess, removeClientAccess,
+  setOrgAppearance, updateEodRecipients, updateDigestRecipients, addClientAccess, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale,
 } from "@/app/actions";
@@ -24,16 +24,18 @@ type Entry = { id: number; entry: string; canEdit: boolean; canSeeAgreements: bo
  * report recipients, sheet sync, removal) rather than hiding them behind a
  * second page that would drift from this one.
  */
-export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync, showRemote = false }: {
+export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
-    eodRecipients: string; systems: number; isOperator: boolean; isSheetOrg: boolean;
+    eodRecipients: string; digestRecipients: string; systems: number; isOperator: boolean; isSheetOrg: boolean;
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
     resaleEnabled: boolean;
   };
   /** Whether the instance has the remote-support module on at all. */
   showRemote?: boolean;
+  /** Whether the instance has the daily-digest module on at all. */
+  showDigest?: boolean;
   people: Entry[];
   platformName: string;
   isOwner: boolean;
@@ -96,6 +98,17 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     startTransition(async () => {
       const res = await updateEodRecipients(org.id, recipients);
       setRecipientsMsg(res?.error ?? "Saved ✓");
+    });
+  };
+
+  // Digest recipients - the partner edition of the daily digest, opt-in.
+  const [digestTo, setDigestTo] = useState(org.digestRecipients);
+  const [digestMsg, setDigestMsg] = useState("");
+  const saveDigestTo = () => {
+    setDigestMsg("");
+    startTransition(async () => {
+      const res = await updateDigestRecipients(org.id, digestTo);
+      setDigestMsg(res?.error ?? "Saved ✓");
     });
   };
 
@@ -249,6 +262,26 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           </div>
           {recipientsMsg && (
             <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
+          )}
+        </div>
+      )}
+
+      {isOwner && showDigest && (
+        <div className="card">
+          <div className="card-title">Daily digest</div>
+          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            Who at {org.name} receives their edition of the morning digest - their systems&apos;
+            status, yesterday&apos;s work, and what&apos;s waiting on whom. Comma-separated;
+            empty means their digest stays internal.
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <input className="mono" value={digestTo}
+              onChange={(e) => { setDigestTo(e.target.value); setDigestMsg(""); }}
+              placeholder="nobody - internal only" style={{ flex: "1 1 220px", fontSize: 12 }} />
+            <button className="btn sm" onClick={saveDigestTo} disabled={pending || digestTo === org.digestRecipients}>Save</button>
+          </div>
+          {digestMsg && (
+            <div style={{ fontSize: 12, marginTop: 6, color: digestMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{digestMsg}</div>
           )}
         </div>
       )}
