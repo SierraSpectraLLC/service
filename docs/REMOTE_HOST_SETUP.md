@@ -528,12 +528,18 @@ import json, pathlib
 p = pathlib.Path("/opt/meshcentral/meshcentral-data/config.json")
 c = json.loads(p.read_text())
 s = c["settings"]
-s["allowedFramingOrigins"] = ["https://service.sierraspectra.com"]   # the portal, and nothing else
+s["allowedFramingOrigins"] = ["https://app.ridgelinefield.com"]      # the portal, and nothing else
 s["sessionSameSite"] = "none"                                        # or the session cookie won't be sent
 p.write_text(json.dumps(c, indent=2) + chr(10))
 print("framing allowed for", s["allowedFramingOrigins"])
 ENDFRAME
 ```
+
+This value is the portal's CURRENT origin, exactly. **Moving the portal to a
+new domain breaks remote support until this is edited on the relay host and
+MeshCentral is restarted** - the console will refuse to embed and sessions come
+up blank, with nothing in the portal's own logs to say why. Change it in the
+same sitting as the DNS cutover, not afterwards.
 
 `allowedFramingOrigins` names the portal specifically, which emits a
 `frame-ancestors` policy listing it and drops the `X-Frame-Options` header.

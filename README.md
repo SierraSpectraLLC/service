@@ -1,4 +1,4 @@
-# Sierra Spectra - Instrument Management
+# Ridgeline - Instrument Management
 
 Replaces the client's Google Sheet with a real system: instrument tracking with
 multi-stage tags, rich tasks (checklists, threaded notes, assignment), parts
@@ -8,6 +8,23 @@ against the old Google Sheet.
 
 Stack: Next.js (App Router) · Neon Postgres · Drizzle ORM · Auth.js (magic
 links via Resend) · Vercel Blob · Vercel Cron.
+
+## Two names, and they are not the same name
+
+**Ridgeline** is the PLATFORM - the product, its wordmark, its page titles, the
+domain it is served from. It lives in `app_settings.platform_name` and is
+edited in Settings > Configuration; no deploy renames it, and nothing in the
+code hardcodes it (`lib/brand.DEFAULT_BRAND` is only the fallback for an
+instance that has never been named).
+
+**Sierra Spectra** is an OPERATOR - a service company running a workspace on
+Ridgeline. Operators are ordinary `orgs` rows, and the operator is who *signs*:
+service reports, sign-off packets, QR labels and both editions of the daily
+digest carry the operator's name and logo, never the platform's
+(`lib/brand.brandForTenant`). That is deliberate - a report about another
+operator's work carrying the platform's name would be a false statement about
+who did the work - and it means renaming the platform does not, and should not,
+change what a client sees at the top of their report.
 
 ## Setup
 
@@ -75,7 +92,7 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   blocked before this was required, by lead name, every morning until somebody
   writes one.
 - **Digest sender** (optional): set `DIGEST_EMAIL_FROM` to give the digest its
-  own address (e.g. `Sierra Spectra <dailydigest@service.sierraspectra.com>`)
+  own address (e.g. `Ridgeline <dailydigest@mail.ridgelinefield.com>`)
   instead of sharing `EMAIL_FROM` with sign-in links. The domain must be
   verified in Resend, and a subdomain is verified in its own right - which is
   the reason to use one: it carries its own sending reputation, so a bounce on

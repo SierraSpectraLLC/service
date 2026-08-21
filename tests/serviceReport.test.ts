@@ -65,6 +65,10 @@ function visit(over: Partial<ServiceReport> = {}): ServiceReport {
     signatures: {
       providerName: "Joe Harris", customerName: "Harpreet Saini",
       customerOrg: "Modesto Irrigation District",
+      // The issuing company is DATA. It used to be a string inside the
+      // generator, which would have printed one operator's name on another
+      // operator's report - and survived a rebrand to say the wrong thing.
+      providerOrg: "Sierra Spectra",
     },
     contact: "Sierra Spectra | +1(833) 574-3772 | sales@sierraspectra.com",
     ...over,
@@ -108,6 +112,27 @@ describe("the report keeps its shape", () => {
     expect(two).toContain("Signatures acknowledge");
     expect(two).toContain("Sierra Spectra Representative");
     expect(two).toContain("Modesto Irrigation District Rep");
+  });
+
+  it("names the issuing company from the report, never from the generator", async () => {
+    const two = pageText(await load(visit({
+      signatures: {
+        providerName: "Joe Harris", customerName: "Harpreet Saini",
+        customerOrg: "Modesto Irrigation District", providerOrg: "Acme Engineering",
+      },
+    })), 1);
+    expect(two).toContain("Acme Engineering Representative");
+    expect(two).not.toContain("Sierra Spectra Representative");
+  });
+
+  it("falls back to a plain role rather than somebody else's name", async () => {
+    const two = pageText(await load(visit({
+      signatures: {
+        providerName: "Joe Harris", customerName: "Harpreet Saini",
+        customerOrg: "Modesto Irrigation District",
+      },
+    })), 1);
+    expect(two).toContain("Service Representative");
   });
 
   it("prints the engineer's notes with their headings and results intact", async () => {

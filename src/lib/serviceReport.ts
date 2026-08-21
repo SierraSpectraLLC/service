@@ -27,7 +27,17 @@ const HEAD = rgb(0.937, 0.937, 0.937);   // table column headings
 const BOX = rgb(0.98, 0.98, 0.98);
 const MONEY_GREEN = rgb(0.1, 0.5, 0.2);
 
-/** The spectrum mark, drawn rather than embedded so no image has to travel with the code. */
+/**
+ * The spectrum mark, drawn rather than embedded so no image has to travel with
+ * the code.
+ *
+ * NOTE: this is ONE service company's logo. Everything else on this page is
+ * data, so a report can be issued by whichever operator did the work; this is
+ * not. Before this generator is wired to a page on a multi-operator instance,
+ * it has to come from that operator's uploaded logo (orgs.logo_url, already on
+ * brandForTenant) - printing one company's mark on another's service report is
+ * a false statement about who did the work.
+ */
 const MARK = [
   { from: [0, 6], to: [14, 30], color: rgb(0.91, 0.30, 0.24) },
   { from: [14, 30], to: [28, 16], color: rgb(0.95, 0.61, 0.24) },
@@ -76,6 +86,8 @@ export type ServiceReport = {
   adjustmentCents: number;
   signatures: {
     providerName: string; customerName: string; customerOrg: string;
+    /** The service company issuing the report - the operator, not the platform. */
+    providerOrg?: string;
     /** PNG bytes for a captured signature, when there is one. */
     providerImage?: Uint8Array; customerImage?: Uint8Array;
   };
@@ -179,7 +191,10 @@ function parties(page: PDFPage, F: Fonts, r: ServiceReport, y: number): number {
       thickness: 3.4, color: seg.color,
     });
   }
-  page.drawText("S I E R R A   •   S P E C T R A", {
+  // The wordmark is whoever is issuing the report, letter-spaced the way the
+  // original prints it - not a company name baked into the generator.
+  const wordmark = r.provider.name.toUpperCase().split("").join(" ");
+  page.drawText(wordmark, {
     x: markX - 4, y: markY - 13, size: 6.5, font: F.bold, color: rgb(0.25, 0.25, 0.25),
   });
 
@@ -427,7 +442,7 @@ function balancesAndTotals(page: PDFPage, F: Fonts, r: ServiceReport, y: number)
 
 async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceReport, y: number) {
   const blocks = [
-    { x: M + 30, w: 200, role: `${r.signatures.customerOrg ? "Sierra Spectra" : "Service"} Representative`, name: r.signatures.providerName, img: r.signatures.providerImage },
+    { x: M + 30, w: 200, role: `${r.signatures.providerOrg?.trim() || "Service"} Representative`, name: r.signatures.providerName, img: r.signatures.providerImage },
     { x: PAGE.w / 2 + 24, w: 200, role: `${r.signatures.customerOrg} Rep`, name: r.signatures.customerName, img: r.signatures.customerImage },
   ];
   const lineY = y - 44;

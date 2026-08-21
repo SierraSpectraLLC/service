@@ -49,7 +49,7 @@ export function passwordProblem(password: string, email = ""): string | null {
   if (p.trim().length < MIN_PASSWORD) return "That's mostly spaces.";
   const local = email.split("@")[0]?.toLowerCase() ?? "";
   if (local.length >= 4 && p.toLowerCase().includes(local)) return "Don't use your email address in it.";
-  if (/^(?:password|baseline|sierra|instrument)/i.test(p)) return "Pick something less guessable.";
+  if (/^(?:password|baseline|sierra|ridgeline|instrument)/i.test(p)) return "Pick something less guessable.";
   return null;
 }
 
