@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pmActive, pmGroups, pmMonthLabel } from "@/lib/pmGroups";
+import { pmActive, pmAssetGroups, pmGroups, pmMonthLabel } from "@/lib/pmGroups";
 
 const TODAY = "2026-08-12";
 const s = (id: number, nextDue: string, over: { paused?: boolean; openTaskId?: number | null } = {}) =>
@@ -79,5 +79,39 @@ describe("month labels", () => {
     // A Date would shift the month across a timezone at midnight on the 1st.
     expect(pmMonthLabel("2026-01-01")).toBe("January 2026");
     expect(pmMonthLabel("2026-12-31")).toBe("December 2026");
+  });
+});
+
+describe("grouping by asset", () => {
+  const a = (id: number, nextDue: string, assetId: number | null, onAsset = "", over = {}) =>
+    ({ ...s(id, nextDue, over), assetId, onAsset });
+
+  it("system work first, then each unit in the order it appears", () => {
+    const g = pmAssetGroups([
+      a(1, "2026-09-01", 7, "Pump — LC-40D"),
+      a(2, "2026-09-01", null),
+      a(3, "2026-09-01", 9, "Mass spec — 6495C"),
+      a(4, "2026-10-01", 7, "Pump — LC-40D"),
+    ], TODAY);
+    expect(g.map((x) => [x.key, x.label, x.rows.map((r) => r.id)])).toEqual([
+      ["sys", "System", [2]],
+      ["a7", "Pump — LC-40D", [1, 4]],
+      ["a9", "Mass spec — 6495C", [3]],
+    ]);
+  });
+
+  it("a folded header still answers both questions: how much is owed, and when next", () => {
+    const [g] = pmAssetGroups([
+      a(1, "2026-07-01", 7, "Pump"),               // overdue
+      a(2, "2026-12-01", 7, "Pump"),
+      a(3, "2026-09-01", 7, "Pump", { paused: true }), // paused: not owed, not "next"
+    ], TODAY);
+    expect(g.due).toBe(1);
+    expect(g.nextDue).toBe("2026-07-01");
+  });
+
+  it("a unit with no label still gets a group, never a blank header", () => {
+    const [g] = pmAssetGroups([a(1, "2026-09-01", 7)], TODAY);
+    expect(g.label).toBe("Unnamed unit");
   });
 });

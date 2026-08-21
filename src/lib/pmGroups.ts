@@ -78,3 +78,59 @@ export function pmGroups<T extends PmLike>(rows: T[], today: string): PmGrouped<
     allClear: active.length === 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The asset dimension.
+//
+// A stacked system carries upkeep on every module - the pump has its seals,
+// the autosampler its needle, the MS its ion source - and when a visit brings
+// them all due at once, forty ACTIVE rows are as unreadable as forty future
+// ones. The month fold cannot help there; the asset can. Rows group under the
+// unit they belong to, the system's own work first, and each group folds to a
+// header that keeps the two answers visible: how much is owed here, and when
+// the next thing is. Collapsing hides rows, never the signal.
+// ---------------------------------------------------------------------------
+
+export type PmAssetLike = PmLike & {
+  /** Which unit the schedule lives on. Null/absent = the system itself. */
+  assetId?: number | null;
+  /** What to call that unit. */
+  onAsset?: string;
+};
+
+export type PmAssetGroup<T> = {
+  /** "sys", or "a<id>". Stable, so a collapse survives a re-render. */
+  key: string;
+  /** "System" for the system's own work; the unit's label otherwise. */
+  label: string;
+  rows: T[];
+  /** Owed now (pmActive) - what the folded header must still say. */
+  due: number;
+  /** Soonest unpaused due date in the group, for the header when nothing is owed. */
+  nextDue: string | null;
+};
+
+/**
+ * Rows by the unit they belong to: the system's own schedules first, then each
+ * asset in the order it first appears. One group (or none) means the asset
+ * dimension has nothing to add - callers keep the flat list.
+ */
+export function pmAssetGroups<T extends PmAssetLike>(rows: T[], today: string): PmAssetGroup<T>[] {
+  const groups: PmAssetGroup<T>[] = [];
+  const byKey = new Map<string, PmAssetGroup<T>>();
+  for (const r of rows) {
+    const key = r.assetId != null ? `a${r.assetId}` : "sys";
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, label: r.assetId != null ? (r.onAsset || "Unnamed unit") : "System", rows: [], due: 0, nextDue: null };
+      byKey.set(key, g);
+      groups.push(g);
+    }
+    g.rows.push(r);
+    if (pmActive(r, today)) g.due++;
+    if (!r.paused && (g.nextDue === null || r.nextDue < g.nextDue)) g.nextDue = r.nextDue;
+  }
+  // The system's own work reads first, wherever its rows sat in the input.
+  groups.sort((a, b) => (a.key === "sys" ? -1 : b.key === "sys" ? 1 : 0));
+  return groups;
+}

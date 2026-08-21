@@ -615,6 +615,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
                   parts: schedulePartsOf(s),
                   onAsset: onAsset ? `${onAsset.kind} — ${onAsset.model || onAsset.serial || "?"}` : undefined,
+                  assetId: s.assetId,
                   openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
                 };
               })} />

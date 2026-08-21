@@ -10,7 +10,7 @@ import {
 import { addDays, cadenceLabel } from "@/lib/pm";
 import { postureIsDefault, type PmPosture } from "@/lib/pmPosture";
 import { partLabel, type ProcPart } from "@/lib/procedures";
-import { pmGroups } from "@/lib/pmGroups";
+import { pmAssetGroups, pmGroups } from "@/lib/pmGroups";
 import PartNumberField from "./PartNumberField";
 
 export type PmRow = {
@@ -20,6 +20,8 @@ export type PmRow = {
   parts: ProcPart[];
   /** Set when a schedule shown on a system page actually lives on one of its assets. */
   onAsset?: string;
+  /** The unit it lives on, for grouping. Null/absent = the system itself. */
+  assetId?: number | null;
   /** An open generated task is the schedule "in flight". */
   openTaskId: number | null;
 };
@@ -60,6 +62,16 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const [editing, setEditing] = useState<Record<number, { assignee: string; everyDays: string; nextDue: string; lastDone: string }>>({});
   const [error, setError] = useState("");
   const [showLater, setShowLater] = useState(false);
+  // The whole panel rolls up; a stacked system's upkeep is most of its page.
+  const [panelOpen, setPanelOpen] = useState(true);
+  /**
+   * Per-unit fold state. Nothing here until somebody clicks: the DEFAULT is
+   * derived - a unit with work owed starts open, a quiet one starts folded -
+   * so the page opens showing exactly the rows that need someone, and a
+   * click is remembered over the derivation from then on.
+   */
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+  const [groupLater, setGroupLater] = useState<Record<string, boolean>>({});
   const [aligning, setAligning] = useState(false);
   const [alignDraft, setAlignDraft] = useState<{ mode: "lastDone" | "visit"; date: string; fileRecord: boolean }>({ mode: "lastDone", date: today, fileRecord: false });
   // Per-schedule backfill: one past completion, filed as the Done task it
@@ -76,6 +88,13 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   const { active, months, paused, next, allClear } = pmGroups(schedules, today);
   const laterCount = months.reduce((n, m) => n + m.rows.length, 0) + paused.length;
   const advisory = posture?.effective === "advisory";
+  // The asset dimension: on a stacked system the pump, the autosampler and
+  // the MS each carry their own upkeep, and when a visit brings it all due at
+  // once the month fold can't help - forty ACTIVE rows are one flat wall.
+  // With two or more units the list groups under them; a single group means
+  // the dimension has nothing to add and the flat list stays.
+  const assetGroups = pmAssetGroups(schedules, today);
+  const grouped = assetGroups.length > 1;
 
   const submit = () => {
     if (!draft.title.trim()) return;
@@ -103,7 +122,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
    * Same row either way: what is folded is which rows are on screen, not how much
    * of them, so opening a month gives the full controls rather than a summary.
    */
-  const renderRow = (s: PmRow) => {
+  const renderRow = (s: PmRow, inGroup = false) => {
     const e = editing[s.id];
     const overdue = !s.paused && s.nextDue < today;
     const dueToday = !s.paused && s.nextDue === today;
@@ -133,7 +152,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             </span>
             )
           )}
-          {s.onAsset && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
+          {s.onAsset && !inGroup && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
           {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
           {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
           {canEdit && (
@@ -282,8 +301,30 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   return (
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-        <div className="card-title">Maintenance</div>
-        {canEdit && (
+        <button onClick={() => setPanelOpen((v) => !v)} aria-expanded={panelOpen}
+          style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+          <span aria-hidden style={{ fontSize: 11, color: "var(--mut)", width: 12 }}>{panelOpen ? "\u25BE" : "\u25B8"}</span>
+          <span className="card-title">Maintenance</span>
+        </button>
+        {/* Rolled up, the header keeps the two answers the panel exists for:
+            is anything owed, and when is the next thing. */}
+        {!panelOpen && schedules.length > 0 && (
+          <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            {active.length > 0 ? (
+              <span className="pill" style={advisory
+                ? { background: "#EEF1F5", color: "#475569" }
+                : { background: "#FBE9E9", color: "#A32D2D" }}>
+                {active.length} {advisory ? "cycled" : "due now"}
+              </span>
+            ) : next ? (
+              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>
+                {advisory ? `next cycle ${next.label}` : `next due ${next.label}`}
+              </span>
+            ) : null}
+            <span className="mut" style={{ fontSize: 11 }}>{schedules.length} schedule{schedules.length === 1 ? "" : "s"}</span>
+          </span>
+        )}
+        {canEdit && panelOpen && (
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
             {schedules.length > 0 && (
               <button className="btn sm" onClick={() => { setAligning((v) => !v); setError(""); }}>
@@ -296,6 +337,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           </span>
         )}
       </div>
+      {panelOpen && (<>
 
       {/* Every schedule here, anchored to one real date - because a new
           system's dates anchor to the day the record was made, and the PM
@@ -432,7 +474,70 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         </div>
       )}
 
-      {active.map(renderRow)}
+      {grouped ? (
+        /* Two or more units: the list reads as the stack does. Each unit folds
+           to a header that keeps its counts; a unit with work owed starts
+           open, a quiet one starts folded, and inside an open unit the month
+           fold still applies to what isn't due yet. */
+        assetGroups.map((g) => {
+          const isOpen = groupOpen[g.key] ?? g.due > 0;
+          const gg = pmGroups(g.rows, today);
+          const gLater = gg.months.reduce((n, m) => n + m.rows.length, 0) + gg.paused.length;
+          const wantLater = groupLater[g.key] ?? false;
+          return (
+            <div key={g.key} style={{ borderTop: "1px solid var(--line)" }}>
+              <button onClick={() => setGroupOpen((m) => ({ ...m, [g.key]: !isOpen }))} aria-expanded={isOpen}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", padding: "8px 0", cursor: "pointer", textAlign: "left", flexWrap: "wrap" }}>
+                <span aria-hidden style={{ fontSize: 10, color: "var(--mut)", width: 12 }}>{isOpen ? "\u25BE" : "\u25B8"}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{g.label}</span>
+                <span className="mut" style={{ fontSize: 11 }}>{g.rows.length}</span>
+                {g.due > 0 ? (
+                  <span className="pill" style={advisory
+                    ? { background: "#EEF1F5", color: "#475569" }
+                    : { background: "#FBE9E9", color: "#A32D2D" }}>
+                    {g.due} {advisory ? "cycled" : "due"}
+                  </span>
+                ) : g.nextDue ? (
+                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>
+                    {advisory ? "next cycle" : "next"} {mdy(g.nextDue)}
+                  </span>
+                ) : (
+                  <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
+                )}
+              </button>
+              {isOpen && (
+                <div style={{ paddingLeft: 20 }}>
+                  {gg.active.map((r) => renderRow(r, true))}
+                  {gLater > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+                      <span className="mut" style={{ fontSize: 12 }}>
+                        {gLater} {advisory ? "more as reference" : "not due yet"}
+                      </span>
+                      <button className="btn link" style={{ marginLeft: "auto", fontSize: 11 }}
+                        onClick={() => setGroupLater((m) => ({ ...m, [g.key]: !wantLater }))}>
+                        {wantLater ? "hide" : "show"}
+                      </button>
+                    </div>
+                  )}
+                  {wantLater && gg.months.map((m) => (
+                    <div key={m.key}>
+                      <div className="eyebrow" style={{ marginTop: 6 }}>{m.label}</div>
+                      {m.rows.map((r) => renderRow(r, true))}
+                    </div>
+                  ))}
+                  {wantLater && gg.paused.length > 0 && (
+                    <div>
+                      <div className="eyebrow" style={{ marginTop: 6 }}>Paused</div>
+                      {gg.paused.map((r) => renderRow(r, true))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })
+      ) : (<>
+      {active.map((r) => renderRow(r))}
 
       {/* The fold. One line when nothing is owed - which is what a system looks
           like most of the time - and the month it comes back around. */}
@@ -456,19 +561,21 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       {showLater && months.map((m) => (
         <div key={m.key}>
           <div className="eyebrow" style={{ marginTop: 6 }}>{m.label}</div>
-          {m.rows.map(renderRow)}
+          {m.rows.map((r) => renderRow(r))}
         </div>
       ))}
       {showLater && paused.length > 0 && (
         <div>
           <div className="eyebrow" style={{ marginTop: 6 }}>Paused</div>
-          {paused.map(renderRow)}
+          {paused.map((r) => renderRow(r))}
         </div>
       )}
+      </>)}
 
       {schedules.length === 0 && !open && (
         <div className="mut" style={{ fontSize: 12 }}>Nothing scheduled yet.</div>
       )}
+      </>)}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
     </div>
   );
