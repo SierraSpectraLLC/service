@@ -10,8 +10,10 @@ import {
 //     blocker under "waiting on them";
 //   - "handed off is not blocked" - a system kicked to the partner's queue
 //     left our repair board, and must raise nothing anywhere;
-//   - "what do we chase today" - a part on order with no tracking, a
-//     backorder with no ETA, a blocked system with no recorded reason.
+//   - "state facts, don't invent stories" - a part without tracking is "No
+//     tracking yet", in the court of whoever ordered it, never a claim about
+//     who is telephoning which vendor;
+//   - "what do we chase today" - a blocked system with no recorded reason.
 
 const now = new Date("2026-08-21T14:00:00Z");
 const days = (n: number) => new Date(now.getTime() - n * 86400000);
@@ -52,10 +54,9 @@ describe("handed off is not blocked", () => {
     expect(handoffFor({ ...queued, queueOrgId: null }, "", ctx().orgName, now)).toBeNull();
   });
 
-  it("a handed-off system chases nothing, even blocked with parts in limbo", () => {
+  it("a handed-off system chases nothing, even blocked with no reason", () => {
     expect(followUpsForSystem(
       { id: 1, externalId: "P-001", stages: ["Waiting / blocked"], queueOrgId: 5, lead: "Joe" },
-      [{ name: "Seal", status: "Ordered", tracking: "", vendor: "" }],
       0,
     )).toEqual([]);
   });
@@ -105,17 +106,35 @@ describe("whose court a wait sits in", () => {
     expect(item).toMatchObject({ court: "us", what: "Part needed: Rotor seal" });
   });
 
-  it("a part moving WITH tracking rides with the supplier; without tracking it is a follow-up, not a status", () => {
+  it("a part moving WITH tracking rides with the supplier", () => {
     const moving = pendingForSystem(sys(), ctx({
       openParts: [part({ name: "Ion gauge", status: "Ordered", tracking: "1Z999", eta: "Aug 28" })],
     }))[0];
     expect(moving).toMatchObject({ court: "supplier", what: "Part on order: Ion gauge - ETA Aug 28" });
-    expect(pendingForSystem(sys(), ctx({
-      openParts: [part({ status: "Ordered", tracking: "" })],
-    }))).toEqual([]);
-    expect(pendingForSystem(sys(), ctx({
-      openParts: [part({ status: "Backordered" })],
-    }))).toEqual([]);
+  });
+
+  it("no tracking is a plain stated fact in the court of whoever ordered - no invented vendor-chasing", () => {
+    // We ordered it (nobody was asked): ours to produce a number.
+    const ours = pendingForSystem(sys(), ctx({
+      openParts: [part({ name: "H-ESI Needle Seal", status: "Ordered", tracking: "" })],
+    }))[0];
+    expect(ours).toMatchObject({ court: "us", what: "No tracking yet for H-ESI Needle Seal" });
+    // The partner ordered it (we asked them): the tracking is theirs to share.
+    const theirs = pendingForSystem(sys(), ctx({
+      openParts: [part({ name: "H-ESI Needle Seal", status: "Ordered", tracking: "", requestedOrgId: 5, requestedAt: days(3) })],
+    }))[0];
+    expect(theirs).toMatchObject({ court: "partner", who: "LabZen", what: "No tracking yet for H-ESI Needle Seal", days: 3 });
+  });
+
+  it("a backorder with no date reads the same way, courted by the orderer", () => {
+    const ours = pendingForSystem(sys(), ctx({
+      openParts: [part({ name: "Filament", status: "Backordered" })],
+    }))[0];
+    expect(ours).toMatchObject({ court: "us", what: "Backordered: Filament - no firm ETA yet" });
+    const theirs = pendingForSystem(sys(), ctx({
+      openParts: [part({ name: "Filament", status: "Backordered", requestedOrgId: 9 })],
+    }))[0];
+    expect(theirs).toMatchObject({ court: "partner", who: "GMI" });
   });
 
   it("closed part statuses never pend - the caller filters, but a stray one is inert", () => {
@@ -129,38 +148,16 @@ describe("the chase list", () => {
   const ours = (stages: string[] = ["Refurbishment"], lead = "Joe") =>
     ({ id: 1, externalId: "T-003", stages, queueOrgId: null, lead });
 
-  it("ordered with no tracking is chased daily, naming the vendor - and the partner may see it", () => {
-    const [f] = followUpsForSystem(ours(), [
-      { name: "H-ESI Needle Seal", status: "Ordered", tracking: "", vendor: "Thermo" },
-    ], 0);
-    expect(f.text).toBe("No tracking yet for H-ESI Needle Seal - chasing Thermo until we have a number");
-    expect(f.internalOnly).toBeUndefined();
-  });
-
-  it("tracking in hand ends the chase; no vendor recorded still names somebody to call", () => {
-    expect(followUpsForSystem(ours(), [
-      { name: "Seal", status: "Ordered", tracking: "1Z999", vendor: "" },
-    ], 0)).toEqual([]);
-    const [f] = followUpsForSystem(ours(), [
-      { name: "Seal", status: "In transit", tracking: "", vendor: "" },
-    ], 0);
-    expect(f.text).toMatch(/chasing the supplier/);
-  });
-
-  it("a backorder is chased for a firm ETA", () => {
-    const [f] = followUpsForSystem(ours(), [
-      { name: "Filament", status: "Backordered", tracking: "", vendor: "Agilent" },
-    ], 0);
-    expect(f.text).toBe("Filament backordered - chasing Agilent for a firm ETA");
-  });
-
-  it("blocked with no recorded reason pesters the lead for one - internally, never the partner", () => {
-    const [f] = followUpsForSystem(ours(["Waiting / blocked"]), [], 0);
+  it("blocked with no recorded reason pesters the lead for one; a blocked task IS the reason", () => {
+    const [f] = followUpsForSystem(ours(["Waiting / blocked"]), 0);
     expect(f.text).toBe("Blocked with no recorded reason - ask Joe what's blocking and what clears it");
-    expect(f.internalOnly).toBe(true);
-    expect(followUpsForSystem(ours(["Waiting / blocked"]), [], 1)).toEqual([]);
-    const [anon] = followUpsForSystem(ours(["Waiting / blocked"], ""), [], 0);
+    expect(followUpsForSystem(ours(["Waiting / blocked"]), 1)).toEqual([]);
+    const [anon] = followUpsForSystem(ours(["Waiting / blocked"], ""), 0);
     expect(anon.text).toMatch(/ask the team/);
+  });
+
+  it("an unblocked system chases nothing", () => {
+    expect(followUpsForSystem(ours(), 0)).toEqual([]);
   });
 });
 

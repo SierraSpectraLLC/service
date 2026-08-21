@@ -57,10 +57,11 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   expression to taste). Set `CRON_SECRET` in project env; Vercel sends it as
   the bearer token. The digest is built per engagement (one section per
   organization whose systems are in work): what's blocked and whose move it
-  is - theirs, ours, or a supplier's - a follow-up chase list (parts on order
-  with no tracking, backorders without an ETA, blocked systems with no
-  recorded reason), systems handed off to the partner's queue (out of our
-  hands, never counted as blocked), what happened since yesterday, and a
+  is - theirs, ours, or a supplier's, with a part stuck without tracking (or
+  backordered with no date) stated as plain fact in the court of whoever
+  ordered it - an internal follow-up list (blocked systems with no recorded
+  reason), systems handed off to the partner's queue (out of our hands, never
+  counted as blocked), what happened since yesterday, and a
   status board (stages, gases, open parts). The internal edition stitches
   every section together for staff (`STAFF_EMAILS` / Settings) via Resend;
   organizations opted in under Settings > Organizations ("Daily digest"

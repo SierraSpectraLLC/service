@@ -71,12 +71,12 @@ export type HandoffItem = {
 };
 
 /**
- * Something to chase today, until the record that clears it exists. Part
- * chases are shared with the partner edition - the whole point of chasing
- * tracking daily is that both sides see it is being chased - while internal
- * housekeeping ("ask Joe why this is blocked") stays internal.
+ * Our own housekeeping to chase today, repeated until the record that clears
+ * it exists. Internal only: a part stuck without tracking is not housekeeping
+ * but a PENDING item, courted by whoever placed the order (see
+ * pendingForSystem) - the digest states the fact, not who is telephoning whom.
  */
-export type FollowUp = { systemId: number; externalId: string; text: string; internalOnly?: boolean };
+export type FollowUp = { systemId: number; externalId: string; text: string };
 
 export type PendingCtx = {
   /** The org this section belongs to (null = the operator's own work). */
@@ -110,10 +110,17 @@ export const handoffFor = (
 /**
  * What one system is genuinely waiting on, each item assigned to a court.
  * Only for systems in OUR queue - a handed-off system pends nothing (see
- * handoffFor). Two deliberate absences: a "Waiting / blocked" stage adds no
- * line of its own (its blocked TASKS are the reasons, and a reasonless one
- * goes on the follow-up list instead), and a part on order without tracking
- * is a follow-up, not a status.
+ * handoffFor). One deliberate absence: a "Waiting / blocked" stage adds no
+ * line of its own - its blocked TASKS are the reasons, and a reasonless one
+ * goes on the follow-up list instead.
+ *
+ * Parts read literally, because the record can't know who is on the phone to
+ * whom: a part moving with tracking rides with the supplier; one stuck
+ * without tracking (or backordered with no date) is a plain stated fact -
+ * "No tracking yet for X" - in the court of whoever placed the order. A part
+ * requested of the partner was ordered by them, so the tracking is theirs to
+ * provide; everything else is ours. Repeating the line each morning IS the
+ * follow-up.
  */
 export function pendingForSystem(
   i: { id: number; externalId: string; stages: string[] },
@@ -133,16 +140,22 @@ export function pendingForSystem(
       `Work order${w.number ? ` ${w.number}` : ""} waiting: ${w.title}`);
   }
   for (const p of ctx.openParts) {
-    if (p.status === "Needed" && p.requestedOrgId !== null) {
-      add("partner", ctx.orgName(p.requestedOrgId), `Part to order: ${p.name}`,
-        p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null);
+    const theirOrder = p.requestedOrgId !== null;
+    const court: Court = theirOrder ? "partner" : "us";
+    const who = theirOrder ? ctx.orgName(p.requestedOrgId) : ctx.operatorName;
+    const asked = theirOrder && p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null;
+    if (p.status === "Needed" && theirOrder) {
+      add("partner", who, `Part to order: ${p.name}`, asked);
     } else if (p.status === "Needed") {
-      add("us", ctx.operatorName, `Part needed: ${p.name}`);
+      add("us", who, `Part needed: ${p.name}`);
     } else if ((p.status === "Ordered" || p.status === "In transit") && p.tracking) {
       add("supplier", "supplier",
         `Part ${p.status === "Ordered" ? "on order" : "in transit"}: ${p.name}${p.eta ? ` - ETA ${p.eta}` : ""}`);
+    } else if (p.status === "Ordered" || p.status === "In transit") {
+      add(court, who, `No tracking yet for ${p.name}`, asked);
+    } else if (p.status === "Backordered") {
+      add(court, who, `Backordered: ${p.name} - no firm ETA yet`, asked);
     }
-    // Ordered/In transit without tracking, and Backordered: follow-ups.
   }
   return items;
 }
@@ -154,27 +167,19 @@ export function pendingForSystem(
  */
 export function followUpsForSystem(
   i: { id: number; externalId: string; stages: string[]; queueOrgId: number | null; lead: string },
-  openParts: { name: string; status: string; tracking: string; vendor: string }[],
   blockedTaskCount: number,
 ): FollowUp[] {
   if (i.queueOrgId !== null) return [];
   const out: FollowUp[] = [];
-  const add = (text: string, internalOnly = false) =>
-    out.push({ systemId: i.id, externalId: i.externalId, text, ...(internalOnly ? { internalOnly } : {}) });
 
   // A blocked system must say why. The reasons live on its blocked tasks (or
   // its queue, handled above); blocked with neither is a question, not a
   // state - and it is our own housekeeping, never the partner's.
   if (i.stages.includes("Waiting / blocked") && blockedTaskCount === 0) {
-    add(`Blocked with no recorded reason - ask ${i.lead || "the team"} what's blocking and what clears it`, true);
-  }
-  for (const p of openParts) {
-    const vendor = p.vendor || "the supplier";
-    if ((p.status === "Ordered" || p.status === "In transit") && !p.tracking) {
-      add(`No tracking yet for ${p.name} - chasing ${vendor} until we have a number`);
-    } else if (p.status === "Backordered") {
-      add(`${p.name} backordered - chasing ${vendor} for a firm ETA`);
-    }
+    out.push({
+      systemId: i.id, externalId: i.externalId,
+      text: `Blocked with no recorded reason - ask ${i.lead || "the team"} what's blocking and what clears it`,
+    });
   }
   return out;
 }
@@ -306,11 +311,7 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
               requestedOrgId: p.requestedOrgId, requestedAt: p.requestedAt,
             })),
           }));
-          section.followUps.push(...followUpsForSystem(
-            i,
-            openParts.map((p) => ({ name: p.name, status: p.status, tracking: p.tracking, vendor: p.vendor })),
-            blockedTasks.length,
-          ));
+          section.followUps.push(...followUpsForSystem(i, blockedTasks.length));
           for (const x of g.filter((x) => gasAttention(x.status))) {
             section.gas.push({ externalId: i.externalId, gas: x.gas, status: x.status, note: x.note });
           }
@@ -389,7 +390,9 @@ function renderPending(section: DigestSection, internal: boolean, operatorName: 
       + c.partner.map((x) => line(x, expected)).join(""));
   }
   if (c.us.length) {
-    groups.push(groupHead(internal ? "Waiting on us" : `With us (${operatorName})`, c.us.length, "#A32D2D")
+    // Partner voice drops the first person: the email is FROM the operator
+    // but READ by the partner, and "us" makes them stop to work out who.
+    groups.push(groupHead(internal ? "Waiting on us" : `With ${operatorName}`, c.us.length, "#A32D2D")
       + c.us.map((x) => line(x, operatorName)).join(""));
   }
   if (c.supplier.length) {
@@ -399,21 +402,13 @@ function renderPending(section: DigestSection, internal: boolean, operatorName: 
   return card(`<div style="font-weight:bold;margin-bottom:2px;">Blocked &amp; pending</div>${groups.join("")}`);
 }
 
-/**
- * The chase list. The partner edition sees the part chases too - a client
- * whose parts are stuck in a vendor's queue should know they are being
- * chased, and the internal-only items (our own housekeeping) stay home.
- */
-function renderFollowUps(section: DigestSection, internal: boolean, operatorName: string): string {
-  const items = internal ? section.followUps : section.followUps.filter((f) => !f.internalOnly);
-  if (!items.length) return "";
-  const lines = items.map((f) =>
+/** The chase list. Internal only - it is our own housekeeping, nobody else's. */
+function renderFollowUps(section: DigestSection): string {
+  if (!section.followUps.length) return "";
+  const lines = section.followUps.map((f) =>
     `<div style="margin:2px 0;">${sysId(f.externalId)} &nbsp;${esc(f.text)}</div>`).join("");
-  const sub = internal
-    ? "Repeats every morning until the record that clears it exists."
-    : `What ${operatorName} is chasing on these systems - repeated each morning until it clears.`;
-  return card(`<b style="color:#8A5410;">Follow up today (${items.length})</b>
-    <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">${esc(sub)}</div>${lines}`,
+  return card(`<b style="color:#8A5410;">Follow up today (${section.followUps.length})</b>
+    <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">Repeats every morning until the record that clears it exists.</div>${lines}`,
     "#EAD9B8", "#FDF8EE");
 }
 
@@ -509,14 +504,10 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
   const quiet = !section.pending.length && !section.gas.length && !section.followUps.length
     ? `<div style="font-family:${EMAIL.font};font-size:13px;color:#0F6E56;margin:8px 0;">Nothing blocked - every system is moving.</div>`
     : "";
-  // Internal leads with the chase list (it is today's legwork); the partner
-  // leads with their own asks.
-  const middle = internal
-    ? renderFollowUps(section, true, operatorName) + renderPending(section, true, operatorName)
-    : renderPending(section, false, operatorName) + renderFollowUps(section, false, operatorName);
   return header
     + renderGas(section)
-    + middle
+    + (internal ? renderFollowUps(section) : "")
+    + renderPending(section, internal, operatorName)
     + quiet
     + renderHandoffs(section, internal, operatorName)
     + renderWork(section, internal)
