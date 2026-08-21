@@ -2618,3 +2618,9 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_by" text NOT NULL DE
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "header_color" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_height" integer NOT NULL DEFAULT 3;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_stops" text NOT NULL DEFAULT '';
+
+-- Which weekdays each digest fires (comma list of 0-6, blank = every day).
+-- The window covers everything since the last send, so skipped days fold
+-- into the next edition instead of vanishing. See lib/digestDays.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_days" text NOT NULL DEFAULT '';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_days" text NOT NULL DEFAULT '';

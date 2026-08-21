@@ -10,6 +10,7 @@ import {
   DEFAULT_HEADER, DEFAULT_SPECTRUM_HEIGHT, DEFAULT_STOPS, MAX_SPECTRUM_HEIGHT, MAX_STOPS,
   gradientCss, type Stop,
 } from "@/lib/appearance";
+import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 
 /** "7:00 AM" - an hour of the day as somebody would say it out loud. */
@@ -54,6 +55,8 @@ export default function ConfigurationForm(props: {
   platformName: string; platformTagline: string; operatorOrgId: number | null;
   /** When the internal edition of the daily digest goes out, in shop time. */
   digestHour: number;
+  /** Which weekdays, as stored ("" = every day). */
+  digestDays: string;
   /** Who it goes to today, for the line under the schedule. Display only. */
   digestTo: string[];
   /** The look, as stored: blank header colour means "the stock navy". */
@@ -66,8 +69,19 @@ export default function ConfigurationForm(props: {
   // (Settings > Personnel), so this shows them rather than offering a second
   // list that would drift from who actually works here.
   const [digestHour, setDigestHourState] = useState(props.digestHour);
+  const [digestDaysSel, setDigestDaysSel] = useState<number[]>(() => {
+    const d = parseDigestDays(props.digestDays);
+    return d.length ? d : [...WEEK_ORDER];
+  });
   const [digestMsg, setDigestMsg] = useState("");
   const [digestErr, setDigestErr] = useState(false);
+  const saveDigestSchedule = (hour: number, days: number[]) => {
+    setDigestMsg(""); setDigestErr(false);
+    startTransition(async () => {
+      const res = await setDigestHour(null, hour, days);
+      if (res?.error) { setDigestErr(true); setDigestMsg(res.error); }
+    });
+  };
   const sendDigest = () => {
     if (!confirm(`Email the internal digest now to ${props.digestTo.join(", ") || "nobody"}?`)) return;
     setDigestMsg(""); setDigestErr(false);
@@ -258,16 +272,27 @@ export default function ConfigurationForm(props: {
                   <select value={digestHour} disabled={pending}
                     onChange={(e) => {
                       const next = parseInt(e.target.value);
-                      setDigestHourState(next); setDigestMsg(""); setDigestErr(false);
-                      startTransition(async () => {
-                        const res = await setDigestHour(null, next);
-                        if (res?.error) { setDigestErr(true); setDigestMsg(res.error); }
-                      });
+                      setDigestHourState(next);
+                      saveDigestSchedule(next, digestDaysSel);
                     }}
                     style={{ width: "auto", fontSize: 12 }}>
                     {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{clockLabel(h)}</option>)}
                   </select>
-                  <span className="mut" style={{ fontSize: 12 }}>shop time</span>
+                  <span className="mut" style={{ fontSize: 12 }}>shop time, on</span>
+                  {WEEK_ORDER.map((d) => (
+                    <label key={d} style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11, margin: 0, fontWeight: 400, cursor: "pointer" }}>
+                      <input type="checkbox" checked={digestDaysSel.includes(d)} disabled={pending}
+                        onChange={() => {
+                          const next = digestDaysSel.includes(d)
+                            ? digestDaysSel.filter((x) => x !== d)
+                            : [...digestDaysSel, d];
+                          setDigestDaysSel(next);
+                          if (next.length) saveDigestSchedule(digestHour, next);
+                          else { setDigestErr(true); setDigestMsg("Pick at least one day"); }
+                        }} style={{ width: "auto", margin: 0 }} />
+                      {DAY_LABELS[d]}
+                    </label>
+                  ))}
                   <a className="btn sm" href="/api/digest/preview" target="_blank" rel="noreferrer">Preview</a>
                   <button className="btn sm" onClick={sendDigest} disabled={pending}>Send now</button>
                 </div>

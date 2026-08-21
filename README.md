@@ -107,12 +107,20 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   counts ride in the preheader: Gmail re-splits a conversation whenever the
   subject changes, so a dated subject and a single chain cannot both be had.
 - **Digest scheduling**: the hourly cron sends only what is due. Every
-  organization keeps its own send hour in shop time (Settings > Organizations;
-  Settings > Configuration for the internal edition) and a per-organization
-  stamp of the day it last went, so an hourly cron still delivers one email a
-  day and a missed hour catches up rather than skipping. Both screens also
-  carry **Preview** (renders today's edition with real data, sends nothing) and
-  **Send now** (delivers immediately and counts as today's).
+  organization keeps its own send hour and days of the week in shop time
+  (Settings > Organizations; Settings > Configuration for the internal
+  edition) and a per-organization stamp of the day it last went, so an hourly
+  cron still delivers one email a day and a missed hour catches up rather than
+  skipping. Both screens also carry **Preview** (renders today's edition with
+  real data, sends nothing) and **Send now** (delivers immediately and counts
+  as today's).
+- **Rested days lose nothing**: an edition's window is "since the last
+  edition", not "the last 24 hours" (`lib/digestDays`). A weekday-only digest
+  therefore covers Friday-to-Monday when it returns - the work section is
+  titled "Over the weekend", each line carries its day ("Sat · Completed:
+  ..."), and if the weekend was quiet the partner edition simply says nothing
+  extra. The same mechanism covers a skipped holiday ("Since Thursday") and a
+  dormant digest coming back (capped at a week of catch-up).
 
 ### 6. Google Sheet parity (service account)
 The sync reads the client's sheet through the Sheets API with a service

@@ -12,6 +12,7 @@ import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
 import StorageMeter from "@/components/StorageMeter";
+import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
 
 const MAX_LOGO_BYTES = 1024 * 1024; // a header logo, not a tune file
 
@@ -34,7 +35,7 @@ const clockLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "
 export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
-    eodRecipients: string; digestRecipients: string; digestHour: number;
+    eodRecipients: string; digestRecipients: string; digestHour: number; digestDays: string;
     systems: number; isOperator: boolean; isSheetOrg: boolean;
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
@@ -118,6 +119,11 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
   const [digestTo, setDigestTo] = useState<string[]>(splitEmails(org.digestRecipients));
   const [digestExtra, setDigestExtra] = useState("");
   const [hour, setHour] = useState(org.digestHour);
+  // [] means every day - the stored blank. The picker shows all seven ticked.
+  const [sendDays, setSendDays] = useState<number[]>(() => {
+    const d = parseDigestDays(org.digestDays);
+    return d.length ? d : [...WEEK_ORDER];
+  });
   const [digestMsg, setDigestMsg] = useState("");
   const [digestErr, setDigestErr] = useState(false);
   // Everyone who can be ticked: this organization's own logins, plus any
@@ -127,8 +133,14 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     ...people.map((p) => p.entry.trim().toLowerCase()).filter((e) => e && !e.startsWith("@")),
     ...digestTo,
   ])];
+  const storedDays = (() => { const d = parseDigestDays(org.digestDays); return d.length ? d : [...WEEK_ORDER]; })();
   const digestDirty = digestTo.join(", ") !== splitEmails(org.digestRecipients).join(", ")
-    || hour !== org.digestHour;
+    || hour !== org.digestHour
+    || [...sendDays].sort().join() !== [...storedDays].sort().join();
+  const toggleDay = (d: number) => {
+    setDigestMsg("");
+    setSendDays((list) => (list.includes(d) ? list.filter((x) => x !== d) : [...list, d]));
+  };
   const toggleDigest = (email: string) => {
     setDigestMsg("");
     setDigestTo((list) => (list.includes(email) ? list.filter((x) => x !== email) : [...list, email]));
@@ -144,7 +156,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     setDigestMsg(""); setDigestErr(false);
     startTransition(async () => {
       const res = await updateDigestRecipients(org.id, digestTo.join(", "));
-      const res2 = res?.error ? null : await setDigestHour(org.id, hour);
+      const res2 = res?.error ? null : await setDigestHour(org.id, hour, sendDays);
       const err = res?.error ?? res2?.error;
       setDigestErr(!!err);
       setDigestMsg(err ?? "Saved \u2713");
@@ -358,8 +370,21 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               style={{ width: "auto", fontSize: 12 }}>
               {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{clockLabel(h)}</option>)}
             </select>
-            <span className="mut" style={{ fontSize: 12 }}>shop time, daily</span>
+            <span className="mut" style={{ fontSize: 12 }}>shop time, on</span>
+            {WEEK_ORDER.map((d) => (
+              <label key={d} style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11, margin: 0, fontWeight: 400, cursor: "pointer" }}>
+                <input type="checkbox" checked={sendDays.includes(d)} disabled={pending}
+                  onChange={() => toggleDay(d)} style={{ width: "auto", margin: 0 }} />
+                {DAY_LABELS[d]}
+              </label>
+            ))}
           </div>
+          {sendDays.length > 0 && sendDays.length < 7 && (
+            <div className="mut" style={{ fontSize: 11, marginTop: -4, marginBottom: 10 }}>
+              Days it rests fold into the next edition - Monday&apos;s digest covers the weekend&apos;s
+              work under its own days, and says nothing extra if there was none.
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <button className="btn sm accent" onClick={saveDigest} disabled={pending || !digestDirty}>Save</button>
             <a className="btn sm" href={`/api/digest/preview?org=${org.id}`} target="_blank" rel="noreferrer">Preview</a>

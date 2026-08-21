@@ -72,6 +72,7 @@ import {
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { DEFAULT_STOPS, clampHeight, serializeStops, type Stop } from "@/lib/appearance";
+import { serializeDigestDays } from "@/lib/digestDays";
 import { sendDigestEdition } from "@/lib/digest";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import {
@@ -6171,31 +6172,37 @@ export async function updateDigestRecipients(orgId: number, value: string): Prom
 }
 
 /**
- * When this organization's digest goes out, in shop time. On the operator's
- * own row it sets the internal edition's hour. The cron runs hourly and sends
- * what is due, so this takes effect tomorrow morning with no deploy.
+ * When this organization's digest goes out: the hour, and which days of the
+ * week. On the operator's own row it sets the internal edition's schedule.
+ * The cron runs hourly and sends what is due, so this takes effect the next
+ * morning with no deploy - and a rested day loses nothing, because the next
+ * edition's window reaches back to the last one (lib/digestDays).
  */
-export async function setDigestHour(orgId: number | null, hour: number): Promise<{ error?: string }> {
+export async function setDigestHour(orgId: number | null, hour: number, days: number[]): Promise<{ error?: string }> {
   const u = await requireOwner();
   if (!Number.isInteger(hour) || hour < 0 || hour > 23) return { error: "Pick an hour of the day" };
+  if (!days.length) return { error: "Pick at least one day - to stop the digest, clear its recipients instead" };
+  if (days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) return { error: "Those aren't days of the week" };
+  const digestDays = serializeDigestDays(days);
   const at = `${String(hour).padStart(2, "0")}:00`;
+  const on = digestDays ? `on days ${digestDays}` : "every day";
   // Null is the workspace's own internal edition. It lives on the operator's
   // org row, because a workspace IS an organization - and on the settings
   // singleton for an instance that has never named one.
   if (orgId === null) {
     const tenantOrgId = myTenantOrgId(u);
-    if (tenantOrgId !== null) await db.update(orgs).set({ digestHour: hour }).where(eq(orgs.id, tenantOrgId));
-    else await db.update(appSettings).set({ digestHour: hour }).where(eq(appSettings.id, 1));
-    await audit({ actor: u.email, entityType: "settings", entityId: tenantOrgId ?? 0, action: `internal daily digest hour: ${at}` });
+    if (tenantOrgId !== null) await db.update(orgs).set({ digestHour: hour, digestDays }).where(eq(orgs.id, tenantOrgId));
+    else await db.update(appSettings).set({ digestHour: hour, digestDays }).where(eq(appSettings.id, 1));
+    await audit({ actor: u.email, entityType: "settings", entityId: tenantOrgId ?? 0, action: `internal daily digest: ${at} ${on}` });
     revalidatePath("/settings");
     return {};
   }
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org) return { error: "Not found" };
-  await db.update(orgs).set({ digestHour: hour }).where(eq(orgs.id, orgId));
+  await db.update(orgs).set({ digestHour: hour, digestDays }).where(eq(orgs.id, orgId));
   await audit({
     actor: u.email, entityType: "settings", entityId: orgId,
-    action: `${org.name} daily digest hour: ${at}`,
+    action: `${org.name} daily digest: ${at} ${on}`,
   });
   revalidatePath("/settings");
   return {};

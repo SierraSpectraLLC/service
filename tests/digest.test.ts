@@ -3,6 +3,7 @@ import {
   courts, digestCounts, digestDue, followUpsForSystem, handoffFor, pendingForSystem,
   type PendingCtx,
 } from "@/lib/digest";
+import { digestGapDays, parseDigestDays, serializeDigestDays, windowLabel } from "@/lib/digestDays";
 
 // The digest's hard questions are pinned here, case by case:
 //
@@ -235,7 +236,7 @@ describe("grouping and totals", () => {
 // whether anything goes out, so the ways it could misfire are the ways the
 // digest arrives twice, or at three in the morning, or never.
 describe("when an edition is due", () => {
-  const at7 = { digestHour: 7, digestLastSentOn: "" };
+  const at7 = { digestHour: 7, digestLastSentOn: "", digestDays: "" };
 
   it("waits for the configured hour", () => {
     expect(digestDue(at7, 6, "2026-08-21")).toBe(false);
@@ -243,7 +244,7 @@ describe("when an edition is due", () => {
   });
 
   it("never sends twice on the same day, whatever the hour", () => {
-    const gone = { digestHour: 7, digestLastSentOn: "2026-08-21" };
+    const gone = { digestHour: 7, digestLastSentOn: "2026-08-21", digestDays: "" };
     for (let h = 0; h < 24; h++) expect(digestDue(gone, h, "2026-08-21")).toBe(false);
   });
 
@@ -253,12 +254,51 @@ describe("when an edition is due", () => {
   });
 
   it("a new day clears yesterday's stamp", () => {
-    const gone = { digestHour: 7, digestLastSentOn: "2026-08-20" };
+    const gone = { digestHour: 7, digestLastSentOn: "2026-08-20", digestDays: "" };
     expect(digestDue(gone, 6, "2026-08-21")).toBe(false);
     expect(digestDue(gone, 7, "2026-08-21")).toBe(true);
   });
 
   it("midnight is an hour like any other - 0 must not read as unset", () => {
-    expect(digestDue({ digestHour: 0, digestLastSentOn: "" }, 0, "2026-08-21")).toBe(true);
+    expect(digestDue({ digestHour: 0, digestLastSentOn: "", digestDays: "" }, 0, "2026-08-21")).toBe(true);
+  });
+
+  it("rests on days not ticked; blank means every day", () => {
+    const weekdaysOnly = { digestHour: 7, digestLastSentOn: "", digestDays: "1,2,3,4,5" };
+    expect(digestDue(weekdaysOnly, 9, "2026-08-22")).toBe(false);  // Saturday
+    expect(digestDue(weekdaysOnly, 9, "2026-08-23")).toBe(false);  // Sunday
+    expect(digestDue(weekdaysOnly, 9, "2026-08-24")).toBe(true);   // Monday
+    expect(digestDue(at7, 9, "2026-08-22")).toBe(true);            // no restriction
+  });
+});
+
+// The window: an edition covers everything since the last one, which is what
+// lets a digest rest over the weekend without the weekend's work vanishing.
+describe("how far back an edition reaches", () => {
+  it("one day after an ordinary morning; three after a Friday-to-Monday rest", () => {
+    expect(digestGapDays("2026-08-20", "2026-08-21")).toBe(1);
+    expect(digestGapDays("2026-08-21", "2026-08-24")).toBe(3);     // Fri -> Mon
+  });
+
+  it("no history reads as one day, and a dormant digest is capped at a week", () => {
+    expect(digestGapDays("", "2026-08-21")).toBe(1);
+    expect(digestGapDays("not-a-date", "2026-08-21")).toBe(1);
+    expect(digestGapDays("2026-06-01", "2026-08-21")).toBe(7);
+  });
+
+  it("names its window: yesterday, the weekend, or the day it opens", () => {
+    expect(windowLabel(1, 4)).toBe("Since yesterday");
+    expect(windowLabel(3, 5)).toBe("Over the weekend");             // Fri -> Mon
+    expect(windowLabel(4, 4)).toBe("Since Thursday");               // holiday weekend
+  });
+});
+
+describe("which days count", () => {
+  it("parses loosely, stores canonically, and all seven days is no restriction", () => {
+    expect(parseDigestDays("5, 1,1,3")).toEqual([1, 3, 5]);
+    expect(parseDigestDays("")).toEqual([]);
+    expect(serializeDigestDays([5, 1, 3])).toBe("1,3,5");
+    expect(serializeDigestDays([0, 1, 2, 3, 4, 5, 6])).toBe("");
+    expect(serializeDigestDays([9, -1] as number[])).toBe("");
   });
 });

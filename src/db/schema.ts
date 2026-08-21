@@ -199,6 +199,13 @@ export const orgs = pgTable("orgs", {
    */
   digestHour: integer("digest_hour").notNull().default(7),
   /**
+   * Which weekdays it fires, comma list of 0-6 (0 = Sunday), blank = every
+   * day. The window self-heals around skipped days: an edition covers
+   * everything since the last one went, so weekday-only sending folds the
+   * weekend's work into Monday rather than losing it. See lib/digestDays.
+   */
+  digestDays: text("digest_days").notNull().default(""),
+  /**
    * The shop day (YYYY-MM-DD) the digest last went out for this organization.
    * What turns an hourly cron into a daily email: a second run in the same
    * hour, a redeploy that re-fires the schedule, and the "send now" button all
@@ -2039,6 +2046,7 @@ export const appSettings = pgTable("app_settings", {
   // there is no orgs row to hang it on. Same meaning as the columns of those
   // names on orgs; see lib/digest.digestDue.
   digestHour: integer("digest_hour").notNull().default(7),
+  digestDays: text("digest_days").notNull().default(""),
   digestLastSentOn: text("digest_last_sent_on").notNull().default(""),
   // Remote support: reaching a lab PC from the portal. Off until an operator
   // stands up the relay host and sets REMOTE_URL - the pages check both, so a

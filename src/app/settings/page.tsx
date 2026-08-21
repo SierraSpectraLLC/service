@@ -33,8 +33,10 @@ export default async function SettingsPage() {
   // hour and save another.
   const operatorRow = s?.operatorOrgId === null || s?.operatorOrgId === undefined
     ? undefined
-    : (await db.select({ digestHour: orgs.digestHour }).from(orgs).where(eq(orgs.id, s.operatorOrgId)))[0];
+    : (await db.select({ digestHour: orgs.digestHour, digestDays: orgs.digestDays })
+        .from(orgs).where(eq(orgs.id, s.operatorOrgId)))[0];
   const digestHour = operatorRow?.digestHour ?? s?.digestHour ?? 7;
+  const digestDays = operatorRow?.digestDays ?? s?.digestDays ?? "";
   return (
     <div className="container settings">
       <SettingsTabs active="configuration" />
@@ -45,6 +47,7 @@ export default async function SettingsPage() {
         platformTagline={s?.platformTagline ?? ""}
         operatorOrgId={s?.operatorOrgId ?? null}
         digestHour={digestHour}
+        digestDays={digestDays}
         digestTo={digestTo}
         appearance={{
           headerColor: look.storedHeaderColor,

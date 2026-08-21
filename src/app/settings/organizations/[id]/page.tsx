@@ -113,7 +113,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         org={{
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
           eodRecipients: org.eodRecipients, digestRecipients: org.digestRecipients,
-          digestHour: org.digestHour, systems: shareRows.length,
+          digestHour: org.digestHour, digestDays: org.digestDays, systems: shareRows.length,
           storageLimitMb: org.storageLimitMb, quota,
           remoteAccessEnabled: org.remoteAccessEnabled,
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,

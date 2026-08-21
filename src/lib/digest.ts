@@ -17,7 +17,7 @@
 // only to recipients that organization has been opted into
 // (orgs.digest_recipients) - never merged, so no organization ever sees
 // another's systems. Same isolation rule as the EOD report, one level up.
-import { and, asc, eq, gte, inArray, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, tasks, workOrders,
@@ -32,6 +32,7 @@ import { shopDay, shopHour, shopToday } from "@/lib/shopday";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
+import { digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel } from "@/lib/digestDays";
 
 // ---------------------------------------------------------------------------
 // The classifications - pure, so they are unit-tested.
@@ -245,14 +246,28 @@ export type DigestSection = {
   activity: string;
 };
 
-export async function collectDigest(tenantOrgId: number | null): Promise<{
+export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): Promise<{
   sections: DigestSection[];
   operatorName: string;
+  /** What the work section calls its window: "Since yesterday", "Over the weekend". */
+  window: string;
 }> {
   const brand = await brandForTenant(tenantOrgId);
   const now = new Date();
-  const cutoff = new Date(now.getTime() - 24 * 3600 * 1000);
-  const yesterday = shopDay(cutoff);
+  // The window is "since the last edition", not "the last 24 hours" - that
+  // one change is what makes skipped days work: a digest resting over the
+  // weekend covers Friday-to-Monday when it comes back, so weekend work
+  // arrives Monday under its own day instead of never.
+  const span = Math.min(7, Math.max(1, Math.round(sinceDays)));
+  const cutoff = new Date(now.getTime() - span * 24 * 3600 * 1000);
+  const sinceDate = shopDay(cutoff);
+  const todayStr = shopDay(now);
+  const multiDay = span > 1;
+  // Lines in a multi-day window say which day they happened - "Sat · " - so
+  // Monday's reader can tell Saturday's fix from this morning's.
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const tagOf = (d: Date) => (multiDay ? `${DAYS[weekdayOfShopDay(shopDay(d))]} · ` : "");
+  const tagOfDay = (iso: string) => (multiDay ? `${DAYS[weekdayOfShopDay(iso)]} · ` : "");
 
   const mine = tenantOrgId === null ? undefined : eq(instruments.tenantOrgId, tenantOrgId);
   const rows = await db.select().from(instruments)
@@ -274,7 +289,8 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
       or(eq(workOrders.state, "waiting"), gte(workOrders.resolvedAt, cutoff), gte(workOrders.closedAt, cutoff)),
     )) : none<typeof workOrders.$inferSelect>(),
     ids.length ? db.select().from(eodUpdates).where(and(
-      eq(eodUpdates.date, yesterday), inArray(eodUpdates.instrumentId, ids),
+      gte(eodUpdates.date, sinceDate), lt(eodUpdates.date, todayStr),
+      inArray(eodUpdates.instrumentId, ids),
     )) : none<typeof eodUpdates.$inferSelect>(),
     db.select().from(auditLog).where(gte(auditLog.createdAt, cutoff)),
     db.select().from(orgs),
@@ -342,18 +358,23 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
         }
       }
 
-      // What happened since yesterday - the hand-written update first (it is
-      // the narrative), then the record: tasks done, work orders resolved.
+      // What happened in the window - the hand-written updates first (they
+      // are the narrative, in day order), then the record: tasks done, work
+      // orders resolved. In a multi-day window every line carries its day.
       const lines: string[] = [];
-      const u = updateRows.find((x) => x.instrumentId === i.id && !x.skipped);
-      if (u?.systemUpdate?.trim()) lines.push(u.systemUpdate.trim());
-      if (u?.actionItem?.trim()) lines.push(`Next: ${u.actionItem.trim()}`);
+      const ups = updateRows.filter((x) => x.instrumentId === i.id && !x.skipped)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      for (const u of ups) {
+        if (u.systemUpdate?.trim()) lines.push(`${tagOfDay(u.date)}${u.systemUpdate.trim()}`);
+        if (u.actionItem?.trim()) lines.push(`${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`);
+      }
       for (const t of taskRows.filter((t) => t.instrumentId === i.id && t.state === "Done" && t.completedAt && t.completedAt >= cutoff)) {
-        lines.push(`Completed: ${t.title}`);
+        lines.push(`${tagOf(t.completedAt!)}Completed: ${t.title}`);
       }
       for (const w of woRows.filter((w) => w.instrumentId === i.id
         && ((w.resolvedAt && w.resolvedAt >= cutoff) || (w.closedAt && w.closedAt >= cutoff)))) {
-        lines.push(`Work order${w.number ? ` ${w.number}` : ""} ${w.closedAt && w.closedAt >= cutoff ? "closed" : "resolved"}: ${w.closeSummary || w.title}`);
+        const closed = w.closedAt && w.closedAt >= cutoff;
+        lines.push(`${tagOf((closed ? w.closedAt : w.resolvedAt)!)}Work order${w.number ? ` ${w.number}` : ""} ${closed ? "closed" : "resolved"}: ${w.closeSummary || w.title}`);
       }
       if (lines.length) section.work.push({ externalId: i.externalId, label, lines });
     }
@@ -363,13 +384,16 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
     const touched = auditRows.filter((a) => a.instrumentId !== null && sysIds.has(a.instrumentId));
     if (touched.length) {
       const actors = [...new Set(touched.map((a) => a.actor.split("@")[0]))];
-      section.activity = `${touched.length} change${touched.length === 1 ? "" : "s"} logged since yesterday by ${actors.join(", ")}`;
+      section.activity = `${touched.length} change${touched.length === 1 ? "" : "s"} logged in the window by ${actors.join(", ")}`;
     }
 
     if (section.board.length || section.work.length || section.handoffs.length) sections.push(section);
   }
 
-  return { sections, operatorName: brand.operatorName };
+  return {
+    sections, operatorName: brand.operatorName,
+    window: windowLabel(span, weekdayOfShopDay(sinceDate)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +485,7 @@ function renderGas(section: DigestSection): string {
   return card(`<b style="color:#A32D2D;">Gas attention (${section.gas.length})</b>${lines}`, "#E8B4B4", "#FBE9E9");
 }
 
-function renderWork(section: DigestSection, internal: boolean): string {
+function renderWork(section: DigestSection, internal: boolean, window: string): string {
   if (!section.work.length && !(internal && section.activity)) return "";
   const blocks = section.work.map((w) => `
     <div style="margin:6px 0;">
@@ -471,8 +495,8 @@ function renderWork(section: DigestSection, internal: boolean): string {
   const activity = internal && section.activity
     ? `<div style="color:${EMAIL.faint};font-size:12px;margin-top:6px;">${esc(section.activity)}</div>` : "";
   const empty = !section.work.length
-    ? `<div style="color:${EMAIL.muted};">Nothing written or completed since yesterday.</div>` : "";
-  return card(`<div style="font-weight:bold;margin-bottom:2px;">Since yesterday</div>${blocks}${empty}${activity}`);
+    ? `<div style="color:${EMAIL.muted};">Nothing written or completed in this window.</div>` : "";
+  return card(`<div style="font-weight:bold;margin-bottom:2px;">${esc(window)}</div>${blocks}${empty}${activity}`);
 }
 
 function renderBoard(section: DigestSection, internal: boolean): string {
@@ -506,7 +530,7 @@ function renderBoard(section: DigestSection, internal: boolean): string {
     </table>`;
 }
 
-function renderSection(section: DigestSection, internal: boolean, operatorName: string): string {
+function renderSection(section: DigestSection, internal: boolean, operatorName: string, window: string): string {
   const title = section.orgId === null
     ? `${esc(operatorName)} — own &amp; unassigned`
     : `${esc(operatorName)} × ${esc(section.name)}`;
@@ -534,7 +558,7 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
     + renderPending(section, internal, operatorName)
     + quiet
     + renderHandoffs(section, internal, operatorName)
-    + renderWork(section, internal)
+    + renderWork(section, internal, window)
     + renderBoard(section, internal);
 }
 
@@ -583,23 +607,35 @@ function summaryStrip(n: ReturnType<typeof digestCounts>): string {
  * One edition's body from collected sections. Pure - the composers wrap it in
  * the shell, and a preview can render it from fixture data with no database.
  */
-export function renderDigestBody(sections: DigestSection[], internal: boolean, operatorName: string): string {
+export function renderDigestBody(sections: DigestSection[], internal: boolean, operatorName: string, window = "Since yesterday"): string {
   if (!sections.length) {
     return `<div style="font-family:${EMAIL.font};font-size:13px;color:${EMAIL.muted};">Nothing in work - no active systems on the board.</div>`;
   }
   const strip = internal ? summaryStrip(digestCounts(sections)) : "";
-  return strip + sections.map((s) => renderSection(s, internal, operatorName)).join("");
+  return strip + sections.map((s) => renderSection(s, internal, operatorName, window)).join("");
 }
 
 /** The internal edition: every engagement, for the engineering team. */
+/** When this edition last went, so its window starts where the last one ended. */
+async function lastSentFor(tenantOrgId: number | null, orgId: number | null): Promise<string> {
+  const target = orgId ?? tenantOrgId;
+  if (target !== null) {
+    const [o] = await db.select({ on: orgs.digestLastSentOn }).from(orgs).where(eq(orgs.id, target));
+    return o?.on ?? "";
+  }
+  const [a] = await db.select({ on: appSettings.digestLastSentOn }).from(appSettings).where(eq(appSettings.id, 1));
+  return a?.on ?? "";
+}
+
 export async function composeDigest(tenantOrgId: number | null = null): Promise<{ subject: string; html: string }> {
   const brand = await brandForTenant(tenantOrgId);
-  const { sections, operatorName } = await collectDigest(tenantOrgId);
+  const gap = digestGapDays(await lastSentFor(tenantOrgId, null), shopToday());
+  const { sections, operatorName, window } = await collectDigest(tenantOrgId, gap);
   const n = digestCounts(sections);
   const today = todayLabel();
   const url = appUrl();
 
-  const body = renderDigestBody(sections, true, operatorName);
+  const body = renderDigestBody(sections, true, operatorName, window);
 
   const busy = n.partner + n.us + n.followUps + n.gas;
   // Constant on purpose: a subject carrying the date or the day's counts
@@ -630,7 +666,8 @@ export async function composePartnerDigest(
   tenantOrgId: number | null, orgId: number,
 ): Promise<{ subject: string; html: string } | null> {
   const brand = await brandForTenant(tenantOrgId);
-  const { sections, operatorName } = await collectDigest(tenantOrgId);
+  const gap = digestGapDays(await lastSentFor(tenantOrgId, orgId), shopToday());
+  const { sections, operatorName, window } = await collectDigest(tenantOrgId, gap);
   const section = sections.find((s) => s.orgId === orgId);
   if (!section) return null;
   const n = digestCounts([section]);
@@ -649,7 +686,7 @@ export async function composePartnerDigest(
         ? `${today} - ${n.handoffs} system${n.handoffs === 1 ? "" : "s"} in your hands, nothing needs your intervention.`
         : `${today} - ${n.systems} system${n.systems === 1 ? "" : "s"} in work, nothing needs your intervention.`,
     width: 680,
-    body: renderDigestBody([section], false, operatorName),
+    body: renderDigestBody([section], false, operatorName, window),
     footer: url
       ? `Sent each morning by ${esc(operatorName)}. Questions on a system? Open it in the portal and reply there: <a href="${esc(url)}" style="color:${EMAIL.faint};">${esc(url.replace(/^https?:\/\//, ""))}</a>`
       : `Sent each morning by ${esc(operatorName)}.`,
@@ -662,7 +699,7 @@ export async function composePartnerDigest(
 // ---------------------------------------------------------------------------
 
 /** What decides whether an edition goes out this hour. */
-export type DigestSchedule = { digestHour: number; digestLastSentOn: string };
+export type DigestSchedule = { digestHour: number; digestLastSentOn: string; digestDays: string };
 
 /**
  * Is this edition due? The cron runs every hour, so this one comparison is the
@@ -676,6 +713,9 @@ export type DigestSchedule = { digestHour: number; digestLastSentOn: string };
  */
 export function digestDue(s: DigestSchedule, hourNow: number, today: string): boolean {
   if (s.digestLastSentOn === today) return false;
+  // A day the digest rests is simply not sent - its work is not lost, because
+  // the next edition's window reaches back to the last one (digestGapDays).
+  if (!digestDayEnabled(s.digestDays, weekdayOfShopDay(today))) return false;
   return hourNow >= s.digestHour;
 }
 
@@ -773,6 +813,7 @@ export async function runDailyDigest(now = new Date()): Promise<{
     const house: DigestSchedule = operator ?? {
       digestHour: settings?.digestHour ?? 7,
       digestLastSentOn: settings?.digestLastSentOn ?? "",
+      digestDays: settings?.digestDays ?? "",
     };
     if (digestDue(house, hourNow, today)) {
       const res = await sendDigestEdition(tenantOrgId, null);
