@@ -18,6 +18,7 @@ import ViewAsBar from "@/components/ViewAsBar";
 import NotificationCenter from "@/components/NotificationCenter";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
+import { getAppearance } from "@/lib/appearanceData";
 import { unreadDiscussions } from "@/lib/discussionUnread";
 import { unreadMessages } from "@/lib/messageUnread";
 import { Analytics } from "@vercel/analytics/next";
@@ -98,13 +99,23 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     ? await db.select({ themeColor: orgs.themeColor, logoUrl: orgs.logoUrl }).from(orgs).where(eq(orgs.id, user.orgId))
     : [];
   const themed = orgTheme && isValidHex(orgTheme.themeColor) ? orgTheme.themeColor : null;
-  const headerBg = themed ?? "var(--navy)";
-  const headerFg = themed ? readableTextOn(themed) : "#fff";
+  // Three layers, narrowest first: an organization paints its own workspace,
+  // the platform paints everyone else's, and lib/appearance holds the look the
+  // app ships with. Every one of these values is validated there before it
+  // reaches a style attribute.
+  const look = await getAppearance();
+  const headerBg = themed ?? look.headerColor;
+  const headerFg = readableTextOn(themed ?? look.headerColor);
+  const pageTint = tint(themed ?? look.headerColor, 0.93);
   const logoUrl = orgTheme?.logoUrl || "";
 
   return (
     <html lang="en">
-      <body style={themed ? ({ ["--bg" as string]: tint(themed, 0.93) } as React.CSSProperties) : undefined}>
+      <body style={{
+        ["--bg" as string]: pageTint,
+        ["--spectrum-h" as string]: `${look.spectrumHeight}px`,
+        ["--spectrum-bg" as string]: look.spectrumCss,
+      } as React.CSSProperties}>
         {/* Topmost so a persona is never mistaken for a broken page. */}
         {view.persona && (
           <ViewAsBar orgs={[]} active={{ orgName: view.persona.orgName, role: view.persona.role }} />

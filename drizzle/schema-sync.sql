@@ -2611,3 +2611,10 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text N
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_reason" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_since" timestamp;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_by" text NOT NULL DEFAULT '';
+
+-- Platform appearance: the header colour and the spectrum bar above it, so a
+-- rebrand is a settings change rather than a deploy. Blank/default = the look
+-- the app ships with. See lib/appearance.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "header_color" text NOT NULL DEFAULT '';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_height" integer NOT NULL DEFAULT 3;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_stops" text NOT NULL DEFAULT '';

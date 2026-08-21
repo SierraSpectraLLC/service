@@ -2007,6 +2007,22 @@ export const appSettings = pgTable("app_settings", {
   // DEFAULT_BRAND in lib/brand.ts.
   platformName: text("platform_name").notNull().default(""),
   platformTagline: text("platform_tagline").notNull().default(""),
+  /**
+   * How the platform looks, for instances that would rather not be navy. See
+   * lib/appearance, which owns the defaults and the validation - blank means
+   * "the look the app ships with", so a future change to that default reaches
+   * every instance that never expressed a preference.
+   *
+   * The header colour paints the header bar and tints the page behind it, the
+   * same rule an organization's own themeColor follows; it deliberately does
+   * NOT move the accents on buttons, titles and tabs, because one hex applied
+   * to everything is a redesign rather than a brand.
+   */
+  headerColor: text("header_color").notNull().default(""),
+  /** The spectrum bar, in whole pixels. 0 hides it. */
+  spectrumHeight: integer("spectrum_height").notNull().default(3),
+  /** Its colour stops, JSON [{c,at}] - see lib/appearance.parseStops. */
+  spectrumStops: text("spectrum_stops").notNull().default(""),
   // The service organization that runs this instance - Sierra Spectra here.
   // Distinct from the platform operator role: this is a provider org like any
   // other, so its engagements are shares and its people are org members.

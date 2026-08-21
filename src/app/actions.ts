@@ -71,6 +71,7 @@ import {
   requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
+import { DEFAULT_STOPS, clampHeight, serializeStops, type Stop } from "@/lib/appearance";
 import { sendDigestEdition } from "@/lib/digest";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import {
@@ -7435,6 +7436,38 @@ export async function setBranding(data: { name: string; tagline: string }): Prom
     actor: u.email, entityType: "settings", entityId: "branding",
     action: `renamed the platform to "${name}"${tagline ? ` (${tagline})` : ""}`,
     field: "platform_name", newValue: name,
+  });
+  revalidatePath("/", "layout");
+  return {};
+}
+
+/**
+ * How the platform looks: the header bar, and the spectrum above it.
+ *
+ * Validated here and not only in the form, because these values are written
+ * into a style attribute on every page - a colour that is not a colour is a
+ * way to write CSS onto the whole app, so what reaches the column has been
+ * through lib/appearance first. Blank is stored for anything that is the stock
+ * look, so an instance that never expressed a preference follows the default
+ * if it ever moves.
+ */
+export async function setPlatformAppearance(data: {
+  headerColor: string; spectrumHeight: number; spectrumStops: Stop[];
+}): Promise<{ error?: string }> {
+  const u = await requirePlatformOwner();
+  const raw = data.headerColor.trim();
+  if (raw && !isValidHex(raw)) return { error: "The header colour needs to be a hex like #1D9E75" };
+  const headerColor = raw ? raw.toUpperCase() : "";
+  const spectrumHeight = clampHeight(data.spectrumHeight);
+  const spectrumStops = serializeStops(data.spectrumStops);
+  const row = { headerColor, spectrumHeight, spectrumStops };
+  await db.insert(appSettings).values({ id: 1, ...row })
+    .onConflictDoUpdate({ target: appSettings.id, set: row });
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "appearance",
+    action: `platform appearance: header ${headerColor || "default"}, spectrum ${spectrumHeight}px`
+      + ` with ${spectrumStops ? JSON.parse(spectrumStops).length : DEFAULT_STOPS.length} stops`,
+    field: "header_color", newValue: headerColor,
   });
   revalidatePath("/", "layout");
   return {};

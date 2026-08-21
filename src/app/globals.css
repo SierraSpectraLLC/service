@@ -184,7 +184,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    is typographic only: a rule under the element would underline just the words
    and float beside whatever sits next to it. */
 .card-title { font-weight: 800; font-size: 16px; line-height: 1.25; letter-spacing: -0.2px; color: var(--navy); }
-.spectrum { height: 3px; background: linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%); }
+/* The identity bar above the header. Both halves are variables so Settings >
+   Configuration > Appearance can move them without a deploy; the values here
+   are the fallback for a page rendered before settings are read, and match
+   lib/appearance's defaults. Height 0 hides it. */
+.spectrum {
+  height: var(--spectrum-h, 3px);
+  background: var(--spectrum-bg, linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%));
+}
 .pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
 .btn {
   cursor: pointer; border-radius: 8px; font-weight: 700; font-size: 13px;

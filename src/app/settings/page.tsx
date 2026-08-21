@@ -5,6 +5,7 @@ import { appSettings, orgs } from "@/db/schema";
 import { myTenantOrgId, requirePlatformOwner } from "@/lib/authz";
 import { houseEmails } from "@/lib/house";
 import { getStageDefs } from "@/lib/stageDefs";
+import { getAppearance } from "@/lib/appearanceData";
 import { viewTenant, visibleOrgs } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
 import ConfigurationForm from "@/components/ConfigurationForm";
@@ -24,6 +25,7 @@ export default async function SettingsPage() {
     visibleOrgs(user),
     houseEmails(myTenantOrgId(user)),
   ]);
+  const look = await getAppearance();
   // The internal digest's hour lives on the operator's org row, or on the
   // settings singleton where no operator has been named. Read from the row
   // itself rather than from the visible-orgs list, which is scoped for display
@@ -44,6 +46,11 @@ export default async function SettingsPage() {
         operatorOrgId={s?.operatorOrgId ?? null}
         digestHour={digestHour}
         digestTo={digestTo}
+        appearance={{
+          headerColor: look.storedHeaderColor,
+          spectrumHeight: look.spectrumHeight,
+          spectrumStops: look.spectrumStops,
+        }}
         modules={{ sheetSync: s?.sheetSyncEnabled ?? false, eod: s?.eodEnabled ?? false, digest: s?.digestEnabled ?? false, remote: s?.remoteEnabled ?? false, publicCatalog: s?.publicCatalogEnabled ?? false }}
       />
     </div>
