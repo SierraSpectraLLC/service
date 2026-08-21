@@ -188,6 +188,23 @@ export const orgs = pgTable("orgs", {
   // the machine, and opting a client into one must never opt them into the
   // other. Blank = the digest stays internal for this organization.
   digestRecipients: text("digest_recipients").notNull().default(""),
+  /**
+   * The hour (0-23, shop time) this organization's digest goes out. On the
+   * operator's own row it is the internal edition's hour.
+   *
+   * Here rather than in the cron expression because vercel.json is a deploy
+   * artifact: "send it at eight, not seven" should be a dropdown, not a pull
+   * request. The cron runs every hour and sends whatever is due, which is also
+   * what lets two organizations on one instance keep different hours.
+   */
+  digestHour: integer("digest_hour").notNull().default(7),
+  /**
+   * The shop day (YYYY-MM-DD) the digest last went out for this organization.
+   * What turns an hourly cron into a daily email: a second run in the same
+   * hour, a redeploy that re-fires the schedule, and the "send now" button all
+   * read this first. Blank = never sent.
+   */
+  digestLastSentOn: text("digest_last_sent_on").notNull().default(""),
   // How much stored file the organization may hold, in megabytes. 0 means no
   // ceiling, which is what every organization that predates this column was
   // given - a limit nobody agreed to is not a limit, it's an outage. New
@@ -1988,6 +2005,11 @@ export const appSettings = pgTable("app_settings", {
   sheetSyncEnabled: boolean("sheet_sync_enabled").notNull().default(false),
   eodEnabled: boolean("eod_enabled").notNull().default(false),
   digestEnabled: boolean("digest_enabled").notNull().default(false),
+  // The digest schedule for an instance that has named no operator org, where
+  // there is no orgs row to hang it on. Same meaning as the columns of those
+  // names on orgs; see lib/digest.digestDue.
+  digestHour: integer("digest_hour").notNull().default(7),
+  digestLastSentOn: text("digest_last_sent_on").notNull().default(""),
   // Remote support: reaching a lab PC from the portal. Off until an operator
   // stands up the relay host and sets REMOTE_URL - the pages check both, so a
   // flag flipped before the infrastructure exists says so instead of failing.

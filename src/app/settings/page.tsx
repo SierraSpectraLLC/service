@@ -2,7 +2,8 @@ import { asc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { appSettings, orgs } from "@/db/schema";
-import { requirePlatformOwner } from "@/lib/authz";
+import { myTenantOrgId, requirePlatformOwner } from "@/lib/authz";
+import { houseEmails } from "@/lib/house";
 import { getStageDefs } from "@/lib/stageDefs";
 import { viewTenant, visibleOrgs } from "@/lib/tenancy";
 import SettingsTabs from "@/components/SettingsTabs";
@@ -17,11 +18,21 @@ export default async function SettingsPage() {
   // it. Another operator's owner runs a workspace, not the platform, so they land
   // on the tab that is theirs instead.
   try { user = await requirePlatformOwner(); } catch { redirect("/settings/organizations"); }
-  const [[s], stageDefList, orgRows] = await Promise.all([
+  const [[s], stageDefList, orgRows, digestTo] = await Promise.all([
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
     getStageDefs(await viewTenant(user)),
     visibleOrgs(user),
+    houseEmails(myTenantOrgId(user)),
   ]);
+  // The internal digest's hour lives on the operator's org row, or on the
+  // settings singleton where no operator has been named. Read from the row
+  // itself rather than from the visible-orgs list, which is scoped for display
+  // and is not where setDigestHour writes - a mismatch there would show one
+  // hour and save another.
+  const operatorRow = s?.operatorOrgId === null || s?.operatorOrgId === undefined
+    ? undefined
+    : (await db.select({ digestHour: orgs.digestHour }).from(orgs).where(eq(orgs.id, s.operatorOrgId)))[0];
+  const digestHour = operatorRow?.digestHour ?? s?.digestHour ?? 7;
   return (
     <div className="container settings">
       <SettingsTabs active="configuration" />
@@ -31,6 +42,8 @@ export default async function SettingsPage() {
         platformName={s?.platformName ?? ""}
         platformTagline={s?.platformTagline ?? ""}
         operatorOrgId={s?.operatorOrgId ?? null}
+        digestHour={digestHour}
+        digestTo={digestTo}
         modules={{ sheetSync: s?.sheetSyncEnabled ?? false, eod: s?.eodEnabled ?? false, digest: s?.digestEnabled ?? false, remote: s?.remoteEnabled ?? false, publicCatalog: s?.publicCatalogEnabled ?? false }}
       />
     </div>

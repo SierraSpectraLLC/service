@@ -2596,3 +2596,12 @@ END $$;
 -- Partner edition of the daily digest: who at each organization receives
 -- their engagement's section. Blank = internal only. See lib/digest.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_recipients" text NOT NULL DEFAULT '';
+
+-- When each organization's daily digest goes out, and whether it already has
+-- today. The cron runs hourly and sends what is due, so the hour is a setting
+-- rather than a cron expression in vercel.json. See lib/digest.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_hour" integer NOT NULL DEFAULT 7;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text NOT NULL DEFAULT '';
+-- The same pair for an instance that has named no operator org.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_hour" integer NOT NULL DEFAULT 7;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text NOT NULL DEFAULT '';

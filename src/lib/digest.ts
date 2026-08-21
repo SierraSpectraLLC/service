@@ -20,7 +20,7 @@
 import { and, asc, eq, gte, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, tasks, workOrders,
+  appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, tasks, workOrders,
 } from "@/db/schema";
 import { GAS_COLOR, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { daysSince } from "@/lib/queue";
@@ -28,7 +28,7 @@ import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { brandForTenant } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
-import { shopDay } from "@/lib/shopday";
+import { shopDay, shopHour, shopToday } from "@/lib/shopday";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 
@@ -639,18 +639,95 @@ export async function composePartnerDigest(
 }
 
 // ---------------------------------------------------------------------------
-// Delivery.
+// Scheduling and delivery.
 // ---------------------------------------------------------------------------
 
+/** What decides whether an edition goes out this hour. */
+export type DigestSchedule = { digestHour: number; digestLastSentOn: string };
+
 /**
- * Send the morning's digests: the internal edition to each operator's staff,
- * then a partner edition to every organization that has opted in
- * (digest_recipients set). One workspace at a time, one engagement per
- * partner email - the isolation that keeps one client's systems out of
- * another's inbox is structural, not a filter.
+ * Is this edition due? The cron runs every hour, so this one comparison is the
+ * whole schedule.
+ *
+ * `>=` rather than `===` on purpose: an hour that was missed - a cron blip, a
+ * cold start, an hour the module spent switched off - still sends later the
+ * same day instead of vanishing until tomorrow. What stops it repeating is the
+ * stamp, which is also what makes a hand-pressed "send now" and the schedule
+ * agree about whether today's digest has gone.
  */
-export async function runDailyDigest(): Promise<{ sent: number; partnersSent: number; skipped: string[] }> {
-  const allOrgs = await db.select().from(orgs);
+export function digestDue(s: DigestSchedule, hourNow: number, today: string): boolean {
+  if (s.digestLastSentOn === today) return false;
+  return hourNow >= s.digestHour;
+}
+
+/** A stored recipient list as addresses. The store is text; this is the list. */
+export const digestRecipientList = (stored: string): string[] =>
+  stored.split(",").map((x) => x.trim()).filter(Boolean);
+
+export type EditionResult = { sent: boolean; to: string[]; reason?: string };
+
+/** Remember that today's edition has gone out, so nothing sends it twice. */
+async function stampSent(tenantOrgId: number | null, orgId: number | null, today: string): Promise<void> {
+  const target = orgId ?? tenantOrgId;
+  if (target !== null) {
+    await db.update(orgs).set({ digestLastSentOn: today }).where(eq(orgs.id, target));
+  } else {
+    // No operator org on this instance - the singleton carries the schedule.
+    await db.update(appSettings).set({ digestLastSentOn: today }).where(eq(appSettings.id, 1));
+  }
+}
+
+/**
+ * Compose and send ONE edition right now, whatever the schedule says, and
+ * stamp the day. `orgId` null is the internal edition for the workspace;
+ * anything else is that organization's partner edition.
+ *
+ * The single path both the cron and the "send now" button take, so a
+ * hand-sent digest is the same email to the same people, and counts as
+ * today's rather than arriving twice.
+ */
+export async function sendDigestEdition(
+  tenantOrgId: number | null, orgId: number | null,
+): Promise<EditionResult> {
+  const today = shopToday();
+  if (orgId === null) {
+    const to = await houseEmails(tenantOrgId);
+    if (!to.length) return { sent: false, to: [], reason: "nobody to send to" };
+    const { subject, html } = await composeDigest(tenantOrgId);
+    await sendEmail(to, subject, html);
+    await stampSent(tenantOrgId, null, today);
+    return { sent: true, to };
+  }
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { sent: false, to: [], reason: "no such organization" };
+  const to = digestRecipientList(org.digestRecipients);
+  if (!to.length) return { sent: false, to: [], reason: "no recipients configured" };
+  const edition = await composePartnerDigest(tenantOrgId, orgId);
+  if (!edition) return { sent: false, to, reason: "nothing on the board" };
+  await sendEmail(to, edition.subject, edition.html);
+  await stampSent(tenantOrgId, orgId, today);
+  return { sent: true, to };
+}
+
+/**
+ * The hourly pass: send every edition that is due and has not gone today.
+ *
+ * Nothing due is the ordinary outcome - twenty-three hours out of twenty-four
+ * this does nothing at all - so a quiet run is a success, not an error. What
+ * could not be sent is REPORTED rather than stamped, which means a workspace
+ * with no staff addresses says so every hour instead of failing silently, and
+ * a partner whose board was empty at seven gets their digest at ten when the
+ * day finally has something in it.
+ */
+export async function runDailyDigest(now = new Date()): Promise<{
+  sent: number; partnersSent: number; skipped: string[];
+}> {
+  const today = shopDay(now);
+  const hourNow = shopHour(now);
+  const [allOrgs, [settings]] = await Promise.all([
+    db.select().from(orgs),
+    db.select().from(appSettings).where(eq(appSettings.id, 1)),
+  ]);
   const operators = allOrgs.filter((o) => o.isOperator);
   const workspaces: (number | null)[] = operators.length ? operators.map((o) => o.id) : [null];
   let sent = 0;
@@ -658,33 +735,35 @@ export async function runDailyDigest(): Promise<{ sent: number; partnersSent: nu
   const skipped: string[] = [];
 
   for (const tenantOrgId of workspaces) {
-    const who = operators.find((o) => o.id === tenantOrgId)?.name ?? "this instance";
-
-    // Internal edition, to the workspace's own staff.
-    const to = await houseEmails(tenantOrgId);
-    if (to.length) {
-      const { subject, html } = await composeDigest(tenantOrgId);
-      await sendEmail(to, subject, html);
-      sent++;
-    } else {
-      skipped.push(`${who}: nobody to send to`);
+    const operator = operators.find((o) => o.id === tenantOrgId);
+    const who = operator?.name ?? "this instance";
+    // The internal edition keeps its schedule on the operator's own org row -
+    // the workspace IS an organization - falling back to the singleton on an
+    // instance that has never named one.
+    const house: DigestSchedule = operator ?? {
+      digestHour: settings?.digestHour ?? 7,
+      digestLastSentOn: settings?.digestLastSentOn ?? "",
+    };
+    if (digestDue(house, hourNow, today)) {
+      const res = await sendDigestEdition(tenantOrgId, null);
+      if (res.sent) sent++;
+      else skipped.push(`${who}: ${res.reason}`);
     }
 
-    // Partner editions, opt-in per organization. Scoped to this workspace's
-    // own organizations, and only ones with a section worth sending.
+    // Partner editions, opt-in per organization and each on its own hour.
+    // Scoped to this workspace's own organizations - the isolation that keeps
+    // one client's systems out of another's inbox is structural, not a filter.
     const partners = allOrgs.filter((o) =>
       o.digestRecipients.trim()
       && o.id !== tenantOrgId
       && (tenantOrgId === null || o.parentOrgId === tenantOrgId));
     for (const p of partners) {
-      const edition = await composePartnerDigest(tenantOrgId, p.id);
-      if (!edition) { skipped.push(`${p.name}: nothing on the board`); continue; }
-      const recipients = p.digestRecipients.split(",").map((s) => s.trim()).filter(Boolean);
-      await sendEmail(recipients, edition.subject, edition.html);
-      partnersSent++;
+      if (!digestDue(p, hourNow, today)) continue;
+      const res = await sendDigestEdition(tenantOrgId, p.id);
+      if (res.sent) partnersSent++;
+      else skipped.push(`${p.name}: ${res.reason}`);
     }
   }
 
-  if (!sent && !skipped.length) throw new Error("No house members configured (STAFF_EMAILS or Settings > Admin)");
   return { sent, partnersSent, skipped };
 }

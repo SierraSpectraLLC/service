@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  courts, digestCounts, followUpsForSystem, handoffFor, pendingForSystem, type PendingCtx,
+  courts, digestCounts, digestDue, followUpsForSystem, handoffFor, pendingForSystem,
+  type PendingCtx,
 } from "@/lib/digest";
 
 // The digest's hard questions are pinned here, case by case:
@@ -203,5 +204,37 @@ describe("grouping and totals", () => {
     };
     const n = digestCounts([section]);
     expect(n).toEqual({ systems: 2, partner: 1, us: 1, supplier: 1, followUps: 1, handoffs: 1, gas: 1 });
+  });
+});
+
+// The schedule. The cron fires every hour and this one comparison decides
+// whether anything goes out, so the ways it could misfire are the ways the
+// digest arrives twice, or at three in the morning, or never.
+describe("when an edition is due", () => {
+  const at7 = { digestHour: 7, digestLastSentOn: "" };
+
+  it("waits for the configured hour", () => {
+    expect(digestDue(at7, 6, "2026-08-21")).toBe(false);
+    expect(digestDue(at7, 7, "2026-08-21")).toBe(true);
+  });
+
+  it("never sends twice on the same day, whatever the hour", () => {
+    const gone = { digestHour: 7, digestLastSentOn: "2026-08-21" };
+    for (let h = 0; h < 24; h++) expect(digestDue(gone, h, "2026-08-21")).toBe(false);
+  });
+
+  it("a missed hour still sends later the same day rather than vanishing", () => {
+    // A cron blip at 07:00, or an hour the module spent switched off.
+    expect(digestDue(at7, 11, "2026-08-21")).toBe(true);
+  });
+
+  it("a new day clears yesterday's stamp", () => {
+    const gone = { digestHour: 7, digestLastSentOn: "2026-08-20" };
+    expect(digestDue(gone, 6, "2026-08-21")).toBe(false);
+    expect(digestDue(gone, 7, "2026-08-21")).toBe(true);
+  });
+
+  it("midnight is an hour like any other - 0 must not read as unset", () => {
+    expect(digestDue({ digestHour: 0, digestLastSentOn: "" }, 0, "2026-08-21")).toBe(true);
   });
 });

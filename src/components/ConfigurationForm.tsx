@@ -3,8 +3,11 @@
 import { useRef, useState, useTransition } from "react";
 import {
   addStage, setStageColor, renameStage, deleteStage,
-  setBranding, setOperatorOrg, setModule,
+  setBranding, setOperatorOrg, setModule, setDigestHour, sendDigestNow,
 } from "@/app/actions";
+
+/** "7:00 AM" - an hour of the day as somebody would say it out loud. */
+const clockLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "AM" : "PM"}`;
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
@@ -43,9 +46,29 @@ export default function ConfigurationForm(props: {
   orgs: OrgRow[];
   modules: { sheetSync: boolean; eod: boolean; digest: boolean; remote: boolean; publicCatalog: boolean };
   platformName: string; platformTagline: string; operatorOrgId: number | null;
+  /** When the internal edition of the daily digest goes out, in shop time. */
+  digestHour: number;
+  /** Who it goes to today, for the line under the schedule. Display only. */
+  digestTo: string[];
 }) {
   const [moduleState, setModuleState] = useState<Record<string, boolean>>({});
   const [pending, startTransition] = useTransition();
+
+  // The internal digest's schedule. Its recipients are the workspace's staff
+  // (Settings > Personnel), so this shows them rather than offering a second
+  // list that would drift from who actually works here.
+  const [digestHour, setDigestHourState] = useState(props.digestHour);
+  const [digestMsg, setDigestMsg] = useState("");
+  const [digestErr, setDigestErr] = useState(false);
+  const sendDigest = () => {
+    if (!confirm(`Email the internal digest now to ${props.digestTo.join(", ") || "nobody"}?`)) return;
+    setDigestMsg(""); setDigestErr(false);
+    startTransition(async () => {
+      const res = await sendDigestNow(null);
+      setDigestErr(!!res?.error);
+      setDigestMsg(res?.error ?? `Sent to ${res.to}`);
+    });
+  };
 
   const [brandDraft, setBrandDraft] = useState({ name: props.platformName, tagline: props.platformTagline });
   const [brandError, setBrandError] = useState("");
@@ -151,14 +174,49 @@ export default function ConfigurationForm(props: {
           ["remote", "Remote support", props.modules.remote],
           ["publicCatalog", "Public equipment library", props.modules.publicCatalog],
         ] as const).map(([key, label, on]) => (
-          <div key={key} style={{ display: "flex", gap: 12, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-            <Toggle on={moduleState[key] ?? on} label={label}
-              onClick={() => {
-                const next = !(moduleState[key] ?? on);
-                setModuleState((m) => ({ ...m, [key]: next }));
-                startTransition(async () => { await setModule(key, next); });
-              }} />
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{label}</div>
+          <div key={key} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <Toggle on={moduleState[key] ?? on} label={label}
+                onClick={() => {
+                  const next = !(moduleState[key] ?? on);
+                  setModuleState((m) => ({ ...m, [key]: next }));
+                  startTransition(async () => { await setModule(key, next); });
+                }} />
+              <div style={{ fontSize: 13, fontWeight: 700 }}>{label}</div>
+            </div>
+            {/* The digest's own schedule sits with its switch: an email that
+                goes out every morning is worth being able to time, preview and
+                send by hand from the place you turned it on. */}
+            {key === "digest" && (moduleState[key] ?? on) && (
+              <div style={{ margin: "8px 0 4px 54px" }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <span className="mut" style={{ fontSize: 12 }}>Sends at</span>
+                  <select value={digestHour} disabled={pending}
+                    onChange={(e) => {
+                      const next = parseInt(e.target.value);
+                      setDigestHourState(next); setDigestMsg(""); setDigestErr(false);
+                      startTransition(async () => {
+                        const res = await setDigestHour(null, next);
+                        if (res?.error) { setDigestErr(true); setDigestMsg(res.error); }
+                      });
+                    }}
+                    style={{ width: "auto", fontSize: 12 }}>
+                    {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{clockLabel(h)}</option>)}
+                  </select>
+                  <span className="mut" style={{ fontSize: 12 }}>shop time</span>
+                  <a className="btn sm" href="/api/digest/preview" target="_blank" rel="noreferrer">Preview</a>
+                  <button className="btn sm" onClick={sendDigest} disabled={pending}>Send now</button>
+                </div>
+                <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                  {props.digestTo.length
+                    ? `Goes to ${props.digestTo.join(", ")}. Each client's own edition is scheduled on their page.`
+                    : "Nobody receives it yet - add staff under Settings > Personnel."}
+                </div>
+                {digestMsg && (
+                  <div style={{ fontSize: 12, marginTop: 4, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </Section>

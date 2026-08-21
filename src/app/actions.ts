@@ -71,6 +71,7 @@ import {
   requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
+import { sendDigestEdition } from "@/lib/digest";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen, stageChange } from "@/lib/stages";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
@@ -6109,6 +6110,68 @@ export async function updateDigestRecipients(orgId: number, value: string): Prom
   });
   revalidatePath("/settings");
   return {};
+}
+
+/**
+ * When this organization's digest goes out, in shop time. On the operator's
+ * own row it sets the internal edition's hour. The cron runs hourly and sends
+ * what is due, so this takes effect tomorrow morning with no deploy.
+ */
+export async function setDigestHour(orgId: number | null, hour: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return { error: "Pick an hour of the day" };
+  const at = `${String(hour).padStart(2, "0")}:00`;
+  // Null is the workspace's own internal edition. It lives on the operator's
+  // org row, because a workspace IS an organization - and on the settings
+  // singleton for an instance that has never named one.
+  if (orgId === null) {
+    const tenantOrgId = myTenantOrgId(u);
+    if (tenantOrgId !== null) await db.update(orgs).set({ digestHour: hour }).where(eq(orgs.id, tenantOrgId));
+    else await db.update(appSettings).set({ digestHour: hour }).where(eq(appSettings.id, 1));
+    await audit({ actor: u.email, entityType: "settings", entityId: tenantOrgId ?? 0, action: `internal daily digest hour: ${at}` });
+    revalidatePath("/settings");
+    return {};
+  }
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ digestHour: hour }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `${org.name} daily digest hour: ${at}`,
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
+/**
+ * Send an edition now rather than waiting for the morning - the button beside
+ * the preview, for when the schedule is not the point.
+ *
+ * `orgId` null is the internal edition for the caller's own workspace;
+ * anything else is that organization's partner edition. It goes through the
+ * same path the cron takes, so what lands is the same email to the same
+ * people and it counts as today's: pressing this at nine does not earn a
+ * second copy at ten.
+ */
+export async function sendDigestNow(orgId: number | null): Promise<{
+  error?: string; sent?: number; to?: string;
+}> {
+  const u = await requireStaff();
+  if (!(await getModules()).digest) return { error: "The daily digest module is off for this instance" };
+  const tenantOrgId = myTenantOrgId(u);
+  if (orgId !== null) {
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    // Somebody else's client is not ours to mail about.
+    if (!org || (tenantOrgId !== null && org.parentOrgId !== tenantOrgId)) return { error: "Not found" };
+  }
+  const res = await sendDigestEdition(tenantOrgId, orgId);
+  if (!res.sent) return { error: `Not sent - ${res.reason}` };
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId ?? 0,
+    action: `sent the daily digest now to ${res.to.join(", ")}`,
+  });
+  revalidatePath("/settings");
+  return { sent: res.to.length, to: res.to.join(", ") };
 }
 
 // ---------------- Client sign-in allowlist ----------------

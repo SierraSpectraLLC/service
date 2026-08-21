@@ -52,21 +52,27 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   hundreds of ms per page load that no code change can recover.
 - **Storage > Blob**: create a store; `BLOB_READ_WRITE_TOKEN` is injected
   automatically.
-- **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` hourly and
-  `GET /api/cron/daily-digest` daily at 14:00 UTC (7am PT - adjust the cron
-  expression to taste). Set `CRON_SECRET` in project env; Vercel sends it as
-  the bearer token. The digest is built per engagement (one section per
-  organization whose systems are in work): what's blocked and whose move it
-  is - theirs, ours, or a supplier's, with a part stuck without tracking (or
-  backordered with no date) stated as plain fact in the court of whoever
-  ordered it - an internal follow-up list (blocked systems with no recorded
-  reason), systems handed off to the partner's queue (out of our hands, never
-  counted as blocked), what happened since yesterday, and a
-  status board (stages, gases, open parts). The internal edition stitches
-  every section together for staff (`STAFF_EMAILS` / Settings) via Resend;
-  organizations opted in under Settings > Organizations ("Daily digest"
-  recipients) also receive their own section as a partner edition, worded
-  from their side and never merged with anyone else's systems.
+- **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` and
+  `GET /api/cron/daily-digest` hourly. Set `CRON_SECRET` in project env; Vercel
+  sends it as the bearer token.
+- **Daily digest**: built per engagement - one section per organization whose
+  systems are in work. Each section carries what's blocked and whose move it is
+  (theirs, ours, or a supplier's, with a part stuck without tracking or
+  backordered stated as plain fact in the court of whoever ordered it), an
+  internal follow-up list (blocked systems with no recorded reason), systems
+  handed off to the partner's queue (out of our hands, never counted as
+  blocked), what happened since yesterday, and a status board of stages, gases
+  and open parts. The internal edition stitches every section together for
+  staff; an organization opted in under Settings > Organizations receives its
+  own section as a partner edition, worded from their side and never merged
+  with anyone else's systems.
+- **Digest scheduling**: the hourly cron sends only what is due. Every
+  organization keeps its own send hour in shop time (Settings > Organizations;
+  Settings > Configuration for the internal edition) and a per-organization
+  stamp of the day it last went, so an hourly cron still delivers one email a
+  day and a missed hour catches up rather than skipping. Both screens also
+  carry **Preview** (renders today's edition with real data, sends nothing) and
+  **Send now** (delivers immediately and counts as today's).
 
 ### 6. Google Sheet parity (service account)
 The sync reads the client's sheet through the Sheets API with a service
