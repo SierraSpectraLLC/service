@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pmActive, pmAssetGroups, pmGroups, pmMonthLabel } from "@/lib/pmGroups";
+import { pmActive, pmAssetGroups, pmFolds, pmGroups, pmMonthLabel } from "@/lib/pmGroups";
 
 const TODAY = "2026-08-12";
 const s = (id: number, nextDue: string, over: { paused?: boolean; openTaskId?: number | null } = {}) =>
@@ -113,5 +113,39 @@ describe("grouping by asset", () => {
   it("a unit with no label still gets a group, never a blank header", () => {
     const [g] = pmAssetGroups([a(1, "2026-09-01", 7)], TODAY);
     expect(g.label).toBe("Unnamed unit");
+  });
+});
+
+describe("one fold per month", () => {
+  it("chronological: overdue months, the due month, the calendar, then paused", () => {
+    const folds = pmFolds([
+      s(1, "2026-09-04"),
+      s(2, "2026-05-20"),                    // overdue straggler
+      s(3, "2026-08-28"),                    // this month, not owed yet
+      s(4, "2026-08-03"),                    // this month, overdue within it
+      s(5, "2027-01-10", { paused: true }),
+    ], TODAY);
+    expect(folds.map((f) => [f.key, f.state, f.rows.map((r) => r.id)])).toEqual([
+      ["2026-05", "overdue", [2]],
+      ["2026-08", "due", [4, 3]],
+      ["2026-09", "upcoming", [1]],
+      ["paused", "paused", [5]],
+    ]);
+  });
+
+  it("a folded header still says what is owed inside", () => {
+    const [may, aug] = pmFolds([s(1, "2026-05-20"), s(2, "2026-08-03"), s(3, "2026-08-28")], TODAY);
+    expect(may.owed).toBe(1);
+    expect(aug.owed).toBe(1);      // the 8/28 row is this month but not owed yet
+  });
+
+  it("work started early makes its month owed - a fold must not hide a job in flight", () => {
+    const [dec] = pmFolds([s(1, "2026-12-01", { openTaskId: 44 })], TODAY);
+    expect(dec.state).toBe("upcoming");
+    expect(dec.owed).toBe(1);
+  });
+
+  it("no paused rows, no paused fold", () => {
+    expect(pmFolds([s(1, "2026-09-01")], TODAY).map((f) => f.key)).toEqual(["2026-09"]);
   });
 });

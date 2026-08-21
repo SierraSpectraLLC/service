@@ -134,3 +134,58 @@ export function pmAssetGroups<T extends PmAssetLike>(rows: T[], today: string): 
   groups.sort((a, b) => (a.key === "sys" ? -1 : b.key === "sys" ? 1 : 0));
   return groups;
 }
+
+// ---------------------------------------------------------------------------
+// The month as the fold.
+//
+// The panel's reading order is the shop's planning order: months. Every
+// schedule sits in the month its next cycle falls in - past months are the
+// overdue stragglers, the current month is the visit being worked, future
+// months are the calendar. One fold per month, chronological, so "May 2026 ·
+// overdue" above "August 2026 · due" says at a glance both what is late and
+// by how much. Paused schedules close the list under their own fold: they
+// belong to no month, because they are not going to happen on their own.
+// ---------------------------------------------------------------------------
+
+export type PmFoldState = "overdue" | "due" | "upcoming" | "paused";
+
+export type PmFold<T> = {
+  /** "2026-05", or "paused". Stable, so a click outlives a re-render. */
+  key: string;
+  label: string;
+  state: PmFoldState;
+  rows: T[];
+  /**
+   * Owed now (pmActive) - overdue, due, or started early. What the folded
+   * header must still say, and what decides a fold starts open: a month with
+   * work owed shows its rows, a quiet one is one line.
+   */
+  owed: number;
+};
+
+export function pmFolds<T extends PmLike>(rows: T[], today: string): PmFold<T>[] {
+  const thisMonth = pmMonthKey(today);
+  const order = (a: T, b: T) => a.nextDue.localeCompare(b.nextDue) || a.id - b.id;
+  const live = rows.filter((r) => !r.paused).sort(order);
+  const paused = rows.filter((r) => r.paused).sort(order);
+
+  const folds: PmFold<T>[] = [];
+  for (const r of live) {
+    const key = pmMonthKey(r.nextDue);
+    let f = folds[folds.length - 1];
+    if (!f || f.key !== key) {
+      f = {
+        key, label: pmMonthLabel(r.nextDue),
+        state: key < thisMonth ? "overdue" : key === thisMonth ? "due" : "upcoming",
+        rows: [], owed: 0,
+      };
+      folds.push(f);
+    }
+    f.rows.push(r);
+    if (pmActive(r, today)) f.owed++;
+  }
+  if (paused.length) {
+    folds.push({ key: "paused", label: "Paused", state: "paused", rows: paused, owed: 0 });
+  }
+  return folds;
+}
