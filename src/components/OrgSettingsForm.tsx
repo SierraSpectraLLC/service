@@ -279,6 +279,10 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               onChange={(e) => { setDigestTo(e.target.value); setDigestMsg(""); }}
               placeholder="nobody - internal only" style={{ flex: "1 1 220px", fontSize: 12 }} />
             <button className="btn sm" onClick={saveDigestTo} disabled={pending || digestTo === org.digestRecipients}>Save</button>
+            <a className="btn sm" href={`/api/digest/preview?org=${org.id}`} target="_blank" rel="noreferrer">Preview</a>
+          </div>
+          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+            Preview shows today&apos;s edition with real data, without sending anything.
           </div>
           {digestMsg && (
             <div style={{ fontSize: 12, marginTop: 6, color: digestMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{digestMsg}</div>

@@ -301,8 +301,10 @@ function renderPending(section: DigestSection, internal: boolean, operatorName: 
   const groups: string[] = [];
   if (c.partner.length) {
     // The house section has no partner; anything in this court there is
-    // parked with some named third organization.
-    const head = !internal ? "Waiting on you"
+    // parked with some named third organization. The partner edition names
+    // the organization rather than saying "you" - a daily email that opens
+    // with an accusation gets read as one.
+    const head = !internal ? `Waiting for ${section.name} intervention`
       : section.orgId === null ? "Waiting on others" : `Waiting on ${section.name}`;
     const expected = section.orgId === null ? "" : section.name;
     groups.push(groupHead(head, c.partner.length, "#8A5410")
@@ -500,8 +502,8 @@ export async function composePartnerDigest(
     logoUrl: brand.operatorLogoUrl || undefined,
     tagline: `${operatorName} × ${section.name} · Daily digest · ${today}`,
     preheader: n.partner
-      ? `${n.partner} item${n.partner === 1 ? "" : "s"} waiting on you · ${n.systems} systems in work.`
-      : `${n.systems} system${n.systems === 1 ? "" : "s"} in work - nothing waiting on you.`,
+      ? `${n.partner} item${n.partner === 1 ? "" : "s"} awaiting ${section.name} intervention · ${n.systems} systems in work.`
+      : `${n.systems} system${n.systems === 1 ? "" : "s"} in work - nothing needs your intervention.`,
     width: 680,
     body: renderDigestBody([section], false, operatorName),
     footer: url
