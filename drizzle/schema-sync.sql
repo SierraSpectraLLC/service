@@ -2605,3 +2605,9 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text NOT NULL 
 -- The same pair for an instance that has named no operator org.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_hour" integer NOT NULL DEFAULT 7;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text NOT NULL DEFAULT '';
+
+-- Why a system is blocked, required at the moment of blocking. See lib/stages
+-- and actions.toggleStage; blank on rows blocked before it was demanded.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_reason" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_since" timestamp;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_by" text NOT NULL DEFAULT '';

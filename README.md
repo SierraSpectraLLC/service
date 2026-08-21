@@ -59,13 +59,21 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   systems are in work. Each section carries what's blocked and whose move it is
   (theirs, ours, or a supplier's, with a part stuck without tracking or
   backordered stated as plain fact in the court of whoever ordered it), an
-  internal follow-up list (blocked systems with no recorded reason), systems
+  internal follow-up list (see below), systems
   handed off to the partner's queue (out of our hands, never counted as
   blocked), what happened since yesterday, and a status board of stages, gases
   and open parts. The internal edition stitches every section together for
   staff; an organization opted in under Settings > Organizations receives its
   own section as a partner edition, worded from their side and never merged
   with anyone else's systems.
+- **Blocked systems**: marking a system "Waiting / blocked" requires a written
+  reason - what it is waiting on and what would clear it - enforced in
+  `toggleStage`, not just in the panel that asks. The reason shows under the
+  system's stages (editable without unblocking, which preserves how long it has
+  been stuck) and leads that system's digest lines, aged from when it was
+  blocked. Unblocking clears it. The digest's follow-up list asks after systems
+  blocked before this was required, by lead name, every morning until somebody
+  writes one.
 - **Digest scheduling**: the hourly cron sends only what is due. Every
   organization keeps its own send hour in shop time (Settings > Organizations;
   Settings > Configuration for the internal edition) and a per-organization

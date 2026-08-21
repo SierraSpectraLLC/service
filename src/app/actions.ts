@@ -73,7 +73,10 @@ import {
 import { getModules } from "@/lib/flags";
 import { sendDigestEdition } from "@/lib/digest";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen, stageChange } from "@/lib/stages";
+import {
+  GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, BLOCKED_STAGE,
+  autoFg, cleanBlockReason, isBlocking, partOpen, stageChange, validBlockReason,
+} from "@/lib/stages";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
@@ -284,7 +287,17 @@ const targetLabel = (externalId: string, asset: { kind: string; model: string; s
 
 // ---------------- Instruments ----------------
 
-export async function toggleStage(instrumentId: number, stage: string): Promise<{ error?: string }> {
+/**
+ * Add or remove a stage. `reason` is required for exactly one move: blocking.
+ *
+ * Enforced HERE rather than only in the panel that asks for it, because the
+ * rule is about the record, not about a form - and `needsReason` comes back so
+ * a caller that forgot can ask rather than showing a validation error for
+ * something the person was never given a box to fill in.
+ */
+export async function toggleStage(
+  instrumentId: number, stage: string, reason = "",
+): Promise<{ error?: string; needsReason?: boolean }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -299,12 +312,56 @@ export async function toggleStage(instrumentId: number, stage: string): Promise<
   if (!move.ok) return { error: move.error };
   const has = inst.stages.includes(stage);
   const next = move.next;
-  await db.update(instruments).set({ stages: next, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  // Blocking is the one move that owes an explanation. Unblocking clears it,
+  // so the field never outlives the state it describes.
+  const blocking = isBlocking(inst.stages, stage);
+  const why = cleanBlockReason(reason);
+  if (blocking && !validBlockReason(why)) {
+    return { error: "Say why it's blocked and what would clear it", needsReason: true };
+  }
+  const blockFields = blocking
+    ? { blockedReason: why, blockedSince: new Date(), blockedBy: u.email }
+    : stage === BLOCKED_STAGE && has
+      ? { blockedReason: "", blockedSince: null, blockedBy: "" }
+      : {};
+  await db.update(instruments).set({ stages: next, updatedAt: new Date(), ...blockFields })
+    .where(eq(instruments.id, instrumentId));
   await db.insert(stageEvents).values({ instrumentId, stage, kind: has ? "removed" : "added" });
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
-    action: `${has ? "removed" : "added"} stage: ${stage}`, field: "stages",
+    action: `${has ? "removed" : "added"} stage: ${stage}${blocking ? ` - ${why}` : ""}`, field: "stages",
     oldValue: inst.stages.join(", "), newValue: next.join(", "),
+  });
+  rev(instrumentId);
+  return {};
+}
+
+/**
+ * Rewrite why a system is blocked without unblocking it - the reason changes
+ * as the wait does ("waiting on the quote" becomes "quote approved, waiting on
+ * the part"), and making somebody unblock and re-block to say so would lose
+ * the date it has been stuck since.
+ */
+export async function setBlockedReason(instrumentId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  await assertSystemEditable(u, instrumentId);
+  if (!inst.stages.includes(BLOCKED_STAGE)) return { error: "That system isn't blocked" };
+  const why = cleanBlockReason(reason);
+  if (!validBlockReason(why)) return { error: "Say why it's blocked and what would clear it" };
+  await db.update(instruments).set({
+    blockedReason: why, blockedBy: u.email,
+    // Keep blockedSince: it is how long the system has been stuck, which
+    // rewording the reason does not reset. Backfill it only if it is missing,
+    // which is every row blocked before a reason was demanded.
+    ...(inst.blockedSince ? {} : { blockedSince: new Date() }),
+    updatedAt: new Date(),
+  }).where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: `blocked reason: ${why}`, field: "blockedReason",
+    oldValue: inst.blockedReason, newValue: why,
   });
   rev(instrumentId);
   return {};

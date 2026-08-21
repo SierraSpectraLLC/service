@@ -22,7 +22,7 @@ import { db } from "@/db";
 import {
   appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, tasks, workOrders,
 } from "@/db/schema";
-import { GAS_COLOR, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
+import { BLOCKED_STAGE, GAS_COLOR, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { daysSince } from "@/lib/queue";
 import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
@@ -112,9 +112,13 @@ export const handoffFor = (
 /**
  * What one system is genuinely waiting on, each item assigned to a court.
  * Only for systems in OUR queue - a handed-off system pends nothing (see
- * handoffFor). One deliberate absence: a "Waiting / blocked" stage adds no
- * line of its own - its blocked TASKS are the reasons, and a reasonless one
- * goes on the follow-up list instead.
+ * handoffFor).
+ *
+ * A blocked system leads with the reason it was blocked for, which is demanded
+ * at the moment of blocking (actions.toggleStage) and aged from that moment.
+ * Its blocked TASKS list beneath as their own lines. A blocked system with
+ * neither goes to the follow-up list instead - it predates the requirement,
+ * and the only useful thing to say about it is that nobody knows.
  *
  * Parts read literally, because the record can't know who is on the phone to
  * whom: a part moving with tracking rides with the supplier; one stuck
@@ -131,13 +135,20 @@ export const handoffFor = (
  * every engagement, which told a client their own purchasing was our job.
  */
 export function pendingForSystem(
-  i: { id: number; externalId: string; stages: string[] },
+  i: {
+    id: number; externalId: string; stages: string[];
+    blockedReason: string; blockedSince: Date | null;
+  },
   ctx: PendingCtx,
 ): PendingItem[] {
   const items: PendingItem[] = [];
   const add = (court: Court, who: string, what: string, days: number | null = null) =>
     items.push({ systemId: i.id, externalId: i.externalId, court, who, what, days });
 
+  if (i.stages.includes(BLOCKED_STAGE) && i.blockedReason.trim()) {
+    add("us", ctx.operatorName, `Blocked: ${i.blockedReason.trim()}`,
+      i.blockedSince ? daysSince(i.blockedSince, ctx.now) : null);
+  }
   if (i.stages.includes("Waiting to ship")) {
     add("us", ctx.operatorName, "Ready and waiting to ship");
   }
@@ -174,16 +185,20 @@ export function pendingForSystem(
  * nothing - it is out of our hands.
  */
 export function followUpsForSystem(
-  i: { id: number; externalId: string; stages: string[]; queueOrgId: number | null; lead: string },
+  i: {
+    id: number; externalId: string; stages: string[];
+    queueOrgId: number | null; lead: string; blockedReason: string;
+  },
   blockedTaskCount: number,
 ): FollowUp[] {
   if (i.queueOrgId !== null) return [];
   const out: FollowUp[] = [];
 
-  // A blocked system must say why. The reasons live on its blocked tasks (or
-  // its queue, handled above); blocked with neither is a question, not a
-  // state - and it is our own housekeeping, never the partner's.
-  if (i.stages.includes("Waiting / blocked") && blockedTaskCount === 0) {
+  // A blocked system must say why. Blocking has demanded a reason since
+  // actions.toggleStage started asking, so what lands here is the backlog: a
+  // system blocked before that, with no reason and no blocked task to stand in
+  // for one. Our own housekeeping, never the partner's.
+  if (i.stages.includes(BLOCKED_STAGE) && !i.blockedReason.trim() && blockedTaskCount === 0) {
     out.push({
       systemId: i.id, externalId: i.externalId,
       text: `Blocked with no recorded reason - ask ${i.lead || "the team"} what's blocking and what clears it`,

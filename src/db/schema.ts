@@ -398,6 +398,20 @@ export const instruments = pgTable("instruments", {
   archivedAt: timestamp("archived_at"),
   archivedBy: text("archived_by").notNull().default(""),
   stages: text("stages").array().notNull().default([]),
+  /**
+   * Why this system is blocked, demanded at the moment of blocking and cleared
+   * the moment it is unblocked (see actions.toggleStage, lib/stages).
+   *
+   * On the system rather than on a task because "Waiting / blocked" is a
+   * statement about the SYSTEM: the work that is stuck may be several tasks or
+   * none at all, and a reason that lives on one of them is a reason the board
+   * cannot show. Blank on rows blocked before this was required - the digest
+   * asks after those by name until somebody writes one.
+   */
+  blockedReason: text("blocked_reason").notNull().default(""),
+  /** When it was blocked, so the digest can say how long. Null = unknown. */
+  blockedSince: timestamp("blocked_since"),
+  blockedBy: text("blocked_by").notNull().default(""),
   notes: text("notes").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

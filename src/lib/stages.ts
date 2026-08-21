@@ -62,6 +62,28 @@ export function gasAttention(status: string): boolean {
   return status === "Low" || status === "Empty" || status === "Not connected";
 }
 
+/**
+ * The stage that means "this system is not moving".
+ *
+ * Load-bearing beyond its name: blocking is the one stage change that demands
+ * a written reason (see toggleStage). A system marked blocked with no recorded
+ * cause is a system nobody can unblock - it sits on the board looking urgent
+ * while the one fact needed to act on it lives in somebody's memory.
+ */
+export const BLOCKED_STAGE = "Waiting / blocked";
+
+/** Is this stage change the ACT of blocking - the moment a reason is owed? */
+export const isBlocking = (current: string[], stage: string): boolean =>
+  stage === BLOCKED_STAGE && !current.includes(stage);
+
+/** A reason short enough to store, long enough to mean something. */
+export const MAX_BLOCK_REASON = 300;
+export const MIN_BLOCK_REASON = 4;
+export const cleanBlockReason = (raw: string): string =>
+  raw.trim().replace(/\s+/g, " ").slice(0, MAX_BLOCK_REASON);
+export const validBlockReason = (raw: string): boolean =>
+  cleanBlockReason(raw).length >= MIN_BLOCK_REASON;
+
 export const TASK_STATES = ["Open", "In progress", "Blocked", "Done"] as const;
 export const PART_STATES = ["Needed", "Ordered", "In transit", "Received", "Backordered", "Installed", "Removed"] as const;
 /** True while a part still needs someone to do something (order, chase, install). */

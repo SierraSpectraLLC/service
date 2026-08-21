@@ -15,3 +15,26 @@ export function promptReason(what: string): string | null {
   }
   return trimmed;
 }
+
+/**
+ * Why a system is being blocked, asked at the moment of blocking.
+ *
+ * Deliberately not promptReason: this is not a destructive act needing an
+ * audit alibi, it is the fact that makes a blocked system actionable, and it
+ * is asked for that way. Pre-filled when re-wording an existing reason. The
+ * server demands it too - see actions.toggleStage.
+ */
+export function promptBlockReason(existing = ""): string | null {
+  const r = window.prompt(
+    "Why is this system blocked, and what would clear it?\n\n"
+    + "Shown on the system and in the daily digest until it is unblocked.\n"
+    + 'e.g. "waiting on LabZen to approve the quote for the HED supply"',
+    existing);
+  if (r === null) return null;
+  const trimmed = r.trim();
+  if (trimmed.length < 4) {
+    window.alert("A few words at least - what is it waiting on? Nothing was changed.");
+    return null;
+  }
+  return trimmed;
+}

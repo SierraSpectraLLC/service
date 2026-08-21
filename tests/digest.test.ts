@@ -19,8 +19,11 @@ import {
 const now = new Date("2026-08-21T14:00:00Z");
 const days = (n: number) => new Date(now.getTime() - n * 86400000);
 
-const sys = (over: Partial<{ id: number; externalId: string; stages: string[] }> = {}) => ({
-  id: 1, externalId: "T-003", stages: ["Refurbishment"], ...over,
+const sys = (over: Partial<{
+  id: number; externalId: string; stages: string[]; blockedReason: string; blockedSince: Date | null;
+}> = {}) => ({
+  id: 1, externalId: "T-003", stages: ["Refurbishment"],
+  blockedReason: "", blockedSince: null as Date | null, ...over,
 });
 
 const ctx = (over: Partial<PendingCtx> = {}): PendingCtx => ({
@@ -57,7 +60,7 @@ describe("handed off is not blocked", () => {
 
   it("a handed-off system chases nothing, even blocked with no reason", () => {
     expect(followUpsForSystem(
-      { id: 1, externalId: "P-001", stages: ["Waiting / blocked"], queueOrgId: 5, lead: "Joe" },
+      { id: 1, externalId: "P-001", stages: ["Waiting / blocked"], queueOrgId: 5, lead: "Joe", blockedReason: "" },
       0,
     )).toEqual([]);
   });
@@ -68,13 +71,30 @@ describe("whose court a wait sits in", () => {
     expect(pendingForSystem(sys(), ctx())).toEqual([]);
   });
 
-  it("the Waiting / blocked stage adds no line of its own - blocked TASKS are the reasons", () => {
-    expect(pendingForSystem(sys({ stages: ["Waiting / blocked"] }), ctx())).toEqual([]);
+  it("a blocked system leads with the reason it was blocked for, aged from then", () => {
     const [item] = pendingForSystem(
-      sys({ stages: ["Waiting / blocked"] }),
+      sys({
+        stages: ["Waiting / blocked"],
+        blockedReason: "waiting on LabZen to approve the quote", blockedSince: days(6),
+      }), ctx());
+    expect(item).toMatchObject({
+      court: "us", who: "Sierra Spectra",
+      what: "Blocked: waiting on LabZen to approve the quote", days: 6,
+    });
+  });
+
+  it("blocked with no reason says nothing here - the chase list asks instead", () => {
+    expect(pendingForSystem(sys({ stages: ["Waiting / blocked"] }), ctx())).toEqual([]);
+  });
+
+  it("blocked tasks list beneath the reason, as their own lines", () => {
+    const items = pendingForSystem(
+      sys({ stages: ["Waiting / blocked"], blockedReason: "no bench space" }),
       ctx({ blockedTasks: [{ title: "Vacuum won't hold" }] }),
     );
-    expect(item).toMatchObject({ court: "us", what: "Blocked task: Vacuum won't hold" });
+    expect(items.map((x) => x.what)).toEqual([
+      "Blocked: no bench space", "Blocked task: Vacuum won't hold",
+    ]);
   });
 
   it("Waiting to ship is ours - the system is done, the shipment is not", () => {
@@ -161,15 +181,19 @@ describe("whose court a wait sits in", () => {
 });
 
 describe("the chase list", () => {
-  const ours = (stages: string[] = ["Refurbishment"], lead = "Joe") =>
-    ({ id: 1, externalId: "T-003", stages, queueOrgId: null, lead });
+  const ours = (stages: string[] = ["Refurbishment"], lead = "Joe", blockedReason = "") =>
+    ({ id: 1, externalId: "T-003", stages, queueOrgId: null, lead, blockedReason });
 
-  it("blocked with no recorded reason pesters the lead for one; a blocked task IS the reason", () => {
+  it("blocked with no recorded reason pesters the lead for one", () => {
     const [f] = followUpsForSystem(ours(["Waiting / blocked"]), 0);
     expect(f.text).toBe("Blocked with no recorded reason - ask Joe what's blocking and what clears it");
-    expect(followUpsForSystem(ours(["Waiting / blocked"]), 1)).toEqual([]);
     const [anon] = followUpsForSystem(ours(["Waiting / blocked"], ""), 0);
     expect(anon.text).toMatch(/ask the team/);
+  });
+
+  it("a recorded reason, or a blocked task standing in for one, ends the asking", () => {
+    expect(followUpsForSystem(ours(["Waiting / blocked"], "Joe", "waiting on the quote"), 0)).toEqual([]);
+    expect(followUpsForSystem(ours(["Waiting / blocked"]), 1)).toEqual([]);
   });
 
   it("an unblocked system chases nothing", () => {
