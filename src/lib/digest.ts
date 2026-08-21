@@ -3,16 +3,18 @@
 // A service company's day is not one flat fleet - it is a set of working
 // relationships: Sierra Spectra × LabZen, Sierra Spectra × GMI, and the
 // house's own bench. The digest mirrors that. Each engagement gets a section
-// that answers, in order, the three questions a morning stand-up asks:
+// that answers, in order, the questions a morning stand-up asks:
 //
 //   1. What is stuck, and WHOSE move is it - theirs, ours, or a supplier's?
-//   2. What actually happened since yesterday?
-//   3. Where does every system stand right now?
+//   2. What should we chase today - the follow-up list?
+//   3. What is handed off - with the partner, out of our hands?
+//   4. What actually happened since yesterday?
+//   5. Where does every system stand right now?
 //
 // The same section renders twice. The INTERNAL edition stitches every
 // engagement together for the engineering team, cross-fleet rollup on top.
-// The PARTNER edition is one engagement, worded for the other side ("waiting
-// on you"), and goes only to recipients that organization has been opted into
+// The PARTNER edition is one engagement, worded for the other side, and goes
+// only to recipients that organization has been opted into
 // (orgs.digest_recipients) - never merged, so no organization ever sees
 // another's systems. Same isolation rule as the EOD report, one level up.
 import { and, asc, eq, gte, inArray, or } from "drizzle-orm";
@@ -31,13 +33,13 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 
 // ---------------------------------------------------------------------------
-// Whose move is it - the classification, pure so it is unit-tested.
+// The classifications - pure, so they are unit-tested.
 // ---------------------------------------------------------------------------
 
 /**
  * partner  the other organization in this engagement (or a named third org)
  * us       the operator - our bench, our decision, our shipment
- * supplier a vendor the wait rides on - a part on order, backordered
+ * supplier a vendor the wait rides on - a part on order that is moving
  */
 export type Court = "partner" | "us" | "supplier";
 
@@ -52,6 +54,23 @@ export type PendingItem = {
   days: number | null;
 };
 
+/**
+ * A system parked in another organization's queue. NOT a blocker: kicking a
+ * finished repair to the partner's queue is how it leaves our board, and the
+ * digest must read it that way - handed off, out of our hands - never as
+ * something anyone is "waiting" on.
+ */
+export type HandoffItem = {
+  systemId: number;
+  externalId: string;
+  holder: string;
+  reason: string;
+  days: number;
+};
+
+/** Something to chase today, until the record that clears it exists. */
+export type FollowUp = { systemId: number; externalId: string; text: string };
+
 export type PendingCtx = {
   /** The org this section belongs to (null = the operator's own work). */
   sectionOrgId: number | null;
@@ -59,34 +78,43 @@ export type PendingCtx = {
   operatorName: string;
   blockedTasks: { title: string }[];
   waitingWorkOrders: { number: string; title: string; orgId: number | null }[];
-  openParts: { name: string; status: string; eta: string; requestedOrgId: number | null }[];
+  openParts: {
+    name: string; status: string; eta: string; tracking: string;
+    requestedOrgId: number | null; requestedAt: Date | null;
+  }[];
   now: Date;
 };
 
-/**
- * Everything one system is waiting on, each item assigned to a court. The
- * queue is the strongest signal - somebody explicitly said whose move it is,
- * and why - so it comes first and suppresses the softer "Waiting / blocked"
- * stage reading of the same fact.
- */
-export function pendingForSystem(
+export const handoffFor = (
   i: {
-    id: number; externalId: string; stages: string[];
+    id: number; externalId: string;
     queueOrgId: number | null; queueReason: string; queueSince: Date | null; createdAt: Date;
   },
+  orgName: (id: number | null) => string,
+  now: Date,
+): HandoffItem | null =>
+  i.queueOrgId === null ? null : {
+    systemId: i.id, externalId: i.externalId,
+    holder: orgName(i.queueOrgId), reason: i.queueReason,
+    days: daysSince(i.queueSince ?? i.createdAt, now),
+  };
+
+/**
+ * What one system is genuinely waiting on, each item assigned to a court.
+ * Only for systems in OUR queue - a handed-off system pends nothing (see
+ * handoffFor). Two deliberate absences: a "Waiting / blocked" stage adds no
+ * line of its own (its blocked TASKS are the reasons, and a reasonless one
+ * goes on the follow-up list instead), and a part on order without tracking
+ * is a follow-up, not a status.
+ */
+export function pendingForSystem(
+  i: { id: number; externalId: string; stages: string[] },
   ctx: PendingCtx,
 ): PendingItem[] {
   const items: PendingItem[] = [];
   const add = (court: Court, who: string, what: string, days: number | null = null) =>
     items.push({ systemId: i.id, externalId: i.externalId, court, who, what, days });
 
-  if (i.queueOrgId !== null) {
-    add("partner", ctx.orgName(i.queueOrgId),
-      i.queueReason || "In their queue - next move is theirs",
-      daysSince(i.queueSince ?? i.createdAt, ctx.now));
-  } else if (i.stages.includes("Waiting / blocked")) {
-    add("us", ctx.operatorName, "Marked waiting / blocked");
-  }
   if (i.stages.includes("Waiting to ship")) {
     add("us", ctx.operatorName, "Ready and waiting to ship");
   }
@@ -97,19 +125,48 @@ export function pendingForSystem(
       `Work order${w.number ? ` ${w.number}` : ""} waiting: ${w.title}`);
   }
   for (const p of ctx.openParts) {
-    const eta = p.eta ? ` - ETA ${p.eta}` : "";
     if (p.status === "Needed" && p.requestedOrgId !== null) {
-      add("partner", ctx.orgName(p.requestedOrgId), `Part to order: ${p.name}`);
+      add("partner", ctx.orgName(p.requestedOrgId), `Part to order: ${p.name}`,
+        p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null);
     } else if (p.status === "Needed") {
       add("us", ctx.operatorName, `Part needed: ${p.name}`);
-    } else if (p.status === "Backordered") {
-      add("supplier", "supplier", `Part backordered: ${p.name}${eta}`);
-    } else if (p.status === "Ordered" || p.status === "In transit") {
+    } else if ((p.status === "Ordered" || p.status === "In transit") && p.tracking) {
       add("supplier", "supplier",
-        `Part ${p.status === "Ordered" ? "on order" : "in transit"}: ${p.name}${eta}`);
+        `Part ${p.status === "Ordered" ? "on order" : "in transit"}: ${p.name}${p.eta ? ` - ETA ${p.eta}` : ""}`);
     }
+    // Ordered/In transit without tracking, and Backordered: follow-ups.
   }
   return items;
+}
+
+/**
+ * The chase list: what somebody should go ask about today, repeated every
+ * morning until the record that answers it exists. A handed-off system chases
+ * nothing - it is out of our hands.
+ */
+export function followUpsForSystem(
+  i: { id: number; externalId: string; stages: string[]; queueOrgId: number | null; lead: string },
+  openParts: { name: string; status: string; tracking: string; vendor: string }[],
+  blockedTaskCount: number,
+): FollowUp[] {
+  if (i.queueOrgId !== null) return [];
+  const out: FollowUp[] = [];
+  const add = (text: string) => out.push({ systemId: i.id, externalId: i.externalId, text });
+
+  // A blocked system must say why. The reasons live on its blocked tasks (or
+  // its queue, handled above); blocked with neither is a question, not a state.
+  if (i.stages.includes("Waiting / blocked") && blockedTaskCount === 0) {
+    add(`Blocked with no recorded reason - ask ${i.lead || "the team"} what's blocking and what clears it`);
+  }
+  for (const p of openParts) {
+    const vendor = p.vendor || "the supplier";
+    if ((p.status === "Ordered" || p.status === "In transit") && !p.tracking) {
+      add(`No tracking yet for ${p.name} - chase ${vendor} until we have a number`);
+    } else if (p.status === "Backordered") {
+      add(`${p.name} backordered - chase ${vendor} for a firm ETA`);
+    }
+  }
+  return out;
 }
 
 /** The three courts in reading order, each keeping its items' order. */
@@ -131,8 +188,6 @@ type BoardRow = {
   externalId: string; label: string; stages: string[];
   gases: { gas: string; status: string }[];
   openParts: number; lead: string;
-  /** "In LabZen's court: waiting on their N2 tech · 12d" - set when parked. */
-  queueNote: string;
   /** Internal edition only. */
   notes: string;
 };
@@ -143,6 +198,8 @@ export type DigestSection = {
   name: string;
   board: BoardRow[];
   pending: PendingItem[];
+  followUps: FollowUp[];
+  handoffs: HandoffItem[];
   gas: GasIssue[];
   work: WorkBlock[];
   /** "9 changes logged since yesterday by joe, chris" - internal only. */
@@ -204,7 +261,7 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
     const systems = rows.filter((r) => (r.ownerOrgId ?? null) === ownerId);
     const section: DigestSection = {
       orgId: ownerId, name: orgName(ownerId),
-      board: [], pending: [], gas: [], work: [], activity: "",
+      board: [], pending: [], followUps: [], handoffs: [], gas: [], work: [], activity: "",
     };
     const sysIds = new Set(systems.map((s) => s.id));
 
@@ -219,23 +276,35 @@ export async function collectDigest(tenantOrgId: number | null): Promise<{
           externalId: i.externalId, label, stages: i.stages,
           gases: g.map((x) => ({ gas: x.gas, status: x.status })),
           openParts: openParts.length, lead: i.lead,
-          queueNote: i.queueOrgId !== null
-            ? `In ${orgName(i.queueOrgId)}'s court${i.queueReason ? `: ${i.queueReason}` : ""} · ${daysSince(i.queueSince ?? i.createdAt, now)}d`
-            : "",
           notes: i.notes,
         });
-        section.pending.push(...pendingForSystem(i, {
-          sectionOrgId: ownerId, orgName, operatorName: brand.operatorName, now,
-          blockedTasks: taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked")
-            .map((t) => ({ title: t.title })),
-          waitingWorkOrders: woRows.filter((w) => w.instrumentId === i.id && w.state === "waiting")
-            .map((w) => ({ number: w.number, title: w.title, orgId: w.orgId })),
-          openParts: openParts.map((p) => ({
-            name: p.name, status: p.status, eta: p.eta, requestedOrgId: p.requestedOrgId,
-          })),
-        }));
-        for (const x of g.filter((x) => gasAttention(x.status))) {
-          section.gas.push({ externalId: i.externalId, gas: x.gas, status: x.status, note: x.note });
+
+        // A system in another org's queue is handed off - it lists once under
+        // "With <them>" and raises nothing: no pendings, no follow-ups, no
+        // gas attention. It is not on our repair board.
+        const handoff = handoffFor(i, orgName, now);
+        if (handoff) {
+          section.handoffs.push(handoff);
+        } else {
+          const blockedTasks = taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked");
+          section.pending.push(...pendingForSystem(i, {
+            sectionOrgId: ownerId, orgName, operatorName: brand.operatorName, now,
+            blockedTasks: blockedTasks.map((t) => ({ title: t.title })),
+            waitingWorkOrders: woRows.filter((w) => w.instrumentId === i.id && w.state === "waiting")
+              .map((w) => ({ number: w.number, title: w.title, orgId: w.orgId })),
+            openParts: openParts.map((p) => ({
+              name: p.name, status: p.status, eta: p.eta, tracking: p.tracking,
+              requestedOrgId: p.requestedOrgId, requestedAt: p.requestedAt,
+            })),
+          }));
+          section.followUps.push(...followUpsForSystem(
+            i,
+            openParts.map((p) => ({ name: p.name, status: p.status, tracking: p.tracking, vendor: p.vendor })),
+            blockedTasks.length,
+          ));
+          for (const x of g.filter((x) => gasAttention(x.status))) {
+            section.gas.push({ externalId: i.externalId, gas: x.gas, status: x.status, note: x.note });
+          }
         }
       }
 
@@ -300,10 +369,10 @@ function renderPending(section: DigestSection, internal: boolean, operatorName: 
   };
   const groups: string[] = [];
   if (c.partner.length) {
-    // The house section has no partner; anything in this court there is
-    // parked with some named third organization. The partner edition names
-    // the organization rather than saying "you" - a daily email that opens
-    // with an accusation gets read as one.
+    // The house section has no partner; anything in this court there is a
+    // named third organization's. The partner edition names the organization
+    // rather than saying "you" - a daily email that opens with an accusation
+    // gets read as one.
     const head = !internal ? `Waiting for ${section.name} intervention`
       : section.orgId === null ? "Waiting on others" : `Waiting on ${section.name}`;
     const expected = section.orgId === null ? "" : section.name;
@@ -319,6 +388,34 @@ function renderPending(section: DigestSection, internal: boolean, operatorName: 
       + c.supplier.map((x) => line(x, "supplier")).join(""));
   }
   return card(`<div style="font-weight:bold;margin-bottom:2px;">Blocked &amp; pending</div>${groups.join("")}`);
+}
+
+/** The chase list. Internal only - it is our own legwork, nobody else's. */
+function renderFollowUps(section: DigestSection): string {
+  if (!section.followUps.length) return "";
+  const lines = section.followUps.map((f) =>
+    `<div style="margin:2px 0;">${sysId(f.externalId)} &nbsp;${esc(f.text)}</div>`).join("");
+  return card(`<b style="color:#8A5410;">Follow up today (${section.followUps.length})</b>
+    <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">Repeats every morning until the record that clears it exists.</div>${lines}`,
+    "#EAD9B8", "#FDF8EE");
+}
+
+/** Handed-off systems: with the partner, out of our hands. Neutral on purpose. */
+function renderHandoffs(section: DigestSection, internal: boolean, operatorName: string): string {
+  if (!section.handoffs.length) return "";
+  // Sections can mix holders (a third org holding one system); name each line's
+  // holder only when it differs from the section's partner.
+  const expected = section.orgId === null ? "" : section.name;
+  const lines = section.handoffs.map((h) => {
+    const aside = h.holder !== expected ? ` <span style="color:${EMAIL.muted};">(with ${esc(h.holder)})</span>` : "";
+    return `<div style="margin:2px 0;">${sysId(h.externalId)}${h.reason ? ` &nbsp;${esc(h.reason)}` : ""}${aside} <span style="color:${EMAIL.faint};">· ${h.days}d</span></div>`;
+  }).join("");
+  const title = section.orgId === null ? "Handed off" : `With ${section.name}`;
+  const sub = internal
+    ? "In their queue - off our repair board, nothing needed from us."
+    : `Handed off by ${operatorName} - nothing pending from our side on these.`;
+  return card(`<div style="font-weight:bold;">${esc(title)} (${section.handoffs.length})</div>
+    <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">${esc(sub)}</div>${lines}`);
 }
 
 function renderGas(section: DigestSection): string {
@@ -358,7 +455,6 @@ function renderBoard(section: DigestSection, internal: boolean): string {
         <td style="padding:7px 8px;border-top:1px solid ${EMAIL.border};font-family:${EMAIL.font};font-size:13px;vertical-align:top;">
           ${sysId(r.externalId)}<br/>
           <span style="font-size:11px;color:${EMAIL.muted};">${esc(r.label)}</span>
-          ${r.queueNote ? `<br/><span style="font-size:11px;color:#8A5410;">${esc(r.queueNote)}</span>` : ""}
           ${internal && r.notes ? `<br/><span style="font-size:11px;color:${EMAIL.faint};">${esc(r.notes)}</span>` : ""}
         </td>
         <td style="padding:7px 8px;border-top:1px solid ${EMAIL.border};vertical-align:top;line-height:1.9;">${r.stages.map(stagePill).join(" ")}</td>
@@ -381,8 +477,10 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
   const c = courts(section.pending);
   const counts = [
     `${section.board.length} system${section.board.length === 1 ? "" : "s"}`,
-    c.partner.length ? `${c.partner.length} on ${internal ? "them" : "you"}` : "",
-    c.us.length ? `${c.us.length} on ${internal ? "us" : operatorName}` : "",
+    c.partner.length ? `${c.partner.length} on them` : "",
+    c.us.length ? `${c.us.length} on us` : "",
+    section.followUps.length ? `${section.followUps.length} to chase` : "",
+    section.handoffs.length ? `${section.handoffs.length} handed off` : "",
     section.gas.length ? `${section.gas.length} gas` : "",
   ].filter(Boolean).join(" · ");
   const header = internal
@@ -391,13 +489,15 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
          <span style="font-size:12px;color:${EMAIL.muted};">&nbsp; ${esc(counts)}</span>
        </div>`
     : "";
-  const quiet = !section.pending.length && !section.gas.length
+  const quiet = !section.pending.length && !section.gas.length && !section.followUps.length
     ? `<div style="font-family:${EMAIL.font};font-size:13px;color:#0F6E56;margin:8px 0;">Nothing blocked - every system is moving.</div>`
     : "";
   return header
     + renderGas(section)
+    + (internal ? renderFollowUps(section) : "")
     + renderPending(section, internal, operatorName)
     + quiet
+    + renderHandoffs(section, internal, operatorName)
     + renderWork(section, internal)
     + renderBoard(section, internal);
 }
@@ -414,13 +514,15 @@ export function digestCounts(sections: DigestSection[]) {
   return {
     systems: sections.reduce((n, s) => n + s.board.length, 0),
     partner: c.partner.length, us: c.us.length, supplier: c.supplier.length,
+    followUps: sections.reduce((n, s) => n + s.followUps.length, 0),
+    handoffs: sections.reduce((n, s) => n + s.handoffs.length, 0),
     gas: sections.reduce((n, s) => n + s.gas.length, 0),
   };
 }
 
 function summaryStrip(n: ReturnType<typeof digestCounts>): string {
   const cell = (value: string, label: string, color = EMAIL.ink) => `
-    <td align="center" style="padding:8px 6px;border:1px solid ${EMAIL.border};border-radius:8px;background:${EMAIL.panel};">
+    <td align="center" style="padding:8px 4px;border:1px solid ${EMAIL.border};border-radius:8px;background:${EMAIL.panel};">
       <div style="font-family:${EMAIL.font};font-size:20px;font-weight:bold;color:${color};">${value}</div>
       <div style="font-family:${EMAIL.font};font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:${EMAIL.muted};">${label}</div>
     </td>`;
@@ -428,9 +530,10 @@ function summaryStrip(n: ReturnType<typeof digestCounts>): string {
     <table width="100%" border="0" cellspacing="6" cellpadding="0" style="margin-bottom:4px;">
       <tr>
         ${cell(String(n.systems), "systems")}
-        ${cell(String(n.partner), "on partners", n.partner ? "#8A5410" : EMAIL.faint)}
         ${cell(String(n.us), "on us", n.us ? "#A32D2D" : EMAIL.faint)}
-        ${cell(String(n.supplier), "on suppliers", n.supplier ? "#475569" : EMAIL.faint)}
+        ${cell(String(n.partner), "on partners", n.partner ? "#8A5410" : EMAIL.faint)}
+        ${cell(String(n.followUps), "to chase", n.followUps ? "#8A5410" : EMAIL.faint)}
+        ${cell(String(n.handoffs), "handed off", EMAIL.muted)}
         ${cell(String(n.gas), "gas issues", n.gas ? "#A32D2D" : EMAIL.faint)}
       </tr>
     </table>`;
@@ -462,17 +565,17 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
 
   const body = renderDigestBody(sections, true, operatorName);
 
-  const blocked = n.partner + n.us;
-  const subject = blocked || n.gas
-    ? `Daily digest: ${n.us} on us, ${n.partner} on partners${n.gas ? `, ${n.gas} gas` : ""} - ${today}`
+  const busy = n.partner + n.us + n.followUps + n.gas;
+  const subject = busy
+    ? `Daily digest: ${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase${n.gas ? `, ${n.gas} gas` : ""} - ${today}`
     : `Daily digest: all moving - ${today}`;
   const html = emailShell({
     brand: brand.operatorName,
     logoUrl: brand.operatorLogoUrl || undefined,
     tagline: `Daily digest · ${today}`,
-    preheader: blocked || n.gas
-      ? `${n.us} waiting on us, ${n.partner} on partners, ${n.gas} gas issue${n.gas === 1 ? "" : "s"} across ${n.systems} systems.`
-      : `All ${n.systems} systems moving - nothing blocked.`,
+    preheader: busy
+      ? `${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase, ${n.gas} gas issue${n.gas === 1 ? "" : "s"} across ${n.systems} systems.`
+      : `All ${n.systems} systems moving - nothing blocked, nothing to chase.`,
     width: 680,
     body,
     footer: `Sent each morning by ${esc(brand.name)}.${url ? ` Statuses live on each system's page: <a href="${esc(url)}" style="color:${EMAIL.faint};">${esc(url.replace(/^https?:\/\//, ""))}</a>` : ""}`,
@@ -503,7 +606,9 @@ export async function composePartnerDigest(
     tagline: `${operatorName} × ${section.name} · Daily digest · ${today}`,
     preheader: n.partner
       ? `${n.partner} item${n.partner === 1 ? "" : "s"} awaiting ${section.name} intervention · ${n.systems} systems in work.`
-      : `${n.systems} system${n.systems === 1 ? "" : "s"} in work - nothing needs your intervention.`,
+      : n.handoffs
+        ? `${n.handoffs} system${n.handoffs === 1 ? "" : "s"} in your hands · nothing needs your intervention.`
+        : `${n.systems} system${n.systems === 1 ? "" : "s"} in work - nothing needs your intervention.`,
     width: 680,
     body: renderDigestBody([section], false, operatorName),
     footer: url
