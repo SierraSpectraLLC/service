@@ -25,7 +25,7 @@ import {
 import { BLOCKED_STAGE, GAS_COLOR, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { daysSince } from "@/lib/queue";
 import { houseEmails } from "@/lib/house";
-import { sendEmail } from "@/lib/email";
+import { digestFrom, digestReplyTo, sendEmail } from "@/lib/email";
 import { brandForTenant } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { shopDay, shopHour, shopToday } from "@/lib/shopday";
@@ -712,13 +712,19 @@ export async function sendDigestEdition(
   // One running conversation per engagement rather than a fresh email every
   // morning - see lib/emailThread. The key names the engagement, so a client's
   // chain and our own never merge.
-  const host = mailHost(process.env.EMAIL_FROM);
-  const thread = (key: string) => threadHeaders(threadRootId(key, host));
+  // Anchored to the address the digest itself sends from, so the chain and
+  // the sender stay coherent. Changing that address starts one fresh chain -
+  // a one-time cost, and the honest one: it is a new sender.
+  const from = digestFrom();
+  const replyTo = digestReplyTo();
+  const host = mailHost(from);
+  const send = (to: string[], subject: string, html: string, key: string) =>
+    sendEmail(to, subject, html, { from, replyTo, headers: threadHeaders(threadRootId(key, host)) });
   if (orgId === null) {
     const to = await houseEmails(tenantOrgId);
     if (!to.length) return { sent: false, to: [], reason: "nobody to send to" };
     const { subject, html } = await composeDigest(tenantOrgId);
-    await sendEmail(to, subject, html, thread(`internal-${tenantOrgId ?? 0}`));
+    await send(to, subject, html, `internal-${tenantOrgId ?? 0}`);
     await stampSent(tenantOrgId, null, today);
     return { sent: true, to };
   }
@@ -728,7 +734,7 @@ export async function sendDigestEdition(
   if (!to.length) return { sent: false, to: [], reason: "no recipients configured" };
   const edition = await composePartnerDigest(tenantOrgId, orgId);
   if (!edition) return { sent: false, to, reason: "nothing on the board" };
-  await sendEmail(to, edition.subject, edition.html, thread(`org-${orgId}`));
+  await send(to, edition.subject, edition.html, `org-${orgId}`);
   await stampSent(tenantOrgId, orgId, today);
   return { sent: true, to };
 }

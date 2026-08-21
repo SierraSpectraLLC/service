@@ -74,6 +74,14 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   blocked. Unblocking clears it. The digest's follow-up list asks after systems
   blocked before this was required, by lead name, every morning until somebody
   writes one.
+- **Digest sender** (optional): set `DIGEST_EMAIL_FROM` to give the digest its
+  own address (e.g. `Sierra Spectra <dailydigest@service.sierraspectra.com>`)
+  instead of sharing `EMAIL_FROM` with sign-in links. The domain must be
+  verified in Resend, and a subdomain is verified in its own right - which is
+  the reason to use one: it carries its own sending reputation, so a bounce on
+  a report never touches deliverability of the emails people log in with. Add
+  `DIGEST_REPLY_TO` when that address is not an inbox anybody reads. Note the
+  thread anchor follows this address, so changing it starts one fresh chain.
 - **One conversation**: a digest is a single email with every recipient in the
   `To:` field - not a copy each - so recipients can see one another and a
   reply-all reaches the whole list. Consecutive editions also thread together

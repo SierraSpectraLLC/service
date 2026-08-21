@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 
 // A recurring email lands in one conversation only if the id it claims to
@@ -41,5 +41,36 @@ describe("the invented thread root", () => {
   it("sets both headers - clients read one or the other, not always the same one", () => {
     const id = threadRootId("org-5", "sierraspectra.com");
     expect(threadHeaders(id)).toEqual({ "In-Reply-To": id, References: id });
+  });
+});
+
+// The digest's own sending identity. Unset must behave exactly as before this
+// existed, because that is every instance that has not set it.
+describe("who the digest comes from", () => {
+  const saved = { ...process.env };
+  afterEach(() => { process.env = { ...saved }; });
+
+  it("falls back to the general sender when no digest address is set", async () => {
+    const { digestFrom, digestReplyTo } = await import("@/lib/email");
+    delete process.env.DIGEST_EMAIL_FROM;
+    process.env.EMAIL_FROM = "Sierra Spectra <login@sierraspectra.com>";
+    expect(digestFrom()).toBe("Sierra Spectra <login@sierraspectra.com>");
+    expect(digestReplyTo()).toBeUndefined();
+  });
+
+  it("uses the digest address when one is set, and ignores an empty one", async () => {
+    const { digestFrom } = await import("@/lib/email");
+    process.env.EMAIL_FROM = "login@sierraspectra.com";
+    process.env.DIGEST_EMAIL_FROM = "Sierra Spectra <dailydigest@service.sierraspectra.com>";
+    expect(digestFrom()).toBe("Sierra Spectra <dailydigest@service.sierraspectra.com>");
+    process.env.DIGEST_EMAIL_FROM = "   ";
+    expect(digestFrom()).toBe("login@sierraspectra.com");
+  });
+
+  it("threads off the digest's own domain, subdomain included", async () => {
+    expect(mailHost("Sierra Spectra <dailydigest@service.sierraspectra.com>"))
+      .toBe("service.sierraspectra.com");
+    expect(threadRootId("org-5", mailHost("dailydigest@service.sierraspectra.com")))
+      .toBe("<digest.org-5@service.sierraspectra.com>");
   });
 });
