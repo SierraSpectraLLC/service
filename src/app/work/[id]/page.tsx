@@ -28,11 +28,14 @@ import TasksPanel from "@/components/TasksPanel";
 import WorkOrderControls from "@/components/WorkOrderControls";
 import WorkOrderNotes from "@/components/WorkOrderNotes";
 import PartsPanel from "@/components/PartsPanel";
+import PhotosPanel from "@/components/PhotosPanel";
+import { isPhotoFile } from "@/lib/photos";
 import { procedures } from "@/db/schema";
 import { coversSystem } from "@/lib/procedureRole";
 import { scopeMatches } from "@/lib/checkout";
 import { parseChecklist } from "@/lib/checklist";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
+import { mentionableOn } from "@/lib/mentionAudience";
 
 export const dynamic = "force-dynamic";
 
@@ -208,6 +211,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   const canAttach = canAdd || (canEdit && staff);
   const fileQuota = await storeQuota(inst?.ownerOrgId ?? asset?.ownerOrgId ?? null);
 
+  // Who the composer may offer for an @mention: this record's readers, and
+  // nobody else - see lib/mentionAudience.
+  const mentionable = await mentionableOn(people, { instrumentId: wo.instrumentId, assetId: wo.assetId });
+
   return (
     <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
@@ -263,10 +270,14 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         />
       </div>
 
-      <WorkOrderNotes workOrderId={wo.id} canPost={canEdit}
-        notes={noteRows.map((n) => ({ id: n.id, author: n.author, text: n.text, createdAt: n.createdAt.toISOString() }))} />
+      <WorkOrderNotes workOrderId={wo.id} canPost={canEdit} people={mentionable}
+        me={{ email: user.email, name: user.name, isHouse: staff }}
+        notes={noteRows.map((n) => ({
+          id: n.id, author: n.author, authorEmail: n.authorEmail, text: n.text,
+          createdAt: n.createdAt.toISOString(), editedAt: n.editedAt?.toISOString() ?? null,
+        }))} />
 
-      <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)}
+      <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)} mentionable={mentionable}
         systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
         today={today} canEdit={canAdd} isStaff={staff} copyTargets={[]}
         procedureChoices={procedureChoices} />
@@ -295,6 +306,20 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         canEdit={canAttach} isStaff={staff} listingCuration={false} storage={fileQuota}
         combineTitle={`${wo.number} packet`}
         combineLines={[wo.title, place.label, `Prepared by ${user.name}`].filter(Boolean)} />
+
+      {/* The job's pictures - the error dialog, the scored seal, the bench
+          after. Same panel the system page has; uploads land tagged with both
+          the system and the job, so they read in either gallery. No cover
+          here: a job is an event, not a thing with a face. */}
+      {(canAttach || fileRows.some(isPhotoFile)) && (
+        <PhotosPanel target={target} coverId={null}
+          photos={fileRows.filter(isPhotoFile).map((a) => ({
+            id: a.id, fileName: a.fileName, kind: a.kind, framing: a.framing,
+            uploadedBy: a.uploadedBy, when: shopTime(a.createdAt), createdAt: a.createdAt.toISOString(),
+          }))}
+          label={`${wo.number} - ${wo.title}`}
+          canEdit={canAttach} storageFull={fileQuota.state === "full"} />
+      )}
 
       {poRows.length > 0 && (
         <div className="card">

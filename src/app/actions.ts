@@ -88,6 +88,8 @@ import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
 import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
+import { canDeleteNote, canEditNote, isAuthor } from "@/lib/notes";
+import { readersOf } from "@/lib/mentionAudience";
 import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { normalizePhone } from "@/lib/sms";
@@ -2172,22 +2174,11 @@ export async function deleteChecklistItem(itemId: number) {
  * task's readership and never wider - same discipline as discussion emails.
  */
 async function taskMentionAudience(t: { instrumentId: number | null; assetId: number | null }): Promise<string[]> {
-  if (t.instrumentId !== null) {
-    return postAudience({
-      instrumentId: t.instrumentId, audience: "all", authorOrgId: null, roomOrgId: null,
-      tenantOrgId: await tenantOfSystem(t.instrumentId),
-    });
-  }
-  const [a] = t.assetId
-    ? await db.select({ ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId }).from(assets).where(eq(assets.id, t.assetId))
-    : [];
-  const staff = await houseEmails(a?.tenantOrgId);
-  if (!t.assetId) return staff;
-  const shares = await db.select({ orgId: assetShares.orgId }).from(assetShares).where(eq(assetShares.assetId, t.assetId));
-  const orgIds = [...new Set([...(a?.ownerOrgId !== null && a?.ownerOrgId !== undefined ? [a.ownerOrgId] : []), ...shares.map((s) => s.orgId)])];
-  if (!orgIds.length) return staff;
-  const entries = await db.select().from(clientAllowlist).where(inArray(clientAllowlist.orgId, orgIds));
-  return [...new Set([...staff, ...entries.filter((e) => !e.entry.trim().startsWith("@")).map((e) => e.entry.toLowerCase())])];
+  // lib/mentionAudience, so the dropdown a name is picked from and the list
+  // this notifies are the same list. They used to be two, and the system half
+  // forgot owners - a client could read a note on the instrument it owns and
+  // never be mentionable on it.
+  return [...(await readersOf(t))];
 }
 
 const noteHref = (t: { instrumentId: number | null; assetId: number | null }) =>
@@ -2227,7 +2218,7 @@ export async function addWorkOrderNote(workOrderId: number, text: string): Promi
   const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
   if (!wo) return { error: "Not found" };
   await assertWorkEditable(u, wo);
-  await db.insert(workOrderNotes).values({ workOrderId, author: u.name, text: body });
+  await db.insert(workOrderNotes).values({ workOrderId, author: u.name, authorEmail: u.email.toLowerCase(), text: body });
   await audit({
     actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId, entityType: "wo_note", entityId: workOrderId,
     action: `commented on ${wo.number}: "${body}"`,
@@ -2480,7 +2471,8 @@ export async function nameServiceVisit(
 }
 
 const partStatusVerb = (status: string) =>
-  status === "Installed" ? "installed" : status === "Removed" ? "pulled" : null;
+  status === "Installed" ? "installed" : status === "Removed" ? "pulled"
+    : status === "Suggested" ? "suggested" : null;
 
 export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string; flag?: string; expanded?: number }> {
   const u = await requireEditor();
@@ -2564,7 +2556,10 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   revWork(p);
   // Same posture as the visit flag on a work order: warn about the allowance
   // at the moment of commitment, never refuse the record.
-  const flag = await partsFlag(payer, t0.instrumentId, p.costCents, p.pmScheduleId !== null).catch(() => "");
+  // A suggestion is not a commitment: the allowance warning waits for the
+  // moment somebody marks it Needed or beyond (see PART_STATES).
+  const flag = p.status === "Suggested" ? ""
+    : await partsFlag(payer, t0.instrumentId, p.costCents, p.pmScheduleId !== null).catch(() => "");
   return { flag: flag || undefined, expanded: expanded || undefined };
 }
 
@@ -2750,16 +2745,21 @@ export async function addPhotos(
   const rows = await db.insert(attachments).values(files.map((f) => ({
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.instrumentId === null ? t0.assetId : null,
+    // The job, when shot from one - the before/after pictures belong to the
+    // repair as much as to the system (the same tag tasks and parts carry).
+    workOrderId: t0.workOrderId,
     fileName: f.fileName.slice(0, 200), kind: "Photo", url: f.url, size: f.size,
     uploadedBy: u.name, description: onSystem ? "System photo" : "Module photo",
   }))).returning();
 
-  // The first photo a record ever gets becomes its cover - but a record sharing
-  // its photos with a unit that already has one is not empty, and should not
-  // quietly take the picture over.
+  // Uploading a photo does not choose the cover, even the first one. The
+  // catalog's stock picture of the model is a deliberate default - it is what
+  // the equipment looks like - and a shot of a cable run or a serial plate
+  // taken on the way past should not replace it because it happened to be
+  // first. Somebody makes it the cover on purpose, or nobody does; a record
+  // with no chosen cover keeps falling back to the stock photo (lib/photos
+  // livingCover, and the pages' stockSrc behind it).
   const twin = await photoTwin(t0);
-  const held = sharedCover(await coverOf(t0), twin ? await coverOf(twin) : null);
-  if (held === null) await setCoverRow(onSystem, t0, rows[0].id);
   if (twin) revWork(twin);
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
@@ -2790,6 +2790,29 @@ async function setCoverRow(
  * system becomes a bench, whose photo is the bench and not one module of it.
  */
 /** Which of a record's photos leads. The rest stay exactly where they are. */
+/**
+ * Put the cover back to the default - the catalog's stock picture of the model.
+ * The counterpart to choosing one: a cover is an override, and an override
+ * nobody can undo is a decision, not a preference.
+ */
+export async function clearCoverPhoto(target: WorkTarget): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const t0 = await resolveTarget(target);
+  if ("error" in t0) return t0;
+  const me = photoRecord(t0);
+  const twin = await photoTwin(t0);
+  await setCoverRow(me.instrumentId !== null, me, null);
+  if (twin) await setCoverRow(twin.instrumentId !== null, twin, null);
+  await audit({
+    actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId,
+    entityType: "attachment", entityId: 0,
+    action: "cleared the cover photo - back to the catalog's picture",
+  });
+  if (twin) revWork(twin);
+  revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
+  return {};
+}
+
 export async function setCoverPhoto(target: WorkTarget, attachmentId: number): Promise<{ error?: string }> {
   const u = await requireEditor();
   const t0 = await resolveTarget(target);
@@ -3807,10 +3830,19 @@ async function postAudience(p: {
   if (p.instrumentId === null) {
     return p.roomOrgId === null ? staff : [...new Set([...staff, ...emailsFor(p.roomOrgId)])];
   }
+  // The owner counts, not only the orgs it was shared WITH: a client that owns
+  // the system can open it, so a post there reaches them. Leaving them out is
+  // how a discussion notification went missing on a client's own instrument.
+  const [inst] = await db.select({ ownerOrgId: instruments.ownerOrgId })
+    .from(instruments).where(eq(instruments.id, p.instrumentId));
   const shares = await db.select({ orgId: systemShares.orgId }).from(systemShares)
     .where(eq(systemShares.instrumentId, p.instrumentId));
-  if (!shares.length) return staff;
-  return [...new Set([...staff, ...shares.flatMap((s) => emailsFor(s.orgId))])];
+  const orgIds = [...new Set([
+    ...(inst?.ownerOrgId != null ? [inst.ownerOrgId] : []),
+    ...shares.map((s) => s.orgId),
+  ])];
+  if (!orgIds.length) return staff;
+  return [...new Set([...staff, ...orgIds.flatMap(emailsFor)])];
 }
 
 /**
@@ -5639,6 +5671,15 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
       .where(and(eq(parts.instrumentId, wo.instrumentId), eq(parts.status, "Installed"),
         sql`${parts.installedAt} >= ${wo.openedOn}`)),
   ]);
+  // Resolved means the work is done, and the job's own list is the record of
+  // the work - so a job cannot claim done over open tasks, the same way a test
+  // cannot close without its result. Finish them or delete them; either is one
+  // click on tasks that turned out not to apply.
+  const stillOpen = doneRows.filter((t) => t.state !== "Done").length;
+  if (stillOpen) {
+    return { error: `${stillOpen} task${stillOpen === 1 ? " on this job is" : "s on this job are"} still open - finish or remove ${stillOpen === 1 ? "it" : "them"} first.` };
+  }
+
   const line = closeLine(said, {
     tasks: doneRows.filter((t) => t.state === "Done").length,
     minutes: timeRows.reduce((n, t) => n + t.minutes, 0),
@@ -5664,6 +5705,115 @@ export async function resolveWorkOrder(woId: number, summary: string): Promise<{
       author: u.name || u.email, authorEmail: u.email, authorOrgId: u.orgId, audience: "all",
     });
   }
+  revWo(wo);
+  return {};
+}
+
+/** The actor as lib/notes wants them. isHouse decides moderation, not editing. */
+const noteActor = (u: SessionUser) => ({ email: u.email, name: u.name, isHouse: isHouse(u.role) });
+
+/**
+ * Fix a comment you posted. Yours alone - see lib/notes for why the house is
+ * deliberately not given this. The old text goes to the audit log and the row
+ * is stamped edited, so a client-visible sentence never changes in silence.
+ */
+export async function updateWorkOrderNote(noteId: number, text: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const body = text.trim();
+  if (!body) return { error: "Say something, or delete it instead." };
+  const [n] = await db.select().from(workOrderNotes).where(eq(workOrderNotes.id, noteId));
+  if (!n) return { error: "Not found" };
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, n.workOrderId));
+  if (!wo) return { error: "Not found" };
+  await assertWorkEditable(u, wo);
+  if (!canEditNote(n, noteActor(u))) return { error: "Only whoever wrote a comment can change it." };
+  if (n.text === body) return {};
+  await db.update(workOrderNotes).set({ text: body, editedAt: new Date() }).where(eq(workOrderNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "wo_note", entityId: noteId,
+    action: `edited their comment on ${wo.number}`, field: "text", oldValue: n.text, newValue: body,
+  });
+  revalidatePath(`/work/${wo.id}`);
+  return {};
+}
+
+/**
+ * Withdraw a comment - your own, or, for the house, anyone's on a record it is
+ * accountable for. The text survives in the audit log either way: the point is
+ * that it stops standing on the job, not that it never happened.
+ */
+export async function deleteWorkOrderNote(noteId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [n] = await db.select().from(workOrderNotes).where(eq(workOrderNotes.id, noteId));
+  if (!n) return {};
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, n.workOrderId));
+  if (!wo) return { error: "Not found" };
+  await assertWorkEditable(u, wo);
+  if (!canDeleteNote(n, noteActor(u))) return { error: "That comment isn't yours to remove." };
+  await db.delete(workOrderNotes).where(eq(workOrderNotes.id, noteId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "wo_note", entityId: noteId,
+    action: `deleted ${isAuthor(n, noteActor(u)) ? "their" : `${n.author}'s`} comment on ${wo.number}`,
+    field: "text", oldValue: n.text,
+  });
+  revalidatePath(`/work/${wo.id}`);
+  return {};
+}
+
+/**
+ * Delete a work order outright - the one opened by mistake, the duplicate, the
+ * test row from a Tuesday afternoon. Cancelling is the tool for a job that was
+ * real and then called off; this is for one that should never have existed.
+ *
+ * What it deliberately does NOT do is delete the work. Tasks, hours, parts,
+ * files and purchase orders all point at the order with ON DELETE SET NULL, so
+ * they survive as the system's own records - a job is a wrapper around work
+ * that happened, and throwing away the wrapper must not throw away the work.
+ * Only the comment thread goes, because it is about the wrapper.
+ *
+ * Refused once the order is resolved or closed. That state published a
+ * close-out to the client's own feed and is the history a service record is
+ * made of; re-opening it first is a deliberate act, and having to perform it
+ * is the point.
+ */
+export async function deleteWorkOrder(woId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "Only the service team deletes a job." };
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  if (wo.state === "resolved" || wo.state === "closed") {
+    return { error: `${wo.number} is ${WO_LABEL[wo.state].toLowerCase()} - its close-out is on the client's record. Re-open it first if it really has to go.` };
+  }
+
+  // Count what is about to be set loose, so the audit line says where it went
+  // rather than leaving somebody to wonder why tasks appeared unattached.
+  const [taskRows, timeRows, partRows, fileRows] = await Promise.all([
+    db.select({ id: tasks.id }).from(tasks).where(eq(tasks.workOrderId, woId)),
+    db.select({ id: timeEntries.id }).from(timeEntries).where(eq(timeEntries.workOrderId, woId)),
+    db.select({ id: parts.id }).from(parts).where(eq(parts.workOrderId, woId)),
+    db.select({ id: attachments.id }).from(attachments).where(eq(attachments.workOrderId, woId)),
+  ]);
+  const freed = [
+    taskRows.length ? `${taskRows.length} task${taskRows.length === 1 ? "" : "s"}` : "",
+    timeRows.length ? `${timeRows.length} time entr${timeRows.length === 1 ? "y" : "ies"}` : "",
+    partRows.length ? `${partRows.length} part${partRows.length === 1 ? "" : "s"}` : "",
+    fileRows.length ? `${fileRows.length} file${fileRows.length === 1 ? "" : "s"}` : "",
+  ].filter(Boolean).join(", ");
+
+  await db.delete(workOrders).where(eq(workOrders.id, woId));
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "work_order", entityId: woId,
+    action: `deleted ${wo.number} '${wo.title}' (was ${WO_LABEL[wo.state] ?? wo.state})`
+      + (freed ? ` - ${freed} released to the record` : "")
+      + ` - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
   revWo(wo);
   return {};
 }

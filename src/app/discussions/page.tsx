@@ -9,6 +9,7 @@ import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
 import DiscussionPanel from "@/components/DiscussionPanel";
+import { visibleDirectory } from "@/lib/directory";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +99,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
 
       {active ? (
         <DiscussionPanel
+          people={await visibleDirectory(user)}
           instrumentId={null}
           threadId={roomThreadId(viewer, active.orgId)}
           roomOrgId={active.orgId}

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
+import { deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { promptReason } from "@/lib/reason";
 import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
 
 /**
@@ -37,6 +39,7 @@ export default function WorkOrderControls({
   const [form, setForm] = useState({ title, body, severity, assignee });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   if (mover === null) return null;
 
@@ -79,10 +82,29 @@ export default function WorkOrderControls({
           </button>
         ))}
         {mover === "house" && (
-          <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
-            onClick={() => { setMode(mode === "edit" ? "" : "edit"); setError(""); }}>
-            {mode === "edit" ? "Cancel" : "Edit"}
-          </button>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn sm" disabled={pending}
+              onClick={() => { setMode(mode === "edit" ? "" : "edit"); setError(""); }}>
+              {mode === "edit" ? "Cancel" : "Edit"}
+            </button>
+            {/* For the job opened by mistake. Cancelling is for one that was
+                real and called off; this is for one that never should have
+                existed - and it releases its work rather than taking it. */}
+            <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+              onClick={() => {
+                const why = promptReason(
+                  `Delete ${number}? Any tasks, hours, parts and files on it stay on the record, unattached. Its comments go with it.`,
+                );
+                if (!why) return;
+                setError("");
+                startTransition(async () => {
+                  const res = await deleteWorkOrder(id, why);
+                  if (res?.error) { setError(res.error); return; }
+                  // The page it was on is gone; the list is where to land.
+                  router.push("/work");
+                });
+              }}>Delete</button>
+          </span>
         )}
       </div>
 

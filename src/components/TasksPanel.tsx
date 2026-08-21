@@ -1,19 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { promptReason } from "@/lib/reason";
-import { useOptimistic, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
 import {
   createTask, updateTask, deleteTask, setTaskState, assignTask, addChecklistItem,
-  toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote,
+  toggleChecklistItem, deleteChecklistItem, addItemNote, addTaskNote, setTaskWorkOrder,
   updateItemNote, deleteItemNote, updateTaskNote, deleteTaskNote, setTaskDue, setTaskAsset, copyTasksTo,
   recordTaskResult,
 } from "@/app/actions";
 import { RESULT_LABEL } from "@/lib/checkout";
 import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResult";
 import { checklistProgress } from "@/lib/checklist";
+import MentionBox from "./MentionBox";
+import type { Candidate } from "@/lib/mentions";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; heading?: boolean; thread: Note[] };
@@ -24,7 +27,7 @@ type TaskResult = {
 };
 type Task = {
   id: number; title: string; body: string; state: string; assignee: string; dueDate: string;
-  assetId: number | null; origin: string;
+  assetId: number | null; origin: string; workOrderId?: number | null;
   checklist: Item[]; notes: Note[]; createdAt: string; completedAt: string | null;
   test?: TestSpec | null; result?: TaskResult | null;
 };
@@ -203,7 +206,7 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
 }
 
 export default function TasksPanel({
-  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [],
+  target, tasks, people, systemAssets, today, canEdit, isStaff, copyTargets = [], procedureChoices = [], jobs = [], mentionable = [],
 }: {
   target: WorkTarget; tasks: Task[]; people: string[];
   systemAssets: SystemAsset[]; today: string; canEdit: boolean; isStaff: boolean;
@@ -215,11 +218,46 @@ export default function TasksPanel({
    * checklist and carries its test spec (pass/fail, target) onto the task.
    */
   procedureChoices?: { id: number; title: string; body: string; brings: string }[];
+  /**
+   * Open work orders on this record. When given, tasks belonging to a job fold
+   * under one band per job instead of reading as loose shop tasks - the job is
+   * the unit of work here, and its internals are one click away, not fifteen
+   * rows deep. The job's own page passes nothing and stays flat.
+   */
+  jobs?: { id: number; number: string; title: string; state: string }[];
+  /**
+   * The directory with emails and orgs, for the @mention dropdown. `people`
+   * stays the plain name list the assignee selects want; this is the same
+   * folks with enough detail to tell two Nicks apart.
+   */
+  mentionable?: Candidate[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [expanded, setExpanded] = useState<number | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [openJobs, setOpenJobs] = useState<number[]>([]);
+  const [jobNote, setJobNote] = useState<null | { id: number; text: string }>(null);
+  // Arriving from a system's job band: #task-N names which one to open. Read
+  // once on mount rather than watched, because after that the person is
+  // working the page and a stale hash must not keep yanking it about.
+  const landed = useRef(false);
+  useEffect(() => {
+    if (landed.current) return;
+    landed.current = true;
+    const m = /^#task-(\d+)$/.exec(window.location.hash);
+    if (!m) return;
+    const id = parseInt(m[1]);
+    if (!tasks.some((t) => t.id === id)) return;
+    setExpanded(id);
+    // After the row has unfolded, or it scrolls to where it used to be.
+    requestAnimationFrame(() => {
+      document.getElementById(`task-${id}`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, [tasks]);
+
+  const toggleJob = (id: number) =>
+    setOpenJobs((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
   const [draft, setDraft] = useState({ title: "", body: "", assignee: "", dueDate: "", assetId: null as number | null, resultType: "", procedureId: null as number | null });
   const [editing, setEditing] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState({ title: "", body: "" });
@@ -236,8 +274,17 @@ export default function TasksPanel({
 
   // Auto-generated checkout tests sit under their own header until done.
   const checkout = tasks.filter((t) => t.state !== "Done" && t.origin === "checkout");
-  const active = tasks.filter((t) => t.state !== "Done" && t.origin !== "checkout");
-  const complete = tasks.filter((t) => t.state === "Done");
+  // A task inside a listed job renders under that job's band, not loose - the
+  // system's list answers "what does the shop owe", and the answer is the JOB,
+  // not its internals. Tasks of jobs not listed (closed, or none given) stay
+  // loose so nothing ever disappears.
+  const jobOf = (t: Task) => jobs.find((j) => j.id === t.workOrderId);
+  const undone = tasks.filter((t) => t.state !== "Done" && t.origin !== "checkout");
+  const active = undone.filter((t) => !jobOf(t));
+  const jobBands = jobs
+    .map((j) => ({ job: j, rows: tasks.filter((t) => t.workOrderId === j.id) }))
+    .filter((b) => b.rows.length > 0);
+  const complete = tasks.filter((t) => t.state === "Done" && !jobOf(t));
 
   // One renderer for both note threads; staff get inline edit / delete.
   const renderNote = (m: Note, kind: "item" | "task") => {
@@ -298,15 +345,19 @@ export default function TasksPanel({
   const toggle = (id: number) =>
     setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const renderTask = (t: Task, isDone: boolean) => {
-    const open = expanded === t.id;
+  /**
+   * One task row. `linkTo` turns it into a signpost instead of a workbench:
+   * inside a job's band on a system page the row does not unfold, it takes you
+   * to that task on the job's own page. A job's work is done in one place, and
+   * a half-editable copy of it on the system was two.
+   */
+  const renderTask = (t: Task, isDone: boolean, linkTo?: string) => {
+    const open = !linkTo && expanded === t.id;
     // Headings are labels, not boxes - counting them reports a finished job as
     // 12/14 forever. See lib/checklist.
     const progress = checklistProgress(t.checklist);
-    return (
-      <div key={t.id} style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden", opacity: isDone && !open ? 0.7 : 1 }}>
-        <div className="row-hover" onClick={() => (picking ? toggle(t.id) : setExpanded(open ? null : t.id))}
-          style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
+    const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" } as const;
+    const inner = (<>
           {picking && (
             <input type="checkbox" checked={picked.has(t.id)} readOnly tabIndex={-1}
               aria-label={`Copy ${t.title}`} style={{ width: 15, height: 15, flexShrink: 0, pointerEvents: "none" }} />
@@ -346,8 +397,20 @@ export default function TasksPanel({
           )}
           <DueChip due={t.dueDate} done={isDone} today={today} />
           <span style={{ fontSize: 12, fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
-          <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
-        </div>
+          <span className="mut" style={{ fontSize: 12 }}>{linkTo ? "→" : open ? "▾" : "▸"}</span>
+      </>);
+    return (
+      <div key={t.id} id={`task-${t.id}`}
+        style={{ border: "1px solid var(--line)", borderRadius: 10, marginBottom: 8, overflow: "hidden", opacity: isDone && !open ? 0.7 : 1 }}>
+        {linkTo ? (
+          <Link href={linkTo} className="row-hover" style={{ ...rowStyle, textDecoration: "none", color: "inherit" }}>
+            {inner}
+          </Link>
+        ) : (
+          <div className="row-hover" onClick={() => (picking ? toggle(t.id) : setExpanded(open ? null : t.id))} style={rowStyle}>
+            {inner}
+          </div>
+        )}
 
         {open && (
           <div style={{ borderTop: "1px solid var(--line)", padding: 12, background: "#FAFBFD" }}>
@@ -373,6 +436,35 @@ export default function TasksPanel({
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                 <span className="mut" style={{ fontSize: 12 }}>Status:</span>
                 <TaskStateSelect task={t} />
+                {/* Which job this belongs to, if any. The common case is a job
+                    that grew - the order was opened and the tasks answering it
+                    were written before anybody filed them under it - and it is
+                    also how work predating the work-order tag gets adopted. */}
+                {jobs.length > 0 && (
+                  <>
+                    <span className="mut" style={{ fontSize: 12 }}>Job:</span>
+                    <select value={t.workOrderId ?? ""} aria-label={`Job for ${t.title}`}
+                      onChange={(e) => {
+                        const to = e.target.value ? parseInt(e.target.value) : null;
+                        // Unfold the band it lands in, or the task appears to
+                        // vanish: it hops out of the loose list into a fold
+                        // that is closed by default.
+                        if (to !== null) setOpenJobs((o) => (o.includes(to) ? o : [...o, to]));
+                        startTransition(async () => {
+                          const res = await setTaskWorkOrder(t.id, to);
+                          if (res?.error) setJobNote({ id: t.id, text: res.error });
+                          else setJobNote(null);
+                        });
+                      }}
+                      style={{ width: "auto", maxWidth: 200, fontSize: 12 }}>
+                      <option value="">on its own</option>
+                      {jobs.map((j) => <option key={j.id} value={j.id}>{j.number}</option>)}
+                    </select>
+                    {jobNote?.id === t.id && (
+                      <span style={{ fontSize: 11, color: "#A32D2D" }}>{jobNote.text}</span>
+                    )}
+                  </>
+                )}
                 <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
                 <AssigneeSelect task={t} people={people} />
                 {systemAssets.length > 0 && (
@@ -439,9 +531,9 @@ export default function TasksPanel({
                       {c.thread.map((m) => renderNote(m, "item"))}
                       {canEdit && (
                         <div style={{ display: "flex", gap: 6 }}>
-                          <input value={(inputs["itemnote-" + c.id] as string) || ""}
-                            onChange={(e) => setInput("itemnote-" + c.id, e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); } }}
+                          <MentionBox people={mentionable} value={(inputs["itemnote-" + c.id] as string) || ""}
+                            onChange={(v) => setInput("itemnote-" + c.id, v)}
+                            onEnter={() => { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); }}
                             placeholder={n > 0 ? "Reply on this item..." : 'e.g. "passed at 101% of spec"'} style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
                           <button className="btn sm" onClick={() => { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); }}>Post</button>
                         </div>
@@ -466,10 +558,10 @@ export default function TasksPanel({
             {t.notes.length === 0 && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>No notes yet.</div>}
             {canEdit && (
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-                <input value={(inputs["note-" + t.id] as string) || ""}
-                  onChange={(e) => setInput("note-" + t.id, e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); } }}
-                  placeholder="Add a note..." style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+                <MentionBox people={mentionable} value={(inputs["note-" + t.id] as string) || ""}
+                  onChange={(v) => setInput("note-" + t.id, v)}
+                  onEnter={() => { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); }}
+                  placeholder="Add a note... @name to notify" style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
                 <button className="btn sm" onClick={() => { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); }}>Post</button>
               </div>
             )}
@@ -630,9 +722,44 @@ export default function TasksPanel({
           {active.length > 0 && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Tasks</div>}
         </div>
       )}
+      {jobBands.map(({ job, rows }) => {
+        const done = rows.filter((t) => t.state === "Done").length;
+        const unfolded = openJobs.includes(job.id);
+        return (
+          <div key={`job-${job.id}`} style={{ border: "1px solid var(--line)", borderRadius: 8, marginBottom: 8, overflow: "hidden" }}>
+            {/* The whole header toggles, with the same ▸/▾ every other fold in
+                this panel uses - a word saying "fold" is a control nobody has
+                to learn twice. A div rather than a button because the job
+                number inside is a link, and a link inside a button is invalid
+                markup that swallows its own clicks; the link stops the event
+                so tapping the number still opens the job. */}
+            <div role="button" tabIndex={0} aria-expanded={unfolded}
+              aria-label={`${job.number} ${job.title}, ${done} of ${rows.length} done`}
+              className="row-hover"
+              onClick={() => toggleJob(job.id)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                toggleJob(job.id);
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#F5F7FA", flexWrap: "wrap", cursor: "pointer" }}>
+              <a href={`/work/${job.id}`} className="mono" onClick={(e) => e.stopPropagation()}
+                style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
+              <span style={{ fontSize: 13, flex: "1 1 140px" }}>{job.title}</span>
+              <span className="pill" style={done === rows.length
+                ? { background: "#E5F3E5", color: "#2E6B2E" }
+                : { background: "#EEF1F5", color: "#475569" }}>
+                {done} of {rows.length} done
+              </span>
+              <span className="mut" style={{ fontSize: 12 }}>{unfolded ? "▾" : "▸"}</span>
+            </div>
+            {unfolded && rows.map((t) => renderTask(t, t.state === "Done", `/work/${job.id}#task-${t.id}`))}
+          </div>
+        );
+      })}
       {active.map((t) => renderTask(t, false))}
-      {checkout.length === 0 && active.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
-      {checkout.length === 0 && active.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
+      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
+      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
 
       {complete.length > 0 && (
         <div style={{ marginTop: active.length ? 8 : 0 }}>

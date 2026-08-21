@@ -417,8 +417,13 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             </select>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-            <input value={draft.partName} onChange={(e) => setDraft({ ...draft, partName: e.target.value })}
-              placeholder="Part it takes (optional)" style={{ flex: "1 1 140px", fontSize: 12 }} />
+            <PartNumberField value={draft.partName} insert="name" className="" ariaLabel="Part it takes"
+              placeholder="Part it takes (optional)" style={{ flex: "1 1 140px", fontSize: 12 }}
+              onChange={(partName) => setDraft({ ...draft, partName })}
+              onPick={(part) => setDraft((d) => ({
+                ...d, partName: part.name || part.partNumber,
+                partNumber: d.partNumber.trim() || part.partNumber,
+              }))} />
             <PartNumberField value={draft.partNumber} style={{ flex: "1 1 120px", fontSize: 12 }}
               onChange={(partNumber) => setDraft({ ...draft, partNumber })}
               onPick={(part) => setDraft((d) => ({

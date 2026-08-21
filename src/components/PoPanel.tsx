@@ -193,7 +193,15 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                     price: l.price.trim() || (part.priceCents !== null ? centsToInput(part.priceCents) : ""),
                   }))} />
               </div>
-              <div><label>Description</label><input value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} /></div>
+              <div><label>Description</label>
+                <PartNumberField value={newLine.name} insert="name" className="" ariaLabel="Line description"
+                  placeholder="What it is"
+                  onChange={(name) => setNewLine((l) => ({ ...l, name }))}
+                  onPick={(part) => setNewLine((l) => ({
+                    ...l, name: part.name || part.partNumber,
+                    partNumber: l.partNumber.trim() || part.partNumber,
+                    price: l.price.trim() || (part.priceCents !== null ? centsToInput(part.priceCents) : ""),
+                  }))} /></div>
               <div><label>Qty</label><input value={newLine.qty} inputMode="numeric" onChange={(e) => setNewLine({ ...newLine, qty: e.target.value })} /></div>
               <div><label>Unit $</label><input value={newLine.price} onChange={(e) => setNewLine({ ...newLine, price: e.target.value })} placeholder="129.95" /></div>
             </div>

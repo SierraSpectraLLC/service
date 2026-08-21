@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import {
-  addCatalogRef, addPhotos, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming,
+  addCatalogRef, addPhotos, clearCoverPhoto, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming,
   type WorkTarget,
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
@@ -236,11 +236,26 @@ export default function PhotosPanel({
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
             <Tile p={lead} width={240} height={180} radius={10} alt={label} />
+            {/* Honest about which picture the rest of the app is showing. An
+                unchosen record still displays the catalog's stock photo of the
+                model everywhere else, so calling this one "the cover" because
+                it happens to be newest would be a lie about the system. */}
             <div className="mut" style={{ fontSize: 11, marginTop: 4, maxWidth: 240, overflowWrap: "anywhere" }}>
-              {chosen ? "Cover" : "Cover (newest, not chosen)"} · {lead.uploadedBy} · {lead.when}
+              {chosen ? "Cover" : "Newest · no cover chosen"} · {lead.uploadedBy} · {lead.when}
             </div>
             {canEdit && !selecting && (
-              <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                {/* Without this the first photo uploaded could never BE the
+                    cover: it is the lead, and only the thumbnails carried the
+                    button. */}
+                {chosen ? (
+                  <button className="btn sm" disabled={pending}
+                    title="Show the catalog's picture of this model again"
+                    onClick={() => act(() => clearCoverPhoto(target))}>Use default</button>
+                ) : (
+                  <button className="btn sm" disabled={pending}
+                    onClick={() => act(() => setCoverPhoto(target, lead.id))}>Make cover</button>
+                )}
                 <button className="btn sm" disabled={pending} onClick={() => setFraming(lead)}>Frame</button>
                 {catalogScopes.length > 0 && (
                   <button className="btn sm" disabled={pending}

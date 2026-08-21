@@ -1061,9 +1061,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                     <PartNumberField value={pt.number} style={{ flex: 1, fontSize: 13 }}
                       onChange={(number) => setPart({ number })}
                       onPick={(part) => setPart({ number: part.partNumber, name: pt.name.trim() || part.name })} />
-                    <input value={pt.name} placeholder="Name (optional)"
-                      onChange={(e) => setPart({ name: e.target.value })}
-                      style={{ flex: 1, fontSize: 13 }} />
+                    <PartNumberField value={pt.name} insert="name" className="" ariaLabel="Part name"
+                      placeholder="Name (optional)" style={{ flex: 1, fontSize: 13 }}
+                      onChange={(name) => setPart({ name })}
+                      onPick={(part) => setPart({ name: part.name || part.partNumber, number: pt.number.trim() || part.partNumber })} />
                     <button className="btn link" aria-label="Remove part" style={{ color: "#A32D2D", fontSize: 13 }}
                       onClick={() => setDraft({ ...draft, parts: draft.parts.filter((_, i) => i !== idx) })}>×</button>
                   </div>
