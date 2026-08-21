@@ -31,6 +31,7 @@ import { appUrl } from "@/lib/appUrl";
 import { shopDay, shopHour, shopToday } from "@/lib/shopday";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
+import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 
 // ---------------------------------------------------------------------------
 // The classifications - pure, so they are unit-tested.
@@ -601,16 +602,18 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
   const body = renderDigestBody(sections, true, operatorName);
 
   const busy = n.partner + n.us + n.followUps + n.gas;
-  const subject = busy
-    ? `Daily digest: ${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase${n.gas ? `, ${n.gas} gas` : ""} - ${today}`
-    : `Daily digest: all moving - ${today}`;
+  // Constant on purpose: a subject carrying the date or the day's counts
+  // started a new Gmail conversation every morning. The counts are in the
+  // preheader, which is the line an inbox shows beside the subject anyway.
+  // See lib/emailThread.
+  const subject = `${operatorName} daily digest`;
   const html = emailShell({
     brand: brand.operatorName,
     logoUrl: brand.operatorLogoUrl || undefined,
     tagline: `Daily digest · ${today}`,
     preheader: busy
-      ? `${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase, ${n.gas} gas issue${n.gas === 1 ? "" : "s"} across ${n.systems} systems.`
-      : `All ${n.systems} systems moving - nothing blocked, nothing to chase.`,
+      ? `${today} - ${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase, ${n.gas} gas issue${n.gas === 1 ? "" : "s"} across ${n.systems} systems.`
+      : `${today} - all ${n.systems} systems moving, nothing blocked, nothing to chase.`,
     width: 680,
     body,
     footer: `Sent each morning by ${esc(brand.name)}.${url ? ` Statuses live on each system's page: <a href="${esc(url)}" style="color:${EMAIL.faint};">${esc(url.replace(/^https?:\/\//, ""))}</a>` : ""}`,
@@ -634,16 +637,17 @@ export async function composePartnerDigest(
   const today = todayLabel();
   const url = appUrl();
 
-  const subject = `${operatorName} × ${section.name}: daily digest - ${today}`;
+  // Constant, for the same reason as the internal edition's.
+  const subject = `${operatorName} × ${section.name}: daily digest`;
   const html = emailShell({
     brand: brand.operatorName,
     logoUrl: brand.operatorLogoUrl || undefined,
     tagline: `${operatorName} × ${section.name} · Daily digest · ${today}`,
     preheader: n.partner
-      ? `${n.partner} item${n.partner === 1 ? "" : "s"} awaiting ${section.name} intervention · ${n.systems} systems in work.`
+      ? `${today} - ${n.partner} item${n.partner === 1 ? "" : "s"} awaiting ${section.name} intervention · ${n.systems} systems in work.`
       : n.handoffs
-        ? `${n.handoffs} system${n.handoffs === 1 ? "" : "s"} in your hands · nothing needs your intervention.`
-        : `${n.systems} system${n.systems === 1 ? "" : "s"} in work - nothing needs your intervention.`,
+        ? `${today} - ${n.handoffs} system${n.handoffs === 1 ? "" : "s"} in your hands, nothing needs your intervention.`
+        : `${today} - ${n.systems} system${n.systems === 1 ? "" : "s"} in work, nothing needs your intervention.`,
     width: 680,
     body: renderDigestBody([section], false, operatorName),
     footer: url
@@ -705,11 +709,16 @@ export async function sendDigestEdition(
   tenantOrgId: number | null, orgId: number | null,
 ): Promise<EditionResult> {
   const today = shopToday();
+  // One running conversation per engagement rather than a fresh email every
+  // morning - see lib/emailThread. The key names the engagement, so a client's
+  // chain and our own never merge.
+  const host = mailHost(process.env.EMAIL_FROM);
+  const thread = (key: string) => threadHeaders(threadRootId(key, host));
   if (orgId === null) {
     const to = await houseEmails(tenantOrgId);
     if (!to.length) return { sent: false, to: [], reason: "nobody to send to" };
     const { subject, html } = await composeDigest(tenantOrgId);
-    await sendEmail(to, subject, html);
+    await sendEmail(to, subject, html, thread(`internal-${tenantOrgId ?? 0}`));
     await stampSent(tenantOrgId, null, today);
     return { sent: true, to };
   }
@@ -719,7 +728,7 @@ export async function sendDigestEdition(
   if (!to.length) return { sent: false, to: [], reason: "no recipients configured" };
   const edition = await composePartnerDigest(tenantOrgId, orgId);
   if (!edition) return { sent: false, to, reason: "nothing on the board" };
-  await sendEmail(to, edition.subject, edition.html);
+  await sendEmail(to, edition.subject, edition.html, thread(`org-${orgId}`));
   await stampSent(tenantOrgId, orgId, today);
   return { sent: true, to };
 }

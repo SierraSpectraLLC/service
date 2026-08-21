@@ -74,6 +74,13 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   blocked. Unblocking clears it. The digest's follow-up list asks after systems
   blocked before this was required, by lead name, every morning until somebody
   writes one.
+- **One conversation**: a digest is a single email with every recipient in the
+  `To:` field - not a copy each - so recipients can see one another and a
+  reply-all reaches the whole list. Consecutive editions also thread together
+  via `In-Reply-To`/`References` pointing at a stable per-engagement id
+  (`lib/emailThread`), which is why the subject line is constant and the day's
+  counts ride in the preheader: Gmail re-splits a conversation whenever the
+  subject changes, so a dated subject and a single chain cannot both be had.
 - **Digest scheduling**: the hourly cron sends only what is due. Every
   organization keeps its own send hour in shop time (Settings > Organizations;
   Settings > Configuration for the internal edition) and a per-organization
