@@ -181,6 +181,13 @@ export const orgs = pgTable("orgs", {
   // own list and its own send button - one report per client, never a merged
   // one that would show them each other's systems.
   eodRecipients: text("eod_recipients").notNull().default(""),
+  // Who at this organization receives the partner edition of the daily digest
+  // - their engagement's section: status, yesterday's work, what's blocked and
+  // whose move it is. Separate from eodRecipients on purpose: the EOD report
+  // is hand-written and sent by a person, the digest is composed and sent by
+  // the machine, and opting a client into one must never opt them into the
+  // other. Blank = the digest stays internal for this organization.
+  digestRecipients: text("digest_recipients").notNull().default(""),
   // How much stored file the organization may hold, in megabytes. 0 means no
   // ceiling, which is what every organization that predates this column was
   // given - a limit nobody agreed to is not a limit, it's an outage. New

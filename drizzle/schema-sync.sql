@@ -2592,3 +2592,7 @@ DO $$ BEGIN
       FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Partner edition of the daily digest: who at each organization receives
+-- their engagement's section. Blank = internal only. See lib/digest.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_recipients" text NOT NULL DEFAULT '';

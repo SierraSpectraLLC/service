@@ -6088,6 +6088,29 @@ export async function updateEodRecipients(orgId: number, value: string): Promise
   return {};
 }
 
+/**
+ * Who at an organization receives the partner edition of the daily digest.
+ * Opt-in per organization and deliberately separate from the EOD list: the
+ * digest is sent by the machine every morning, and a client added to a
+ * hand-written report must not silently start receiving an automated one.
+ */
+export async function updateDigestRecipients(orgId: number, value: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const entries = value.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const bad = entries.find((e) => !ALLOW_EMAIL.test(e));
+  if (bad) return { error: `"${bad}" doesn't look like an email` };
+  const digestRecipients = entries.join(", ");
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ digestRecipients }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `${org.name} daily digest recipients: ${digestRecipients || "(none)"}`,
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
 // ---------------- Client sign-in allowlist ----------------
 
 /** "jane@labzenllc.com" (one person) or "@labzenllc.com" (whole domain). */

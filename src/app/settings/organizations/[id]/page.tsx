@@ -112,7 +112,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
       <OrgSettingsForm
         org={{
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
-          eodRecipients: org.eodRecipients, systems: shareRows.length,
+          eodRecipients: org.eodRecipients, digestRecipients: org.digestRecipients, systems: shareRows.length,
           storageLimitMb: org.storageLimitMb, quota,
           remoteAccessEnabled: org.remoteAccessEnabled,
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
@@ -124,6 +124,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         showRecipients={s?.eodEnabled ?? false}
         showSheetSync={s?.sheetSyncEnabled ?? false}
         showRemote={s?.remoteEnabled ?? false}
+        showDigest={s?.digestEnabled ?? false}
       />
       </div>
 
