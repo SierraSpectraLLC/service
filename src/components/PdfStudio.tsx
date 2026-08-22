@@ -9,6 +9,8 @@ import { chunkRanges } from "@/lib/cloudUpload";
 import type { CloudItem } from "@/lib/cloudItems";
 import { startCloudUpload } from "@/app/actions";
 import CloudBrowser from "./CloudBrowser";
+import { Panel, RowActions } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
 
 // pdfjs renders thumbnails; pdf-lib assembles the result. Both are loaded on
 // demand so nobody pays for the studio until they open it.
@@ -358,12 +360,14 @@ export default function PdfStudio({
           }
         }
         setSaved(`${started.name ?? cleanName} saved to ${cloudFolderName || "OneDrive"}`);
+        toast({ message: `Saved ${started.name ?? cleanName} to ${cloudFolderName || "OneDrive"}` });
       } else if (mode === "download" || dest === "download") {
         const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }));
         const a = document.createElement("a");
         a.href = url; a.download = cleanName; a.click();
         URL.revokeObjectURL(url);
         setSaved(`${cleanName} downloaded`);
+        toast({ message: `Downloaded ${cleanName}` });
       } else {
         const blob = await upload(cleanName, new Blob([bytes as BlobPart], { type: "application/pdf" }), {
           access: "public", handleUploadUrl: "/api/upload",
@@ -376,6 +380,7 @@ export default function PdfStudio({
           const res = await recordLibraryFiles([meta]);
           if (res?.error) throw new Error(res.error);
           setSaved(`${cleanName} filed on ${libraryLabel.toLowerCase()}`);
+          toast({ message: `Filed ${cleanName} on ${libraryLabel.toLowerCase()}` });
         } else {
           const [kind, idStr] = dest.split(":");
           const target = kind === "i"
@@ -384,6 +389,7 @@ export default function PdfStudio({
           const res = await recordAttachments(target, [{ ...meta, kind: "Report" }]);
           if (res?.error) throw new Error(res.error);
           setSaved(`${cleanName} filed on ${destinations.find((d) => d.key === dest)?.label ?? "the record"}`);
+          toast({ message: `Filed ${cleanName} on ${destinations.find((d) => d.key === dest)?.label ?? "the record"}` });
         }
       }
     } catch (e) {
@@ -424,13 +430,14 @@ export default function PdfStudio({
       style={fileOver ? { outline: "2px dashed var(--sky)", outlineOffset: 6, borderRadius: 10 } : undefined}>
       {/* ── Sources ── */}
       <div>
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 6 }}>Sources</div>
-          <label className="btn sm" style={{ display: "inline-block", cursor: "pointer", marginBottom: 4 }}>
-            + From this device
-            <input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
-              onChange={(e) => { addLocal(e.target.files); e.target.value = ""; }} />
-          </label>
+        <Panel title="Sources" count={sources.length}
+          actions={
+            <label className="btn sm" style={{ display: "inline-block", cursor: "pointer" }}>
+              + From this device
+              <input type="file" accept="application/pdf,.pdf" multiple style={{ display: "none" }}
+                onChange={(e) => { addLocal(e.target.files); e.target.value = ""; }} />
+            </label>
+          }>
           {fileOver && <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>Drop to add</div>}
           {dropNote && (
             <div style={{ fontSize: 11, color: "#8A5410", marginBottom: 8 }}>
@@ -469,23 +476,20 @@ export default function PdfStudio({
             ))}
             {shownSources.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No PDFs match.</div>}
           </div>
-        </div>
+        </Panel>
 
         {docs.length > 0 && (
-          <div className="card">
-            <div className="card-title" style={{ marginBottom: 2 }}>In this packet</div>
-            <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
-              Each title is the default header for that document&apos;s pages. Any page can override it.
-            </div>
+          <Panel title="In this packet" count={docs.length}
+            hint="Each title is the default header for that document's pages. Any page can override it.">
             {docs.map((d) => (
-              <div key={d.key} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+              <div key={d.key} className="row-reveal" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                   <span aria-hidden style={{ width: 9, height: 9, borderRadius: 2, background: docColor(d.key), flexShrink: 0 }} />
                   <input value={d.title} aria-label={`Header title for ${d.fileName}`}
                     onChange={(e) => setDocs((ds) => ds.map((x) => (x.key === d.key ? { ...x, title: e.target.value } : x)))}
                     style={{ fontSize: 12, flex: 1 }} />
-                  <button className="btn link" style={{ color: "#A32D2D", fontSize: 12 }} aria-label={`Remove ${d.fileName}`}
-                    onClick={() => removeDoc(d.key)}>×</button>
+                  <RowActions inline={1} menuLabel={`Actions for ${d.fileName}`}
+                    items={[{ label: "Remove", tone: "bad", onClick: () => removeDoc(d.key) }]} />
                 </div>
                 <div className="mut" style={{ fontSize: 10, marginTop: 2 }}>
                   {d.state === "loading" ? "loading…"
@@ -495,27 +499,18 @@ export default function PdfStudio({
               </div>
             ))}
             <div className="mut" style={{ fontSize: 10, marginTop: 6 }}>{fmtSize(totalBytes)} loaded in this tab</div>
-          </div>
+          </Panel>
         )}
       </div>
 
       {/* ── Working set + output ── */}
       <div>
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-            <div className="card-title">Pages</div>
-            <span className="mut" style={{ fontSize: 12 }}>
-              {pages.length
-                ? <>{pages.length} page{pages.length === 1 ? "" : "s"} · tap a page to select<span className="pdf-drag-hint">, drag or use ‹ › to reorder</span></>
-                : "Add a source to begin"}
-            </span>
-          </div>
-          {pages.length > 0 && (
-            <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
-              The box under each page is its header title. Leave it blank and the page takes its
-              document&apos;s title from the left; type in it and that page alone says something different.
-            </div>
-          )}
+        <Panel title="Pages" count={pages.length}
+          hint={pages.length
+            ? <>Tap a page to select<span className="pdf-drag-hint">, drag or use Earlier / Later to reorder</span>.
+              The box under each page is its header title: blank inherits the document&apos;s title
+              from the left, typed text makes that page alone say something different.</>
+            : "Add a source to begin"}>
 
           {/* Bulk operations. Wraps to its own rows on a narrow screen rather
               than squeezing into the title line. */}
@@ -589,14 +584,13 @@ export default function PdfStudio({
                     aria-label={`Header title for page ${ix + 1}`}
                     onChange={(e) => setTitles(new Set([p.uid]), e.target.value)} />
                   <span className="pdf-acts">
-                    <button className="btn sm" disabled={ix === 0} aria-label={`Move page ${ix + 1} earlier`}
-                      onClick={() => nudge(p.uid, -1)}>‹</button>
-                    <button className="btn sm" aria-label={`Rotate page ${ix + 1}`}
-                      onClick={() => rotateUids(new Set([p.uid]), 1)}>⟳</button>
-                    <button className="btn sm" style={{ color: "#A32D2D" }} aria-label={`Remove page ${ix + 1}`}
-                      onClick={() => removeUids(new Set([p.uid]))}>×</button>
-                    <button className="btn sm" disabled={ix === pages.length - 1} aria-label={`Move page ${ix + 1} later`}
-                      onClick={() => nudge(p.uid, 1)}>›</button>
+                    <RowActions inline={2} menuLabel={`Actions for page ${ix + 1}`}
+                      items={[
+                        ...(ix > 0 ? [{ label: "Earlier", onClick: () => nudge(p.uid, -1) }] : []),
+                        ...(ix < pages.length - 1 ? [{ label: "Later", onClick: () => nudge(p.uid, 1) }] : []),
+                        { label: "Rotate", onClick: () => rotateUids(new Set([p.uid]), 1) },
+                        { label: "Remove", tone: "bad" as const, onClick: () => removeUids(new Set([p.uid])) },
+                      ]} />
                   </span>
                 </div>
               );
@@ -612,10 +606,9 @@ export default function PdfStudio({
               ><span className="mut" style={{ fontSize: 11 }}>to the end</span></div>
             )}
           </div>
-        </div>
+        </Panel>
 
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 8 }}>Output</div>
+        <Panel title="Output">
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>File name</label>
@@ -642,11 +635,11 @@ export default function PdfStudio({
           </div>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10, fontSize: 12 }}>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={numbers} onChange={(e) => setNumbers(e.target.checked)} style={{ width: 15, height: 15 }} />
+              <input type="checkbox" className="check" checked={numbers} onChange={(e) => setNumbers(e.target.checked)} />
               Page numbers
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={headers} onChange={(e) => setHeaders(e.target.checked)} style={{ width: 15, height: 15 }} />
+              <input type="checkbox" className="check" checked={headers} onChange={(e) => setHeaders(e.target.checked)} />
               Header bar on each page
             </label>
           </div>
@@ -664,7 +657,7 @@ export default function PdfStudio({
             {saved && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{saved} ✓</span>}
           </div>
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+        </Panel>
       </div>
     </div>
   );
