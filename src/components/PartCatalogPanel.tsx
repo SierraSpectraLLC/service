@@ -7,6 +7,8 @@ import {
   addCatalogPart, addPartPhotos, addPartPrices, archiveCatalogPart, deletePartPrice,
   makePartPhotoCover, removePartPhoto, setKitLines, setPartPhotoCaption, updateCatalogPart,
 } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
 import {
   ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, isSuperseded, kitContents, MAX_PART_PHOTOS,
@@ -120,6 +122,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       // The book just changed; the next field to open must see it.
       forgetCatalog();
       setSheet(null);
+      toast({ message: `Saved ${draft.partNumber.trim()}` });
     });
   };
 
@@ -256,13 +259,20 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       )}
 
       {sheet && (
-        <>
-          <div className="scrim" onClick={() => setSheet(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="Catalog entry">
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>
-              {sheet.id ? "Edit" : "New"} part number
-            </div>
-
+        <Dialog open onClose={() => setSheet(null)} title={sheet.id ? "Edit part number" : "New part number"}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>
+                {error || (draft.partNumber.trim()
+                  ? catalogLabel({ partNumber: draft.partNumber, name: draft.name, manufacturer: draft.manufacturer })
+                  : "A part number is the one thing this needs.")}
+              </span>
+              <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending || !draft.partNumber.trim()}>
+                {pending ? "Saving..." : "Save part"}
+              </button>
+            </>
+          }>
             <label>Your number *</label>
             <input className="mono" value={draft.partNumber} autoFocus
               onChange={(e) => setDraft({ ...draft, partNumber: e.target.value })}
@@ -544,21 +554,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
             <textarea value={draft.note} rows={2} style={{ width: "100%", marginBottom: 8 }}
               onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
 
-            <div className="mut" style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, background: "#F1F4F8" }}>
-              {draft.partNumber.trim()
-                ? catalogLabel({ partNumber: draft.partNumber, name: draft.name, manufacturer: draft.manufacturer })
-                : "A part number is the one thing this needs."}
-            </div>
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-
-            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" onClick={save} disabled={pending || !draft.partNumber.trim()}>
-                {pending ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
     </div>
   );
