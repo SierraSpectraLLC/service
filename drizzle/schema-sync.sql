@@ -2601,3 +2601,31 @@ ALTER TABLE "work_order_notes" ADD COLUMN IF NOT EXISTS "edited_at" timestamp;
 -- Partner edition of the daily digest: who at each organization receives
 -- their engagement's section. Blank = internal only. See lib/digest.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_recipients" text NOT NULL DEFAULT '';
+
+-- When each organization's daily digest goes out, and whether it already has
+-- today. The cron runs hourly and sends what is due, so the hour is a setting
+-- rather than a cron expression in vercel.json. See lib/digest.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_hour" integer NOT NULL DEFAULT 7;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text NOT NULL DEFAULT '';
+-- The same pair for an instance that has named no operator org.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_hour" integer NOT NULL DEFAULT 7;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text NOT NULL DEFAULT '';
+
+-- Why a system is blocked, required at the moment of blocking. See lib/stages
+-- and actions.toggleStage; blank on rows blocked before it was demanded.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_reason" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_since" timestamp;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_by" text NOT NULL DEFAULT '';
+
+-- Platform appearance: the header colour and the spectrum bar above it, so a
+-- rebrand is a settings change rather than a deploy. Blank/default = the look
+-- the app ships with. See lib/appearance.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "header_color" text NOT NULL DEFAULT '';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_height" integer NOT NULL DEFAULT 3;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_stops" text NOT NULL DEFAULT '';
+
+-- Which weekdays each digest fires (comma list of 0-6, blank = every day).
+-- The window covers everything since the last send, so skipped days fold
+-- into the next edition instead of vanishing. See lib/digestDays.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_days" text NOT NULL DEFAULT '';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_days" text NOT NULL DEFAULT '';

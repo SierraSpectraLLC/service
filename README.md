@@ -1,4 +1,4 @@
-# Sierra Spectra - Instrument Management
+# Ridgeline - Instrument Management
 
 Replaces the client's Google Sheet with a real system: instrument tracking with
 multi-stage tags, rich tasks (checklists, threaded notes, assignment), parts
@@ -8,6 +8,23 @@ against the old Google Sheet.
 
 Stack: Next.js (App Router) · Neon Postgres · Drizzle ORM · Auth.js (magic
 links via Resend) · Vercel Blob · Vercel Cron.
+
+## Two names, and they are not the same name
+
+**Ridgeline** is the PLATFORM - the product, its wordmark, its page titles, the
+domain it is served from. It lives in `app_settings.platform_name` and is
+edited in Settings > Configuration; no deploy renames it, and nothing in the
+code hardcodes it (`lib/brand.DEFAULT_BRAND` is only the fallback for an
+instance that has never been named).
+
+**Sierra Spectra** is an OPERATOR - a service company running a workspace on
+Ridgeline. Operators are ordinary `orgs` rows, and the operator is who *signs*:
+service reports, sign-off packets, QR labels and both editions of the daily
+digest carry the operator's name and logo, never the platform's
+(`lib/brand.brandForTenant`). That is deliberate - a report about another
+operator's work carrying the platform's name would be a false statement about
+who did the work - and it means renaming the platform does not, and should not,
+change what a client sees at the top of their report.
 
 ## Setup
 
@@ -52,21 +69,58 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   hundreds of ms per page load that no code change can recover.
 - **Storage > Blob**: create a store; `BLOB_READ_WRITE_TOKEN` is injected
   automatically.
-- **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` hourly and
-  `GET /api/cron/daily-digest` daily at 14:00 UTC (7am PT - adjust the cron
-  expression to taste). Set `CRON_SECRET` in project env; Vercel sends it as
-  the bearer token. The digest is built per engagement (one section per
-  organization whose systems are in work): what's blocked and whose move it
-  is - theirs, ours, or a supplier's, with a part stuck without tracking (or
-  backordered with no date) stated as plain fact in the court of whoever
-  ordered it - an internal follow-up list (blocked systems with no recorded
-  reason), systems handed off to the partner's queue (out of our hands, never
-  counted as blocked), what happened since yesterday, and a
-  status board (stages, gases, open parts). The internal edition stitches
-  every section together for staff (`STAFF_EMAILS` / Settings) via Resend;
-  organizations opted in under Settings > Organizations ("Daily digest"
-  recipients) also receive their own section as a partner edition, worded
-  from their side and never merged with anyone else's systems.
+- **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` and
+  `GET /api/cron/daily-digest` hourly. Set `CRON_SECRET` in project env; Vercel
+  sends it as the bearer token.
+- **Daily digest**: built per engagement - one section per organization whose
+  systems are in work. Each section carries what's blocked and whose move it is
+  (theirs, ours, or a supplier's, with a part stuck without tracking or
+  backordered stated as plain fact in the court of whoever ordered it), an
+  internal follow-up list (see below), systems
+  handed off to the partner's queue (out of our hands, never counted as
+  blocked), what happened since yesterday, and a status board of stages, gases
+  and open parts. The internal edition stitches every section together for
+  staff; an organization opted in under Settings > Organizations receives its
+  own section as a partner edition, worded from their side and never merged
+  with anyone else's systems.
+- **Blocked systems**: marking a system "Waiting / blocked" requires a written
+  reason - what it is waiting on and what would clear it - enforced in
+  `toggleStage`, not just in the panel that asks. The reason shows under the
+  system's stages (editable without unblocking, which preserves how long it has
+  been stuck) and leads that system's digest lines, aged from when it was
+  blocked. Unblocking clears it. The digest's follow-up list asks after systems
+  blocked before this was required, by lead name, every morning until somebody
+  writes one.
+- **Digest sender** (optional): set `DIGEST_EMAIL_FROM` to give the digest its
+  own address (e.g. `Ridgeline <dailydigest@mail.ridgelinefield.com>`)
+  instead of sharing `EMAIL_FROM` with sign-in links. The domain must be
+  verified in Resend, and a subdomain is verified in its own right - which is
+  the reason to use one: it carries its own sending reputation, so a bounce on
+  a report never touches deliverability of the emails people log in with. Add
+  `DIGEST_REPLY_TO` when that address is not an inbox anybody reads. Note the
+  thread anchor follows this address, so changing it starts one fresh chain.
+- **One conversation**: a digest is a single email with every recipient in the
+  `To:` field - not a copy each - so recipients can see one another and a
+  reply-all reaches the whole list. Consecutive editions also thread together
+  via `In-Reply-To`/`References` pointing at a stable per-engagement id
+  (`lib/emailThread`), which is why the subject line is constant and the day's
+  counts ride in the preheader: Gmail re-splits a conversation whenever the
+  subject changes, so a dated subject and a single chain cannot both be had.
+- **Digest scheduling**: the hourly cron sends only what is due. Every
+  organization keeps its own send hour and days of the week in shop time
+  (Settings > Organizations; Settings > Configuration for the internal
+  edition) and a per-organization stamp of the day it last went, so an hourly
+  cron still delivers one email a day and a missed hour catches up rather than
+  skipping. Both screens also carry **Preview** (renders today's edition with
+  real data, sends nothing) and **Send now** (delivers immediately and counts
+  as today's).
+- **Rested days lose nothing**: an edition's window is "since the last
+  edition", not "the last 24 hours" (`lib/digestDays`). A weekday-only digest
+  therefore covers Friday-to-Monday when it returns - the work section is
+  titled "Over the weekend", each line carries its day ("Sat · Completed:
+  ..."), and if the weekend was quiet the partner edition simply says nothing
+  extra. The same mechanism covers a skipped holiday ("Since Thursday") and a
+  dormant digest coming back (capped at a week of catch-up).
 
 ### 6. Google Sheet parity (service account)
 The sync reads the client's sheet through the Sheets API with a service

@@ -188,6 +188,30 @@ export const orgs = pgTable("orgs", {
   // the machine, and opting a client into one must never opt them into the
   // other. Blank = the digest stays internal for this organization.
   digestRecipients: text("digest_recipients").notNull().default(""),
+  /**
+   * The hour (0-23, shop time) this organization's digest goes out. On the
+   * operator's own row it is the internal edition's hour.
+   *
+   * Here rather than in the cron expression because vercel.json is a deploy
+   * artifact: "send it at eight, not seven" should be a dropdown, not a pull
+   * request. The cron runs every hour and sends whatever is due, which is also
+   * what lets two organizations on one instance keep different hours.
+   */
+  digestHour: integer("digest_hour").notNull().default(7),
+  /**
+   * Which weekdays it fires, comma list of 0-6 (0 = Sunday), blank = every
+   * day. The window self-heals around skipped days: an edition covers
+   * everything since the last one went, so weekday-only sending folds the
+   * weekend's work into Monday rather than losing it. See lib/digestDays.
+   */
+  digestDays: text("digest_days").notNull().default(""),
+  /**
+   * The shop day (YYYY-MM-DD) the digest last went out for this organization.
+   * What turns an hourly cron into a daily email: a second run in the same
+   * hour, a redeploy that re-fires the schedule, and the "send now" button all
+   * read this first. Blank = never sent.
+   */
+  digestLastSentOn: text("digest_last_sent_on").notNull().default(""),
   // How much stored file the organization may hold, in megabytes. 0 means no
   // ceiling, which is what every organization that predates this column was
   // given - a limit nobody agreed to is not a limit, it's an outage. New
@@ -381,6 +405,20 @@ export const instruments = pgTable("instruments", {
   archivedAt: timestamp("archived_at"),
   archivedBy: text("archived_by").notNull().default(""),
   stages: text("stages").array().notNull().default([]),
+  /**
+   * Why this system is blocked, demanded at the moment of blocking and cleared
+   * the moment it is unblocked (see actions.toggleStage, lib/stages).
+   *
+   * On the system rather than on a task because "Waiting / blocked" is a
+   * statement about the SYSTEM: the work that is stuck may be several tasks or
+   * none at all, and a reason that lives on one of them is a reason the board
+   * cannot show. Blank on rows blocked before this was required - the digest
+   * asks after those by name until somebody writes one.
+   */
+  blockedReason: text("blocked_reason").notNull().default(""),
+  /** When it was blocked, so the digest can say how long. Null = unknown. */
+  blockedSince: timestamp("blocked_since"),
+  blockedBy: text("blocked_by").notNull().default(""),
   notes: text("notes").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -1985,6 +2023,22 @@ export const appSettings = pgTable("app_settings", {
   // DEFAULT_BRAND in lib/brand.ts.
   platformName: text("platform_name").notNull().default(""),
   platformTagline: text("platform_tagline").notNull().default(""),
+  /**
+   * How the platform looks, for instances that would rather not be navy. See
+   * lib/appearance, which owns the defaults and the validation - blank means
+   * "the look the app ships with", so a future change to that default reaches
+   * every instance that never expressed a preference.
+   *
+   * The header colour paints the header bar and tints the page behind it, the
+   * same rule an organization's own themeColor follows; it deliberately does
+   * NOT move the accents on buttons, titles and tabs, because one hex applied
+   * to everything is a redesign rather than a brand.
+   */
+  headerColor: text("header_color").notNull().default(""),
+  /** The spectrum bar, in whole pixels. 0 hides it. */
+  spectrumHeight: integer("spectrum_height").notNull().default(3),
+  /** Its colour stops, JSON [{c,at}] - see lib/appearance.parseStops. */
+  spectrumStops: text("spectrum_stops").notNull().default(""),
   // The service organization that runs this instance - Sierra Spectra here.
   // Distinct from the platform operator role: this is a provider org like any
   // other, so its engagements are shares and its people are org members.
@@ -1997,6 +2051,12 @@ export const appSettings = pgTable("app_settings", {
   sheetSyncEnabled: boolean("sheet_sync_enabled").notNull().default(false),
   eodEnabled: boolean("eod_enabled").notNull().default(false),
   digestEnabled: boolean("digest_enabled").notNull().default(false),
+  // The digest schedule for an instance that has named no operator org, where
+  // there is no orgs row to hang it on. Same meaning as the columns of those
+  // names on orgs; see lib/digest.digestDue.
+  digestHour: integer("digest_hour").notNull().default(7),
+  digestDays: text("digest_days").notNull().default(""),
+  digestLastSentOn: text("digest_last_sent_on").notNull().default(""),
   // Remote support: reaching a lab PC from the portal. Off until an operator
   // stands up the relay host and sets REMOTE_URL - the pages check both, so a
   // flag flipped before the infrastructure exists says so instead of failing.

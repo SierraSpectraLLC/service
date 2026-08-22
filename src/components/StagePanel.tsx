@@ -1,12 +1,16 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { toggleStage } from "@/app/actions";
+import { setBlockedReason, toggleStage } from "@/app/actions";
+import { BLOCKED_STAGE } from "@/lib/stages";
+import { promptBlockReason } from "@/lib/reason";
 
 export type StageDefLite = { name: string; bg: string; fg: string };
 
-export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }: {
+export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, blockedReason = "" }: {
   instrumentId: number; stages: string[]; stageDefs: StageDefLite[]; canEdit: boolean;
+  /** Why this system is blocked. Only meaningful while the blocked stage is on. */
+  blockedReason?: string;
 }) {
   const [, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -16,12 +20,33 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }:
   );
   // The refusal is shown, not thrown. A server action that throws reaches the
   // browser as a crash page with a digest number and nothing a person can act on.
-  const toggle = (s: string) => startTransition(async () => {
-    setError("");
-    applyToggle(s);
-    const res = await toggleStage(instrumentId, s);
-    if (res?.error) setError(res.error);
-  });
+  // Blocking is the one stage change that asks a question first: a blocked
+  // system with no recorded reason is one nobody else can pick up. Asked before
+  // the optimistic flip, so cancelling leaves the pill exactly as it was.
+  const toggle = (s: string) => {
+    let reason = "";
+    if (s === BLOCKED_STAGE && !optimisticStages.includes(s)) {
+      const answer = promptBlockReason();
+      if (answer === null) return;
+      reason = answer;
+    }
+    startTransition(async () => {
+      setError("");
+      applyToggle(s);
+      const res = await toggleStage(instrumentId, s, reason);
+      if (res?.error) setError(res.error);
+    });
+  };
+
+  const editReason = () => {
+    const answer = promptBlockReason(blockedReason);
+    if (answer === null) return;
+    startTransition(async () => {
+      setError("");
+      const res = await setBlockedReason(instrumentId, answer);
+      if (res?.error) setError(res.error);
+    });
+  };
   const color = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
   // Active stages render as pills; the rest live in a compact dropdown so the
   // full stage vocabulary doesn't clutter the page (especially mobile).
@@ -54,6 +79,20 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit }:
           </select>
         )}
       </div>
+      {/* The reason sits under the pills, where the blocked pill can be seen
+          next to it - and reads as a prompt when it is missing, which is every
+          system blocked before a reason was required. */}
+      {optimisticStages.includes(BLOCKED_STAGE) && (
+        <div style={{ fontSize: 12, marginTop: 6, color: blockedReason ? "var(--mut)" : "#A32D2D" }}>
+          <b>Blocked:</b>{" "}
+          {blockedReason || "no reason recorded"}
+          {canEdit && (
+            <button className="btn link" onClick={editReason} style={{ marginLeft: 6, fontSize: 12 }}>
+              {blockedReason ? "edit" : "say why"}
+            </button>
+          )}
+        </div>
+      )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
     </>
   );

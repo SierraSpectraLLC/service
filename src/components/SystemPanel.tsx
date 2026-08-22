@@ -17,6 +17,8 @@ type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
   gxp: boolean;
   lead: string; notes: string; archived: boolean; archivedBy: string;
+  /** Why it is blocked, while it is. See lib/stages and StagePanel. */
+  blockedReason: string;
   location: string; name: string;
   forSale: boolean; saleNote: string; listingToken: string;
   /**
@@ -253,7 +255,8 @@ export default function SystemPanel({ instrument, label, clients, categories, st
         </div>
       )}
 
-      <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit} />
+      <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit}
+        blockedReason={instrument.blockedReason} />
       <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
       <SharePanel targetId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}
         canManageAll={isStaff} canAddProvider={!isStaff && canEdit} />

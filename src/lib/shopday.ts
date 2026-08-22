@@ -32,3 +32,16 @@ export function shopDay(d: Date): string {
 export function shopMonthDay(d: Date = new Date()): string {
   return d.toLocaleDateString("en-US", { timeZone: TZ(), month: "short", day: "numeric" });
 }
+
+/**
+ * The hour (0-23) it is now in shop time. The digest cron runs hourly and
+ * compares this against each organization's configured send hour, which is how
+ * "send it at eight" became a dropdown instead of a deploy.
+ *
+ * hourCycle h23 rather than hour12:false: the latter renders midnight as "24"
+ * in en-US on some runtimes, and an hour that never equals 0 would silently
+ * skip every schedule set to midnight.
+ */
+export function shopHour(d: Date = new Date()): number {
+  return parseInt(d.toLocaleString("en-US", { timeZone: TZ(), hour: "2-digit", hourCycle: "h23" }), 10);
+}

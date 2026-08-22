@@ -71,8 +71,14 @@ import {
   requireRealOwner, tenantViewer, viewContext, VIEW_AS_COOKIE, type SessionUser,
 } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
+import { DEFAULT_STOPS, clampHeight, serializeStops, type Stop } from "@/lib/appearance";
+import { serializeDigestDays } from "@/lib/digestDays";
+import { sendDigestEdition } from "@/lib/digest";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
-import { GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, autoFg, partOpen, stageChange } from "@/lib/stages";
+import {
+  GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, BLOCKED_STAGE,
+  autoFg, cleanBlockReason, isBlocking, partOpen, stageChange, validBlockReason,
+} from "@/lib/stages";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail } from "@/lib/eodEmail";
@@ -285,7 +291,17 @@ const targetLabel = (externalId: string, asset: { kind: string; model: string; s
 
 // ---------------- Instruments ----------------
 
-export async function toggleStage(instrumentId: number, stage: string): Promise<{ error?: string }> {
+/**
+ * Add or remove a stage. `reason` is required for exactly one move: blocking.
+ *
+ * Enforced HERE rather than only in the panel that asks for it, because the
+ * rule is about the record, not about a form - and `needsReason` comes back so
+ * a caller that forgot can ask rather than showing a validation error for
+ * something the person was never given a box to fill in.
+ */
+export async function toggleStage(
+  instrumentId: number, stage: string, reason = "",
+): Promise<{ error?: string; needsReason?: boolean }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -300,12 +316,56 @@ export async function toggleStage(instrumentId: number, stage: string): Promise<
   if (!move.ok) return { error: move.error };
   const has = inst.stages.includes(stage);
   const next = move.next;
-  await db.update(instruments).set({ stages: next, updatedAt: new Date() }).where(eq(instruments.id, instrumentId));
+  // Blocking is the one move that owes an explanation. Unblocking clears it,
+  // so the field never outlives the state it describes.
+  const blocking = isBlocking(inst.stages, stage);
+  const why = cleanBlockReason(reason);
+  if (blocking && !validBlockReason(why)) {
+    return { error: "Say why it's blocked and what would clear it", needsReason: true };
+  }
+  const blockFields = blocking
+    ? { blockedReason: why, blockedSince: new Date(), blockedBy: u.email }
+    : stage === BLOCKED_STAGE && has
+      ? { blockedReason: "", blockedSince: null, blockedBy: "" }
+      : {};
+  await db.update(instruments).set({ stages: next, updatedAt: new Date(), ...blockFields })
+    .where(eq(instruments.id, instrumentId));
   await db.insert(stageEvents).values({ instrumentId, stage, kind: has ? "removed" : "added" });
   await audit({
     actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
-    action: `${has ? "removed" : "added"} stage: ${stage}`, field: "stages",
+    action: `${has ? "removed" : "added"} stage: ${stage}${blocking ? ` - ${why}` : ""}`, field: "stages",
     oldValue: inst.stages.join(", "), newValue: next.join(", "),
+  });
+  rev(instrumentId);
+  return {};
+}
+
+/**
+ * Rewrite why a system is blocked without unblocking it - the reason changes
+ * as the wait does ("waiting on the quote" becomes "quote approved, waiting on
+ * the part"), and making somebody unblock and re-block to say so would lose
+ * the date it has been stuck since.
+ */
+export async function setBlockedReason(instrumentId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  await assertSystemEditable(u, instrumentId);
+  if (!inst.stages.includes(BLOCKED_STAGE)) return { error: "That system isn't blocked" };
+  const why = cleanBlockReason(reason);
+  if (!validBlockReason(why)) return { error: "Say why it's blocked and what would clear it" };
+  await db.update(instruments).set({
+    blockedReason: why, blockedBy: u.email,
+    // Keep blockedSince: it is how long the system has been stuck, which
+    // rewording the reason does not reset. Backfill it only if it is missing,
+    // which is every row blocked before a reason was demanded.
+    ...(inst.blockedSince ? {} : { blockedSince: new Date() }),
+    updatedAt: new Date(),
+  }).where(eq(instruments.id, instrumentId));
+  await audit({
+    actor: u.email, instrumentId, entityType: "instrument", entityId: inst.externalId,
+    action: `blocked reason: ${why}`, field: "blockedReason",
+    oldValue: inst.blockedReason, newValue: why,
   });
   rev(instrumentId);
   return {};
@@ -6261,6 +6321,74 @@ export async function updateDigestRecipients(orgId: number, value: string): Prom
   return {};
 }
 
+/**
+ * When this organization's digest goes out: the hour, and which days of the
+ * week. On the operator's own row it sets the internal edition's schedule.
+ * The cron runs hourly and sends what is due, so this takes effect the next
+ * morning with no deploy - and a rested day loses nothing, because the next
+ * edition's window reaches back to the last one (lib/digestDays).
+ */
+export async function setDigestHour(orgId: number | null, hour: number, days: number[]): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return { error: "Pick an hour of the day" };
+  if (!days.length) return { error: "Pick at least one day - to stop the digest, clear its recipients instead" };
+  if (days.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) return { error: "Those aren't days of the week" };
+  const digestDays = serializeDigestDays(days);
+  const at = `${String(hour).padStart(2, "0")}:00`;
+  const on = digestDays ? `on days ${digestDays}` : "every day";
+  // Null is the workspace's own internal edition. It lives on the operator's
+  // org row, because a workspace IS an organization - and on the settings
+  // singleton for an instance that has never named one.
+  if (orgId === null) {
+    const tenantOrgId = myTenantOrgId(u);
+    if (tenantOrgId !== null) await db.update(orgs).set({ digestHour: hour, digestDays }).where(eq(orgs.id, tenantOrgId));
+    else await db.update(appSettings).set({ digestHour: hour, digestDays }).where(eq(appSettings.id, 1));
+    await audit({ actor: u.email, entityType: "settings", entityId: tenantOrgId ?? 0, action: `internal daily digest: ${at} ${on}` });
+    revalidatePath("/settings");
+    return {};
+  }
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  await db.update(orgs).set({ digestHour: hour, digestDays }).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId,
+    action: `${org.name} daily digest: ${at} ${on}`,
+  });
+  revalidatePath("/settings");
+  return {};
+}
+
+/**
+ * Send an edition now rather than waiting for the morning - the button beside
+ * the preview, for when the schedule is not the point.
+ *
+ * `orgId` null is the internal edition for the caller's own workspace;
+ * anything else is that organization's partner edition. It goes through the
+ * same path the cron takes, so what lands is the same email to the same
+ * people and it counts as today's: pressing this at nine does not earn a
+ * second copy at ten.
+ */
+export async function sendDigestNow(orgId: number | null): Promise<{
+  error?: string; sent?: number; to?: string;
+}> {
+  const u = await requireStaff();
+  if (!(await getModules()).digest) return { error: "The daily digest module is off for this instance" };
+  const tenantOrgId = myTenantOrgId(u);
+  if (orgId !== null) {
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    // Somebody else's client is not ours to mail about.
+    if (!org || (tenantOrgId !== null && org.parentOrgId !== tenantOrgId)) return { error: "Not found" };
+  }
+  const res = await sendDigestEdition(tenantOrgId, orgId);
+  if (!res.sent) return { error: `Not sent - ${res.reason}` };
+  await audit({
+    actor: u.email, entityType: "settings", entityId: orgId ?? 0,
+    action: `sent the daily digest now to ${res.to.join(", ")}`,
+  });
+  revalidatePath("/settings");
+  return { sent: res.to.length, to: res.to.join(", ") };
+}
+
 // ---------------- Client sign-in allowlist ----------------
 
 /** "jane@labzenllc.com" (one person) or "@labzenllc.com" (whole domain). */
@@ -7465,6 +7593,38 @@ export async function setBranding(data: { name: string; tagline: string }): Prom
     actor: u.email, entityType: "settings", entityId: "branding",
     action: `renamed the platform to "${name}"${tagline ? ` (${tagline})` : ""}`,
     field: "platform_name", newValue: name,
+  });
+  revalidatePath("/", "layout");
+  return {};
+}
+
+/**
+ * How the platform looks: the header bar, and the spectrum above it.
+ *
+ * Validated here and not only in the form, because these values are written
+ * into a style attribute on every page - a colour that is not a colour is a
+ * way to write CSS onto the whole app, so what reaches the column has been
+ * through lib/appearance first. Blank is stored for anything that is the stock
+ * look, so an instance that never expressed a preference follows the default
+ * if it ever moves.
+ */
+export async function setPlatformAppearance(data: {
+  headerColor: string; spectrumHeight: number; spectrumStops: Stop[];
+}): Promise<{ error?: string }> {
+  const u = await requirePlatformOwner();
+  const raw = data.headerColor.trim();
+  if (raw && !isValidHex(raw)) return { error: "The header colour needs to be a hex like #1D9E75" };
+  const headerColor = raw ? raw.toUpperCase() : "";
+  const spectrumHeight = clampHeight(data.spectrumHeight);
+  const spectrumStops = serializeStops(data.spectrumStops);
+  const row = { headerColor, spectrumHeight, spectrumStops };
+  await db.insert(appSettings).values({ id: 1, ...row })
+    .onConflictDoUpdate({ target: appSettings.id, set: row });
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "appearance",
+    action: `platform appearance: header ${headerColor || "default"}, spectrum ${spectrumHeight}px`
+      + ` with ${spectrumStops ? JSON.parse(spectrumStops).length : DEFAULT_STOPS.length} stops`,
+    field: "header_color", newValue: headerColor,
   });
   revalidatePath("/", "layout");
   return {};

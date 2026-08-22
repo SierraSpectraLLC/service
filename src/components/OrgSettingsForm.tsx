@@ -3,7 +3,8 @@
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  setOrgAppearance, updateEodRecipients, updateDigestRecipients, addClientAccess, removeClientAccess,
+  setOrgAppearance, updateEodRecipients, updateDigestRecipients, setDigestHour, sendDigestNow,
+  addClientAccess, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale,
 } from "@/app/actions";
@@ -11,10 +12,17 @@ import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
 import StorageMeter from "@/components/StorageMeter";
+import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
 
 const MAX_LOGO_BYTES = 1024 * 1024; // a header logo, not a tune file
 
 type Entry = { id: number; entry: string; canEdit: boolean; canSeeAgreements: boolean };
+
+/** A stored recipient list as addresses; the store is text, this is the list. */
+const splitEmails = (s: string) => s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+
+/** "7:00 AM" - an hour of the day as somebody would say it out loud. */
+const clockLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "AM" : "PM"}`;
 
 /**
  * One organization's own settings page. It serves two audiences with the same
@@ -27,7 +35,8 @@ type Entry = { id: number; entry: string; canEdit: boolean; canSeeAgreements: bo
 export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
-    eodRecipients: string; digestRecipients: string; systems: number; isOperator: boolean; isSheetOrg: boolean;
+    eodRecipients: string; digestRecipients: string; digestHour: number; digestDays: string;
+    systems: number; isOperator: boolean; isSheetOrg: boolean;
     storageLimitMb: number; quota: Quota;
     remoteAccessEnabled: boolean; remoteDevices: number;
     resaleEnabled: boolean;
@@ -101,14 +110,69 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     });
   };
 
-  // Digest recipients - the partner edition of the daily digest, opt-in.
-  const [digestTo, setDigestTo] = useState(org.digestRecipients);
+  // The partner edition of the daily digest: who gets it, and when.
+  //
+  // Held as a LIST rather than the stored comma string. Typing addresses into
+  // a text box is how a stray comma becomes a recipient nobody can see is
+  // wrong; the people who could receive it are already known, so they are
+  // ticked instead.
+  const [digestTo, setDigestTo] = useState<string[]>(splitEmails(org.digestRecipients));
+  const [digestExtra, setDigestExtra] = useState("");
+  const [hour, setHour] = useState(org.digestHour);
+  // [] means every day - the stored blank. The picker shows all seven ticked.
+  const [sendDays, setSendDays] = useState<number[]>(() => {
+    const d = parseDigestDays(org.digestDays);
+    return d.length ? d : [...WEEK_ORDER];
+  });
   const [digestMsg, setDigestMsg] = useState("");
-  const saveDigestTo = () => {
+  const [digestErr, setDigestErr] = useState(false);
+  // Everyone who can be ticked: this organization's own logins, plus any
+  // address already on the list that isn't one - a shared purchasing inbox is
+  // a perfectly good recipient and must not silently vanish from the picker.
+  const digestPeople = [...new Set([
+    ...people.map((p) => p.entry.trim().toLowerCase()).filter((e) => e && !e.startsWith("@")),
+    ...digestTo,
+  ])];
+  const storedDays = (() => { const d = parseDigestDays(org.digestDays); return d.length ? d : [...WEEK_ORDER]; })();
+  const digestDirty = digestTo.join(", ") !== splitEmails(org.digestRecipients).join(", ")
+    || hour !== org.digestHour
+    || [...sendDays].sort().join() !== [...storedDays].sort().join();
+  const toggleDay = (d: number) => {
     setDigestMsg("");
+    setSendDays((list) => (list.includes(d) ? list.filter((x) => x !== d) : [...list, d]));
+  };
+  const toggleDigest = (email: string) => {
+    setDigestMsg("");
+    setDigestTo((list) => (list.includes(email) ? list.filter((x) => x !== email) : [...list, email]));
+  };
+  const addDigestExtra = () => {
+    const v = digestExtra.trim().toLowerCase();
+    if (!v) return;
+    setDigestMsg("");
+    setDigestTo((list) => (list.includes(v) ? list : [...list, v]));
+    setDigestExtra("");
+  };
+  const saveDigest = () => {
+    setDigestMsg(""); setDigestErr(false);
     startTransition(async () => {
-      const res = await updateDigestRecipients(org.id, digestTo);
-      setDigestMsg(res?.error ?? "Saved ✓");
+      const res = await updateDigestRecipients(org.id, digestTo.join(", "));
+      const res2 = res?.error ? null : await setDigestHour(org.id, hour, sendDays);
+      const err = res?.error ?? res2?.error;
+      setDigestErr(!!err);
+      setDigestMsg(err ?? "Saved \u2713");
+    });
+  };
+  const sendDigest = () => {
+    if (!digestTo.length) { setDigestErr(true); setDigestMsg("Tick somebody first"); return; }
+    if (digestDirty) { setDigestErr(true); setDigestMsg("Save your changes first"); return; }
+    // Outward-facing and unrecallable, so it asks - and names the addresses,
+    // because "send now" is only safe if you can see who now means.
+    if (!confirm(`Email ${org.name}'s digest now to ${digestTo.join(", ")}?`)) return;
+    setDigestMsg(""); setDigestErr(false);
+    startTransition(async () => {
+      const res = await sendDigestNow(org.id);
+      setDigestErr(!!res?.error);
+      setDigestMsg(res?.error ?? `Sent to ${res.to}`);
     });
   };
 
@@ -270,22 +334,68 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
         <div className="card">
           <div className="card-title">Daily digest</div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Who at {org.name} receives their edition of the morning digest - their systems&apos;
-            status, yesterday&apos;s work, and what&apos;s waiting on whom. Comma-separated;
-            empty means their digest stays internal.
+            Who at {org.name} receives their edition each morning - their systems&apos; status,
+            yesterday&apos;s work, and what&apos;s waiting on whom. Nobody ticked means their
+            digest stays internal.
           </div>
+          {digestPeople.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
+              {digestPeople.map((email) => (
+                <label key={email} style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", padding: "2px 0" }}>
+                  <input type="checkbox" checked={digestTo.includes(email)} disabled={pending}
+                    onChange={() => toggleDigest(email)} style={{ width: "auto", margin: 0 }} />
+                  <span className="mono" style={{ fontSize: 12 }}>{email}</span>
+                  {!people.some((p) => p.entry.trim().toLowerCase() === email) && (
+                    <span className="mut" style={{ fontSize: 11 }}>not a login here</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+              Nobody from {org.name} can sign in yet - add their address below, or invite them under People.
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            <input className="mono" value={digestExtra} placeholder="another address"
+              onChange={(e) => { setDigestExtra(e.target.value); setDigestMsg(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addDigestExtra(); } }}
+              style={{ flex: "1 1 200px", fontSize: 12 }} />
+            <button className="btn sm" onClick={addDigestExtra} disabled={pending || !digestExtra.trim()}>Add</button>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            <span className="mut" style={{ fontSize: 12 }}>Sends at</span>
+            <select value={hour} disabled={pending}
+              onChange={(e) => { setHour(parseInt(e.target.value)); setDigestMsg(""); }}
+              style={{ width: "auto", fontSize: 12 }}>
+              {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{clockLabel(h)}</option>)}
+            </select>
+            <span className="mut" style={{ fontSize: 12 }}>shop time, on</span>
+            {WEEK_ORDER.map((d) => (
+              <label key={d} style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11, margin: 0, fontWeight: 400, cursor: "pointer" }}>
+                <input type="checkbox" checked={sendDays.includes(d)} disabled={pending}
+                  onChange={() => toggleDay(d)} style={{ width: "auto", margin: 0 }} />
+                {DAY_LABELS[d]}
+              </label>
+            ))}
+          </div>
+          {sendDays.length > 0 && sendDays.length < 7 && (
+            <div className="mut" style={{ fontSize: 11, marginTop: -4, marginBottom: 10 }}>
+              Days it rests fold into the next edition - Monday&apos;s digest covers the weekend&apos;s
+              work under its own days, and says nothing extra if there was none.
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <input className="mono" value={digestTo}
-              onChange={(e) => { setDigestTo(e.target.value); setDigestMsg(""); }}
-              placeholder="nobody - internal only" style={{ flex: "1 1 220px", fontSize: 12 }} />
-            <button className="btn sm" onClick={saveDigestTo} disabled={pending || digestTo === org.digestRecipients}>Save</button>
+            <button className="btn sm accent" onClick={saveDigest} disabled={pending || !digestDirty}>Save</button>
             <a className="btn sm" href={`/api/digest/preview?org=${org.id}`} target="_blank" rel="noreferrer">Preview</a>
+            <button className="btn sm" onClick={sendDigest} disabled={pending}>Send now</button>
           </div>
           <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
-            Preview shows today&apos;s edition with real data, without sending anything.
+            Preview shows today&apos;s edition with real data and sends nothing. Send now emails it
+            immediately and counts as today&apos;s, so the schedule won&apos;t send a second copy.
           </div>
           {digestMsg && (
-            <div style={{ fontSize: 12, marginTop: 6, color: digestMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{digestMsg}</div>
+            <div style={{ fontSize: 12, marginTop: 6, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
           )}
         </div>
       )}

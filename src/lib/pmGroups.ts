@@ -78,3 +78,114 @@ export function pmGroups<T extends PmLike>(rows: T[], today: string): PmGrouped<
     allClear: active.length === 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The asset dimension.
+//
+// A stacked system carries upkeep on every module - the pump has its seals,
+// the autosampler its needle, the MS its ion source - and when a visit brings
+// them all due at once, forty ACTIVE rows are as unreadable as forty future
+// ones. The month fold cannot help there; the asset can. Rows group under the
+// unit they belong to, the system's own work first, and each group folds to a
+// header that keeps the two answers visible: how much is owed here, and when
+// the next thing is. Collapsing hides rows, never the signal.
+// ---------------------------------------------------------------------------
+
+export type PmAssetLike = PmLike & {
+  /** Which unit the schedule lives on. Null/absent = the system itself. */
+  assetId?: number | null;
+  /** What to call that unit. */
+  onAsset?: string;
+};
+
+export type PmAssetGroup<T> = {
+  /** "sys", or "a<id>". Stable, so a collapse survives a re-render. */
+  key: string;
+  /** "System" for the system's own work; the unit's label otherwise. */
+  label: string;
+  rows: T[];
+  /** Owed now (pmActive) - what the folded header must still say. */
+  due: number;
+  /** Soonest unpaused due date in the group, for the header when nothing is owed. */
+  nextDue: string | null;
+};
+
+/**
+ * Rows by the unit they belong to: the system's own schedules first, then each
+ * asset in the order it first appears. One group (or none) means the asset
+ * dimension has nothing to add - callers keep the flat list.
+ */
+export function pmAssetGroups<T extends PmAssetLike>(rows: T[], today: string): PmAssetGroup<T>[] {
+  const groups: PmAssetGroup<T>[] = [];
+  const byKey = new Map<string, PmAssetGroup<T>>();
+  for (const r of rows) {
+    const key = r.assetId != null ? `a${r.assetId}` : "sys";
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, label: r.assetId != null ? (r.onAsset || "Unnamed unit") : "System", rows: [], due: 0, nextDue: null };
+      byKey.set(key, g);
+      groups.push(g);
+    }
+    g.rows.push(r);
+    if (pmActive(r, today)) g.due++;
+    if (!r.paused && (g.nextDue === null || r.nextDue < g.nextDue)) g.nextDue = r.nextDue;
+  }
+  // The system's own work reads first, wherever its rows sat in the input.
+  groups.sort((a, b) => (a.key === "sys" ? -1 : b.key === "sys" ? 1 : 0));
+  return groups;
+}
+
+// ---------------------------------------------------------------------------
+// The month as the fold.
+//
+// The panel's reading order is the shop's planning order: months. Every
+// schedule sits in the month its next cycle falls in - past months are the
+// overdue stragglers, the current month is the visit being worked, future
+// months are the calendar. One fold per month, chronological, so "May 2026 ·
+// overdue" above "August 2026 · due" says at a glance both what is late and
+// by how much. Paused schedules close the list under their own fold: they
+// belong to no month, because they are not going to happen on their own.
+// ---------------------------------------------------------------------------
+
+export type PmFoldState = "overdue" | "due" | "upcoming" | "paused";
+
+export type PmFold<T> = {
+  /** "2026-05", or "paused". Stable, so a click outlives a re-render. */
+  key: string;
+  label: string;
+  state: PmFoldState;
+  rows: T[];
+  /**
+   * Owed now (pmActive) - overdue, due, or started early. What the folded
+   * header must still say, and what decides a fold starts open: a month with
+   * work owed shows its rows, a quiet one is one line.
+   */
+  owed: number;
+};
+
+export function pmFolds<T extends PmLike>(rows: T[], today: string): PmFold<T>[] {
+  const thisMonth = pmMonthKey(today);
+  const order = (a: T, b: T) => a.nextDue.localeCompare(b.nextDue) || a.id - b.id;
+  const live = rows.filter((r) => !r.paused).sort(order);
+  const paused = rows.filter((r) => r.paused).sort(order);
+
+  const folds: PmFold<T>[] = [];
+  for (const r of live) {
+    const key = pmMonthKey(r.nextDue);
+    let f = folds[folds.length - 1];
+    if (!f || f.key !== key) {
+      f = {
+        key, label: pmMonthLabel(r.nextDue),
+        state: key < thisMonth ? "overdue" : key === thisMonth ? "due" : "upcoming",
+        rows: [], owed: 0,
+      };
+      folds.push(f);
+    }
+    f.rows.push(r);
+    if (pmActive(r, today)) f.owed++;
+  }
+  if (paused.length) {
+    folds.push({ key: "paused", label: "Paused", state: "paused", rows: paused, owed: 0 });
+  }
+  return folds;
+}
