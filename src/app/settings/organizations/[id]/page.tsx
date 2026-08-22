@@ -13,6 +13,7 @@ import AgreementsPanel from "@/components/AgreementsPanel";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
 import { isHouse, maySeeAgreements } from "@/lib/tenancy";
+import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,14 @@ export const dynamic = "force-dynamic";
  * why these controls are here and not bolted onto the dashboard, where they sat
  * looking like part of the work.
  */
-export default async function OrgSettingsPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function OrgSettingsPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { id } = await params;
+  const sp = await searchParams;
   const orgId = parseInt(id);
   if (isNaN(orgId)) notFound();
 
@@ -87,6 +92,25 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
   const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
     .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
+  const activeAgreements = agreementRows.filter((r) => r.status === "active").length;
+  const heroStats: HeroStat[] = [
+    { value: ownedSystems.length, label: ownedSystems.length === 1 ? "system" : "systems" },
+    { value: allowRows.length, label: allowRows.length === 1 ? "person" : "people" },
+    { value: siteRows.length, label: siteRows.length === 1 ? "site" : "sites" },
+    ...(seesAgreements
+      ? [{ value: activeAgreements, label: activeAgreements === 1 ? "active agreement" : "active agreements", tone: activeAgreements === 0 ? "warn" as const : undefined }]
+      : []),
+  ];
+
+  const base = `/settings/organizations/${org.id}`;
+  const tab = ["agreements", "sites"].includes(sp.tab ?? "") && (sp.tab !== "agreements" || seesAgreements)
+    ? sp.tab! : "settings";
+  const tabs: TabItem[] = [
+    { key: "settings", label: "Settings", href: base },
+    ...(seesAgreements ? [{ key: "agreements", label: "Agreements", count: agreementRows.length, href: `${base}?tab=agreements` }] : []),
+    { key: "sites", label: "Sites", count: siteRows.length, href: `${base}?tab=sites` },
+  ];
+
   return (
     <div>
       {isOwner && (
@@ -94,22 +118,19 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           <Link href="/settings/organizations" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Organizations</Link>
         </div>
       )}
-      <div className="page-head">
-        <h1 className="page-title">{org.name}</h1>
-        <span className={`pill ${org.kind === "provider" ? "warn" : "info"}`}>
-          {org.kind}
-        </span>
-        <p className="page-sub">
-          Who signs in, how their workspace looks, where their instruments live, and the
-          paper behind the work.
-        </p>
-      </div>
-      {/* Two stacks from 1200px up, like the record pages: this page was nine
-          cards in one long column. Configuration on the left; the business -
-          contracts, sites, billing - on the right. Flattens in this order. */}
-      <div className="panel-cols">
-      <div>
-      <OrgSettingsForm
+
+      <RecordHero
+        image={org.logoUrl || undefined}
+        imageAlt={org.name}
+        eyebrow={`${org.kind === "provider" ? "Provider" : "Client"} organization`}
+        title={org.name}
+        meta="Who signs in, how their workspace looks, where their instruments live, and the paper behind the work."
+        stats={heroStats}
+      />
+
+      <Tabs items={tabs} active={tab} ariaLabel="Organization sections" />
+
+      {tab === "settings" && <OrgSettingsForm
         org={{
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
           eodRecipients: org.eodRecipients, digestRecipients: org.digestRecipients,
@@ -126,11 +147,9 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         showSheetSync={s?.sheetSyncEnabled ?? false}
         showRemote={s?.remoteEnabled ?? false}
         showDigest={s?.digestEnabled ?? false}
-      />
-      </div>
+      />}
 
-      <div>
-      {seesAgreements && (
+      {tab === "agreements" && seesAgreements && (
       <AgreementsPanel
         rows={agreementRows.map((r) => ({
           id: r.id, orgId: r.orgId, orgName: org.name,
@@ -152,7 +171,8 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
         papers={agreementPapers}
       />
       )}
-      <SitesCard
+
+      {tab === "sites" && <SitesCard
         orgId={org.id} orgName={org.name} billingAddress={org.billingAddress}
         canEdit={mayConfigure}
         sites={siteRows.map((r) => ({
@@ -160,10 +180,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
           contactName: r.contactName, contactPhone: r.contactPhone, archived: r.archived,
           systems: siteSystems.filter((i) => i.siteId === r.id).length,
         }))}
-      />
-
-      </div>
-      </div>
+      />}
     </div>
   );
 }
