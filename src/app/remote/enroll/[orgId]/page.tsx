@@ -68,7 +68,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <Link href="/remote" className="btn sm" style={{ textDecoration: "none" }}>← Machines</Link>
         <h1 style={{ fontSize: 20, margin: 0 }}>Enroll a machine</h1>
-        <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{org.name}</span>
+        <span className="pill info">{org.name}</span>
       </div>
 
       {"error" in group && <div className="card" style={{ fontSize: 13, color: "#A32D2D" }}>{group.error}</div>}
