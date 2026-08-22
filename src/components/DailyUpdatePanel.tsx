@@ -92,22 +92,22 @@ export default function DailyUpdatePanel({ target, systemUpdate, actionItem, upd
     return (
       <div className="card">
         <div className="card-title" style={{ marginBottom: 6 }}>Today&apos;s update</div>
-        {systemUpdate && <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{systemUpdate}</div>}
+        {systemUpdate && <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{systemUpdate}</div>}
         {actionItem && (
-          <div style={{ fontSize: 13, marginTop: 4 }}>
+          <div className="t-body" style={{ marginTop: 4 }}>
             <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>{actionItem}
           </div>
         )}
-        {updatedBy && <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>{updatedBy}</div>}
+        {updatedBy && <div className="mut t-meta" style={{ marginTop: 2 }}>{updatedBy}</div>}
       </div>
     );
   }
 
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+      <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
         <div className="card-title">Today&apos;s update</div>
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           {state === "saving" ? "Saving..." : state === "saved" ? "Saved ✓" : state === "dirty" ? "Unsaved" : "goes on today's client report"}
         </span>
       </div>
