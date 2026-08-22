@@ -79,6 +79,31 @@ const FIXTURE = `
 
   INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, visits_included, parts_allowance_cents, labor_included_minutes, value_cents, created_by) VALUES
     (1, 'contract', 'AGR-2026-01', 'Lab Zen full service', 'active', '2026-01-01', '2026-12-31', 6, 500000, 4800, 3600000, '${OWNER}');
+
+  INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, archived, archived_at, archived_by) VALUES
+    ('LZ-000', 'Lab Zen', 'Agilent 5975C GC-MSD', 'Agilent', 'US83221', 99, '{"Shipped"}', true, now() - interval '40 days', 'joe');
+
+  INSERT INTO pm_schedules (instrument_id, title, assignee, every_days, next_due, last_done) VALUES
+    (1, 'Quarterly source clean', 'joe', 90, to_char(now() - interval '5 days', 'YYYY-MM-DD'), to_char(now() - interval '95 days', 'YYYY-MM-DD')),
+    (3, 'Annual desolvation line swap', '', 365, to_char(now() + interval '200 days', 'YYYY-MM-DD'), ''),
+    (6, 'Rough pump oil change', 'joe', 180, to_char(now() + interval '20 days', 'YYYY-MM-DD'), '');
+
+  INSERT INTO sheet_diffs (external_id, field, sheet_value, db_value) VALUES
+    ('LZ-002', 'stage', 'Checkout', 'Refurbishment, System setup'),
+    ('CA-001', 'notes', 'Waiting on quote approval', '');
+
+  INSERT INTO discussion_posts (instrument_id, author, author_email, body) VALUES
+    (1, 'Rita Alvarez', 'rita@labzen.test', 'Any word on the checkout date? The lab is planning validation runs.'),
+    (1, 'Dev Owner', '${OWNER}', 'Tune passed this morning; sign-off packet goes out tomorrow.');
+
+  INSERT INTO message_threads (title, created_by, last_message_at) VALUES
+    ('Sign-off scheduling', '${OWNER}', now() - interval '2 hours');
+  INSERT INTO thread_members (thread_id, email, name, org_name, added_by) VALUES
+    (1, '${OWNER}', 'Dev Owner', '', '${OWNER}'),
+    (1, 'rita@labzen.test', 'Rita Alvarez', 'Lab Zen', '${OWNER}');
+  INSERT INTO messages (thread_id, author_email, author_name, body) VALUES
+    (1, 'rita@labzen.test', 'Rita Alvarez', 'Could we do Thursday morning for the sign-off?'),
+    (1, '${OWNER}', 'Dev Owner', 'Thursday 9am works. I will bring the packet.');
 `;
 
 async function seed() {

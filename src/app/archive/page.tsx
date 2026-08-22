@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments } from "@/db/schema";
@@ -8,12 +7,14 @@ import { viewTenant, visibleSystemIds } from "@/lib/tenancy";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopMonthDay } from "@/lib/shopday";
+import { DataTable, FacetStrip, Id, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function ArchivePage() {
+export default async function ArchivePage({ searchParams }: { searchParams: Promise<{ q?: string; client?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  const { q = "", client = "" } = await searchParams;
   // This page was reachable by URL for anyone signed in; now it shows only
   // what the viewer may see.
   const visible = await visibleSystemIds(user);
@@ -27,36 +28,79 @@ export default async function ArchivePage() {
   const labels = await getSystemLabels(rows);
   const color = (name: string) => defs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
 
+  const clients = [...new Set(rows.map((i) => i.client).filter(Boolean))].sort();
+  const needle = q.trim().toLowerCase();
+  const shown = rows.filter((i) =>
+    (!client || i.client === client)
+    && (!needle
+      || i.externalId.toLowerCase().includes(needle)
+      || (labels.get(i.id) ?? "").toLowerCase().includes(needle)
+      || i.client.toLowerCase().includes(needle)
+      || i.archivedBy.toLowerCase().includes(needle)));
+  const clientHref = (c: string) => {
+    const p = new URLSearchParams();
+    if (needle) p.set("q", needle);
+    if (c && c !== client) p.set("client", c);
+    return `/archive${p.size ? `?${p}` : ""}`;
+  };
+
   return (
     <div className="container page">
-      <div className="crumb">Operations › <b>Archived</b></div>
-      <div className="page-head">
-        <h1 className="page-title">Archived systems</h1>
-        <p className="page-sub">Retired from the active fleet, kept in full. Open one to restore it.</p>
-      </div>
-      <div className="card">
-        {rows.map((i) => (
-          <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", flexWrap: "wrap" }}>
-            <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
-            <span style={{ fontSize: 13, flex: "1 1 140px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{labels.get(i.id) || <span className="mut">No assets listed</span>}</span>
-            <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {i.stages.map((s) => (
-                <span key={s} className="pill" style={{ background: color(s).bg, color: color(s).fg }}>{s}</span>
-              ))}
-            </span>
-            <span className="mut" style={{ fontSize: 11 }}>
-              {i.client}{i.archivedAt ? ` · archived ${shopMonthDay(i.archivedAt)}` : ""}{i.archivedBy ? ` by ${i.archivedBy}` : ""}
-            </span>
-          </Link>
-        ))}
-        {rows.length === 0 && (
-          <div className="empty">
-            <b>Nothing archived</b>
-            Systems retired from the dashboard land here, kept in full.
-          </div>
-        )}
-      </div>
+      <PageHead
+        crumb={<>Operations › <b>Archived</b></>}
+        title="Archived systems"
+        sub="Retired from the active fleet, kept in full. Open one to restore it."
+      />
+      <Toolbar
+        search={
+          <form action="/archive">
+            {client && <input type="hidden" name="client" value={client} />}
+            <input name="q" defaultValue={q} placeholder="ID, model or client" aria-label="Search archived systems" />
+          </form>
+        }
+        facets={clients.length > 1 ? (
+          <FacetStrip facets={clients.map((c) => ({
+            key: c, label: c,
+            count: rows.filter((i) => i.client === c).length,
+            on: client === c, href: clientHref(c),
+          }))} />
+        ) : undefined}
+      />
+      <DataTable
+        cols={[
+          { key: "id", label: "ID", width: "90px" },
+          { key: "system", label: "System", width: "minmax(180px, 2fr)" },
+          { key: "stage", label: "Left in", width: "minmax(120px, 0.9fr)", hideMobile: true },
+          { key: "when", label: "Archived", width: "minmax(150px, 1fr)" },
+        ]}
+        rows={shown.map((i) => ({
+          key: i.id,
+          href: `/instruments/${i.id}`,
+          cells: {
+            id: <Id>{i.externalId}</Id>,
+            system: (
+              <span style={{ minWidth: 0, display: "block" }}>
+                <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {labels.get(i.id) || <span className="mut">No assets listed</span>}
+                </span>
+                <span className="mut" style={{ fontSize: 11 }}>{i.client}</span>
+              </span>
+            ),
+            stage: i.stages.length ? (
+              <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <span className="pill" style={{ background: color(i.stages[0]).bg, color: color(i.stages[0]).fg }}>{i.stages[0]}</span>
+                {i.stages.length > 1 && <span className="mut" style={{ fontSize: 11 }}>+{i.stages.length - 1}</span>}
+              </span>
+            ) : null,
+            when: (
+              <span className="mut" style={{ fontSize: 12 }}>
+                {i.archivedAt ? shopMonthDay(i.archivedAt) : ""}{i.archivedBy ? ` by ${i.archivedBy}` : ""}
+              </span>
+            ),
+          },
+        }))}
+        empty="Nothing archived"
+      />
     </div>
   );
 }
