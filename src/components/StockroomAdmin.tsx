@@ -87,7 +87,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
       {shares.map((s) => (
         <div key={s.orgId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", flexWrap: "wrap" }}>
           <span style={{ fontSize: 13 }}>{s.name}</span>
-          <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{s.kind}</span>
+          <span className="pill accent">{s.kind}</span>
           <select value={s.access} disabled={pending}
             onChange={(e) => startTransition(async () => {
               const res = await setStockroomShare(room.id, s.orgId, e.target.value);
