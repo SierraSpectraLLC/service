@@ -6,9 +6,66 @@ import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import {
   CardGrid, DataTable, Dot, EmptyState, EntityCard, FacetStrip, Field, Legend,
-  PageHead, Panel, Pill, RowActions, SectionHead, Seg, Tabs, Toolbar, Id,
+  PageHead, Panel, Pill, RowActions, SaveBar, SectionHead, Seg, Tabs, Toolbar, Id,
 } from "@/components/ui";
+import MobileNav from "@/components/MobileNav";
+import SettingsNav from "@/components/SettingsNav";
 import type { Tone } from "@/lib/tones";
+
+/* The nav components gate themselves by viewport (burger and tab bar exist
+   under 640px, the settings sidebar from 900px up). The frames below unhide
+   both variants and pin the fixed pieces in place, so the inventory shows
+   every state at any width. Dev route only - production never loads this. */
+const NAV_FRAME_CSS = `
+  .navframe { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 12px; background: var(--bg); }
+  .navframe-bar { background: var(--navy); color: #fff; display: flex; align-items: center; gap: 10px; padding: 8px 12px; flex-wrap: wrap; }
+  .navframe .mnav-burger { display: inline-flex; }
+
+  /* The tab bar and drawer live in the frame's flow, styled as they are on a
+     phone; the app pins them to the viewport instead. */
+  .navframe .mnav-tabbar {
+    display: flex; position: static; order: 10; flex-basis: calc(100% + 24px);
+    background: var(--card); border-top: 1px solid var(--line);
+    padding: 6px 4px 8px; margin: 8px -12px -8px;
+  }
+  .navframe .mnav-tabbar a {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-size: 10.5px; font-weight: 600; color: var(--mut); text-decoration: none;
+  }
+  .navframe .mnav-tabbar a.active { color: var(--navy); }
+  .navframe .mnav-drawer { display: block; position: static; order: 5; flex-basis: calc(100% + 24px); margin: 8px -12px 0; }
+  .navframe .scrim { display: none; }
+  .navframe .mnav-pane {
+    position: static; width: auto; box-shadow: none;
+    background: var(--card); padding: 10px 0 20px; border-top: 1px solid var(--line);
+  }
+  .navframe .mnav-id { padding: 8px 18px 12px; border-bottom: 1px solid var(--line); color: var(--ink); }
+  .navframe .mnav-group {
+    padding: 14px 18px 4px; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.6px; text-transform: uppercase; color: var(--mut);
+  }
+  .navframe .mnav-pane a { display: block; padding: 9px 18px; font-size: 14px; font-weight: 500; color: var(--ink); text-decoration: none; }
+  .navframe .mnav-pane a.active { background: var(--t-info-bg); color: var(--navy); font-weight: 600; }
+
+  /* Sidebar and drilldown side by side, whatever the viewport. */
+  .navframe .settings-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px 20px; padding: 12px; }
+  .navframe .settings-side { display: block; position: static; grid-column: 1; grid-row: 1 / span 2; }
+  .navframe .settings-shell > div { grid-column: 2; grid-row: 1; min-width: 0; }
+  .navframe .settings-mobnav {
+    display: block; grid-column: 2; grid-row: 2;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .navframe .settings-mobnav > summary {
+    list-style: none; cursor: pointer; padding: 11px 14px;
+    font-size: 13.5px; font-weight: 600; color: var(--navy);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .navframe .settings-mobnav nav { border-top: 1px solid var(--line); padding-bottom: 8px; }
+  @media (max-width: 639px) {
+    .navframe .settings-shell { grid-template-columns: minmax(0, 1fr); }
+    .navframe .settings-side, .navframe .settings-shell > div, .navframe .settings-mobnav { grid-column: 1; grid-row: auto; }
+  }
+`;
 
 const TONES: Tone[] = ["neutral", "faint", "info", "good", "warn", "accent", "bad"];
 
@@ -189,6 +246,47 @@ export default function DevUiGallery() {
         </CardGrid>
       </div>
 
+      <SectionHead label="Navigation" />
+      <style>{NAV_FRAME_CSS}</style>
+      <div className="navframe" id="nav-mobile">
+        <div className="navframe-bar">
+          <MobileNav
+            links={[
+              { href: "/", label: "Dashboard" },
+              { href: "/work", label: "Work orders" },
+              { href: "/assets", label: "Assets" },
+              { href: "/stock", label: "Inventory" },
+            ]}
+            groups={[
+              { label: "Operations", items: [
+                { href: "/eod", label: "EOD update" }, { href: "/maintenance", label: "Maintenance" },
+                { href: "/purchasing", label: "Purchasing" }, { href: "/remote", label: "Remote support" },
+                { href: "/metrics", label: "Metrics" }, { href: "/archive", label: "Archived" },
+              ] },
+              { label: "Library", items: [
+                { href: "/settings/catalog", label: "Equipment catalog" }, { href: "/settings/parts", label: "Parts book" },
+                { href: "/documents", label: "Files" }, { href: "/gallery", label: "Gallery" },
+                { href: "/pdf", label: "PDF studio" }, { href: "/import", label: "Import spreadsheet" },
+              ] },
+            ]}
+            settingsHref="/settings"
+            userName="Rita Vasquez" orgName="Sierra Spectral" />
+          <b style={{ letterSpacing: "-0.2px" }}>RIDGELINE</b>
+          <span style={{ fontSize: 11, opacity: 0.75 }}>burger opens the drawer inline here</span>
+        </div>
+      </div>
+
+      <div className="navframe" id="nav-settings">
+        <div className="settings-shell">
+          <SettingsNav isOwner isPlatform={false} />
+          <div style={{ minWidth: 0 }}>
+            <Panel title="Equipment catalog" hint="The page the sidebar frames - fixture body.">
+              <div className="mut t-small">Sidebar from 900px up; the drilldown below is the phone variant.</div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+
       <SectionHead label="Panel, fields, empty state" />
       <div className="panel-cols" id="panel">
         <div className="panel-slot">
@@ -219,6 +317,11 @@ export default function DevUiGallery() {
               action={<button className="btn primary">Email me a link</button>} />
           </div>
         </div>
+      </div>
+
+      <SectionHead label="Save bar" />
+      <div id="savebar">
+        <SaveBar dirty label="Save configuration" onSave={() => toast({ message: "Saved configuration" })} onDiscard={() => {}} />
       </div>
 
       {/* ── The dialogs, one per ?d= key ──────────────────────────────── */}
