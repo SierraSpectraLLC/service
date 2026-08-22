@@ -1,0 +1,277 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Dialog from "@/components/ui/Dialog";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
+import {
+  CardGrid, DataTable, Dot, EmptyState, EntityCard, FacetStrip, Field, Legend,
+  PageHead, Panel, Pill, RowActions, SectionHead, Seg, Tabs, Toolbar, Id,
+} from "@/components/ui";
+import type { Tone } from "@/lib/tones";
+
+const TONES: Tone[] = ["neutral", "faint", "info", "good", "warn", "accent", "bad"];
+
+/**
+ * The living component inventory behind /dev/ui (development only - the route
+ * 404s in production). Every kit piece with fixture props, one dialog per
+ * ?d= key so each can be linked to and screenshotted:
+ *
+ *   ?d=dialog-md      a create form in the standard Dialog
+ *   ?d=dialog-sm      the small variant
+ *   ?d=dialog-steps   the stepped variant (rail on desktop, bar on phone)
+ *   ?d=confirm-bad    a destructive ConfirmDialog with a consequence list
+ *   ?d=confirm-plain  a non-destructive ConfirmDialog
+ *   ?d=toast          the toast rack
+ *
+ * Fixture data only. Nothing here talks to the server.
+ */
+export default function DevUiGallery() {
+  const [show, setShow] = useState("");
+  const [seg, setSeg] = useState("open");
+  const [tab, setTab] = useState("procedures");
+  const [facets, setFacets] = useState<{ key: string; label: string; count?: number; on?: boolean }[]>([
+    { key: "open", label: "Open", count: 14, on: true },
+    { key: "mine", label: "Mine", count: 6 },
+    { key: "blocked", label: "Blocked", count: 2 },
+    { key: "closed", label: "Closed" },
+  ]);
+
+  useEffect(() => {
+    setShow(new URLSearchParams(window.location.search).get("d") ?? "");
+  }, []);
+  const close = () => {
+    setShow("");
+    window.history.replaceState(null, "", window.location.pathname);
+  };
+
+  useEffect(() => {
+    if (show === "confirm-bad") {
+      void confirmDialog({
+        title: "Decommission #33?",
+        body: (
+          <>
+            Its history stays. It leaves the active pool and stops generating maintenance.
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              <li>cancels 2 overdue PM tasks</li>
+              <li>removes it from the Lab Zen escrow count</li>
+            </ul>
+          </>
+        ),
+        action: "Decommission #33",
+        tone: "bad",
+        cancel: "Keep it",
+      });
+    } else if (show === "confirm-plain") {
+      void confirmDialog({
+        title: "Send PO-118 to Agilent?",
+        body: "Lines lock after this.",
+        action: "Send PO-118",
+      });
+    } else if (show === "toast") {
+      toast({ message: "Saved procedure" });
+      toast({ message: "Decommissioned #33", undo: () => {} });
+      toast({ message: "The handoff didn't go through: server error", tone: "bad" });
+    }
+  }, [show]);
+
+  const anchor = (k: string, label: string) => (
+    <a key={k} className="facet" href={`?d=${k}`} onClick={(e) => { e.preventDefault(); setShow(k); window.history.replaceState(null, "", `?d=${k}`); }}>
+      {label}
+    </a>
+  );
+
+  return (
+    <div className="container wide">
+      <PageHead title="UI inventory" sub="Every kit component with fixture props. Development only."
+        crumb={<span>dev › <b>ui</b></span>}
+        actions={<span className="facets">
+          {anchor("dialog-md", "Dialog md")}
+          {anchor("dialog-sm", "Dialog sm")}
+          {anchor("dialog-steps", "Dialog steps")}
+          {anchor("confirm-bad", "Confirm bad")}
+          {anchor("confirm-plain", "Confirm plain")}
+          {anchor("toast", "Toasts")}
+        </span>} />
+
+      <SectionHead label="Tones" count={7} />
+      <div className="card">
+        <div className="row-2" id="pills">
+          {TONES.map((t) => <Pill key={t} tone={t}>{t}</Pill>)}
+          <Pill tone="info" mono>PO-118</Pill>
+        </div>
+        <div className="row-3" style={{ marginTop: 10 }} id="dots">
+          {TONES.map((t) => <Dot key={t} tone={t} label={t} />)}
+        </div>
+        <div style={{ marginTop: 10 }} id="legend">
+          <Legend items={[
+            { tone: "good", label: "our move" }, { tone: "warn", label: "waiting on client" },
+            { tone: "bad", label: "blocked" }, { tone: "info", label: "with supplier" },
+            { tone: "neutral", label: "parked" },
+          ]} />
+        </div>
+      </div>
+
+      <SectionHead label="Type scale and identifiers" />
+      <div className="card" id="type">
+        <div className="t-page">Page title 22</div>
+        <div className="t-title">Card title 16</div>
+        <div className="t-lead">Lead 14</div>
+        <div className="t-body">Body 13</div>
+        <div className="t-small mut">Small 12</div>
+        <div className="t-meta mut">Meta 11</div>
+        <div style={{ marginTop: 8 }}>
+          <Id>US24051113</Id> · <Id dim>G7167B</Id> · serial and model read as designations
+        </div>
+      </div>
+
+      <SectionHead label="Toolbar, facets, controls" />
+      <div className="card" id="controls">
+        <Toolbar
+          search={<input placeholder="Serial, client, model or WO number" />}
+          facets={<FacetStrip facets={facets}
+            onToggle={(k) => setFacets(facets.map((f) => f.key === k ? { ...f, on: !f.on } : f))} />}
+          actions={<button className="btn primary">+ Work order</button>} />
+        <div className="row-3">
+          <Seg options={[{ value: "open", label: "Open" }, { value: "all", label: "All" }, { value: "closed", label: "Closed" }]}
+            value={seg} onChange={setSeg} />
+          <button className="btn">Button</button>
+          <button className="btn primary">Primary</button>
+          <button className="btn accent">Accent</button>
+          <button className="btn danger">Danger</button>
+          <button className="btn link">link</button>
+          <button className="btn link danger">danger link</button>
+        </div>
+        <div style={{ marginTop: 10 }}>
+          <Tabs active={tab} onSelect={setTab} items={[
+            { key: "procedures", label: "Procedures", count: 7 },
+            { key: "specs", label: "Specs", count: 0, warn: true },
+            { key: "parts", label: "Parts", count: 3 },
+            { key: "fleet", label: "Fleet", count: 1 },
+          ]} />
+        </div>
+      </div>
+
+      <SectionHead label="DataTable" count={5} action={<button className="btn link">Export</button>} />
+      <div id="datatable">
+        <DataTable
+          cols={[
+            { key: "dot", label: "", width: "12px" },
+            { key: "wo", label: "WO", width: "90px" },
+            { key: "system", label: "System", width: "minmax(160px,1.6fr)" },
+            { key: "stage", label: "Stage", width: "110px" },
+            { key: "updated", label: "Updated", width: "90px", hideMobile: true },
+          ]}
+          rows={[
+            { key: 1, group: "Lab Zen", href: "#", cells: { dot: <Dot tone="bad" />, wo: <Id>WO-0412</Id>, system: <b>Agilent 6495C</b>, stage: <Pill tone="bad">Blocked</Pill>, updated: "2 h" } },
+            { key: 2, group: "Lab Zen", href: "#", cells: { dot: <Dot tone="warn" />, wo: <Id>WO-0411</Id>, system: <b>Thermo ISQ 7000</b>, stage: <Pill tone="warn">Their move</Pill>, updated: "1 d" } },
+            { key: 3, group: "Lab Zen", href: "#", cells: { dot: <Dot tone="good" />, wo: <Id>WO-0408</Id>, system: <b>Shimadzu LCMS-8060</b>, stage: <Pill tone="good">Ours</Pill>, updated: "3 h" } },
+            { key: 4, group: "Coastal Analytical", cells: { dot: <Dot tone="info" />, wo: <Id>WO-0409</Id>, system: <b>PerkinElmer Optima 8300</b>, stage: <Pill tone="info">Quoted</Pill>, updated: "2 d" },
+              actions: [{ label: "Open", onClick: () => {} }, { label: "Close out", onClick: () => {} }, { label: "Cancel", onClick: () => {}, tone: "bad" }] },
+            { key: 5, group: "Coastal Analytical", cells: { dot: <Dot tone="neutral" />, wo: <Id>WO-0388</Id>, system: <b>Peak N2 generator</b>, stage: <Pill tone="faint">Parked</Pill>, updated: "9 d" },
+              actions: [{ label: "Open", onClick: () => {} }] },
+          ]} />
+      </div>
+
+      <SectionHead label="CardGrid" count={3} />
+      <div id="cardgrid">
+        <CardGrid>
+          <EntityCard eyebrow="Agilent" title="G6495C" mono meta="Triple quad · LC-MS"
+            pills={<><Pill>8 procedures</Pill><Pill>4 parts</Pill></>}
+            kebab={<RowActions items={[{ label: "Edit model", onClick: () => {} }]} inline={0} />} />
+          <EntityCard eyebrow="Shimadzu" title="TOC-Lc" mono meta="Analyzer · TOC"
+            pills={<><Pill tone="warn">No photo</Pill><Pill>7 procedures</Pill></>} />
+          <EntityCard eyebrow="Thermo" title="ISQ 7000" mono meta="Single quad · GC-MS"
+            pills={<Pill tone="bad">0 procedures</Pill>} />
+        </CardGrid>
+      </div>
+
+      <SectionHead label="Panel, fields, empty state" />
+      <div className="panel-cols" id="panel">
+        <div className="panel-slot">
+          <Panel title="Parts" count={2} actions={<button className="btn link">+ Part</button>}>
+            <div className="row-2 row-reveal" style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+              <Id>G1960-80039</Id>
+              <span className="mut t-small">Oil exhaust mist filter · PO-118</span>
+              <span className="sp" />
+              <RowActions items={[{ label: "Edit", onClick: () => {} }, { label: "Remove", onClick: () => {}, tone: "bad" }]} />
+            </div>
+            <div className="row-2" style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+              <Id>5188-5365</Id>
+              <span className="mut t-small">Septa, 11 mm, 50/pk · backordered</span>
+            </div>
+          </Panel>
+          <Panel title="Notes" empty="No notes yet" />
+        </div>
+        <div className="panel-slot">
+          <Panel title="Fields">
+            <div className="pf2">
+              <Field label="Vendor" required hint="From the maker book."><input placeholder="Agilent" /></Field>
+              <Field label="Reference" optional><input placeholder="Vendor quote #" /></Field>
+            </div>
+            <Field label="Estimated hours" required error="Needed to quote."><input /></Field>
+          </Panel>
+          <div style={{ marginTop: 12 }}>
+            <EmptyState title="Looking for a share link?" body="Open the link you were sent - no sign-in needed."
+              action={<button className="btn primary">Email me a link</button>} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── The dialogs, one per ?d= key ──────────────────────────────── */}
+      <Dialog open={show === "dialog-md"} onClose={close} title="New site" context="Lab Zen"
+        footer={
+          <>
+            <span className="dialog-status">Saved 2 s ago</span>
+            <button className="btn" onClick={close}>Cancel</button>
+            <button className="btn accent">Save site</button>
+          </>
+        }>
+        <Field label="Name"><input placeholder="Building 4 lab" /></Field>
+        <Field label="Address"><textarea rows={3} placeholder={"123 Cedar St, Suite 400\nReno NV 89501"} /></Field>
+        <div className="pf2">
+          <Field label="Who to ask for"><input placeholder="Rita, front desk" /></Field>
+          <Field label="Phone"><input placeholder="775-555-0143" /></Field>
+        </div>
+        <Field label="Getting in" hint="The part nobody writes down and everybody needs at 7am.">
+          <textarea rows={3} placeholder="Loading dock round the back, badge needed." />
+        </Field>
+      </Dialog>
+
+      <Dialog open={show === "dialog-sm"} onClose={close} size="sm" title="Kill this link?"
+        context="Anyone holding it loses access immediately."
+        footer={
+          <>
+            <span className="dialog-status" />
+            <button className="btn" onClick={close}>Cancel</button>
+            <button className="btn danger">Kill link</button>
+          </>
+        }>
+        <span />
+      </Dialog>
+
+      <Dialog open={show === "dialog-steps"} onClose={close} size="lg" title="New work order"
+        context="Lab Zen · launched from #58 Agilent 6495C"
+        steps={[
+          { key: "system", label: "System", done: true },
+          { key: "work", label: "Work", done: true },
+          { key: "parts", label: "Parts & time", warn: true },
+          { key: "client", label: "Client" },
+        ]}
+        activeStep="parts"
+        onStepSelect={() => {}}
+        footer={
+          <>
+            <span className="dialog-status err">Can&apos;t create yet - add estimated hours.</span>
+            <button className="btn" onClick={close}>Cancel</button>
+            <button className="btn primary" disabled>Create WO-0413</button>
+          </>
+        }>
+        <div className="pf2">
+          <Field label="Estimated hours" required error="Needed to quote."><input className="mono" /></Field>
+          <Field label="Parts needed"><input placeholder="Add from the parts book..." /></Field>
+        </div>
+      </Dialog>
+    </div>
+  );
+}
