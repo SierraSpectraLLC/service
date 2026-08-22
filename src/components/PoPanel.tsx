@@ -6,7 +6,7 @@ import PartNumberField from "./PartNumberField";
 import {
   addPoLine, cancelPurchaseOrder, deletePoLine, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
 } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { formatCents, centsToInput } from "@/lib/money";
 import { PO_LABEL, PO_TONE, lineOutstanding, lineTotalCents, poEditable, poReceivable, poTotals } from "@/lib/po";
 import { toast } from "@/components/ui/Toast";
@@ -80,30 +80,35 @@ export default function PoPanel({ po, lines, canManage, makers }: {
           </div>
         )}
 
-        {editing && (
-          <Dialog open onClose={() => setEditing(false)} title={`Edit ${po.number}`}
-            footer={
-              <>
-                <span className="dialog-status" />
-                <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
-                <button className="btn accent" disabled={pending || !head.vendor.trim()}
-                  onClick={() => run(() => updatePurchaseOrder(po.id, head), () => { setEditing(false); toast({ message: `Saved ${po.number}` }); })}>
-                  {pending ? "Saving..." : "Save PO"}
-                </button>
-              </>
-            }>
-            <div className="pf2" style={{ marginBottom: 8 }}>
-              <div><label>Vendor *</label><input value={head.vendor} list="maker-book" onChange={(e) => setHead({ ...head, vendor: e.target.value })} />
-                <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
-              <div><label>Reference</label><input value={head.reference} onChange={(e) => setHead({ ...head, reference: e.target.value })} placeholder="Vendor quote #" /></div>
-              <div><label>Expected</label><input value={head.expectedAt} onChange={(e) => setHead({ ...head, expectedAt: e.target.value })} placeholder="Jul 23" /></div>
-            </div>
-            <div style={{ marginBottom: 8 }}>
-              <label>Note</label>
-              <input value={head.note} onChange={(e) => setHead({ ...head, note: e.target.value })} />
-            </div>
-          </Dialog>
-        )}
+        {editing && (() => {
+          const problem = !head.vendor.trim() ? "name the vendor" : null;
+          return (
+            <Dialog open onClose={() => setEditing(false)} title={`Edit ${po.number}`}
+              context={`${po.vendor} · raised ${po.when}`}
+              footer={
+                <>
+                  <DialogStatus error={error} problem={problem} />
+                  <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+                  <button className="btn accent" disabled={pending || !!problem}
+                    onClick={() => run(() => updatePurchaseOrder(po.id, head), () => { setEditing(false); toast({ message: `Saved ${po.number}` }); })}>
+                    {pending ? "Saving..." : `Save ${po.number}`}
+                  </button>
+                </>
+              }>
+              <div className="dialog-section">Vendor and reference</div>
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div><label>Vendor *</label><input value={head.vendor} list="maker-book" onChange={(e) => setHead({ ...head, vendor: e.target.value })} />
+                  <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
+                <div><label>Reference</label><input value={head.reference} onChange={(e) => setHead({ ...head, reference: e.target.value })} placeholder="Vendor quote #" /></div>
+                <div><label>Expected</label><input value={head.expectedAt} onChange={(e) => setHead({ ...head, expectedAt: e.target.value })} placeholder="Jul 23" /></div>
+              </div>
+              <div className="dialog-section">Note</div>
+              <div style={{ marginBottom: 8 }}>
+                <input value={head.note} onChange={(e) => setHead({ ...head, note: e.target.value })} aria-label="Note" />
+              </div>
+            </Dialog>
+          );
+        })()}
 
         {lines.map((l) => {
           const out = lineOutstanding(l);
@@ -157,39 +162,54 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                 </div>
               )}
 
-              {isReceiving && (
-                <div className="dash-form" style={{ marginTop: 6 }}>
-                  <div className="panel-head" style={{ marginBottom: 4 }}><span className="card-title" style={{ fontSize: 13 }}>Book in a delivery</span></div>
-                  <div className="row-2">
-                  <span className="mut t-meta">arrived</span>
-                  <input value={receiving.qty} onChange={(e) => setReceiving({ ...receiving, qty: e.target.value })}
-                    inputMode="numeric" aria-label="How many arrived" style={{ width: 64, minHeight: 34, textAlign: "center" }} />
-                  <span className="mut t-small">of {out}</span>
-                  <input value={receiving.note} onChange={(e) => setReceiving({ ...receiving, note: e.target.value })}
-                    placeholder="Packing slip / note" className="t-body" style={{ flex: "1 1 160px", minHeight: 34 }} />
-                  <button className="btn sm accent" style={{ minHeight: 34 }} disabled={pending}
-                    onClick={() => {
-                      const n = parseInt(receiving.qty, 10);
-                      if (!Number.isInteger(n) || n <= 0) { setError("How many arrived? Whole numbers above zero."); return; }
-                      run(() => receivePoLine(l.id, n, receiving.note), () => setReceiving(null));
-                    }}>{pending ? "Booking..." : "Book in"}</button>
-                  <button className="btn sm" style={{ minHeight: 34 }} onClick={() => setReceiving(null)}>Cancel</button>
-                  </div>
-                </div>
-              )}
+              {isReceiving && (() => {
+                const n = parseInt(receiving.qty, 10);
+                const qtyOk = Number.isInteger(n) && n > 0;
+                const problem = !qtyOk ? "how many arrived? whole numbers above zero"
+                  : n > out ? `only ${out} are outstanding`
+                  : null;
+                return (
+                  <Dialog open onClose={() => setReceiving(null)} size="sm"
+                    title={`Receive ${l.partNumber}`}
+                    context={`${po.number} · ${out} outstanding`}
+                    footer={
+                      <>
+                        <DialogStatus error={error} problem={problem} />
+                        <button className="btn" onClick={() => setReceiving(null)} disabled={pending}>Cancel</button>
+                        <button className="btn accent" disabled={pending || !!problem}
+                          onClick={() => run(() => receivePoLine(l.id, n, receiving.note), () => setReceiving(null))}>
+                          {pending ? "Booking..." : qtyOk ? `Book in ${n}` : "Book in"}
+                        </button>
+                      </>
+                    }>
+                    <div className="dialog-section">How many</div>
+                    <div className="row-2">
+                      <input value={receiving.qty} onChange={(e) => setReceiving({ ...receiving, qty: e.target.value })}
+                        inputMode="numeric" aria-label="How many arrived" style={{ width: 64, minHeight: 34, textAlign: "center" }} />
+                      <span className="mut t-small">of {out}</span>
+                    </div>
+                    <div className="dialog-section">Note</div>
+                    <input value={receiving.note} onChange={(e) => setReceiving({ ...receiving, note: e.target.value })}
+                      placeholder="Packing slip / note" className="t-body" style={{ minHeight: 34 }} aria-label="Note" />
+                  </Dialog>
+                );
+              })()}
             </div>
           );
         })}
 
         {lines.length === 0 && <div className="mut t-body">Nothing on this order yet.</div>}
 
-        {editable && (adding ? (
+        {editable && (adding ? (() => {
+          const problem = !newLine.partNumber.trim() ? "enter a part number" : null;
+          return (
           <Dialog open onClose={() => setAdding(false)} title={`Add a line to ${po.number}`}
+            context={`${po.vendor} · ${lines.length} line${lines.length === 1 ? "" : "s"} so far`}
             footer={
               <>
-                <span className="dialog-status" />
+                <DialogStatus error={error} problem={problem} />
                 <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
-                <button className="btn accent" disabled={pending || !newLine.partNumber.trim()}
+                <button className="btn accent" disabled={pending || !!problem}
                   onClick={() => run(() => addPoLine(po.id, newLine), () => {
                     setAdding(false); setNewLine({ partNumber: "", name: "", qty: "1", price: "" });
                     toast({ message: `Added ${newLine.partNumber.trim()} to ${po.number}` });
@@ -198,6 +218,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                 </button>
               </>
             }>
+            <div className="dialog-section">What it is</div>
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
                 <label>Part number *</label>
@@ -224,11 +245,15 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                     partNumber: l.partNumber.trim() || part.partNumber,
                     price: l.price.trim() || (part.priceCents !== null ? centsToInput(part.priceCents) : ""),
                   }))} /></div>
+            </div>
+            <div className="dialog-section">Quantity and price</div>
+            <div className="pf2" style={{ marginBottom: 8 }}>
               <div><label>Qty</label><input value={newLine.qty} inputMode="numeric" onChange={(e) => setNewLine({ ...newLine, qty: e.target.value })} /></div>
               <div><label>Unit $</label><input value={newLine.price} onChange={(e) => setNewLine({ ...newLine, price: e.target.value })} placeholder="129.95" /></div>
             </div>
           </Dialog>
-        ) : (
+          );
+        })() : (
           <button className="btn link" style={{ fontSize: 12, marginTop: 8 }} onClick={() => setAdding(true)}>+ add a line</button>
         ))}
 

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { issueStock, receiveStock, recountStock, transferStock } from "@/app/actions";
 import { needsReorder, shortBy } from "@/lib/stock";
@@ -145,51 +146,63 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
             </div>
             {i.note && <div className="mut t-small" style={{ marginTop: 2 }}>{i.note}</div>}
 
-            {isOpen && (
-              <div className="dash-form" style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div className="panel-head" style={{ marginBottom: 0 }}>
-                  <span className="card-title" style={{ fontSize: 14 }}>
-                    {open.mode === "issue" ? "Issue" : open.mode === "receive" ? "Receive" : "Move"}
-                  </span>
-                </div>
-                <div className="row-2">
-                  <button className="btn sm" style={TAP} onClick={() => setQty(String(Math.max(1, (parseInt(qty, 10) || 1) - 1)))} aria-label="One fewer">−</button>
-                  <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" aria-label="How many"
-                    style={{ width: 64, textAlign: "center", ...TAP }} />
-                  <button className="btn sm" style={TAP} onClick={() => setQty(String((parseInt(qty, 10) || 0) + 1))} aria-label="One more">＋</button>
-                  {open.mode !== "receive" && <span className="mut t-small">of {i.qty}</span>}
-                </div>
+            {isOpen && (() => {
+              const verb = open.mode === "issue" ? "Issue" : open.mode === "receive" ? "Receive" : "Move";
+              const n = parseInt(qty, 10);
+              const qtyOk = Number.isInteger(n) && n > 0;
+              const problem = !qtyOk ? "how many? whole numbers above zero"
+                : open.mode === "issue" && !targets.some((t) => t.key === targetKey) ? "pick where it's going"
+                : open.mode === "move" && !toRoom ? "pick a stockroom"
+                : null;
+              return (
+                <Dialog open onClose={close} size="sm"
+                  title={`${verb} ${i.partNumber}`}
+                  context={[i.name, `${i.qty} on hand`, i.bin ? `bin ${i.bin}` : ""].filter(Boolean).join(" · ")}
+                  footer={
+                    <>
+                      <DialogStatus error={error} problem={problem} />
+                      <button className="btn" onClick={close} disabled={pending}>Cancel</button>
+                      <button className="btn accent" onClick={() => run(i)} disabled={pending || !!problem}>
+                        {pending ? "Working..." : qtyOk ? `${verb} ${n}` : verb}
+                      </button>
+                    </>
+                  }>
+                  <div className="dialog-section">How many</div>
+                  <div className="row-2">
+                    <button className="btn sm" style={TAP} onClick={() => setQty(String(Math.max(1, (parseInt(qty, 10) || 1) - 1)))} aria-label="One fewer">−</button>
+                    <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" aria-label="How many"
+                      style={{ width: 64, textAlign: "center", ...TAP }} />
+                    <button className="btn sm" style={TAP} onClick={() => setQty(String((parseInt(qty, 10) || 0) + 1))} aria-label="One more">＋</button>
+                    {open.mode !== "receive" && <span className="mut t-small">of {i.qty}</span>}
+                  </div>
 
-                {open.mode === "issue" && (
-                  <>
-                    <select value={targetKey} onChange={(e) => setTargetKey(e.target.value)} aria-label="Where it's going" style={TAP}>
-                      {targets.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                  {open.mode !== "receive" && <div className="dialog-section">Where it goes</div>}
+                  {open.mode === "issue" && (
+                    <>
+                      <select value={targetKey} onChange={(e) => setTargetKey(e.target.value)} aria-label="Where it's going" style={TAP}>
+                        {targets.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+                      </select>
+                      <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                        <input type="checkbox" checked={install} onChange={(e) => setInstall(e.target.checked)} style={{ width: 16, height: 16 }} />
+                        Installed now (otherwise it lands as Received)
+                      </label>
+                    </>
+                  )}
+                  {open.mode === "move" && (
+                    <select value={toRoom} onChange={(e) => setToRoom(parseInt(e.target.value))} aria-label="Into which stockroom" style={TAP}>
+                      {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
-                    <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input type="checkbox" checked={install} onChange={(e) => setInstall(e.target.checked)} style={{ width: 16, height: 16 }} />
-                      Installed now (otherwise it lands as Received)
-                    </label>
-                  </>
-                )}
-                {open.mode === "move" && (
-                  <select value={toRoom} onChange={(e) => setToRoom(parseInt(e.target.value))} aria-label="Into which stockroom" style={TAP}>
-                    {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                  </select>
-                )}
+                  )}
 
-                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" style={TAP} />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn sm accent" style={TAP} onClick={() => run(i)} disabled={pending}>
-                    {pending ? "Working..." : open.mode === "issue" ? "Issue" : open.mode === "receive" ? "Receive" : "Move"}
-                  </button>
-                  <button className="btn sm" style={TAP} onClick={close}>Cancel</button>
-                </div>
-              </div>
-            )}
+                  <div className="dialog-section">Note</div>
+                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note (optional)" style={TAP} aria-label="Note" />
+                </Dialog>
+              );
+            })()}
           </div>
         );
       })}
-      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && !open && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </>
   );
 }
