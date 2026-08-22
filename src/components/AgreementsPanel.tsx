@@ -401,11 +401,8 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               return (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                   {states.map((k) => (
-                    <span key={k.partNumber} className="pill" title={k.partNumber}
-                      style={{
-                        background: k.over ? "#FBE9E9" : k.remaining === 0 ? "#FAF0DC" : "#E8F3EC",
-                        color: k.over ? "#A32D2D" : k.remaining === 0 ? "#8A5410" : "#2E6B2E",
-                      }}>
+                    <span key={k.partNumber} title={k.partNumber}
+                      className={`pill ${k.over ? "bad" : k.remaining === 0 ? "warn" : "good"}`}>
                       🧰 {k.name || k.partNumber} {k.used}/{k.qty}
                       {k.over ? ` · ${k.used - k.qty} billable` : ""}
                     </span>
