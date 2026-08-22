@@ -98,17 +98,12 @@ export default function HouseMembersPanel({ members, myEmail }: {
             {m.name || m.email.split("@")[0]}
           </span>
           <span className="mono mut" style={{ fontSize: 12 }}>{m.email}</span>
-          {m.email === myEmail.toLowerCase() && (
-            <span className="pill good">you</span>
-          )}
-          {m.isRoot && (
-            <span className="pill warn" title="First entry in STAFF_EMAILS">
-              root
-            </span>
-          )}
-          {m.fromEnv && !m.isRoot && (
-            <span className="pill neutral" title="Listed in STAFF_EMAILS">
-              from env
+          {/* Quiet markers, not more pills: the row's one pill is its role. */}
+          {(m.email === myEmail.toLowerCase() || m.isRoot || m.fromEnv) && (
+            <span className="mut" style={{ fontSize: 11 }}
+              title={m.isRoot ? "First entry in STAFF_EMAILS" : m.fromEnv ? "Listed in STAFF_EMAILS" : undefined}>
+              {[m.email === myEmail.toLowerCase() ? "you" : "",
+                m.isRoot ? "root" : m.fromEnv ? "from env" : ""].filter(Boolean).join(" · ")}
             </span>
           )}
 
@@ -118,7 +113,11 @@ export default function HouseMembersPanel({ members, myEmail }: {
             </span>
           ) : (
             <select value={m.role} disabled={pending}
-              onChange={(e) => run(() => setHouseMember(m.email, e.target.value, m.name))}
+              onChange={(e) => {
+                const role = e.target.value;
+                run(() => setHouseMember(m.email, role, m.name),
+                  () => toast({ message: `Made ${m.name || m.email} ${role}` }));
+              }}
               style={{
                 width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, cursor: "pointer",
                 background: `var(--t-${ROLE[m.role as keyof typeof ROLE]?.tone ?? "neutral"}-bg)`,
@@ -143,7 +142,8 @@ export default function HouseMembersPanel({ members, myEmail }: {
                     `Revoke ${m.email}'s access to the whole shop?${m.fromEnv ? " They're also in STAFF_EMAILS, so this records an override." : ""}`,
                   );
                   if (!why) return;
-                  run(() => revokeHouseMember(m.email, why));
+                  run(() => revokeHouseMember(m.email, why),
+                    () => toast({ message: `Revoked ${m.email}` }));
                 }}>revoke</button>
             )}
           </span>

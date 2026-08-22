@@ -11,7 +11,7 @@ import { visibleOrgs } from "@/lib/tenancy";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
-import Panel from "@/components/ui/Panel";
+import { PageHead, Panel } from "@/components/ui";
 import { listHouseMembers } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +60,8 @@ export default async function AdminSettingsPage() {
 
   return (
     <div>
+      <PageHead title="People & ownership"
+        sub="Who works here, what is waiting on a decision, and who owns and can see each system." />
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 
