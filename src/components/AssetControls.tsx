@@ -5,6 +5,8 @@ import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_TONE } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, setAssetServes, updateAsset } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { serveCandidates, serversOf } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
 
@@ -43,11 +45,12 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
   const servers = serversOf(asset.id, siblings);
   const serving = siblings.find((s) => s.id === asset.servesAssetId) ?? null;
 
-  const run = (fn: () => Promise<{ error?: string } | void>) => {
+  const run = (fn: () => Promise<{ error?: string } | void>, after?: () => void) => {
     setError("");
     startTransition(async () => {
       const res = await fn();
       if (res && "error" in res && res.error) setError(res.error);
+      else after?.();
     });
   };
 
@@ -66,7 +69,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
         {canEdit && (
           <>
             <select value="" disabled={pending}
-              onChange={(e) => {
+              onChange={async (e) => {
                 const id = parseInt(e.target.value);
                 if (!id) return;
                 // Offered, never assumed: a roughing pump often stays plumbed to
@@ -75,12 +78,15 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
                 let bringing: number[] = [];
                 if (servers.length) {
                   const what = servers.map((s) => s.label).join(", ");
-                  bringing = window.confirm(
-                    `${what} ${servers.length === 1 ? "serves" : "serve"} this unit. Move ${servers.length === 1 ? "it" : "them"} too?`
-                      + "\n\nOK moves them along. Cancel leaves them behind and drops the link.",
-                  ) ? servers.map((s) => s.id) : [];
+                  const one = servers.length === 1;
+                  bringing = (await confirmDialog({
+                    title: `${what} ${one ? "serves" : "serve"} this unit. Move ${one ? "it" : "them"} too?`,
+                    body: `Leaving ${one ? "it" : "them"} behind drops the link.`,
+                    action: one ? "Move it too" : "Move them too",
+                    cancel: one ? "Leave it behind" : "Leave them behind",
+                  })) ? servers.map((s) => s.id) : [];
                 }
-                run(() => moveAsset(asset.id, id, bringing));
+                run(() => moveAsset(asset.id, id, bringing), () => toast({ message: "Moved the unit" }));
               }}
               style={{ width: "auto", fontSize: 12 }}>
               <option value="">{asset.instrumentId !== null ? "Move to..." : "Install into..."}</option>
@@ -88,7 +94,14 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
             </select>
             {asset.instrumentId !== null && (
               <button className="btn sm" disabled={pending}
-                onClick={() => { if (window.confirm("Remove from its system? It becomes a spare.")) run(() => detachAsset(asset.id)); }}>
+                onClick={async () => {
+                  if (!(await confirmDialog({
+                    title: "Remove from its system?",
+                    body: "It becomes a spare.",
+                    action: "Detach unit",
+                  }))) return;
+                  run(() => detachAsset(asset.id), () => toast({ message: "Detached - now a spare" }));
+                }}>
                 Detach → Spare
               </button>
             )}
@@ -97,7 +110,14 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
         )}
         {isStaff && asset.status !== "Decommissioned" && (
           <button className="btn link" style={{ color: "#A32D2D", fontSize: 12, fontWeight: 700 }} disabled={pending}
-            onClick={() => { if (window.confirm("Decommission this asset? Its history stays; it leaves the active pool.")) run(() => decommissionAsset(asset.id)); }}>
+            onClick={async () => {
+              if (!(await confirmDialog({
+                title: "Decommission this asset?",
+                body: "Its history stays; it leaves the active pool and stops generating maintenance.",
+                action: "Decommission asset", tone: "bad",
+              }))) return;
+              run(() => decommissionAsset(asset.id), () => toast({ message: "Decommissioned the asset" }));
+            }}>
             Decommission
           </button>
         )}
