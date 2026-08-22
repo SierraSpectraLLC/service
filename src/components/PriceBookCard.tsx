@@ -6,6 +6,8 @@ import { formatCents, centsToInput } from "@/lib/money";
 import { groupByPn, normalizePn } from "@/lib/priceBook";
 import { toCsv } from "@/lib/csv";
 import { matchesQuery } from "@/lib/search";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 export type PriceBookRow = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string; note: string;
@@ -222,11 +224,15 @@ export default function PriceBookCard({ prices, knownVendors }: {
               <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
                 <button className="btn link" style={{ fontSize: 11 }} onClick={() => editRow(p)}>edit</button>
                 <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }} disabled={pending}
-                  onClick={() => {
-                    if (!confirm(`Remove ${p.vendor}'s ${formatCents(p.priceCents)} price for PN ${p.partNumber}?`)) return;
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Remove ${p.vendor}'s ${formatCents(p.priceCents)} price for PN ${p.partNumber}?`,
+                      action: "Remove price", tone: "bad",
+                    }))) return;
                     startTransition(async () => {
                       const res = await deletePartPrice(p.id);
                       if (res?.error) setError(res.error);
+                      else toast({ message: `Removed ${p.vendor}'s price for ${p.partNumber}` });
                     });
                   }}>remove</button>
               </span>
