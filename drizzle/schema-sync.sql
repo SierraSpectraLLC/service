@@ -2661,3 +2661,13 @@ END $$;
 -- injections for us. Unit '' = no usage cadence.
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "usage_every" integer;
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "usage_unit" text NOT NULL DEFAULT '';
+
+-- ── Internal EOD lines ──────────────────────────────────────────────────────
+-- An update written for our own bench rather than for the client. Client-
+-- facing renders (the EOD report, the partner digest) skip these; the system
+-- page and the internal digest still show them. Anything generated about our
+-- own bookkeeping - the sheet sync, the parity check - is internal by
+-- default, because nobody chose to say it to a client.
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "internal" boolean NOT NULL DEFAULT false;
+UPDATE "eod_updates" SET "internal" = true
+ WHERE "internal" = false AND "updated_by" IN ('sheet-sync', 'parity');

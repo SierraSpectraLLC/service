@@ -26,6 +26,12 @@ export type EodEntry = {
   systemUpdate: string;
   actionItem: string;
   skipped: boolean;
+  /**
+   * Written for our own bench, not for the client. Staff still see it on the
+   * EOD page (that is where it gets marked); the client's report never
+   * carries it. See eod_updates.internal.
+   */
+  internal: boolean;
   /** Something was written today - drives autopopulation on the EOD page. */
   written: boolean;
 };
@@ -106,6 +112,7 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
       label: named ? `${i.externalId} - ${named}` : i.externalId,
       systemUpdate: u?.systemUpdate ?? "", actionItem: u?.actionItem ?? "",
       skipped: u?.skipped ?? false,
+      internal: u?.internal ?? false,
       written: !!(u?.systemUpdate || u?.actionItem),
     };
   });
@@ -128,6 +135,7 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
         externalId: a.serial ? `SN ${a.serial}` : a.kind,
         label: `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
         systemUpdate: u.systemUpdate, actionItem: u.actionItem, skipped: u.skipped,
+        internal: u.internal,
         written: !!(u.systemUpdate || u.actionItem),
       });
     }
@@ -200,7 +208,9 @@ export async function composeEodEmail(
 }> {
   const brand = await brandForTenant(tenantOrgId);
   const entries = await collectEodEntries(date, orgId, false);
-  const included = entries.filter((e) => !e.skipped);
+  // Skipped is "not today"; internal is "not for them". Both leave the client's
+  // report, and only the internal one stays on our own screen.
+  const included = entries.filter((e) => !e.skipped && !e.internal);
   const url = appUrl();
 
   let filled = 0;

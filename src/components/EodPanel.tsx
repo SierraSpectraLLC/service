@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { saveEodUpdate, setEodSkip, sendEodEmail } from "@/app/actions";
+import { saveEodUpdate, setEodInternal, setEodSkip, sendEodEmail } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import EmailPreview from "@/components/ui/EmailPreview";
 import { Field, Panel } from "@/components/ui";
 
 /** One line on a client's report: a system, or a standalone asset. */
@@ -15,6 +16,8 @@ export type EodLine = {
   systemUpdate: string;
   actionItem: string;
   skipped: boolean;
+  /** Written for our own bench: kept here, kept out of the client's report. */
+  internal: boolean;
   written: boolean;
   suggestedUpdate: string;
   suggestedAction: string;
@@ -36,9 +39,12 @@ const targetOf = (e: EodLine) =>
  */
 export default function EodPanel({
   clientName, orgId, entries, dateMDY, readOnly = false, canSend = false, recipientCount = 0, sentInfo = "",
+  emailSubject = "", emailHtml = "", recipients = [],
 }: {
   clientName: string; orgId: number | null; entries: EodLine[]; dateMDY: string;
   readOnly?: boolean; canSend?: boolean; recipientCount?: number; sentInfo?: string;
+  /** The composed report, so the preview shows the bytes that would be sent. */
+  emailSubject?: string; emailHtml?: string; recipients?: string[];
 }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>(
     Object.fromEntries(entries.map((e) => [keyOf(e), { systemUpdate: e.systemUpdate, actionItem: e.actionItem }]))
@@ -140,11 +146,20 @@ export default function EodPanel({
           {num > 0 ? `${e.kind === "system" ? "System" : "Unit"} ${num}: ` : ""}<span className="mono">{e.label}</span>
         </span>
         {e.kind === "asset" && <span className="pill neutral">unit</span>}
+        {e.internal && <span className="pill warn">internal only</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <span className="mut t-meta">{saveLabel(status[keyOf(e)])}</span>
           {canAutofill(e) && (
             <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
+          {/* Two different "not in the email": internal keeps the line on our
+              own screens and off theirs; skip drops it from today entirely. */}
+          <button className="btn link" disabled={pending}
+            title={e.internal ? "Include it in the client's report" : "Keep this line off the client's report"}
+            onClick={() => startTransition(async () => {
+              await setEodInternal(targetOf(e), !e.internal);
+              toast({ message: e.internal ? `${e.externalId} goes to the client` : `${e.externalId} is internal only` });
+            })}>{e.internal ? "internal only" : "make internal"}</button>
           <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
             onClick={() => startTransition(async () => {
               await setEodSkip(targetOf(e), true);
@@ -243,10 +258,11 @@ export default function EodPanel({
       {filled.length > 0 && (
         <details style={{ marginTop: 10 }}>
           <summary className="mut t-small" style={{ cursor: "pointer" }}>Email preview</summary>
-          <pre className="t-small" style={{
-            whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#F5F7FA",
-            border: "1px solid var(--line)", borderRadius: 8, padding: 12, margin: "8px 0 0",
-          }}>{emailText}</pre>
+          <div style={{ marginTop: 8 }}>
+            {emailHtml
+              ? <EmailPreview subject={emailSubject} html={emailHtml} to={recipients} />
+              : <div className="mut t-small">Nothing written yet - the report has no lines to render.</div>}
+          </div>
         </details>
       )}
     </Panel>
