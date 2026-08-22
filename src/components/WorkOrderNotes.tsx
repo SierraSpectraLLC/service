@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { addWorkOrderNote, deleteWorkOrderNote, updateWorkOrderNote } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { canDeleteNote, canEditNote } from "@/lib/notes";
 import MentionBox from "./MentionBox";
 import type { Candidate } from "@/lib/mentions";
@@ -81,12 +83,16 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
                   )}
                   {removable && (
                     <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
-                      onClick={() => {
-                        if (!window.confirm(mine ? "Delete your comment?" : `Delete ${n.author}'s comment?`)) return;
+                      onClick={async () => {
+                        if (!(await confirmDialog({
+                          title: mine ? "Delete your comment?" : `Delete ${n.author}'s comment?`,
+                          action: "Delete comment", tone: "bad",
+                        }))) return;
                         setError("");
                         startTransition(async () => {
                           const res = await deleteWorkOrderNote(n.id);
                           if (res?.error) setError(res.error);
+                          else toast({ message: "Deleted the comment" });
                         });
                       }}>delete</button>
                   )}
