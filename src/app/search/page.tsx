@@ -231,7 +231,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 <div style={{ border: "1px solid #BFDDBF", background: "#F3FAF3", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                     <b style={{ fontSize: 14, color: "var(--navy)" }}>{m.desc}</b>
-                    <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+                    <span className="pill good">For sale</span>
                   </div>
                   {m.listing.note && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{m.listing.note}</div>}
                   <a href={`/listing/${m.listing.token}`} target="_blank" rel="noreferrer" className="btn sm accent"
