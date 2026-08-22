@@ -107,13 +107,12 @@ export default function PdfCombiner({ target, pdfs, defaultCover, coverLines }: 
         </span>
       ) : (
         <div className="dash-form">
-          <div className="row-2" style={{ alignItems: "baseline", marginBottom: 8 }}>
-            <b className="t-body" style={{ color: "var(--navy)" }}>Combine into one packet</b>
-            <span className="mut t-meta">
-              order with the arrows; titles go in each document&apos;s header bar
-            </span>
-            <button className="btn link t-small" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>close</button>
+          <div className="panel-head">
+            <span className="card-title" style={{ fontSize: 14 }}>Combine into one packet</span>
+            <span className="sp" />
+            <button className="btn link t-small" onClick={() => setOpen(false)}>close</button>
           </div>
+          <div className="panel-hint">order with the arrows; titles go in each document&apos;s header bar</div>
 
           {rows.map((r, ix) => (
             <div key={r.id} className="row-2" style={{ padding: "3px 0" }}>
