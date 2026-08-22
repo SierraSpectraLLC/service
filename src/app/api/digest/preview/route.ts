@@ -5,7 +5,9 @@ import { orgs } from "@/db/schema";
 import { getModules } from "@/lib/flags";
 import { myTenantOrgId, requireStaff } from "@/lib/authz";
 import { composeDigest, composePartnerDigest } from "@/lib/digest";
-import { esc } from "@/lib/emailTheme";
+import { previewPage } from "@/lib/emailPreview";
+import { digestRecipientList } from "@/lib/digest";
+import { houseEmails } from "@/lib/house";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +19,12 @@ export const dynamic = "force-dynamic";
  *   /api/digest/preview?org=<id>   that organization's partner edition
  *
  * Staff only, and scoped like the send: a staff member previews their own
- * workspace's digest, and only their own workspace's organizations. A sticky
- * banner carries the subject line and where the edition would actually go, so
- * the preview can never be mistaken for (or leak as) the mail itself.
+ * workspace's digest, and only their own workspace's organizations.
+ *
+ * The mail is rendered in an iframe at 600px and 320px - the exact bytes that
+ * would be sent, not a web-styled restatement of them - with the subject and
+ * the real recipient list above, so the preview can never be mistaken for
+ * (or leak as) the mail itself.
  */
 export async function GET(req: Request) {
   let user;
@@ -34,6 +39,7 @@ export async function GET(req: Request) {
 
   let composed: { subject: string; html: string };
   let note: string;
+  let to: string[];
   if (orgParam) {
     const orgId = parseInt(orgParam, 10);
     const [org] = Number.isFinite(orgId)
@@ -47,19 +53,15 @@ export async function GET(req: Request) {
       return new NextResponse(`${org.name} has nothing on the board today - no partner edition would be sent.`, { status: 200 });
     }
     composed = edition;
-    note = `Partner edition for ${org.name}. ${org.digestRecipients
-      ? `Sends daily to: ${org.digestRecipients}`
-      : "No recipients configured - this edition is NOT being sent"}`;
+    to = digestRecipientList(org.digestRecipients);
+    note = `Partner edition for ${org.name}.${to.length ? "" : " No recipients configured - this edition is NOT being sent."}`;
   } else {
     composed = await composeDigest(tenant);
-    note = "Internal edition - what your own staff receive each morning";
+    to = await houseEmails(tenant);
+    note = "Internal edition - what your own staff receive each morning.";
   }
 
-  const banner = `<div style="position:sticky;top:0;z-index:1;background:#172A4A;color:#FFFFFF;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;padding:8px 14px;">
-    Preview - nothing has been sent. ${esc(note)}<br/>
-    <span style="opacity:0.75;">Subject: ${esc(composed.subject)}</span>
-  </div>`;
-  return new NextResponse(composed.html.replace(/(<body[^>]*>)/, `$1${banner}`), {
+  return new NextResponse(previewPage({ subject: composed.subject, to, html: composed.html, note }), {
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });
 }

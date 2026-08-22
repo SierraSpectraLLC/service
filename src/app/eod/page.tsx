@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
-import { collectEodEntries, eodGroups } from "@/lib/eodEmail";
+import { collectEodEntries, composeEodEmail, eodGroups } from "@/lib/eodEmail";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import EodPanel from "@/components/EodPanel";
 import EodDateNav from "@/components/EodDateNav";
@@ -64,11 +64,18 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
       : [[], [], []];
 
     const last = recentAudit.find((a) => a.entityType === "eod" && a.entityId === `${date}:${g.orgId ?? "own"}`);
+    // The preview shows the mail itself, so it has to BE the mail: composed by
+    // the same function the send uses, with the same internal-line exclusions.
+    const composed = await composeEodEmail(date, isToday ? shopTodayMDY() : mdy(date), g.orgId, readTenant(user));
+    const recipients = g.recipients.split(",").map((x) => x.trim()).filter(Boolean);
     return {
       orgId: g.orgId,
       name: g.name,
       canSend: isToday && !!g.recipients.trim(),
-      recipientCount: g.recipients.split(",").filter((x) => x.trim()).length,
+      recipientCount: recipients.length,
+      recipients,
+      emailSubject: composed.subject,
+      emailHtml: composed.filled > 0 ? composed.html : "",
       sentInfo: last ? `Sent ${shopTime(last.createdAt)} by ${last.actor.split("@")[0]}` : "",
       entries: entries.map((e) => {
         if (!isToday || e.kind !== "system") {
@@ -103,7 +110,8 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
       {shown.map((g) => (
         <EodPanel key={g.orgId ?? "own"} clientName={g.name} orgId={g.orgId}
           entries={g.entries} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
-          canSend={g.canSend} recipientCount={g.recipientCount} sentInfo={g.sentInfo} />
+          canSend={g.canSend} recipientCount={g.recipientCount} sentInfo={g.sentInfo}
+          emailSubject={g.emailSubject} emailHtml={g.emailHtml} recipients={g.recipients} />
       ))}
       {shown.length === 0 && (
         <div className="card">
