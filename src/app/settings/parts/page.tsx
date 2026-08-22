@@ -26,7 +26,7 @@ export const dynamic = "force-dynamic";
  * leads with the numbers already in use that nothing describes, which is the
  * list that makes filling a parts book a job somebody finishes.
  */
-export default async function PartsCatalogPage() {
+export default async function PartsCatalogPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
   const tenant = readTenant(user);
@@ -124,6 +124,7 @@ export default async function PartsCatalogPage() {
     ...kitParts,
   ];
 
+  const { f = "" } = await searchParams;
   return (
     <div>
       <PartCatalogPanel
@@ -153,6 +154,7 @@ export default async function PartsCatalogPage() {
         }))}
         unnamed={uncatalogued(withAliases, used)}
         makers={bookNames}
+        initialFacet={f}
       />
       <PriceBookCard prices={priceRows} knownVendors={[...new Set([...bookNames, ...priceRows.map((p) => p.vendor)])].sort()} />
     </div>

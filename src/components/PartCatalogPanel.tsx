@@ -8,6 +8,8 @@ import {
   makePartPhotoCover, removePartPhoto, setKitLines, setPartPhotoCaption, updateCatalogPart,
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { DataTable, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
+import type { DataRow } from "@/components/ui/DataTable";
 import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
 import {
@@ -55,7 +57,7 @@ export type VendorPrice = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string;
 };
 
-export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed, makers = [] }: {
+export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed, makers = [], initialFacet = "" }: {
   items: CatalogRow[];
   assetTypes: string[];
   /** Catalog models per module type, for the per-model chips. */
@@ -66,9 +68,17 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
   unnamed: UncataloguedPart[];
   /** The maker/vendor book (Settings → Catalog), suggested on every maker and vendor field. */
   makers?: string[];
+  /** Facet from the URL (?f=), so a filtered book is a link. */
+  initialFacet?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
+  type Facet = "all" | "part" | "consumable" | "kit" | "retired" | "undescribed";
+  const FACETS: Facet[] = ["all", "part", "consumable", "kit", "retired", "undescribed"];
+  const facet: Facet = FACETS.includes(initialFacet as Facet) && initialFacet !== "" ? (initialFacet as Facet) : "all";
+  // The facet lives in the URL so a filtered book is a link.
+  const setFacet = (f: Facet) =>
+    router.replace(f === "all" ? "/settings/parts" : `/settings/parts?f=${f}`, { scroll: false });
   const [sheet, setSheet] = useState<null | { id?: number }>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [lines, setLines] = useState<{ partNumber: string; name: string; qty: number }[]>([]);
@@ -126,137 +136,156 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
     });
   };
 
-  return (
-    <div className="card">
-      {/* One spelling of "Shimadzu", wherever it's typed - see Settings → Catalog. */}
-      <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-        <div className="card-title">Parts book</div>
-        <span className="mut" style={{ fontSize: 11 }}>
-          {items.length} number{items.length === 1 ? "" : "s"}
-        </span>
-        <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => openAdd()}>
-          ＋ Part number
-        </button>
-      </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-        What each number means, so a part fitted in March still has a name in December.
-        Nothing here is required to record a part - an unknown number always works.
-      </div>
+  const live = items.filter((r) => !r.archived);
+  const shownRows = shown.filter((r) =>
+    facet === "all" ? !r.archived
+    : facet === "retired" ? r.archived
+    : facet === "undescribed" ? false
+    : !r.archived && r.kind === facet);
 
-      <input value={query} onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by your number, theirs, a name or a maker"
-        style={{ marginBottom: 10, fontSize: 13 }} />
+  const bestPrice = (partNumber: string) => {
+    const mine = prices.filter((p) => p.partNumber.toLowerCase() === partNumber.toLowerCase());
+    if (!mine.length) return "";
+    const best = mine.reduce((a, b) => (a.priceCents <= b.priceCents ? a : b));
+    return `${formatCents(best.priceCents)} at ${best.vendor}${mine.length > 1 ? ` (+${mine.length - 1} more)` : ""}`;
+  };
 
-      {shown.map((r) => (
-        <div key={r.id} style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "7px 8px",
-          border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6,
-          opacity: r.archived ? 0.55 : 1,
-        }}>
+  const toRow = (r: CatalogRow): DataRow => ({
+    key: r.id,
+    actions: [
+      { label: "Edit", onClick: () => openEdit(r) },
+      {
+        label: r.archived ? "Restore" : "Retire",
+        tone: r.archived ? undefined : "bad",
+        onClick: () => startTransition(async () => {
+          await archiveCatalogPart(r.id, !r.archived);
+          toast({ message: `${r.archived ? "Restored" : "Retired"} ${r.partNumber}` });
+        }),
+      },
+    ],
+    cells: {
+      pn: (
+        <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {/* What it looks like beats what it is called, for the one question
               this list gets asked at a bench: is this the thing in my hand? */}
           {r.photos[0] && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={r.photos[0].url} alt="" width={34} height={34}
-              style={{ width: 34, height: 34, borderRadius: 6, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
+            <img src={r.photos[0].url} alt="" width={26} height={26}
+              style={{ width: 26, height: 26, borderRadius: 6, objectFit: "cover", flexShrink: 0, border: "1px solid var(--line)" }} />
           )}
-          <button className="btn link" onClick={() => openEdit(r)}
-            style={{ flex: 1, minWidth: 0, textAlign: "left", padding: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{r.partNumber}</span>
-              <span style={{ fontSize: 13 }}>{r.name || <span className="mut">unnamed</span>}</span>
-              <span className={`pill ${KIND_TONE[r.kind] ?? "info"}`}>{PART_KIND_LABEL[r.kind]}</span>
-              {/* The other numbers it answers to. Shown on the row rather than
-                  hidden in the sheet, because the number somebody is holding is
-                  as likely to be one of these as the one on the left. */}
-              {r.aliases.slice(0, 3).map((a) => (
-                /* A superseded number reads as history at a glance - struck
-                   through, and pointing at what replaced it. Looking the same
-                   as a live alternate is how somebody orders a number nobody
-                   sells any more. */
-                <span key={a.partNumber} className="pill mono"
-                  title={isSuperseded(a)
-                    ? `Superseded - order ${r.partNumber} instead${a.note ? ` · ${a.note}` : ""}`
-                    : `${ALIAS_KIND_LABEL[a.kind] ?? "Also"}${a.manufacturer ? ` · ${a.manufacturer}` : ""}${a.note ? ` · ${a.note}` : ""}`}
-                  style={isSuperseded(a)
-                    ? { background: "#F4F6F9", color: "#94A3B8", fontWeight: 400, textDecoration: "line-through" }
-                    : { background: "#F1F5F9", color: "#64748B", fontWeight: 400 }}>
-                  {isSuperseded(a) ? "was " : "= "}{a.partNumber}
-                </span>
-              ))}
-              {r.aliases.length > 3 && (
-                <span className="mut" style={{ fontSize: 11 }}>+{r.aliases.length - 3}</span>
-              )}
-              {r.photos.length > 1 && (
-                <span className="mut" style={{ fontSize: 11 }}>▣ {r.photos.length}</span>
-              )}
-              {r.archived && <span className="pill faint">retired</span>}
-            </div>
-            <div className="mut" style={{ fontSize: 11 }}>
-              {[
-                r.manufacturer && `${r.manufacturer}${r.mfrPartNumber ? ` ${r.mfrPartNumber}` : ""}`,
-                r.kind === "kit" && r.lines.length ? kitContents(r.lines) : "",
-                r.assetTypes.length ? r.assetTypes.join(", ") : "",
-                r.models.length ? r.models.join(", ") : "",
-                (() => {
-                  const mine = prices.filter((p) => p.partNumber.toLowerCase() === r.partNumber.toLowerCase());
-                  if (!mine.length) return "";
-                  const best = mine.reduce((a, b) => (a.priceCents <= b.priceCents ? a : b));
-                  return `${formatCents(best.priceCents)} at ${best.vendor}${mine.length > 1 ? ` (+${mine.length - 1} more)` : ""}`;
-                })(),
-              ].filter(Boolean).join(" · ")}
-            </div>
-          </button>
-          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-            onClick={() => startTransition(async () => { await archiveCatalogPart(r.id, !r.archived); })}>
-            {r.archived ? "restore" : "retire"}
-          </button>
-        </div>
-      ))}
-      {shown.length === 0 && (
-        <div className="mut" style={{ fontSize: 13 }}>
-          {query ? "Nothing matches that." : "Nothing catalogued yet."}
-        </div>
-      )}
+          <Id>{r.partNumber}</Id>
+        </span>
+      ),
+      name: (
+        <span style={{ minWidth: 0, display: "block", opacity: r.archived ? 0.55 : 1 }}>
+          <span style={{ display: "block", fontSize: 13 }}>{r.name || <span className="mut">unnamed</span>}</span>
+          <span className="mut" style={{ display: "block", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {[
+              r.manufacturer && `${r.manufacturer}${r.mfrPartNumber ? ` ${r.mfrPartNumber}` : ""}`,
+              r.kind === "kit" && r.lines.length ? kitContents(r.lines) : "",
+              r.archived ? "retired" : "",
+            ].filter(Boolean).join(" · ")}
+          </span>
+        </span>
+      ),
+      kind: <Pill tone={KIND_TONE[r.kind] ?? "info"}>{PART_KIND_LABEL[r.kind]}</Pill>,
+      aka: r.aliases.length ? (
+        /* The other numbers it answers to, as a count the row can afford -
+           the full list, superseded ones marked, rides in the title. */
+        <span className="mut" style={{ fontSize: 11 }}
+          title={r.aliases.map((a) => `${isSuperseded(a) ? "was" : "="} ${a.partNumber}${a.manufacturer ? ` (${a.manufacturer})` : ""}`).join("\n")}>
+          {r.aliases.length} other number{r.aliases.length === 1 ? "" : "s"}
+        </span>
+      ) : null,
+      fit: (
+        <span className="mut" style={{ fontSize: 11 }}
+          title={[...r.assetTypes, ...r.models].join(", ") || undefined}>
+          {[r.assetTypes.length ? r.assetTypes.join(", ") : "", r.models.length ? `${r.models.length} model${r.models.length === 1 ? "" : "s"}` : ""]
+            .filter(Boolean).join(" · ")}
+        </span>
+      ),
+      price: <span className="mut" style={{ fontSize: 11 }}>{bestPrice(r.partNumber)}</span>,
+    },
+  });
 
-      {/* The list that makes this tractable: numbers the shop has really used
-          that nothing describes. Maintenance parts arrive with their name and
-          fit already known, so describing one is a click, not a form. */}
-      {unnamed.length > 0 && (
-        <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>Used but not described</div>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
-            {unnamed.length} number{unnamed.length === 1 ? "" : "s"} on real work - fitted, stocked, ordered,
-            named by a maintenance task, or packed inside a kit - with no catalog entry yet. Describing one
-            keeps everything already said about it.
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {unnamed.slice(0, 40).map((u) => (
-              <div key={u.partNumber} className="row-hover" onClick={() => openDescribe(u)}
-                style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "5px 6px", borderRadius: 8, cursor: "pointer" }}>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{u.partNumber}</span>
-                <span style={{ fontSize: 12, minWidth: 0 }}>{u.name || <span className="mut">unnamed</span>}</span>
-                {u.sources.includes("maintenance") && (
-                  <span className="pill good"
-                    title="Named by a maintenance task or PM schedule">maintenance</span>
-                )}
-                {u.sources.includes("kit") && (
-                  <span className="pill warn"
-                    title="Listed inside a kit's contents">🧰 kit</span>
-                )}
-                {u.models.slice(0, 3).map((m) => (
-                  <span key={m} className="pill accent">{m}</span>
-                ))}
-                <span className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}>describe</span>
-              </div>
-            ))}
-            {unnamed.length > 40 && (
-              <span className="mut" style={{ fontSize: 11 }}>+{unnamed.length - 40} more</span>
-            )}
-          </div>
+  const undescribedRow = (u: UncataloguedPart): DataRow => ({
+    key: u.partNumber,
+    actions: [{ label: "Describe", onClick: () => openDescribe(u) }],
+    cells: {
+      pn: <Id>{u.partNumber}</Id>,
+      name: (
+        <span style={{ minWidth: 0, display: "block" }}>
+          <span style={{ display: "block", fontSize: 13 }}>{u.name || <span className="mut">unnamed</span>}</span>
+          <span className="mut" style={{ display: "block", fontSize: 11 }}>
+            {[u.sources.join(", "), u.models.slice(0, 3).join(", ")].filter(Boolean).join(" · ")}
+          </span>
+        </span>
+      ),
+      kind: u.sources.includes("maintenance")
+        ? <Pill tone="good" title="Named by a maintenance task or PM schedule">maintenance</Pill>
+        : u.sources.includes("kit")
+          ? <Pill tone="warn" title="Listed inside a kit's contents">in a kit</Pill>
+          : null,
+      aka: null,
+      fit: null,
+      price: null,
+    },
+  });
+
+  return (
+    <div>
+      {/* One spelling of "Shimadzu", wherever it's typed - see Settings → Catalog. */}
+      <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
+      <PageHead
+        title="Parts book"
+        sub="What each number means, so a part fitted in March still has a name in December. Nothing here is required to record a part - an unknown number always works."
+        actions={<button className="btn sm primary" onClick={() => openAdd()}>+ Part number</button>}
+      />
+      <Toolbar
+        search={
+          <input value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="Your number, theirs, a name or a maker" aria-label="Search the parts book" />
+        }
+        facets={
+          <FacetStrip
+            facets={[
+              { key: "all", label: "All", count: live.length, on: facet === "all" },
+              ...PART_KINDS.map((k) => ({
+                key: k, label: PART_KIND_LABEL[k],
+                count: live.filter((r) => r.kind === k).length || undefined,
+                on: facet === k,
+              })),
+              /* The numbers real work already used that nothing describes -
+                 a filtered view of this ledger, not a second list below it. */
+              ...(unnamed.length ? [{ key: "undescribed", label: "Used but not described", count: unnamed.length, on: facet === "undescribed" }] : []),
+              ...(items.some((r) => r.archived)
+                ? [{ key: "retired", label: "Retired", count: items.filter((r) => r.archived).length, on: facet === "retired" }]
+                : []),
+            ]}
+            onToggle={(k) => setFacet(facet === k ? "all" : (k as typeof facet))}
+          />
+        }
+      />
+      {facet === "undescribed" && (
+        <div className="mut" style={{ fontSize: 11, margin: "0 0 8px" }}>
+          Numbers on real work - fitted, stocked, ordered, named by a maintenance task, or packed
+          inside a kit - with no catalog entry yet. Describing one keeps everything already said about it.
         </div>
       )}
+      <DataTable
+        cols={[
+          { key: "pn", label: "Part number", width: "minmax(140px, 1.1fr)" },
+          { key: "name", label: "What it is", width: "minmax(180px, 1.8fr)" },
+          { key: "kind", label: "Kind", width: "110px" },
+          { key: "aka", label: "Also", width: "110px", hideMobile: true },
+          { key: "fit", label: "Fits", width: "minmax(120px, 1fr)", hideMobile: true },
+          { key: "price", label: "Best price", width: "minmax(120px, 1fr)", hideMobile: true },
+        ]}
+        rows={facet === "undescribed"
+          ? unnamed.slice(0, 80).filter((u) => !query.trim() || `${u.partNumber} ${u.name}`.toLowerCase().includes(query.trim().toLowerCase())).map(undescribedRow)
+          : shownRows.map(toRow)}
+        empty={query ? "Nothing matches that" : "Nothing catalogued yet"}
+      />
 
       {sheet && (
         <Dialog open onClose={() => setSheet(null)} title={sheet.id ? "Edit part number" : "New part number"}
