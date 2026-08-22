@@ -1,7 +1,7 @@
 "use client";
 
 import { useOptimistic, useState, useTransition } from "react";
-import { GAS_STATES, GAS_COLOR } from "@/lib/stages";
+import { GAS_STATES, GAS_TONE } from "@/lib/stages";
 import PickOrAdd from "./PickOrAdd";
 import { addInstrumentGas, setGasStatus, updateGasNote, removeInstrumentGas, type WorkTarget } from "@/app/actions";
 
@@ -14,7 +14,7 @@ function GasStatusSelect({ row }: { row: GasRow }) {
     <select
       value={status}
       onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setGasStatus(row.id, e.target.value); })}
-      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: GAS_COLOR[status]?.bg, color: GAS_COLOR[status]?.fg, cursor: "pointer" }}
+      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: `var(--t-${GAS_TONE[status] ?? "neutral"}-bg)`, color: `var(--t-${GAS_TONE[status] ?? "neutral"}-fg)`, cursor: "pointer" }}
     >
       {GAS_STATES.map((s) => <option key={s}>{s}</option>)}
     </select>
@@ -62,7 +62,7 @@ export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }
             {canEdit ? (
               <GasStatusSelect row={g} />
             ) : (
-              <span className="pill" style={{ background: GAS_COLOR[g.status]?.bg, color: GAS_COLOR[g.status]?.fg }}>{g.status}</span>
+              <span className={`pill ${GAS_TONE[g.status] ?? "neutral"}`}>{g.status}</span>
             )}
             {canEdit ? (
               <input

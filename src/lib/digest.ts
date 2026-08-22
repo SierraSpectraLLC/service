@@ -22,7 +22,8 @@ import { db } from "@/db";
 import {
   appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, tasks, workOrders,
 } from "@/db/schema";
-import { BLOCKED_STAGE, GAS_COLOR, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
+import { BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
+import { TONE_HEX } from "@/lib/tones";
 import { daysSince } from "@/lib/queue";
 import { houseEmails } from "@/lib/house";
 import { digestFrom, digestReplyTo, sendEmail } from "@/lib/email";
@@ -506,7 +507,7 @@ function renderBoard(section: DigestSection, internal: boolean): string {
   const rows = section.board.map((r) => {
     const gasCells = r.gases.length
       ? r.gases.map((x) => {
-          const c = GAS_COLOR[x.status] || { bg: "#EEF1F5", fg: "#475569" };
+          const c = TONE_HEX[GAS_TONE[x.status] ?? "neutral"];
           return pill(`${x.gas}: ${x.status}`, c.bg, c.fg);
         }).join(" ")
       : `<span style="color:${EMAIL.faint};">-</span>`;

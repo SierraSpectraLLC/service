@@ -3,6 +3,8 @@
 // the seed values and the fallback before the table is populated. The built-in
 // NAMES are load-bearing: "Shipped", "Waiting / blocked", "Waiting to ship",
 // and "Intake" are referenced by sync, dashboard counts, and the EOD report.
+import type { Tone } from "@/lib/tones";
+
 export const STAGES = [
   "Intake",
   "Refurbishment",
@@ -50,12 +52,15 @@ export const GAS_STATES = ["Connected", "Low", "Empty", "Not connected", "Not ne
 export const GAS_SYMBOL: Record<string, string> = {
   Helium: "He", Nitrogen: "N2", Argon: "Ar", Hydrogen: "H2", Air: "Air",
 };
-export const GAS_COLOR: Record<string, { bg: string; fg: string }> = {
-  Connected: { bg: "#E5F3E5", fg: "#2E6B2E" },
-  Low: { bg: "#FAF0DC", fg: "#8A5410" },
-  Empty: { bg: "#FBE9E9", fg: "#A32D2D" },
-  "Not connected": { bg: "#EEF1F5", fg: "#475569" },
-  "Not needed": { bg: "#F1F5F9", fg: "#94A3B8" },
+/* Dual-use: pills in the UI (via the tone classes) and chips in the digest
+   email (via TONE_HEX, since mail clients read inline hex). "Not connected"
+   is neutral yet still flags attention - see gasAttention below. */
+export const GAS_TONE: Record<string, Tone> = {
+  Connected: "good",
+  Low: "warn",
+  Empty: "bad",
+  "Not connected": "neutral",
+  "Not needed": "faint",
 };
 /** True when a gas status should surface on the dashboard / digest. */
 export function gasAttention(status: string): boolean {
