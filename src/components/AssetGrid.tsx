@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { createAssets, type AssetInput } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { toCsv } from "@/lib/csv";
 
 /** One catalog model, with the maker so picking a model fills it in. */
@@ -105,6 +106,7 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
       if (res?.error) { setError(res.error); return; }
       setFailures(res.failures ?? []);
       setSaved(`${res.created} asset${res.created === 1 ? "" : "s"} added`);
+      if (res.created) toast({ message: `Added ${res.created} asset${res.created === 1 ? "" : "s"}` });
       // Keep only the rows that failed, so a fix is a retry rather than a retype.
       const bad = new Set((res.failures ?? []).map((f) => f.row));
       setRows(bad.size
@@ -179,7 +181,7 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
                 ))}
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   {rows.length > 1 && (
-                    <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "#A32D2D", fontSize: 12 }}
+                    <button className="btn link t-small" aria-label={`Remove row ${i + 1}`} style={{ color: "var(--t-bad-fg)" }}
                       onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}>×</button>
                   )}
                 </td>
@@ -190,13 +192,13 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
       </div>
       <datalist id="grid-owners">{owners.map((o) => <option key={o} value={o} />)}</datalist>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="row-2" style={{ marginTop: 8 }}>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, blank(kinds[0] ?? "")])}>＋ Row</button>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, ...Array.from({ length: 5 }, () => blank(kinds[0] ?? ""))])}>＋ 5</button>
-        <a className="btn link" style={{ fontSize: 12 }}
+        <a className="btn link t-small"
           href={"data:text/csv;charset=utf-8," + encodeURIComponent(template())}
           download="assets-template.csv">download template</a>
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           Paste a block from a spreadsheet into any cell - same columns, in order.
         </span>
         <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={save} disabled={pending || !usable.length}>
@@ -204,16 +206,16 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
         </button>
       </div>
 
-      {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginTop: 8 }}>{saved} ✓</div>}
+      {saved && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{saved} ✓</div>}
       {failures.length > 0 && (
-        <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>
+        <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>
           {failures.length} row{failures.length === 1 ? "" : "s"} could not be saved and {failures.length === 1 ? "is" : "are"} still above:
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
             {failures.map((f) => <li key={f.row}>Row {f.row}: {f.error}</li>)}
           </ul>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }
