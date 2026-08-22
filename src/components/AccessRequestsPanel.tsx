@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { approveAccessRequest, approveClaim, denyAccessRequest } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 export type AccessRequestRow = {
   id: number; orgName: string; orgKind: string; kind: string;
@@ -44,11 +46,16 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
             <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
               {isClaim && isOperator && (
                 <button className="btn sm accent" disabled={pending}
-                  onClick={() => {
-                    if (!window.confirm(`Make ${r.orgName} the owner of this system? They get edit access and the right to decide who else gets on it.`)) return;
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Make ${r.orgName} the owner of this system?`,
+                      body: "They get edit access and the right to decide who else gets on it.",
+                      action: `Make ${r.orgName} owner`,
+                    }))) return;
                     startTransition(async () => {
                       const res = await approveClaim(r.id);
                       if (res?.error) setError(res.error);
+                      else toast({ message: `Made ${r.orgName} the owner` });
                     });
                   }}>Grant ownership</button>
               )}
