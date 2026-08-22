@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createAsset } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import CatalogSelect from "./CatalogSelect";
 import PickOrAdd from "./PickOrAdd";
 
@@ -25,6 +25,9 @@ export default function NewAssetForm({ owners, kinds, models }: {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState("");
   const [pending, startTransition] = useTransition();
+
+  // The first unmet requirement, in plain words, live in the footer.
+  const problem = !draft.model.trim() && !draft.serial.trim() ? "give it a model or a serial number" : null;
 
   const submit = () => {
     setError("");
@@ -52,15 +55,15 @@ export default function NewAssetForm({ owners, kinds, models }: {
           context="Goes onto the shelf as a spare - no system needed. Attach it to one whenever it's used."
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : saved ? " ok" : ""}`}>
-                {error || (saved ? `${saved} ✓` : "Type, owner and location stay put so a shipment goes in fast.")}
-              </span>
+              <DialogStatus error={error} problem={problem}
+                ok={saved ? `${saved} ✓` : "Type, owner and location stay put so a shipment goes in fast."} />
               <button className="btn" onClick={() => { setOpen(false); setDraft(empty); }} disabled={pending}>Done</button>
-              <button className="btn accent" onClick={submit} disabled={pending || (!draft.model.trim() && !draft.serial.trim())}>
+              <button className="btn accent" onClick={submit} disabled={pending || !!problem}>
                 {pending ? "Saving..." : "Add to stock"}
               </button>
             </>
           }>
+          <div className="dialog-section">What it is</div>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
@@ -76,6 +79,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
             </div>
             <div><label>Serial #</label><input className="mono" value={draft.serial} onChange={(e) => setDraft({ ...draft, serial: e.target.value })} placeholder="L20304512345" /></div>
           </div>
+          <div className="dialog-section">Where it&apos;s from</div>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div><label>Manufacturer</label><input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" /></div>
             <div>
@@ -85,6 +89,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
             </div>
             <div><label>Where it is</label><input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Warehouse, shelf B" /></div>
           </div>
+          <div className="dialog-section">Condition</div>
           <div style={{ marginBottom: 8 }}>
             <label>As found (optional)</label>
             <input value={draft.asFound} onChange={(e) => setDraft({ ...draft, asFound: e.target.value })}

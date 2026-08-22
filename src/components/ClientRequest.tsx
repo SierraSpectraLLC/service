@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { reportIssue, requestPm } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { PM_WINDOWS } from "@/lib/pmRequest";
 
 /**
@@ -51,6 +51,8 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
 
   const isPm = choice === PM;
   const title = "Request service";
+  // The first unmet requirement, in plain words, live in the footer.
+  const problem = !isPm && !summary.trim() ? "say what's wrong" : null;
 
   const close = () => {
     setOpen(false); setError(""); setDone(""); setNumber("");
@@ -108,10 +110,10 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
         </>
       ) : (
         <>
-          <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+          <DialogStatus error={error} problem={problem} ok={busy} />
           <button className="btn" disabled={pending} onClick={close}>Cancel</button>
-          <button className="btn accent" disabled={pending || (!isPm && !summary.trim())} onClick={submit}>
-            {busy || (pending ? "Sending..." : "Send request")}
+          <button className="btn accent" disabled={pending || !!problem} onClick={submit}>
+            {isPm ? "Request a PM" : "Send to service"}
           </button>
         </>
       )}>
@@ -130,6 +132,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
           </div>
         ) : (
           <>
+            <div className="dialog-section">What do you need</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
               {NEEDS.map((o) => (
                 <button key={o.key} type="button" onClick={() => setChoice(o.key)}
@@ -142,6 +145,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
               <>
                 {/* How soon, asked only once upkeep is what they came for -
                     a horizon is meaningless against a broken instrument. */}
+                <div className="dialog-section">How soon</div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
                   {PM_WINDOWS.map((w) => (
                     <button key={w.key} type="button" onClick={() => setPmWindow(w.key)}
@@ -150,18 +154,14 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
                   ))}
                 </div>
                 {nextPm && <div className="mut t-small" style={{ marginBottom: 10 }}>{nextPm}</div>}
-                <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
-                  Anything specific? <span className="mut" style={{ fontWeight: 400 }}>Optional</span>
-                </label>
+                <div className="dialog-section">Anything specific</div>
                 <textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={4} autoFocus
                   placeholder="Lamp is at 900 hours, and we'd like the column checked"
                   className="t-body" style={{ width: "100%", marginBottom: 12 }} />
               </>
             ) : (
               <>
-                <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
-                  What&apos;s wrong?
-                </label>
+                <div className="dialog-section">What&apos;s wrong</div>
                 <input value={summary} onChange={(e) => setSummary(e.target.value)} autoFocus
                   placeholder="Lamp won't ignite" maxLength={160}
                   className="t-body" style={{ width: "100%", marginBottom: 10 }} />
@@ -173,6 +173,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
                   placeholder="Error code, when it started, what you were running"
                   className="t-body" style={{ width: "100%", marginBottom: 10 }} />
 
+                <div className="dialog-section">Evidence</div>
                 <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
                   Photos, screenshots or log files <span className="mut" style={{ fontWeight: 400 }}>Optional</span>
                 </label>

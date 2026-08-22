@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addOrgSite, archiveOrgSite, setOrgBillingAddress, updateOrgSite } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { addressLine, siteLabel } from "@/lib/sites";
 
@@ -52,8 +52,10 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
     setError(""); setSheet({ id: s.id });
   };
 
+  // The first unmet requirement, in plain words, live in the footer.
+  const problem = !draft.name.trim() && !draft.address.trim() ? "give it a name or an address" : null;
+
   const save = () => {
-    if (!draft.name.trim() && !draft.address.trim()) { setError("Give it a name or an address"); return; }
     setError("");
     startTransition(async () => {
       const res = sheet?.id ? await updateOrgSite(sheet.id, draft) : await addOrgSite(orgId, draft);
@@ -162,15 +164,20 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
 
       {sheet && (
         <Dialog open onClose={() => setSheet(null)} title={sheet.id ? "Edit site" : "New site"}
+          context={orgName}
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <DialogStatus error={error} problem={problem} />
               <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn accent" onClick={save} disabled={pending}>
-                {pending ? "Saving..." : "Save site"}
+              <button className="btn accent" onClick={save} disabled={pending || !!problem}>
+                {pending ? "Saving..."
+                  : sheet.id
+                    ? (draft.name.trim() ? `Save ${draft.name.trim()}` : "Save site")
+                    : (draft.name.trim() ? `Add ${draft.name.trim()}` : "Add site")}
               </button>
             </>
           }>
+            <div className="dialog-section">Where it is</div>
             <label>Name</label>
             <input value={draft.name} autoFocus placeholder="Building 4 lab"
               onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ marginBottom: 8 }} />
@@ -180,9 +187,10 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
               placeholder={"123 Cedar St, Suite 400\nReno NV 89501"}
               onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
 
+            <div className="dialog-section">Who to ask for</div>
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
-                <label>Who to ask for</label>
+                <label>Contact</label>
                 <input value={draft.contactName} placeholder="Rita, front desk"
                   onChange={(e) => setDraft({ ...draft, contactName: e.target.value })} />
               </div>
@@ -193,7 +201,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
               </div>
             </div>
 
-            <label>Getting in</label>
+            <div className="dialog-section">Getting in</div>
             <textarea value={draft.accessNotes} rows={3} style={{ width: "100%", marginBottom: 4 }}
               placeholder={"Parking garage on Cedar, $30/day - street parking is 2hr only.\nLoading dock round the back, badge needed."}
               onChange={(e) => setDraft({ ...draft, accessNotes: e.target.value })} />

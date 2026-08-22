@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { startThread } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 
 /**
  * Start a conversation.
@@ -44,22 +44,30 @@ export default function NewMessageButton({ people }: {
     return <span className="mut t-meta">Nobody to message yet</span>;
   }
 
+  // The first unmet requirement, in plain words, live in the footer.
+  const problem = !picked.length ? "pick who it goes to" : !body.trim() ? "write a message" : null;
+  const firstPicked = people.find((p) => p.email === picked[0]);
+  const sendLabel = picked.length === 1 && firstPicked ? `Send to ${firstPicked.name}`
+    : picked.length > 1 ? `Send to ${picked.length} people` : "Send message";
+
   return (
     <>
       <button className="btn sm primary" onClick={() => { setOpen(!open); setError(""); }}>
         {open ? "Cancel" : "New message"}
       </button>
       <Dialog open={open} onClose={() => setOpen(false)} title="New message"
+        context="Starts a thread everyone picked can read"
         footer={
           <>
-            <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+            <DialogStatus error={error} problem={problem}
+              ok={`Goes to ${picked.length} ${picked.length === 1 ? "person" : "people"}`} />
             <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
-            <button className="btn accent" disabled={pending || !picked.length || !body.trim()} onClick={send}>
-              {pending ? "Sending..." : "Send message"}
+            <button className="btn accent" disabled={pending || !!problem} onClick={send}>
+              {pending ? "Sending..." : sendLabel}
             </button>
           </>
         }>
-            <label>To *</label>
+            <div className="dialog-section">Who it goes to</div>
             <input value={filter} onChange={(e) => setFilter(e.target.value)}
               placeholder="Type to filter people..." style={{ marginBottom: 6 }} />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", maxHeight: 180, overflowY: "auto", marginBottom: 8 }}>
@@ -76,13 +84,13 @@ export default function NewMessageButton({ people }: {
                 each other. */}
             {picked.length > 1 && (
               <>
-                <label>Name this group</label>
+                <div className="dialog-section">Name this group</div>
                 <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={80}
                   placeholder="Optional - e.g. &quot;Reno trip&quot;" style={{ marginBottom: 8 }} />
               </>
             )}
 
-            <label>Message *</label>
+            <div className="dialog-section">The message</div>
             <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4}
               placeholder="What do you want to say?" style={{ width: "100%", marginBottom: 8, resize: "vertical" }} />
 
