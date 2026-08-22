@@ -31,9 +31,9 @@ export default function AccountMenu({ name, email, orgName, roleLabel, settingsH
   return (
     <Dropdown label={<span className="nav-avatar" aria-hidden>{initials}</span>} ariaLabel={`Account: ${name}`}>
       <div className="menu-head">
-        <div style={{ fontSize: 13, fontWeight: 700 }}>{name}</div>
-        <div className="mut mono" style={{ fontSize: 11, overflowWrap: "anywhere" }}>{email}</div>
-        <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+        <div className="t-body" style={{ fontWeight: 700 }}>{name}</div>
+        <div className="mut mono t-meta" style={{ overflowWrap: "anywhere" }}>{email}</div>
+        <div className="mut t-meta" style={{ marginTop: 3 }}>
           {orgName ? `${orgName} · ${roleLabel}` : roleLabel}
         </div>
       </div>
