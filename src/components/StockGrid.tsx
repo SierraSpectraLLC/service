@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addStockItems } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { toCsv } from "@/lib/csv";
 
 type Row = { partNumber: string; name: string; qty: string; minQty: string; bin: string };
@@ -93,6 +94,7 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
         res.updated ? `${res.updated} updated` : "",
       ].filter(Boolean);
       setSaved(bits.join(", ") || "Nothing changed");
+      if (bits.length) toast({ message: `Stocked the lines - ${bits.join(", ")}` });
       const bad = new Set((res.failures ?? []).map((f) => f.row));
       setRows(bad.size ? usable.filter((_, i) => bad.has(i + 1)) : [blank(), blank(), blank()]);
       if (!bad.size) onDone?.();
@@ -137,7 +139,7 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
                 ))}
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   {rows.length > 1 && (
-                    <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "#A32D2D", fontSize: 12 }}
+                    <button className="btn link t-small" aria-label={`Remove row ${i + 1}`} style={{ color: "var(--t-bad-fg)" }}
                       onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}>×</button>
                   )}
                 </td>
@@ -148,28 +150,28 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
       </div>
       <datalist id="stock-known-parts">{knownParts.map((p) => <option key={p.pn} value={p.pn}>{p.name}</option>)}</datalist>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="row-2" style={{ marginTop: 8 }}>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, blank()])}>＋ Row</button>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, ...Array.from({ length: 5 }, blank)])}>＋ 5</button>
-        <a className="btn link" style={{ fontSize: 12 }}
+        <a className="btn link t-small"
           href={"data:text/csv;charset=utf-8," + encodeURIComponent(template())}
           download="stock-template.csv">download template</a>
-        <span className="mut" style={{ fontSize: 11 }}>Reorder at 0 means never suggest reordering.</span>
+        <span className="mut t-meta">Reorder at 0 means never suggest reordering.</span>
         <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={save} disabled={pending || !usable.length}>
           {pending ? "Saving..." : `Save ${usable.length || ""} line${usable.length === 1 ? "" : "s"}`.replace("  ", " ")}
         </button>
       </div>
 
-      {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginTop: 8 }}>{saved} ✓</div>}
+      {saved && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{saved} ✓</div>}
       {failures.length > 0 && (
-        <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>
+        <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>
           {failures.length} row{failures.length === 1 ? "" : "s"} still above:
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
             {failures.map((f) => <li key={f.row}>{f.name}: {f.error}</li>)}
           </ul>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }
