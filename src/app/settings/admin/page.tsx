@@ -109,9 +109,9 @@ export default async function AdminSettingsPage() {
                   {label || <span className="mut">No assets listed</span>}
                   {inst.client && <span className="mut"> · {inst.client}</span>}
                 </span>
-                {inst.archived && <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>archived</span>}
+                {inst.archived && <span className="pill neutral">archived</span>}
                 {(pendingBySystem.get(inst.id)?.length ?? 0) > 0 && (
-                  <span className="pill" style={{ background: "#F2E0CC", color: "#8A5410" }}>
+                  <span className="pill warn">
                     {pendingBySystem.get(inst.id)!.length} waiting
                   </span>
                 )}
