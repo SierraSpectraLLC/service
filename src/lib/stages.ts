@@ -180,15 +180,17 @@ export const TASK_TONE: Record<string, Tone> = {
   Blocked: "bad",
   Done: "good",
 };
-export const PART_COLOR: Record<string, { bg: string; fg: string }> = {
-  Suggested: { bg: "#FAF0DC", fg: "#8A5410" },
-  Needed: { bg: "#EEF1F5", fg: "#475569" },
-  Ordered: { bg: "#EDEBFA", fg: "#4F45A3" },
-  "In transit": { bg: "#E7F2FA", fg: "#1D6396" },
-  Received: { bg: "#E5F3E5", fg: "#2E6B2E" },
-  Backordered: { bg: "#FBE9E9", fg: "#A32D2D" },
-  Installed: { bg: "#DDF0EA", fg: "#085041" },
-  Removed: { bg: "#EEF1F5", fg: "#64748B" },
+/* Installed was a teal of its own; it now shares `good` with Received - the
+   distinction the teal carried is already in the word. */
+export const PART_TONE: Record<string, Tone> = {
+  Suggested: "warn",
+  Needed: "neutral",
+  Ordered: "accent",
+  "In transit": "info",
+  Received: "good",
+  Backordered: "bad",
+  Installed: "good",
+  Removed: "neutral",
 };
 export const ATTACH_META: Record<string, { glyph: string; bg: string; fg: string }> = {
   "Tune report": { glyph: "⚙", bg: "#EDEBFA", fg: "#4F45A3" },

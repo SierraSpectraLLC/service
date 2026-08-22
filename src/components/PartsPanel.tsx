@@ -2,7 +2,7 @@
 
 import { promptReason } from "@/lib/reason";
 import { useOptimistic, useState, useTransition } from "react";
-import { CARRIERS, PART_STATES, PART_COLOR, ORDER_STATES, trackUrl } from "@/lib/stages";
+import { CARRIERS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import {
   createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
@@ -30,7 +30,7 @@ function PartStatusSelect({ part }: { part: Part }) {
     <select
       value={status}
       onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setPartStatus(part.id, e.target.value); })}
-      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: PART_COLOR[status]?.bg, color: PART_COLOR[status]?.fg, cursor: "pointer" }}
+      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: `var(--t-${PART_TONE[status] ?? "neutral"}-bg)`, color: `var(--t-${PART_TONE[status] ?? "neutral"}-fg)`, cursor: "pointer" }}
     >
       {PART_STATES.map((s) => <option key={s}>{s}</option>)}
     </select>
@@ -403,15 +403,15 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 {canEdit && systemAssets.length > 0 ? (
                   <PartAssetSelect part={p} systemAssets={systemAssets} />
                 ) : assetLabel(p.assetId) ? (
-                  <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(p.assetId)}</span>
+                  <span className="pill accent">{assetLabel(p.assetId)}</span>
                 ) : null}
                 {p.assetId !== null && !assetLabel(p.assetId) && (
-                  <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>asset detached</span>
+                  <span className="pill faint">asset detached</span>
                 )}
                 {canEdit ? (
                   <PartStatusSelect part={p} />
                 ) : (
-                  <span className="pill" style={{ background: PART_COLOR[p.status]?.bg, color: PART_COLOR[p.status]?.fg }}>{p.status}</span>
+                  <span className={`pill ${PART_TONE[p.status] ?? "neutral"}`}>{p.status}</span>
                 )}
                 {canEdit && <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => openEdit(p)}>edit</button>}
               </div>
@@ -440,7 +440,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 </div>
               )}
               {p.pmScheduleId != null && pmJobs.some((j) => j.id === p.pmScheduleId) && (
-                <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E", fontSize: 10, marginTop: 4, display: "inline-block" }}>
+                <span className="pill good" style={{ fontSize: 10, marginTop: 4, display: "inline-block" }}>
                   {pmJobs.find((j) => j.id === p.pmScheduleId)!.title}
                 </span>
               )}
