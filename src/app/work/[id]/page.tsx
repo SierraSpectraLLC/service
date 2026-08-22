@@ -36,6 +36,9 @@ import { scopeMatches } from "@/lib/checkout";
 import { parseChecklist } from "@/lib/checklist";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { mentionableOn } from "@/lib/mentionAudience";
+import PanelLayout from "@/components/PanelLayout";
+import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
+import { getUiLayout } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -215,36 +218,52 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   // nobody else - see lib/mentionAudience.
   const mentionable = await mentionableOn(people, { instrumentId: wo.instrumentId, assetId: wo.assetId });
 
+  const panelLayout = await getUiLayout("workorder");
+  const openTasksH = taskRows.filter((t) => t.state !== "Done").length;
+  const heroStats: HeroStat[] = [
+    { value: WO_LABEL[wo.state] ?? wo.state, label: "", tone: tone === "neutral" ? undefined : tone },
+    { value: sev.label, label: "" },
+    ...(woLate(wo, today) ? [{ value: `wanted by ${targetDay(wo.severity, wo.openedOn)}`, label: "", tone: "bad" as const }] : []),
+    ...(openTasksH ? [{ value: openTasksH, label: `open task${openTasksH === 1 ? "" : "s"}` }] : []),
+    ...(minutes ? [{ value: formatHours(minutes), label: "logged" }] : []),
+  ];
+
   return (
     <div className="container page">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <div className="crumb" style={{ margin: 0 }}>
-          <Link href="/work" style={{ textDecoration: "none", color: "inherit" }}>Work orders</Link> › <b>{wo.number}</b>
-        </div>
-        <Link href={place.href} className="mut" style={{ fontSize: 13, textDecoration: "none", marginLeft: "auto" }}>
-          {place.label} →
-        </Link>
+      <div className="crumb">
+        <Link href="/work" style={{ textDecoration: "none", color: "inherit" }}>Work orders</Link> › <b>{wo.number}</b>
       </div>
 
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <span className="mono" style={{ fontWeight: 700, fontSize: 13, color: "var(--navy)" }}>{wo.number}</span>
-          <span style={{ fontSize: 16, fontWeight: 700 }}>{wo.title}</span>
-          <span className={`pill ${tone}`}>{WO_LABEL[wo.state] ?? wo.state}</span>
-          <span className="pill accent">{sev.label}</span>
-          {woLate(wo, today) && (
-            <span className="pill bad">
-              wanted by {targetDay(wo.severity, wo.openedOn)}
-            </span>
-          )}
-        </div>
-        <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
-          Asked by {askedBy}
-          {wo.requestedBy ? ` · ${wo.requestedBy}` : ""} · opened {wo.openedOn}
-          {wo.assignee ? ` · with ${wo.assignee}` : " · nobody assigned"}
-          {minutes ? ` · ${formatHours(minutes)} logged` : ""}
-        </div>
+      <RecordHero
+        eyebrow={<>Asked by {askedBy}{wo.requestedBy ? ` · ${wo.requestedBy}` : ""}</>}
+        id={wo.number}
+        title={wo.title}
+        meta={`opened ${wo.openedOn}${wo.assignee ? ` · with ${wo.assignee}` : " · nobody assigned"}`}
+        stats={heroStats}
+        actions={
+          <Link href={place.href} className="btn sm" style={{ textDecoration: "none" }}>
+            {place.label} →
+          </Link>
+        }
+        kebab={<HeroKebab arrange menuLabel={`Actions for ${wo.number}`} />}
+      />
 
+      <PanelLayout
+        viewKey="workorder"
+        saved={panelLayout}
+        defaultRight={[]}
+        pinned={["job"]}
+        groups={[
+          { key: "work", label: "Work", keys: ["notes", "tasks", "parts", "hours"],
+            badge: openTasksH || undefined,
+            badgeTone: taskRows.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < today) ? "bad" : "info" },
+          { key: "files", label: "Files", keys: ["files", "photos"] },
+          { key: "purchasing", label: "Purchasing", keys: ["po"] },
+          { key: "history", label: "History", keys: ["activity"] },
+        ]}
+        panels={[
+          { key: "job", label: "The job", node: (
+      <div className="card">
         {entFlag && (
           <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginTop: 10 }}>
             {entFlag}
@@ -271,19 +290,23 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           people={directoryNames(people)}
         />
       </div>
-
+          ) },
+          { key: "notes", label: "Notes", node: (
       <WorkOrderNotes workOrderId={wo.id} canPost={canEdit} people={mentionable}
         me={{ email: user.email, name: user.name, isHouse: staff }}
         notes={noteRows.map((n) => ({
           id: n.id, author: n.author, authorEmail: n.authorEmail, text: n.text,
           createdAt: n.createdAt.toISOString(), editedAt: n.editedAt?.toISOString() ?? null,
         }))} />
-
+          ) },
+          { key: "tasks", label: "Tasks", node: (
       <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)} mentionable={mentionable}
         systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
         today={today} canEdit={canAdd} isStaff={staff} copyTargets={[]}
         procedureChoices={procedureChoices} />
-
+          ) },
+          ...((canAdd || woPartRows.length > 0) ? [{ key: "parts", label: "Parts", node: (
+          <>
       {/* The job's own parts list - what this repair looks like needing, and
           then what it took. Rows carry the work order, so they read here and
           on the system's full parts panel alike; "potential" is just status
@@ -296,19 +319,24 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           canEdit={canAdd} isStaff={staff}
           showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
       )}
-
+          </>
+          ) }] : []),
+          { key: "hours", label: "Hours", node: (
       <HoursPanel target={target}
         entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
         people={directoryNames(people)} defaultPerson={user.name}
         today={today} canEdit={canAdd} isStaff={staff} />
-
+          ) },
+          { key: "files", label: "Files", node: (
       <AttachmentsPanel target={target} today={shopToday()}
         attachments={fileRows.map(({ url: _url, ...a }) => ({ ...a, createdAt: a.createdAt.toISOString() }))}
         evidenceTasks={taskRows.map((t) => ({ id: t.id, title: t.title, required: false }))}
         canEdit={canAttach} isStaff={staff} listingCuration={false} storage={fileQuota}
         combineTitle={`${wo.number} packet`}
         combineLines={[wo.title, place.label, `Prepared by ${user.name}`].filter(Boolean)} />
-
+          ) },
+          ...((canAttach || fileRows.some(isPhotoFile)) ? [{ key: "photos", label: "Photos", node: (
+          <>
       {/* The job's pictures - the error dialog, the scored seal, the bench
           after. Same panel the system page has; uploads land tagged with both
           the system and the job, so they read in either gallery. No cover
@@ -322,8 +350,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           label={`${wo.number} - ${wo.title}`}
           canEdit={canAttach} storageFull={fileQuota.state === "full"} />
       )}
-
-      {poRows.length > 0 && (
+          </>
+          ) }] : []),
+          ...(poRows.length > 0 ? [{ key: "po", label: "Bought for this job", node: (
         <div className="card">
           <div className="card-title">Bought for this job</div>
           {poRows.map((p) => {
@@ -362,9 +391,8 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
             </div>
           )}
         </div>
-      )}
-
-      {activity.length > 0 && (
+          ) }] : []),
+          ...(activity.length > 0 ? [{ key: "activity", label: "History", node: (
         <div className="card">
           <div className="card-title">History</div>
           <ActivityFeed items={activity.map((a) => ({
@@ -372,7 +400,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
             when: shopTime(a.createdAt),
           }))} />
         </div>
-      )}
+          ) }] : []),
+        ]}
+      />
     </div>
   );
 }
