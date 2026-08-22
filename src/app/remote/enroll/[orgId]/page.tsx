@@ -44,7 +44,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
     return (
       <div className="container page">
         <h1 style={{ fontSize: 20, marginTop: 0 }}>Enroll a machine</h1>
-        <div className="card" style={{ fontSize: 13 }}>{NOT_CONFIGURED}</div>
+        <div className="card t-body">{NOT_CONFIGURED}</div>
       </div>
     );
   }
@@ -73,19 +73,19 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
         <span className="pill info">{org.name}</span>
       </div>
 
-      {"error" in group && <div className="card" style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>{group.error}</div>}
+      {"error" in group && <div className="card t-body" style={{ color: "var(--t-bad-fg)" }}>{group.error}</div>}
 
       {downloads.length > 0 && (
         <>
           <div className="card">
             <div className="card-title" style={{ marginBottom: 4 }}>Install on the machine</div>
-            <div className="mut" style={{ fontSize: 12, marginBottom: 14 }}>
+            <div className="mut t-small" style={{ marginBottom: 14 }}>
               Anything installed from this page joins <b>{org.name}</b>&apos;s machines and nobody else&apos;s.
             </div>
 
             <ol style={{ fontSize: 13.5, margin: "0 0 12px", paddingLeft: 20, lineHeight: 1.7 }}>
               <li>Download below and run it on the PC.</li>
-              <li>Press <b>Install</b>, not Connect — Connect lasts only until the window closes.</li>
+              <li>Press <b>Install</b>, not Connect - Connect lasts only until the window closes.</li>
               <li>At the publisher warning, choose <b>More info → Run anyway</b>.</li>
             </ol>
 
@@ -102,16 +102,16 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 they look almost identical:
                 <ul style={{ paddingLeft: 18, margin: "6px 0" }}>
                   <li>
-                    <b>The browser refused the download</b> — Edge or Chrome says it is not commonly downloaded.
+                    <b>The browser refused the download</b> - Edge or Chrome says it is not commonly downloaded.
                     Open the downloads list, find the file, and choose <b>Keep</b> (Chrome:{" "}
                     <b>⌄ → Keep</b>; Edge: <b>… → Keep → Show more → Keep anyway</b>).
                   </li>
                   <li>
-                    <b>The file arrived but will not start</b> — right-click it → <b>Properties</b> → tick{" "}
+                    <b>The file arrived but will not start</b> - right-click it → <b>Properties</b> → tick{" "}
                     <b>Unblock</b> at the bottom → <b>OK</b>, then run it again.
                   </li>
                   <li>
-                    <b>&quot;Windows protected your PC&quot; with no Run anyway</b> — that button is hidden behind{" "}
+                    <b>&quot;Windows protected your PC&quot; with no Run anyway</b> - that button is hidden behind{" "}
                     <b>More info</b>. If it genuinely is not there, SmartScreen is set to block without a bypass by
                     policy, and only the site&apos;s own IT can allow it: they can add the file to their allow list, or
                     install it from an elevated PowerShell.
@@ -136,31 +136,31 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
             {/* Not decoration: this is the one place the borrowed branding is
                 catchable before a client's IT sees it on their own desktop. */}
             {branding && !branding.branded && (
-              <div style={{ background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 10px", marginTop: 12, fontSize: 12 }}>
+              <div className="t-small" style={{ background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 10px", marginTop: 12 }}>
                 <b style={{ color: "var(--t-warn-fg)" }}>The support host has no agent branding set.</b>{" "}
                 This downloads as <span className="mono">{branding.fileName}</span>, and installs a window and a
                 Windows service under the engine&apos;s name rather than {brand.operatorName || brand.name}&apos;s.
-                Fix it on the host — <span className="mono">agentCustomization</span> in{" "}
-                <span className="mono">meshcentral-data/config.json</span>, §13 of the remote host setup — then
+                Fix it on the host - <span className="mono">agentCustomization</span> in{" "}
+                <span className="mono">meshcentral-data/config.json</span>, §13 of the remote host setup - then
                 restart it. Agents already installed keep the old name until they are reinstalled.
               </div>
             )}
             {branding?.branded && (
-              <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
-                Downloads under your own name — the host is serving{" "}
+              <div className="mut t-meta" style={{ marginTop: 12 }}>
+                Downloads under your own name - the host is serving{" "}
                 <span className="mono">{branding.fileName}</span>.
               </div>
             )}
 
-            <div className="mut" style={{ fontSize: 11, marginTop: 12 }}>
-              Outbound 443 only, nothing listening — a site that filters by destination needs one entry for{" "}
+            <div className="mut t-meta" style={{ marginTop: 12 }}>
+              Outbound 443 only, nothing listening - a site that filters by destination needs one entry for{" "}
               <span className="mono">{(process.env.REMOTE_URL ?? "").replace(/^https?:\/\//, "")}</span>.
             </div>
           </div>
 
           <div className="card">
             <div className="card-title" style={{ marginBottom: 4 }}>Send it to someone else</div>
-            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+            <div className="mut t-small" style={{ marginBottom: 10 }}>
               For a client&apos;s own IT, with no {brand.name} account. Expires in 24 hours and carries the same
               rights as the downloads above.
             </div>

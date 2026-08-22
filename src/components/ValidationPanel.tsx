@@ -113,25 +113,25 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
         <div className="row-hover" onClick={() => setOpenDoc(open ? null : d.id)}
           style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", cursor: "pointer" }}>
           <span className={`pill ${st}`}>{d.state}</span>
-          <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0 }}>{d.title}</span>
-          <span className="mut" style={{ fontSize: 11 }}>v{d.version}</span>
+          <span className="t-body" style={{ fontWeight: 600, minWidth: 0 }}>{d.title}</span>
+          <span className="mut t-meta">v{d.version}</span>
           {d.attachmentId !== null && (
             <a href={`/api/files/${d.attachmentId}`} target="_blank" rel="noreferrer"
-              onClick={(e) => e.stopPropagation()} style={{ fontSize: 11 }}>file</a>
+              onClick={(e) => e.stopPropagation()} className="t-meta">file</a>
           )}
           {d.reviewOn && (
             <span className={`pill ${d.reviewOn < today ? "bad" : "neutral"}`} title={`Review by ${d.reviewOn}`}>{d.reviewOn < today ? `review ${expiryLabel(d.reviewOn, today).replace("expired", "overdue")}` : `review ${d.reviewOn}`}</span>
           )}
           {active.length > 0 && (
-            <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>
+            <span className="mut t-meta" style={{ marginLeft: "auto" }}>
               {active.map((x) => `${x.role}: ${x.signerName}`).join(" · ")}
             </span>
           )}
-          <span className="mut" style={{ fontSize: 12 }}>{open ? "▾" : "▸"}</span>
+          <span className="mut t-small">{open ? "▾" : "▸"}</span>
         </div>
 
         {open && (
-          <div style={{ padding: "6px 0 2px", fontSize: 12 }}>
+          <div className="t-small" style={{ padding: "6px 0 2px" }}>
             {d.note && <div className="mut" style={{ marginBottom: 6 }}>{d.note}</div>}
             {d.signatures.map((x) => (
               <div key={x.id} style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", textDecoration: x.revokedAt ? "line-through" : "none", color: x.revokedAt ? "var(--mut)" : "inherit" }}>
@@ -164,13 +164,13 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                 {signing === d.id ? (
                   <>
                     <select value={sigDraft.role} onChange={(e) => setSigDraft({ ...sigDraft, role: e.target.value })}
-                      style={{ width: "auto", fontSize: 12 }} aria-label="Signing role">
+                      className="t-small" style={{ width: "auto" }} aria-label="Signing role">
                       {SIG_ROLES.filter((r) => r !== "Approved" || canApprove(d)).map((r) => <option key={r}>{r}</option>)}
                     </select>
                     <input value={sigDraft.signerName} onChange={(e) => setSigDraft({ ...sigDraft, signerName: e.target.value })}
-                      placeholder="Type your full name to sign" style={{ width: "auto", flex: "1 1 160px", fontSize: 12 }} />
+                      placeholder="Type your full name to sign" className="t-small" style={{ width: "auto", flex: "1 1 160px" }} />
                     <input value={sigDraft.signerTitle} onChange={(e) => setSigDraft({ ...sigDraft, signerTitle: e.target.value })}
-                      placeholder="Title (optional)" style={{ width: "auto", flex: "1 1 110px", fontSize: 12 }} />
+                      placeholder="Title (optional)" className="t-small" style={{ width: "auto", flex: "1 1 110px" }} />
                     <button className="btn sm accent" disabled={pending || sigDraft.signerName.trim().length < 2}
                       onClick={() => sign(d.id)}>{pending ? "Signing..." : "Sign"}</button>
                     <button className="btn sm" onClick={() => setSigning(null)}>Cancel</button>
@@ -231,7 +231,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
           {isStaff && <button className="btn sm accent" onClick={() => openAdd()}>+ Document</button>}
         </span>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+      <div className="mut t-small" style={{ marginBottom: 8 }}>
         The paper behind the qualification. Protocols are approved before they run, reports after;
         revisions supersede instead of replacing, so every approved version stays on the record.
       </div>
@@ -260,7 +260,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                 <option value="">none - paper master or filed later</option>
                 {files.map((f) => <option key={f.id} value={f.id}>{f.fileName}</option>)}
               </select>
-              <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+              <div className="mut t-meta" style={{ marginTop: 2 }}>
                 Upload under Attachments first, then link it here.
               </div>
             </div>
@@ -271,9 +271,9 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
             </div>
           </div>
           <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
-            placeholder="Note (optional)" style={{ fontSize: 12, marginBottom: 8 }} />
+            placeholder="Note (optional)" className="t-small" style={{ marginBottom: 8 }} />
           {draft.supersedesId !== null && (
-            <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+            <div className="mut t-small" style={{ marginBottom: 8 }}>
               Filing this supersedes the current version - it stays on the record under its own number.
             </div>
           )}
@@ -303,7 +303,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                 {r.docs.length ? "not approved yet" : "missing"}
               </span>
             )}
-            {!r.required && <span className="mut" style={{ fontSize: 11 }}>beyond the declared package</span>}
+            {!r.required && <span className="mut t-meta">beyond the declared package</span>}
             {isStaff && r.docs.length === 0 && (
               <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => openAdd(r.docType)}>file it</button>
             )}
@@ -312,7 +312,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
         </div>
       ))}
 
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

@@ -116,11 +116,11 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const totalMinutes = hoursByClient.reduce((n, [, min]) => n + min, 0);
   const totalSpend = spend.reduce((n, [, v]) => n + v.cents, 0);
   const tiles: [string, string, string | undefined][] = [
-    ["PM on time", pmTotal === 0 ? "—" : `${pmPct}%`,
+    ["PM on time", pmTotal === 0 ? "-" : `${pmPct}%`,
       pmTotal === 0 ? undefined : pmPct >= 80 ? "good" : pmPct >= 50 ? "warn" : "bad"],
-    ["Avg turnaround", turnaround.length ? `${avgTurn}d` : "—", undefined],
-    ["Hours logged", totalMinutes ? formatHours(totalMinutes) : "—", undefined],
-    ["Parts spend", totalSpend ? formatCents(totalSpend) : "—", undefined],
+    ["Avg turnaround", turnaround.length ? `${avgTurn}d` : "-", undefined],
+    ["Hours logged", totalMinutes ? formatHours(totalMinutes) : "-", undefined],
+    ["Parts spend", totalSpend ? formatCents(totalSpend) : "-", undefined],
     ["Active systems", String(active.length), undefined],
   ];
 
@@ -135,7 +135,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <div className="page-head">
         <h1 className="page-title">Metrics</h1>
         <span className="page-actions">
-          <span className="mut" style={{ fontSize: 12 }}>Last</span>
+          <span className="mut t-small">Last</span>
           <div className="seg" role="group" aria-label="Report window">
             {WINDOWS.map((w) => (
               <Link key={w} href={w === 30 ? "/metrics" : `/metrics?days=${w}`}
@@ -150,7 +150,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <div className="metric-grid" style={{ marginBottom: 12 }}>
         {tiles.map(([label, n, tone]) => (
           <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
-            <div style={{ fontSize: 12 }} className="mut">{label}</div>
+            <div className="mut t-small">{label}</div>
             <div className="t-page" style={{ fontWeight: 700, color: tone ? `var(--t-${tone}-fg)` : "var(--navy)" }}>{n}</div>
           </div>
         ))}
@@ -164,7 +164,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <Panel title="PM compliance"
         hint="Scheduled maintenance that fell due in the window. A task reopened after being done counts as open - the work is not done.">
         {pmTotal === 0 ? (
-          <div className="mut" style={{ fontSize: 13 }}>No scheduled maintenance fell due in this window.</div>
+          <div className="mut t-body">No scheduled maintenance fell due in this window.</div>
         ) : (
           <>
             {/* The distribution as one bar, in the same tones as the pills. */}
@@ -181,7 +181,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
               <span className="pill bad">{pm.openOverdue} overdue, open</span>
               <span className="pill neutral">{pm.openNotDue} due soon</span>
             </div>
-            <div style={{ fontSize: 13 }}>
+            <div className="t-body">
               <b>{pmPct}%</b>
               <span className="mut"> of due maintenance was done on time.</span>
             </div>
@@ -191,14 +191,14 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <Panel title="Hours"
         hint="Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or unit where they happened.">
         {hoursByClient.length === 0 ? (
-          <div className="mut" style={{ fontSize: 13 }}>No hours logged in this window.</div>
+          <div className="mut t-body">No hours logged in this window.</div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>By client</div>
               {hoursByClient.map(([k, min]) => (
                 <div key={k} style={{ padding: "4px 0", borderTop: "1px solid var(--line)" }}>
-                  <div style={{ display: "flex", gap: 8, fontSize: 13 }}>
+                  <div className="t-body" style={{ display: "flex", gap: 8 }}>
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
                     <b>{formatHours(min)}</b>
                   </div>
@@ -210,7 +210,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
               <div className="eyebrow" style={{ marginBottom: 4 }}>By person</div>
               {hoursByPerson.map(([k, min]) => (
                 <div key={k} style={{ padding: "4px 0", borderTop: "1px solid var(--line)" }}>
-                  <div style={{ display: "flex", gap: 8, fontSize: 13 }}>
+                  <div className="t-body" style={{ display: "flex", gap: 8 }}>
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
                     <b>{formatHours(min)}</b>
                   </div>
@@ -227,8 +227,8 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         {active.length === 0 ? null : <>{active.map((i) => (
           <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", flexWrap: "wrap" }}>
-            <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
-            <span style={{ fontSize: 13, flex: "1 1 140px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{labels.get(i.id) || i.externalId}</span>
+            <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
+            <span className="t-body" style={{ flex: "1 1 140px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{labels.get(i.id) || i.externalId}</span>
             <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {i.ages.map(({ stage, days }) => (
                 <span key={stage} className="pill" style={{ background: color(stage).bg, color: color(stage).fg }}>
@@ -244,9 +244,9 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <Panel title="Turnaround"
         hint="Days from a system entering the shop to its first Shipped. Days it spent in another organization's queue are shown separately - the client waited for them, but nobody here could have shortened them.">
         {turnaround.length === 0 ? (
-          <div className="mut" style={{ fontSize: 13 }}>Nothing shipped in this window.</div>
+          <div className="mut t-body">Nothing shipped in this window.</div>
         ) : (
-          <div style={{ fontSize: 13 }}>
+          <div className="t-body">
             <b>{avgTurn} day{avgTurn === 1 ? "" : "s"}</b>
             <span className="mut"> average across {turnaround.length} system{turnaround.length === 1 ? "" : "s"} · </span>
             <span className="mut">
@@ -266,14 +266,14 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         hint={<>By client, from parts recorded in the window whose cost parsed as money. Free-text costs
           (&quot;call for quote&quot;) are counted but not summed, so this is a floor.</>}>
         {spend.length === 0 ? (
-          <div className="mut" style={{ fontSize: 13 }}>No parts recorded in this window.</div>
+          <div className="mut t-body">No parts recorded in this window.</div>
         ) : (
           spend.map(([k, v]) => (
             <div key={k} style={{ padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-              <div style={{ display: "flex", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
+              <div className="t-body" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ flex: 1, minWidth: 0 }}>{k}</span>
                 <b>{formatCents(v.cents)}</b>
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {v.counted} priced{v.unpriced ? ` · ${v.unpriced} unpriced` : ""}
                 </span>
               </div>
@@ -286,15 +286,15 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         hint="From completed stage transitions (a stage added and later removed). Builds up as systems move through the shop.">
         {avgRows.map((r) => (
           <div key={r.stage} style={{ padding: "7px 4px", borderTop: "1px solid var(--line)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <div className="t-body" style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="pill" style={{ background: color(r.stage).bg, color: color(r.stage).fg }}>{r.stage}</span>
               <b style={{ marginLeft: "auto" }}>{r.avg < 1 ? "<1" : Math.round(r.avg)} day{Math.round(r.avg) === 1 ? "" : "s"}</b>
-              <span className="mut" style={{ fontSize: 11 }}>({r.n} completion{r.n === 1 ? "" : "s"})</span>
+              <span className="mut t-meta">({r.n} completion{r.n === 1 ? "" : "s"})</span>
             </div>
             <Bar value={r.avg} max={maxAvgStage} tone="neutral" />
           </div>
         ))}
-        {avgRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No completed stage transitions recorded yet.</div>}
+        {avgRows.length === 0 && <div className="mut t-body">No completed stage transitions recorded yet.</div>}
       </Panel>
         </div>
       </div>

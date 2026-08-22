@@ -438,10 +438,10 @@ export default function PdfStudio({
                 onChange={(e) => { addLocal(e.target.files); e.target.value = ""; }} />
             </label>
           }>
-          {fileOver && <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>Drop to add</div>}
+          {fileOver && <div className="mut t-meta" style={{ marginBottom: 8 }}>Drop to add</div>}
           {dropNote && (
-            <div style={{ fontSize: 11, color: "var(--t-warn-fg)", marginBottom: 8 }}>
-              {dropNote} <button className="btn link" style={{ fontSize: 11 }} onClick={() => setDropNote("")}>dismiss</button>
+            <div className="t-meta" style={{ color: "var(--t-warn-fg)", marginBottom: 8 }}>
+              {dropNote} <button className="btn link" onClick={() => setDropNote("")}>dismiss</button>
             </div>
           )}
           {/* Folded away, and it stays folded. The connection is made and
@@ -449,7 +449,7 @@ export default function PdfStudio({
               second way into a store rather than the first thing on the page. */}
           {cloud?.configured && (
             <details style={{ marginBottom: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--t-info-fg)" }}>
+              <summary className="t-small" style={{ cursor: "pointer", color: "var(--t-info-fg)" }}>
                 OneDrive, Teams and SharePoint
               </summary>
               <CloudBrowser account={cloud.account} brokenReason={cloud.brokenReason}
@@ -462,19 +462,19 @@ export default function PdfStudio({
           )}
           {sources.length > 6 && (
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or record"
-              style={{ fontSize: 12, marginBottom: 8 }} />
+              className="t-small" style={{ marginBottom: 8 }} />
           )}
           <div className="pdf-srclist">
             {shownSources.map((s) => (
               <div key={s.id} style={{ display: "flex", gap: 6, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
                 <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }} onClick={() => addAttachment(s)}>+ add</button>
-                <span style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.fileName}>
+                <span className="t-small" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.fileName}>
                   {s.fileName}
                 </span>
                 <span className="mut" style={{ fontSize: 10, marginLeft: "auto", flexShrink: 0 }}>{s.home}</span>
               </div>
             ))}
-            {shownSources.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No PDFs match.</div>}
+            {shownSources.length === 0 && <div className="mut t-small">No PDFs match.</div>}
           </div>
         </Panel>
 
@@ -487,7 +487,7 @@ export default function PdfStudio({
                   <span aria-hidden style={{ width: 9, height: 9, borderRadius: 2, background: docColor(d.key), flexShrink: 0 }} />
                   <input value={d.title} aria-label={`Header title for ${d.fileName}`}
                     onChange={(e) => setDocs((ds) => ds.map((x) => (x.key === d.key ? { ...x, title: e.target.value } : x)))}
-                    style={{ fontSize: 12, flex: 1 }} />
+                    className="t-small" style={{ flex: 1 }} />
                   <RowActions inline={1} menuLabel={`Actions for ${d.fileName}`}
                     items={[{ label: "Remove", tone: "bad", onClick: () => removeDoc(d.key) }]} />
                 </div>
@@ -517,20 +517,20 @@ export default function PdfStudio({
           {selected.size > 0 && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10,
               background: "#F4F6F9", border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px" }}>
-              <b style={{ fontSize: 12 }}>{selected.size} selected</b>
+              <b className="t-small">{selected.size} selected</b>
               <button className="btn sm" onClick={() => rotateUids(selected, -1)}>⟲</button>
               <button className="btn sm" onClick={() => rotateUids(selected, 1)}>⟳</button>
               <button className="btn sm" style={{ color: "var(--t-bad-fg)" }} onClick={() => removeUids(selected)}>Remove</button>
               <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <input value={bulkTitle} onChange={(e) => setBulkTitle(e.target.value)}
                   aria-label="Header title for the selected pages" placeholder="header for these pages"
-                  style={{ fontSize: 12, width: 150 }} />
+                  className="t-small" style={{ width: 150 }} />
                 <button className="btn sm" onClick={() => setTitles(selected, bulkTitle.trim())}>Set</button>
               </span>
               <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                <label className="mut" style={{ fontSize: 12 }} htmlFor="pdf-moveto">to page</label>
+                <label className="mut t-small" htmlFor="pdf-moveto">to page</label>
                 <input id="pdf-moveto" value={moveTo} onChange={(e) => setMoveTo(e.target.value.replace(/\D/g, ""))}
-                  inputMode="numeric" style={{ fontSize: 12, width: 52 }} />
+                  inputMode="numeric" className="t-small" style={{ width: 52 }} />
                 <button className="btn sm" disabled={!moveTo} onClick={() => moveSelectedTo(parseInt(moveTo) || 1)}>Move</button>
               </span>
               <button className="btn link" style={{ fontSize: 12 }} onClick={() => setSelected(new Set())}>clear</button>
@@ -567,7 +567,7 @@ export default function PdfStudio({
                         style={{ width: "100%", display: "block", borderRadius: 4, transform: p.rotate ? `rotate(${p.rotate}deg)` : undefined }} />
                     ) : (
                       <div style={{ width: "100%", aspectRatio: "17 / 22", display: "grid", placeItems: "center", background: "#F4F6F9", borderRadius: 4 }}>
-                        <span className="mut" style={{ fontSize: 11 }}>{src === "" ? "no preview" : "rendering…"}</span>
+                        <span className="mut t-meta">{src === "" ? "no preview" : "rendering…"}</span>
                       </div>
                     )}
                     <span style={{
@@ -603,7 +603,7 @@ export default function PdfStudio({
                   minHeight: 120, borderRadius: 4, display: "grid", placeItems: "center",
                   border: `2px dashed ${over === "end" ? "var(--navy)" : "var(--line)"}`,
                 }}
-              ><span className="mut" style={{ fontSize: 11 }}>to the end</span></div>
+              ><span className="mut t-meta">to the end</span></div>
             )}
           </div>
         </Panel>
@@ -633,7 +633,7 @@ export default function PdfStudio({
               <input value={cover} onChange={(e) => setCover(e.target.value)} placeholder="SS-1042 validation packet" />
             </div>
           </div>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10, fontSize: 12 }}>
+          <div className="t-small" style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
               <input type="checkbox" className="check" checked={numbers} onChange={(e) => setNumbers(e.target.checked)} />
               Page numbers
@@ -654,9 +654,9 @@ export default function PdfStudio({
             <button className="btn sm" disabled={!!busy || !pages.length} onClick={() => save("download")}>
               {busy === "download" ? "Building..." : "Download"}
             </button>
-            {saved && <span style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700 }}>{saved} ✓</span>}
+            {saved && <span className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700 }}>{saved} ✓</span>}
           </div>
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
         </Panel>
       </div>
     </div>

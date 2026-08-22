@@ -48,30 +48,30 @@ export default function ParityList({ diffs, showHistory = false }: { diffs: Diff
   }
 
   if (!diffs.length) {
-    return <div className="mut" style={{ fontSize: 13 }}>No diffs recorded yet. The cron job runs hourly.</div>;
+    return <div className="mut t-body">No diffs recorded yet. The cron job runs hourly.</div>;
   }
 
   return (
     <>
       {!showHistory && open.length === 0 && (
         <div className="card" style={{ padding: 14 }}>
-          <span style={{ fontSize: 13, color: "var(--t-good-fg)", fontWeight: 700 }}>✓ No open mismatches.</span>
+          <span className="t-body" style={{ color: "var(--t-good-fg)", fontWeight: 700 }}>✓ No open mismatches.</span>
         </div>
       )}
 
       {!showHistory && groups.map((g) => (
         <div key={g.externalId} className="card" style={{ padding: 14 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span className="mono" style={{ fontWeight: 700, fontSize: 13, color: "var(--navy)" }}>{g.externalId}</span>
-            <span className="mut" style={{ fontSize: 12 }}>{g.items.length} mismatch{g.items.length === 1 ? "" : "es"}</span>
+            <span className="mono t-body" style={{ fontWeight: 700, color: "var(--navy)" }}>{g.externalId}</span>
+            <span className="mut t-small">{g.items.length} mismatch{g.items.length === 1 ? "" : "es"}</span>
           </div>
           {g.items.map((d) => (
             <div key={d.id} style={{ borderTop: "1px solid var(--line)", marginTop: 10, paddingTop: 10 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 700 }}>{d.field === "Row" ? "Row presence" : d.field}</span>
-                <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{when(d.runAt)}</span>
+                <span className="t-body" style={{ fontWeight: 700 }}>{d.field === "Row" ? "Row presence" : d.field}</span>
+                <span className="mut t-meta" style={{ marginLeft: "auto" }}>{when(d.runAt)}</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: "3px 8px", fontSize: 13, marginBottom: 8 }}>
+              <div className="t-body" style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: "3px 8px", marginBottom: 8 }}>
                 <span className="eyebrow" style={{ alignSelf: "start", paddingTop: 2 }}>Sheet</span>
                 <span>{d.sheetValue || <span className="mut">(blank)</span>}</span>
                 <span className="eyebrow" style={{ alignSelf: "start", paddingTop: 2, color: "var(--t-info-fg)" }}>Ours</span>
@@ -89,7 +89,7 @@ export default function ParityList({ diffs, showHistory = false }: { diffs: Diff
                   {d.field === "Row" && d.sheetValue === "(missing from sheet)" ? "Just acknowledge" : "Accept sheet"}
                 </button>
               </div>
-              {errors[d.id] && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{errors[d.id]}</div>}
+              {errors[d.id] && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{errors[d.id]}</div>}
             </div>
           ))}
         </div>

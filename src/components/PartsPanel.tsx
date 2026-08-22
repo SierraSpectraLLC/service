@@ -32,7 +32,8 @@ function PartStatusSelect({ part }: { part: Part }) {
     <select
       value={status}
       onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setPartStatus(part.id, e.target.value); })}
-      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: `var(--t-${PART_TONE[status] ?? "neutral"}-bg)`, color: `var(--t-${PART_TONE[status] ?? "neutral"}-fg)`, cursor: "pointer" }}
+      className="t-meta"
+      style={{ width: "auto", fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: `var(--t-${PART_TONE[status] ?? "neutral"}-bg)`, color: `var(--t-${PART_TONE[status] ?? "neutral"}-fg)`, cursor: "pointer" }}
     >
       {PART_STATES.map((s) => <option key={s}>{s}</option>)}
     </select>
@@ -51,7 +52,8 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
         setOptimistic(next);
         await setPartAsset(part.id, next);
       })}
-      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: assetId !== null ? "#EDEBFA" : "#EEF1F5", color: assetId !== null ? "#4F45A3" : "#475569", cursor: "pointer" }}
+      className="t-meta"
+      style={{ width: "auto", fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: assetId !== null ? "#EDEBFA" : "#EEF1F5", color: assetId !== null ? "#4F45A3" : "#475569", cursor: "pointer" }}
     >
       <option value="">Whole system</option>
       {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
@@ -119,7 +121,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   /** Say what a row is still carrying when a date input could not show it. */
   const legacy = (stored: string | undefined, shown: string) =>
     (stored && !isoDay(stored) && !shown
-      ? <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>recorded as &ldquo;{stored}&rdquo;</div>
+      ? <div className="mut t-meta" style={{ marginTop: 3 }}>recorded as &ldquo;{stored}&rdquo;</div>
       : null);
 
   // Order paperwork only matters once something is actually on order; keep the
@@ -171,9 +173,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
       </div>
 
       {flag && (
-        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8, display: "flex", gap: 8 }}>
+        <div className="t-small" style={{ padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8, display: "flex", gap: 8 }}>
           <span style={{ flex: 1 }}><b>Recorded.</b> {flag}</span>
-          <button className="btn link" style={{ fontSize: 11, color: "var(--t-warn-fg)" }} onClick={() => setFlag("")}>dismiss</button>
+          <button className="btn link" style={{ color: "var(--t-warn-fg)" }} onClick={() => setFlag("")}>dismiss</button>
         </div>
       )}
 
@@ -213,11 +215,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               ))}
             </div>
             {draft.kind === "consumable" && (
-              <span className="mut" style={{ fontSize: 11 }}>ferrules, septa, liners... defaults to Installed</span>
+              <span className="mut t-meta">ferrules, septa, liners... defaults to Installed</span>
             )}
             {draft.kind === "kit" && (
               <>
-                <span className="mut" style={{ fontSize: 11 }}>the box as sold</span>
+                <span className="mut t-meta">the box as sold</span>
                 <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0, fontSize: 11.5, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--ink)", cursor: "pointer" }}>
                   <input type="checkbox" checked={draft.expandKit} style={{ width: 14, height: 14 }}
                     onChange={(e) => setDraft({ ...draft, expandKit: e.target.checked })} />
@@ -272,7 +274,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             if (!offers.length) return null;
             return (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                <span className="mut" style={{ fontSize: 11 }}>Price book:</span>
+                <span className="mut t-meta">Price book:</span>
                 {offers.map((o, i) => (
                   <button key={`${o.vendor}-${i}`} className="pill" type="button"
                     onClick={() => setDraft({ ...draft, vendor: o.vendor, cost: centsToInput(o.priceCents) })}
@@ -296,7 +298,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               </select>
             </div>
           ) : target.instrumentId !== null ? (
-            <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+            <div className="mut t-meta" style={{ marginBottom: 8 }}>
               To tag this part to a specific unit, first list the system&apos;s assets (pump, detector...) in
               the Assets section above - then a &quot;For asset&quot; picker appears here and on each part row.
             </div>
@@ -309,7 +311,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 {PART_STATES.map((s) => <option key={s}>{s}</option>)}
               </select>
               {draft.status === "Removed" && (
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "6px 0 0", textTransform: "none", letterSpacing: 0, color: "var(--ink)", fontWeight: 400 }}>
+                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0 0", textTransform: "none", letterSpacing: 0, color: "var(--ink)", fontWeight: 400 }}>
                   <input type="checkbox" checked={draft.requestReplacement} style={{ width: 15, height: 15 }}
                     onChange={(e) => setDraft({ ...draft, requestReplacement: e.target.checked })} />
                   Request new? Files a copy as <b>Needed</b> so the reorder isn&apos;t forgotten.
@@ -362,12 +364,12 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 <label style={{ margin: 0 }}>Part of maintenance</label>
                 <select value={draft.pmScheduleId ?? ""} aria-label="Part of maintenance"
                   onChange={(e) => setDraft({ ...draft, pmScheduleId: e.target.value ? parseInt(e.target.value) : null })}
-                  style={{ width: "auto", fontSize: 12, maxWidth: 280 }}>
+                  className="t-small" style={{ width: "auto", maxWidth: 280 }}>
                   <option value="">Not part of a maintenance job</option>
                   {pmJobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
                 </select>
                 {draft.pmScheduleId !== null && (
-                  <span className="mut" style={{ fontSize: 11 }}>
+                  <span className="mut t-meta">
                     stays off the parts allowance where the contract includes PM parts
                   </span>
                 )}
@@ -381,8 +383,8 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             <label>Details</label>
             {specPairs.map((p, i) => (
               <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                <input value={p.k} onChange={(e) => setPair(i, { k: e.target.value })} placeholder="Length" style={{ flex: "0 1 120px", fontSize: 13 }} />
-                <input value={p.v} onChange={(e) => setPair(i, { v: e.target.value })} placeholder="30 m" style={{ flex: 1, fontSize: 13 }} />
+                <input value={p.k} onChange={(e) => setPair(i, { k: e.target.value })} placeholder="Length" className="t-body" style={{ flex: "0 1 120px" }} />
+                <input value={p.v} onChange={(e) => setPair(i, { v: e.target.value })} placeholder="30 m" className="t-body" style={{ flex: 1 }} />
                 <button className="btn link" style={{ color: "var(--t-bad-fg)", padding: "0 4px" }}
                   onClick={() => setSpecPairs((s) => s.filter((_, idx) => idx !== i))}>×</button>
               </div>
@@ -396,7 +398,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         </Dialog>
       )}
 
-      {parts.length === 0 && !form && <div className="mut" style={{ fontSize: 13 }}>No parts tracked for this system.</div>}
+      {parts.length === 0 && !form && <div className="mut t-body">No parts tracked for this system.</div>}
       {(() => {
         const renderRow = (p: Part) => {
           const link = trackUrl(p.carrier, p.tracking);
@@ -407,7 +409,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           return (
             <div key={p.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 8, background: "#FAFBFD" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontWeight: 700, fontSize: 13 }}>{p.name}{p.qty ? <span className="mut" style={{ fontWeight: 400 }}> × {p.qty}</span> : null}</span>
+                <span className="t-body" style={{ fontWeight: 700 }}>{p.name}{p.qty ? <span className="mut" style={{ fontWeight: 400 }}> × {p.qty}</span> : null}</span>
                 {canEdit && systemAssets.length > 0 ? (
                   <PartAssetSelect part={p} systemAssets={systemAssets} />
                 ) : assetLabel(p.assetId) ? (
@@ -423,20 +425,20 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 )}
                 {canEdit && <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => openEdit(p)}>edit</button>}
               </div>
-              <div className="mut" style={{ fontSize: 12, marginTop: 5 }}>
+              <div className="mut t-small" style={{ marginTop: 5 }}>
                 {p.partNumber ? <>PN {p.partNumber}</> : "No PN"}
                 {p.serial ? " · SN " + p.serial : ""}
                 {p.vendor ? " · " + p.vendor : ""}{p.po ? " · PO " + p.po : ""}{p.cost ? " · $" + p.cost : ""}
               </div>
               {specs.length > 0 && (
-                <div style={{ fontSize: 12, marginTop: 5 }}>
+                <div className="t-small" style={{ marginTop: 5 }}>
                   {specs.map((s, i) => (
                     <span key={i}>{i > 0 ? " · " : ""}<span className="mut">{s.k}</span> <b style={{ fontWeight: 600 }}>{s.v}</b></span>
                   ))}
                 </div>
               )}
               {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.installedAt || p.removedAt) && (
-                <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                <div className="t-small" style={{ marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   {p.tracking && (link
                     ? <a className="mono" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{p.carrier} {p.tracking} ↗</a>
                     : <span className="mono" style={{ color: "var(--t-info-fg)" }}>{p.carrier ? p.carrier + " " : ""}{p.tracking}</span>)}
@@ -452,7 +454,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   {pmJobs.find((j) => j.id === p.pmScheduleId)!.title}
                 </span>
               )}
-              {p.note && <div style={{ fontSize: 12, marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
+              {p.note && <div className="t-small" style={{ marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
               {inside.length > 0 && (
                 <details style={{ marginTop: 6 }}>
                   <summary style={{ cursor: "pointer", fontSize: 11.5, color: "var(--mut)" }}>
@@ -460,9 +462,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   </summary>
                   <div style={{ paddingLeft: 12, marginTop: 4 }}>
                     {inside.map((c) => (
-                      <div key={c.id} style={{ fontSize: 12, padding: "2px 0", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <div key={c.id} className="t-small" style={{ padding: "2px 0", display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <span>{c.name}{c.qty ? <span className="mut"> × {c.qty}</span> : null}</span>
-                        {c.partNumber && <span className="mono mut" style={{ fontSize: 11 }}>{c.partNumber}</span>}
+                        {c.partNumber && <span className="mono mut t-meta">{c.partNumber}</span>}
                       </div>
                     ))}
                   </div>
@@ -493,7 +495,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                     {/* Call the day what it was. A PM day closes seven procedures
                         at once and no list of them says "Annual PM". */}
                     {canEdit && v.day !== "" && (
-                      <button className="btn link" style={{ fontSize: 11, marginLeft: 8 }}
+                      <button className="btn link" style={{ marginLeft: 8 }}
                         onClick={(e) => {
                           // Inside a <summary>: without this the click also
                           // toggles the fold shut under the form that opens.
@@ -508,7 +510,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                         placeholder="Annual PM"
                         onChange={(e) => setNaming({ day: v.day, title: e.target.value })}
                         onKeyDown={(e) => { if (e.key === "Enter") saveVisitName(); }}
-                        style={{ flex: "1 1 180px", fontSize: 13 }} />
+                        className="t-body" style={{ flex: "1 1 180px" }} />
                       <button className="btn sm accent" disabled={pending} onClick={() => saveVisitName()}>Save</button>
                       <button className="btn sm" disabled={pending} onClick={() => setNaming(null)}>Cancel</button>
                       {v.named && (
@@ -552,7 +554,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         const total = priced.reduce((sum, p) => sum + money(p.cost), 0);
         const missing = billable.length - priced.length;
         return (
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, fontSize: 12, marginTop: 2 }}>
+          <div className="t-small" style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 2 }}>
             <span className="mut">Parts total{missing > 0 ? ` (${priced.length} of ${billable.length} priced)` : ""}:</span>
             <b>${total.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
           </div>

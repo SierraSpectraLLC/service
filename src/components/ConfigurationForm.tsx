@@ -260,7 +260,7 @@ export default function ConfigurationForm(props: {
                 if (res?.error) setOpError(res.error);
               });
             }}
-            style={{ width: "auto", fontSize: 12 }}>
+            className="t-small" style={{ width: "auto" }}>
             <option value="">nobody - use the platform name</option>
             {props.orgs.filter((o) => o.kind === "provider").map((o) => (
               <option key={o.id} value={o.id}>{o.name}</option>
@@ -269,7 +269,7 @@ export default function ConfigurationForm(props: {
         </Field>
 
         <SubHead>Modules</SubHead>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+        <div className="mut t-meta" style={{ marginBottom: 6 }}>
           Off hides their pages and silences their scheduled runs.
         </div>
         {([
@@ -287,7 +287,7 @@ export default function ConfigurationForm(props: {
                   setModuleState((m) => ({ ...m, [key]: next }));
                   startTransition(async () => { await setModule(key, next); });
                 }} />
-              <div style={{ fontSize: 13, fontWeight: 700 }}>{label}</div>
+              <div className="t-body" style={{ fontWeight: 700 }}>{label}</div>
             </div>
             {/* The digest's own schedule sits with its switch: an email that
                 goes out every morning is worth being able to time, preview and
@@ -295,19 +295,19 @@ export default function ConfigurationForm(props: {
             {key === "digest" && (moduleState[key] ?? on) && (
               <div style={{ margin: "8px 0 4px 54px" }}>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <span className="mut" style={{ fontSize: 12 }}>Sends at</span>
+                  <span className="mut t-small">Sends at</span>
                   <select value={digestHour} disabled={pending}
                     onChange={(e) => {
                       const next = parseInt(e.target.value);
                       setDigestHourState(next);
                       saveDigestSchedule(next, digestDaysSel);
                     }}
-                    style={{ width: "auto", fontSize: 12 }}>
+                    className="t-small" style={{ width: "auto" }}>
                     {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{clockLabel(h)}</option>)}
                   </select>
-                  <span className="mut" style={{ fontSize: 12 }}>shop time, on</span>
+                  <span className="mut t-small">shop time, on</span>
                   {WEEK_ORDER.map((d) => (
-                    <label key={d} style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11, margin: 0, fontWeight: 400, cursor: "pointer" }}>
+                    <label key={d} className="t-meta" style={{ display: "flex", gap: 3, alignItems: "center", margin: 0, fontWeight: 400, cursor: "pointer" }}>
                       <input type="checkbox" checked={digestDaysSel.includes(d)} disabled={pending}
                         onChange={() => {
                           const next = digestDaysSel.includes(d)
@@ -323,13 +323,13 @@ export default function ConfigurationForm(props: {
                   <a className="btn sm" href="/api/digest/preview" target="_blank" rel="noreferrer">Preview</a>
                   <button className="btn sm" onClick={sendDigest} disabled={pending}>Send now</button>
                 </div>
-                <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                <div className="mut t-meta" style={{ marginTop: 4 }}>
                   {props.digestTo.length
                     ? `Goes to ${props.digestTo.join(", ")}. Each client's own edition is scheduled on their page.`
                     : "Nobody receives it yet - add staff under Settings > Personnel."}
                 </div>
                 {digestMsg && (
-                  <div style={{ fontSize: 12, marginTop: 4, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
+                  <div className="t-small" style={{ marginTop: 4, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
                 )}
               </div>
             )}
@@ -348,16 +348,16 @@ export default function ConfigurationForm(props: {
           <div style={{ height: bandH, background: gradientCss(stops) }} />
           <div style={{ background: headerOk ? effectiveHeader : "var(--navy)", color: previewFg, padding: "10px 14px", display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontWeight: 800, letterSpacing: "-0.2px" }}>{(props.platformName || "Ridgeline").toUpperCase()}</span>
-            <span style={{ opacity: 0.7, fontSize: 12 }}>× a client workspace</span>
+            <span className="t-small" style={{ opacity: 0.7 }}>× a client workspace</span>
           </div>
-          <div style={{ background: headerOk ? tint(effectiveHeader, 0.93) : "var(--bg)", padding: "12px 14px", fontSize: 12, color: "var(--mut)" }}>
+          <div className="t-small" style={{ background: headerOk ? tint(effectiveHeader, 0.93) : "var(--bg)", padding: "12px 14px", color: "var(--mut)" }}>
             The page behind it takes a wash of the same colour, exactly as an organization&apos;s does.
           </div>
         </div>
 
         <SubHead>Header colour</SubHead>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+          <label className="t-body" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={headerDefault} disabled={pending}
               onChange={(e) => { setHeaderDefault(e.target.checked); clearBar(); }}
               style={{ width: "auto", margin: 0 }} />
@@ -366,35 +366,35 @@ export default function ConfigurationForm(props: {
           <input type="color" value={isValidHex(header) ? header : DEFAULT_HEADER} disabled={pending || headerDefault}
             onChange={(e) => { setHeader(e.target.value.toUpperCase()); clearBar(); }}
             style={{ width: 44, height: 30, padding: 2 }} />
-          <input className="mono" value={header} disabled={pending || headerDefault}
+          <input className="mono t-small" value={header} disabled={pending || headerDefault}
             onChange={(e) => { setHeader(e.target.value.toUpperCase()); clearBar(); }}
-            style={{ width: 110, fontSize: 12 }} />
+            style={{ width: 110 }} />
           {!headerDefault && !isValidHex(header) && (
-            <span style={{ fontSize: 12, color: "var(--t-bad-fg)" }}>needs to be #RRGGBB</span>
+            <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>needs to be #RRGGBB</span>
           )}
         </div>
 
         <SubHead>Spectrum</SubHead>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <span className="mut" style={{ fontSize: 12 }}>Thickness</span>
+          <span className="mut t-small">Thickness</span>
           <input type="range" min={0} max={MAX_SPECTRUM_HEIGHT} value={bandH} disabled={pending}
             onChange={(e) => { setBandH(parseInt(e.target.value)); clearBar(); }}
             style={{ width: 160 }} />
-          <span className="mono" style={{ fontSize: 12, minWidth: 34 }}>{bandH}px</span>
-          {bandH === 0 && <span className="mut" style={{ fontSize: 12 }}>hidden</span>}
+          <span className="mono t-small" style={{ minWidth: 34 }}>{bandH}px</span>
+          {bandH === 0 && <span className="mut t-small">hidden</span>}
         </div>
         {stops.map((st, i) => (
           <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderTop: "1px solid var(--line)" }}>
             <input type="color" value={isValidHex(st.c) ? st.c : DEFAULT_HEADER} disabled={pending}
               onChange={(e) => setStop(i, { c: e.target.value.toUpperCase() })}
               style={{ width: 40, height: 26, padding: 2 }} />
-            <input className="mono" value={st.c} disabled={pending}
+            <input className="mono t-small" value={st.c} disabled={pending}
               onChange={(e) => setStop(i, { c: e.target.value.toUpperCase() })}
-              style={{ width: 100, fontSize: 12 }} />
+              style={{ width: 100 }} />
             <input type="range" min={0} max={100} value={st.at} disabled={pending}
               onChange={(e) => setStop(i, { at: parseInt(e.target.value) })}
               style={{ flex: "1 1 90px", minWidth: 80 }} />
-            <span className="mono" style={{ fontSize: 12, minWidth: 34 }}>{st.at}%</span>
+            <span className="mono t-small" style={{ minWidth: 34 }}>{st.at}%</span>
             <button className="btn link" disabled={pending || stops.length <= 1}
               onClick={() => { clearBar(); setStops((l) => l.filter((_, n) => n !== i)); }}
               style={{ fontSize: 12 }}>remove</button>
@@ -408,7 +408,7 @@ export default function ConfigurationForm(props: {
             reset to the default look
           </button>
         </div>
-        <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
+        <div className="mut t-meta" style={{ marginTop: 8 }}>
           Buttons, titles and tabs keep the house navy on purpose - one colour applied to
           every accent is a redesign rather than a brand, and it is how a readable interface
           stops being one.
@@ -425,8 +425,8 @@ export default function ConfigurationForm(props: {
             <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
               {!s.builtin && (
                 <>
-                  <button className="btn link" style={{ fontSize: 11 }} disabled={pending} onClick={() => doRename(s)}>rename</button>
-                  <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending} onClick={() => doDelete(s)}>delete</button>
+                  <button className="btn link" disabled={pending} onClick={() => doRename(s)}>rename</button>
+                  <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending} onClick={() => doDelete(s)}>delete</button>
                 </>
               )}
               <input type="color" value={colors[s.id] ?? s.bg} onChange={(e) => changeColor(s.id, e.target.value)}
@@ -438,12 +438,12 @@ export default function ConfigurationForm(props: {
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center" }}>
           <input value={stageDraft.name} onChange={(e) => setStageDraft({ ...stageDraft, name: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") submitStage(); }}
-            placeholder="New stage name" style={{ flex: 1, fontSize: 13 }} />
+            placeholder="New stage name" className="t-body" style={{ flex: 1 }} />
           <input type="color" value={stageDraft.bg} onChange={(e) => setStageDraft({ ...stageDraft, bg: e.target.value })}
             style={{ width: 34, height: 30, padding: 2, border: "1px solid var(--line)", borderRadius: 6, background: "#fff", cursor: "pointer" }} />
           <button className="btn sm accent" onClick={submitStage} disabled={pending || !stageDraft.name.trim()}>Add</button>
         </div>
-        {stageError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{stageError}</div>}
+        {stageError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{stageError}</div>}
       </Panel>
 
       {/* Modules, stages and the operator save themselves; the bar carries the

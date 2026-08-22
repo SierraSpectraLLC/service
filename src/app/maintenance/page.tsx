@@ -93,7 +93,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
           <span style={{ minWidth: 0, display: "block" }}>
             <Id>{place.id}</Id>
             {place.label && (
-              <span className="mut" style={{ display: "block", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span className="mut t-meta" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {place.label}
               </span>
             )}
@@ -150,7 +150,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
       {/* Nothing owed: the whole shop's upkeep in one line, and when it's back. */}
       {view === "due" && allClear && next && schedules.length > 0 && (
         <div className="card" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>Nothing due</span>
+          <span className="t-body" style={{ fontWeight: 700 }}>Nothing due</span>
           <Pill tone="good">next due {next.label}</Pill>
         </div>
       )}
@@ -177,7 +177,7 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         { tone: "faint", label: "paused" },
       ]} />
 
-      <div className="mut no-print" style={{ fontSize: 12, padding: "0 4px" }}>
+      <div className="mut no-print t-small" style={{ padding: "0 4px" }}>
         Define what each model needs - jobs, cadences, part numbers - in{" "}
         <Link href="/settings/procedures" style={{ color: "var(--navy)" }}>Settings → Procedures</Link>.
       </div>

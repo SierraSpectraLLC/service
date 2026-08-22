@@ -79,10 +79,10 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
           padding: "7px 4px", borderTop: "1px solid var(--line)",
           textDecoration: "none", color: "inherit",
         }}>
-        <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{o.number}</span>
-        <span style={{ fontSize: 13, flex: "1 1 160px" }}>{o.title}</span>
+        <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{o.number}</span>
+        <span className="t-body" style={{ flex: "1 1 160px" }}>{o.title}</span>
         <span className={`pill ${tone}`}>{WO_LABEL[o.state] ?? o.state}</span>
-        <span className="mut" style={{ fontSize: 11, width: "100%" }}>
+        <span className="mut t-meta" style={{ width: "100%" }}>
           {woLine(o, today, { tasks: o.tasks, done: o.done })}
           {o.askedBy ? ` · asked by ${o.askedBy}` : ""}
         </span>
@@ -188,20 +188,20 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <label style={{ margin: 0 }}>Dispatch to</label>
               <select value={assignee} onChange={(e) => setAssignee(e.target.value)}
-                aria-label="Dispatch to" style={{ width: "auto", fontSize: 13 }}>
+                aria-label="Dispatch to" className="t-body" style={{ width: "auto" }}>
                 <option value="">Decide later</option>
                 {people.map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
-              {assignee && <span className="mut" style={{ fontSize: 11 }}>{assignee} gets notified the moment it files.</span>}
+              {assignee && <span className="mut t-meta">{assignee} gets notified the moment it files.</span>}
             </div>
           )}
         </Dialog>
       )}
-      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
+      {!open && error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
       {flag && (
-        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8, display: "flex", gap: 8 }}>
+        <div className="t-small" style={{ padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8, display: "flex", gap: 8 }}>
           <span style={{ flex: 1 }}><b>Filed.</b> {flag}</span>
-          <button className="btn link" style={{ fontSize: 11, color: "var(--t-warn-fg)" }} onClick={() => setFlag("")}>dismiss</button>
+          <button className="btn link" style={{ color: "var(--t-warn-fg)" }} onClick={() => setFlag("")}>dismiss</button>
         </div>
       )}
 

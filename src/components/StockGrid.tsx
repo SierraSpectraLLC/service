@@ -110,12 +110,12 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
   return (
     <div>
       <div style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
-        <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 560 }}>
+        <table className="t-small" style={{ borderCollapse: "collapse", minWidth: 560 }}>
           <thead>
             <tr>
               <th style={{ width: 26 }} />
               {COLUMNS.map((c) => (
-                <th key={c.key} style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--slate)", width: c.width }}>
+                <th key={c.key} className="t-meta" style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", color: "var(--slate)", width: c.width }}>
                   {c.label}{c.key === "partNumber" && " *"}
                 </th>
               ))}
@@ -131,10 +131,10 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
                     <input value={r[c.key]} aria-label={`${c.label}, row ${i + 1}`}
                       list={c.key === "partNumber" ? "stock-known-parts" : undefined}
                       inputMode={c.key === "qty" || c.key === "minQty" ? "numeric" : undefined}
-                      className={c.key === "partNumber" ? "mono" : undefined}
+                      className={c.key === "partNumber" ? "mono t-small" : "t-small"}
                       onChange={(e) => setCell(i, c.key, e.target.value)}
                       onPaste={(e) => onPaste(e, i, ci)}
-                      style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                      style={{ width: "100%", padding: "3px 4px" }} />
                   </td>
                 ))}
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>

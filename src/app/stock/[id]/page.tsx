@@ -167,7 +167,7 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
       <div className="card">
 
         {short.length > 0 && (
-          <div style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", margin: "6px 0 10px" }}>
+          <div className="t-small" style={{ color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", margin: "6px 0 10px" }}>
             <b>{short.length} line{short.length === 1 ? "" : "s"} at or below the reorder point:</b>{" "}
             {short.slice(0, 6).map((s) => s.partNumber).join(", ")}
             {short.length > 6 ? `, +${short.length - 6} more` : ""}
@@ -210,32 +210,32 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
 
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Ledger</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+        <div className="mut t-small" style={{ marginBottom: 10 }}>
           Every count change, newest first. A recount posts the difference rather than
           overwriting the number, so a shelf that keeps drifting shows up as a pattern.
         </div>
-        {moves.length === 0 && <div className="mut" style={{ fontSize: 13 }}>Nothing has moved yet.</div>}
+        {moves.length === 0 && <div className="mut t-body">Nothing has moved yet.</div>}
         {moves.map((m) => (
           <div key={m.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-            <span style={{
-              fontSize: 13, fontWeight: 700, width: 40,
+            <span className="t-body" style={{
+              fontWeight: 700, width: 40,
               color: m.delta > 0 ? "#2E6B2E" : "#A32D2D",
             }}>{m.delta > 0 ? `+${m.delta}` : m.delta}</span>
-            <span className="mono" style={{ fontSize: 12 }}>{m.partNumber}</span>
-            <span className="mut" style={{ fontSize: 12 }}>{MOVE_LABEL[m.kind] ?? m.kind}</span>
+            <span className="mono t-small">{m.partNumber}</span>
+            <span className="mut t-small">{MOVE_LABEL[m.kind] ?? m.kind}</span>
             {m.instrumentId !== null && instLabel.get(m.instrumentId) && (
-              <Link href={`/instruments/${m.instrumentId}`} style={{ fontSize: 12, textDecoration: "none" }}>
+              <Link href={`/instruments/${m.instrumentId}`} className="t-small" style={{ textDecoration: "none" }}>
                 {instLabel.get(m.instrumentId)}
               </Link>
             )}
             {m.assetId !== null && (
-              <Link href={`/assets/${m.assetId}`} style={{ fontSize: 12, textDecoration: "none" }}>unit #{m.assetId}</Link>
+              <Link href={`/assets/${m.assetId}`} className="t-small" style={{ textDecoration: "none" }}>unit #{m.assetId}</Link>
             )}
             {m.counterpartyId !== null && roomName.get(m.counterpartyId) && (
-              <span className="mut" style={{ fontSize: 12 }}>{roomName.get(m.counterpartyId)}</span>
+              <span className="mut t-small">{roomName.get(m.counterpartyId)}</span>
             )}
-            {m.reason && <span className="mut" style={{ fontSize: 12 }}>- {m.reason}</span>}
-            <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>
+            {m.reason && <span className="mut t-small">- {m.reason}</span>}
+            <span className="mut t-meta" style={{ marginLeft: "auto" }}>
               {m.actor.split("@")[0]} · {shopTime(m.at)}
             </span>
           </div>

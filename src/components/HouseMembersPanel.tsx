@@ -44,14 +44,14 @@ export default function HouseMembersPanel({ members, myEmail }: {
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Our people</div>
-        <span className="mut" style={{ fontSize: 12 }}>
+        <span className="mut t-small">
           {owners} owner{owners === 1 ? "" : "s"} · {members.filter((m) => m.role === "staff").length} staff
         </span>
         <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => { setAdding(!adding); setError(""); }}>
           {adding ? "Cancel" : "+ Add someone"}
         </button>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="mut t-small" style={{ marginBottom: 10 }}>
         Staff see and work every system in the shop. Owners additionally get Settings,
         organizations, stages, branding, hard deletes and signature revocation. Changes
         take effect on their next page load - no redeploy, no signing out.
@@ -94,13 +94,13 @@ export default function HouseMembersPanel({ members, myEmail }: {
 
       {members.map((m) => (
         <div key={m.email} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: m.role === "owner" ? 700 : 400 }}>
+          <span className="t-body" style={{ fontWeight: m.role === "owner" ? 700 : 400 }}>
             {m.name || m.email.split("@")[0]}
           </span>
-          <span className="mono mut" style={{ fontSize: 12 }}>{m.email}</span>
+          <span className="mono mut t-small">{m.email}</span>
           {/* Quiet markers, not more pills: the row's one pill is its role. */}
           {(m.email === myEmail.toLowerCase() || m.isRoot || m.fromEnv) && (
-            <span className="mut" style={{ fontSize: 11 }}
+            <span className="mut t-meta"
               title={m.isRoot ? "First entry in STAFF_EMAILS" : m.fromEnv ? "Listed in STAFF_EMAILS" : undefined}>
               {[m.email === myEmail.toLowerCase() ? "you" : "",
                 m.isRoot ? "root" : m.fromEnv ? "from env" : ""].filter(Boolean).join(" · ")}
@@ -118,8 +118,9 @@ export default function HouseMembersPanel({ members, myEmail }: {
                 run(() => setHouseMember(m.email, role, m.name),
                   () => toast({ message: `Made ${m.name || m.email} ${role}` }));
               }}
+              className="t-meta"
               style={{
-                width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, cursor: "pointer",
+                width: "auto", fontWeight: 700, padding: "3px 6px", borderRadius: 999, cursor: "pointer",
                 background: `var(--t-${ROLE[m.role as keyof typeof ROLE]?.tone ?? "neutral"}-bg)`,
                 color: `var(--t-${ROLE[m.role as keyof typeof ROLE]?.tone ?? "neutral"}-fg)`,
               }}>
@@ -130,13 +131,13 @@ export default function HouseMembersPanel({ members, myEmail }: {
 
           <span style={{ marginLeft: "auto" }}>
             {m.locked ? (
-              <span className="mut" style={{ fontSize: 11 }}>
+              <span className="mut t-meta">
                 {m.isRoot ? "set by STAFF_EMAILS"
                   : m.email === myEmail.toLowerCase() ? "ask another owner"
                   : "last owner"}
               </span>
             ) : (
-              <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
+              <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                 onClick={async () => {
                   const why = await confirmReason({
                     title: `Revoke ${m.email}'s access to the whole shop?`,
@@ -152,9 +153,9 @@ export default function HouseMembersPanel({ members, myEmail }: {
         </div>
       ))}
 
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
-      <div className="mut" style={{ fontSize: 11, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+      <div className="mut t-meta" style={{ marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
         The <b>root</b> owner comes from the first <span className="mono">STAFF_EMAILS</span> entry and can&apos;t be
         changed here - it&apos;s the way back in if this list is ever left without a working owner. Move it by
         editing the environment variable and redeploying.

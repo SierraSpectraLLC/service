@@ -136,12 +136,12 @@ export default function EodPanel({
   const editable = (e: EodLine, num: number) => (
     <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>
+        <span className="t-body" style={{ fontWeight: 700 }}>
           {num > 0 ? `${e.kind === "system" ? "System" : "Unit"} ${num}: ` : ""}<span className="mono">{e.label}</span>
         </span>
         {e.kind === "asset" && <span className="pill neutral">unit</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          <span className="mut" style={{ fontSize: 11 }}>{saveLabel(status[keyOf(e)])}</span>
+          <span className="mut t-meta">{saveLabel(status[keyOf(e)])}</span>
           {canAutofill(e) && (
             <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
@@ -185,29 +185,29 @@ export default function EodPanel({
         </>
       }>
       {sendMsg && (
-        <div style={{ fontSize: 12, marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
+        <div className="t-small" style={{ marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
       )}
       {!canSend && !readOnly && (
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>No recipients set for {clientName} yet - add them in Settings.</div>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>No recipients set for {clientName} yet - add them in Settings.</div>
       )}
 
       {/* Read-only days never render the blanks, so their emptiness has to be
           said out loud - an empty card reads as a broken page. */}
       {filled.length === 0 && (readOnly || blanks.length === 0) && (
-        <div className="mut" style={{ fontSize: 13 }}>
+        <div className="mut t-body">
           {readOnly ? "Nothing was recorded for this client on this day." : "Nothing to report."}
         </div>
       )}
 
       {filled.map((e, i) => (readOnly ? (
         <div key={keyOf(e)} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: 12, marginBottom: 8, background: "#FAFBFD" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>
+          <div className="t-body" style={{ fontWeight: 700, marginBottom: 6 }}>
             {e.kind === "system" ? "System" : "Unit"} {i + 1}: <span className="mono">{e.label}</span>
           </div>
-          <div style={{ fontSize: 13, marginBottom: 4 }}>
+          <div className="t-body" style={{ marginBottom: 4 }}>
             <span className="eyebrow" style={{ marginRight: 6 }}>Update</span>{e.systemUpdate || <span className="mut">(blank)</span>}
           </div>
-          <div style={{ fontSize: 13 }}>
+          <div className="t-body">
             <span className="eyebrow" style={{ marginRight: 6 }}>Action</span>{e.actionItem || <span className="mut">(blank)</span>}
           </div>
         </div>
@@ -224,7 +224,7 @@ export default function EodPanel({
 
       {skipped.length > 0 && (
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
-          <span className="mut" style={{ fontSize: 11 }}>Skipped:</span>
+          <span className="mut t-meta">Skipped:</span>
           {skipped.map((e) => (
             <span key={keyOf(e)} className="pill neutral" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
               {e.externalId}
@@ -242,9 +242,9 @@ export default function EodPanel({
 
       {filled.length > 0 && (
         <details style={{ marginTop: 10 }}>
-          <summary className="mut" style={{ fontSize: 12, cursor: "pointer" }}>Email preview</summary>
-          <pre style={{
-            fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#F5F7FA",
+          <summary className="mut t-small" style={{ cursor: "pointer" }}>Email preview</summary>
+          <pre className="t-small" style={{
+            whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#F5F7FA",
             border: "1px solid var(--line)", borderRadius: 8, padding: 12, margin: "8px 0 0",
           }}>{emailText}</pre>
         </details>

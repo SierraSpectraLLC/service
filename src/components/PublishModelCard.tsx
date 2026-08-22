@@ -58,7 +58,7 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
         <div className="card-title">Public page</div>
         <span className={`pill ${published ? "good" : "neutral"}`} style={{ fontSize: 10 }}>{published ? "live" : "not published"}</span>
       </div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+      <div className="mut t-meta" style={{ marginBottom: 8 }}>
         A page anyone can find on the web: the specs, the part numbers, the kit contents and how often
         work comes round. Checklists, note text, prices and clients never appear on it.
       </div>
@@ -67,9 +67,9 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
       <textarea value={draft} rows={4} maxLength={MAX_SUMMARY}
         onChange={(e) => { setDraft(e.target.value); setDirty(true); }}
         placeholder={`What a ${modelName} is, what it's used for, what it's known for going wrong - in your own words. This is the part of the page that exists nowhere else.`}
-        style={{ width: "100%", fontSize: 13, marginBottom: 4 }} />
+        className="t-body" style={{ width: "100%", marginBottom: 4 }} />
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           {draft.trim().length}/{MAX_SUMMARY}
           {draft.trim().length < MIN_SUMMARY && ` · ${MIN_SUMMARY - draft.trim().length} more to publish`}
         </span>
@@ -81,7 +81,7 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
       </div>
 
       {blockers.length > 0 && !published && (
-        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8 }}>
+        <div className="t-small" style={{ padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8 }}>
           <b>Before this can go public:</b>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
             {blockers.map((b) => <li key={b}>{b}</li>)}
@@ -89,7 +89,7 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
         </div>
       )}
       {warnings.length > 0 && blockers.length === 0 && !published && (
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>{warnings.join(" · ")}</div>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>{warnings.join(" · ")}</div>
       )}
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -106,8 +106,8 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
           </button>
         )}
       </div>
-      {note && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {note && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

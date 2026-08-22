@@ -58,9 +58,9 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
     <>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {canEdit ? (
-          <select value={asset.status} disabled={pending}
+          <select value={asset.status} disabled={pending} className="t-small"
             onChange={(e) => run(() => setAssetStatus(asset.id, e.target.value))}
-            style={{ width: "auto", fontSize: 12, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: `var(--t-${statusTone}-bg)`, color: `var(--t-${statusTone}-fg)` }}>
+            style={{ width: "auto", fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: `var(--t-${statusTone}-bg)`, color: `var(--t-${statusTone}-fg)` }}>
             {ASSET_STATES.map((s) => <option key={s}>{s}</option>)}
           </select>
         ) : (
@@ -88,7 +88,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
                 }
                 run(() => moveAsset(asset.id, id, bringing), () => toast({ message: "Moved the unit" }));
               }}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               <option value="">{asset.instrumentId !== null ? "Move to..." : "Install into..."}</option>
               {systems.filter((s) => s.id !== asset.instrumentId).map((s) => <option key={s.id} value={s.id}>{s.externalId}</option>)}
             </select>
@@ -122,7 +122,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
           </button>
         )}
         {isStaff && (
-          <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
+          <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
             onClick={async () => {
               const reason = await confirmReason({
                 title: "Permanently delete this asset record?",
@@ -144,7 +144,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
           module that is itself served, where the server would refuse it, since
           a control that can only say no is worse than no control. */}
       {asset.instrumentId !== null && !servers.length && (candidates.length > 0 || serving) && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8, fontSize: 12 }}>
+        <div className="t-small" style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
           <span className="mut">Serves</span>
           {canEdit ? (
             <select value={asset.servesAssetId ?? ""} disabled={pending}
@@ -153,7 +153,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
                 const v = e.target.value;
                 run(() => setAssetServes(asset.id, v ? parseInt(v) : null, role));
               }}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               <option value="">nothing in particular</option>
               {serving && <option value={serving.id}>{serving.label}</option>}
               {candidates.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
@@ -168,7 +168,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
                 aria-label="What it does for that module"
                 onChange={(e) => setRole(e.target.value)}
                 onBlur={() => { if (role !== asset.servesRole) run(() => setAssetServes(asset.id, asset.servesAssetId, role)); }}
-                style={{ width: 120, fontSize: 12, padding: "3px 7px" }} />
+                className="t-small" style={{ width: 120, padding: "3px 7px" }} />
             </>
           )}
           {serving && !canEdit && asset.servesRole && <span className="mut">as {asset.servesRole}</span>}
@@ -178,7 +178,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
       {/* The other direction. A mass spec with two pumps on it should say so on
           its own page, not only on theirs. */}
       {servers.length > 0 && (
-        <div style={{ fontSize: 12, marginTop: 6 }}>
+        <div className="t-small" style={{ marginTop: 6 }}>
           <span className="mut">Served by </span>
           {servers.map((s, i) => (
             <span key={s.id}>
@@ -227,7 +227,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
               able to disagree - a unit could name one company on its row while
               another, or nobody, could actually open it. It decides visibility,
               so it belongs with sharing. */}
-          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+          <div className="mut t-meta" style={{ marginBottom: 8 }}>
             Owner: <b style={{ fontWeight: 700 }}>{asset.owner || "Unassigned"}</b> - set it under Sharing,
             below, where it also decides who can see this unit.
           </div>
@@ -243,7 +243,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
           </div>
         </Dialog>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </>
   );
 }

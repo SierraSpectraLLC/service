@@ -60,7 +60,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
         actions={canEnroll ? (
           <>
             <select value={enrollOrg} onChange={(e) => setEnrollOrg(e.target.value)}
-              aria-label="Organization to enroll a machine for" style={{ width: "auto", fontSize: 12 }}>
+              aria-label="Organization to enroll a machine for" className="t-small" style={{ width: "auto" }}>
               {enrollOrgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
             <Link href={enrollOrg ? `/remote/enroll/${enrollOrg}` : "/remote"}
@@ -68,7 +68,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
           </>
         ) : undefined}>
         {devices.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>
+          <div className="mut t-body">
             No machines yet.{canEnroll ? "" : " Ask us to enroll one."}
           </div>
         )}
@@ -81,9 +81,9 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               {/* Kept beside the nickname, never replaced by it: the nickname
                   finds the machine, the hostname proves it is the right one. */}
               {deviceSubLabel(d.nickname, d.name) && (
-                <span className="mono mut" style={{ fontSize: 11 }}>{deviceSubLabel(d.nickname, d.name)}</span>
+                <span className="mono mut t-meta">{deviceSubLabel(d.nickname, d.name)}</span>
               )}
-              {d.orgName && <span className="mut" style={{ fontSize: 12 }}>{d.orgName}</span>}
+              {d.orgName && <span className="mut t-small">{d.orgName}</span>}
               {/* One pill: consent said up front beats everything - never
                   discovered after a click. */}
               {d.consentMode === "consent" ? (
@@ -99,12 +99,12 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                     {d.consentMode === "consent" ? "Request session" : "Connect"}
                   </Link>
                 ) : d.refusal ? (
-                  <span className="mut" style={{ fontSize: 11, maxWidth: 220 }}>{d.refusal}</span>
+                  <span className="mut t-meta" style={{ maxWidth: 220 }}>{d.refusal}</span>
                 ) : null}
               </span>
             </div>
 
-            <div className="mut" style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <div className="mut t-meta" style={{ marginTop: 4, display: "flex", gap: 10, flexWrap: "wrap" }}>
               <span>{d.platform}</span>
               <span>
                 {d.online ? (stale ? "was online at last contact" : "online") : d.lastSeen ? `last seen ${d.lastSeen}` : "never checked in"}
@@ -118,7 +118,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                     two-second job somebody does while looking at the list. */}
                 <input defaultValue={d.nickname} disabled={pending}
                   aria-label={`Name for ${d.name}`}
-                  placeholder={needsNickname(d.nickname, d.name) ? "name it — e.g. Altis PC" : "no name"}
+                  placeholder={needsNickname(d.nickname, d.name) ? "name it - e.g. Altis PC" : "no name"}
                   onBlur={(e) => {
                     if (e.target.value.trim() === d.nickname) return;
                     setError("");
@@ -129,7 +129,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                     });
                   }}
                   onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                  style={{ width: 170, fontSize: 11 }} />
+                  className="t-meta" style={{ width: 170 }} />
 
                 <select value={d.systemId ?? ""} disabled={pending} aria-label={`System ${d.name} drives`}
                   onChange={(e) => {
@@ -141,7 +141,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                       if (!res?.error) toast({ message: v === null ? "Unlinked the machine" : "Linked the machine to its system" });
                     });
                   }}
-                  style={{ width: "auto", maxWidth: 240, fontSize: 11 }}>
+                  className="t-meta" style={{ width: "auto", maxWidth: 240 }}>
                   <option value="">not linked to a system</option>
                   {systems.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
                 </select>
@@ -158,13 +158,13 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                       if (!res?.error) toast({ message: "Saved the consent rule" });
                     });
                   }}
-                  style={{ width: "auto", fontSize: 11 }}>
+                  className="t-meta" style={{ width: "auto" }}>
                   <option value="derive">consent follows custody</option>
                   <option value="always">always ask first</option>
                   <option value="never">never ask</option>
                 </select>
 
-                <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11, marginLeft: "auto" }} disabled={pending}
+                <button className="btn link" style={{ color: "var(--t-bad-fg)", marginLeft: "auto" }} disabled={pending}
                   onClick={async () => {
                     const why = await confirmReason({
                       title: `Remove "${deviceLabel(d.nickname, d.name)}" from remote support?`,
@@ -183,7 +183,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
             )}
           </div>
         ))}
-        {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 10 }}>{error}</div>}
+        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 10 }}>{error}</div>}
       </Panel>
       <Legend items={[{ tone: "good", label: "online" }, { tone: "faint", label: "offline" }]} />
     </>

@@ -62,25 +62,25 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
           <Link href="/remote" style={{ textDecoration: "none", color: "inherit" }}>Remote support</Link> ›
         </div>
         <h1 style={{ fontSize: 18, margin: 0 }}>{label}</h1>
-        {host && <span className="mono mut" style={{ fontSize: 11 }}>{host}</span>}
+        {host && <span className="mono mut t-meta">{host}</span>}
         {row.orgName && (
           <span className="pill info">{row.orgName}</span>
         )}
         {system?.externalId && (
-          <Link href={`/instruments/${device.instrumentId}`} className="mut" style={{ fontSize: 12 }}>
+          <Link href={`/instruments/${device.instrumentId}`} className="mut t-small">
             on {system.externalId}
           </Link>
         )}
         {opened.url && (
-          <a href={opened.url} target="_blank" rel="noreferrer" className="mut"
-            style={{ marginLeft: "auto", fontSize: 11 }}>
+          <a href={opened.url} target="_blank" rel="noreferrer" className="mut t-meta"
+            style={{ marginLeft: "auto" }}>
             open in a new window
           </a>
         )}
       </div>
 
       {opened.error && (
-        <div className="card" style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>{opened.error}</div>
+        <div className="card t-body" style={{ color: "var(--t-bad-fg)" }}>{opened.error}</div>
       )}
 
       {opened.url && (

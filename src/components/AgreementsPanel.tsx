@@ -67,17 +67,17 @@ function Bar({ label, included, used, fmt, unlimited = false }: {
     // the pill sits beside the figure instead of under a bar that isn't there.
     return (
       <div style={BLOCK}>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 3 }}>{label}</div>
+        <div className="mut t-meta" style={{ marginBottom: 3 }}>{label}</div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
           <span className="pill good">unlimited</span>
-          <span style={{ fontSize: 11, fontWeight: 700 }}>{fmt(a.used)} used</span>
+          <span className="t-meta" style={{ fontWeight: 700 }}>{fmt(a.used)} used</span>
         </div>
       </div>
     );
   }
   return (
     <div style={BLOCK}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, marginBottom: 3 }}>
+      <div className="t-meta" style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 3 }}>
         <span className="mut">{label}</span>
         <span style={{ fontWeight: 700, color: a.over ? "#A32D2D" : "var(--ink)" }}>
           {fmt(a.used)} / {fmt(a.included)}
@@ -140,9 +140,9 @@ function PaperPicker({ lib, onPick, onFiles, disabled, note }: {
         </button>
         <input ref={ref} type="file" multiple style={{ display: "none" }}
           onChange={(e) => { onFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
-        {note && <span className="mut" style={{ fontSize: 11 }}>{note}</span>}
+        {note && <span className="mut t-meta">{note}</span>}
       </div>
-      <div className="mut" style={{ fontSize: 11, margin: "7px 0 3px" }}>
+      <div className="mut t-meta" style={{ margin: "7px 0 3px" }}>
         {lib === null ? "Loading your library..."
           : lib.length === 0 ? "Nothing else on the shelf yet."
             : "...or pick one already in your library:"}
@@ -300,24 +300,24 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
             borderLeft: s === "expired" ? "3px solid #A32D2D" : s === "expiring" ? "3px solid #8A5410" : undefined,
           }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13, fontWeight: 700 }}>
+              <span className="t-body" style={{ fontWeight: 700 }}>
                 {[r.number, r.title].filter(Boolean).join(" ") || KIND_LABEL[r.kind]}
               </span>
               <span className={`pill ${STANDING_TONE[s]}`}>{STANDING_LABEL[s]}</span>
               <span className="pill neutral">{KIND_LABEL[r.kind]}</span>
-              {orgs.length !== 1 && <span className="mut" style={{ fontSize: 12 }}>{r.orgName}</span>}
+              {orgs.length !== 1 && <span className="mut t-small">{r.orgName}</span>}
               {r.valueCents != null && (
-                <span className="mono" style={{ fontSize: 11, color: "var(--slate)" }}
+                <span className="mono t-meta" style={{ color: "var(--slate)" }}
                   title="Contract value">{formatCents(r.valueCents)}</span>
               )}
               {r.hourlyRateCents != null && (
-                <span className="mono" style={{ fontSize: 11, color: "var(--slate)" }}
+                <span className="mono t-meta" style={{ color: "var(--slate)" }}
                   title="Hourly rate">{formatCents(r.hourlyRateCents)}/hr</span>
               )}
               {canEdit && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                  <button className="btn link" style={{ fontSize: 11 }} onClick={() => openEdit(r)}>edit</button>
-                  <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                  <button className="btn link" onClick={() => openEdit(r)}>edit</button>
+                  <button className="btn link" disabled={pending}
                     onClick={async () => {
                       const why = await confirmReason({
                         title: `Remove ${r.number || KIND_LABEL[r.kind]}?`,
@@ -347,7 +347,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                       <a href={`/api/files/${pp.id}`} target="_blank" rel="noreferrer" className="mono">{pp.fileName}</a>
                       <span className="mut">{pp.kind} · {pp.uploadedBy} · {pp.when}</span>
                       {canEdit && (
-                        <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                        <button className="btn link" disabled={pending}
                           title="Unfile it - the document stays in your library"
                           onClick={() => startTransition(async () => {
                             const res = await unfileAgreementPaper(pp.id);
@@ -357,7 +357,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                     </div>
                   ))}
                   {canEdit && (
-                    <button className="btn link" style={{ fontSize: 11 }} onClick={() => openFiling(r.id)}>
+                    <button className="btn link" onClick={() => openFiling(r.id)}>
                       {filing === r.id ? "cancel" : mine.length ? "+ another document" : "+ attach the signed agreement"}
                     </button>
                   )}
@@ -383,7 +383,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 them", which is true only when nothing is assigned. */}
             {r.instrumentIds.length > 0 && (
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
-                <span className="mut" style={{ fontSize: 11 }}>covers</span>
+                <span className="mut t-meta">covers</span>
                 {r.instrumentIds.map((id) => {
                   const sys = systems.find((s2) => s2.id === id);
                   return (
@@ -422,7 +422,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
             {/* Reported, never hidden: the money was really spent, the client
                 just isn't being charged for it out of this allowance. */}
             {r.pmPartsIncluded && (r.used.pmPartsCents ?? 0) > 0 && (
-              <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+              <div className="mut t-meta" style={{ marginTop: 6 }}>
                 Plus {formatCents(r.used.pmPartsCents ?? 0)} in PM parts, covered by the contract.
               </div>
             )}
@@ -432,7 +432,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       })}
 
       {rows.length === 0 && (
-        <div className="mut" style={{ fontSize: 13 }}>
+        <div className="mut t-body">
           Nothing on file. An agreement is what a renewal date, a visit count and a parts
           allowance hang off - and what makes those numbers answerable on the phone.
         </div>
@@ -530,8 +530,8 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
             <input type="number" min={0} max={3650} value={draft.renewNoticeDays} style={{ marginBottom: 8 }}
               onChange={(e) => setDraft({ ...draft, renewNoticeDays: e.target.value })} />
 
-            <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>What it includes</div>
-            <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+            <div className="t-small" style={{ fontWeight: 700, marginBottom: 2 }}>What it includes</div>
+            <div className="mut t-meta" style={{ marginBottom: 6 }}>
               Leave one blank when it is not part of this agreement. Blank means untracked,
               not zero - an unlimited contract and a nothing-included one are different things.
             </div>
@@ -540,7 +540,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 <label>Parts allowance ($)</label>
                 <input value={draft.partsAllowance} placeholder="5000" disabled={draft.partsUnlimited}
                   onChange={(e) => setDraft({ ...draft, partsAllowance: e.target.value })} />
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
                   <input type="checkbox" checked={draft.partsUnlimited} style={{ width: 15, height: 15 }}
                     onChange={(e) => setDraft({ ...draft, partsUnlimited: e.target.checked })} />
                   Unlimited - parts are covered, spend isn&apos;t tracked against a cap
@@ -548,7 +548,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 {/* The PM's own parts are part of the PM. Without this, an
                     included PM's kit gets billed twice - once in the PM, once
                     out of the allowance. */}
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
                   <input type="checkbox" checked={draft.pmPartsIncluded} style={{ width: 15, height: 15, marginTop: 2 }}
                     onChange={(e) => setDraft({ ...draft, pmPartsIncluded: e.target.checked })} />
                   <span>
@@ -563,7 +563,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 <label>Service visits</label>
                 <input type="number" min={0} value={draft.visitsIncluded} disabled={draft.visitsUnlimited}
                   onChange={(e) => setDraft({ ...draft, visitsIncluded: e.target.value })} />
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
                   <input type="checkbox" checked={draft.visitsUnlimited} style={{ width: 15, height: 15 }}
                     onChange={(e) => setDraft({ ...draft, visitsUnlimited: e.target.checked })} />
                   Unlimited visits
@@ -581,9 +581,9 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   <input type="number" min={1} value={k.qty} aria-label="How many"
                     onChange={(e) => setDraft({ ...draft, includedKits: draft.includedKits.map((x, i) =>
                       (i === idx ? { ...x, qty: parseInt(e.target.value) || 1 } : x)) })}
-                    style={{ width: 62, fontSize: 12 }} />
-                  <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{k.partNumber}</span>
-                  <span className="mut" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
+                    className="t-small" style={{ width: 62 }} />
+                  <span className="mono t-small" style={{ fontWeight: 700 }}>{k.partNumber}</span>
+                  <span className="mut t-meta" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
                   <button className="btn link" aria-label={`Remove ${k.partNumber}`} style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 13 }}
                     onClick={() => setDraft({ ...draft, includedKits: draft.includedKits.filter((_, i) => i !== idx) })}>×</button>
                 </div>
@@ -595,11 +595,11 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   if (draft.includedKits.some((k) => k.partNumber.toLowerCase() === hit.partNumber.toLowerCase())) return;
                   setDraft({ ...draft, includedKits: [...draft.includedKits, { partNumber: hit.partNumber, name: hit.name, qty: 1 }] });
                 }}
-                style={{ fontSize: 12 }}>
+                className="t-small">
                 <option value="">＋ Add a kit from the parts book...</option>
                 {(book ?? []).map((b) => (
                   <option key={b.partNumber} value={b.partNumber}>
-                    {b.kind === "kit" ? "🧰 " : ""}{b.partNumber}{b.name ? ` - ${b.name}` : ""}
+                    {b.kind === "kit" ? "▣ " : ""}{b.partNumber}{b.name ? ` - ${b.name}` : ""}
                   </option>
                 ))}
               </select>

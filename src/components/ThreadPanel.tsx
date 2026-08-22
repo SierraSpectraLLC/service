@@ -64,7 +64,7 @@ export default function ThreadPanel({ threadId, me, members, messages, addable }
               {adding ? "Cancel" : "Add someone"}
             </button>
           )}
-          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+          <button className="btn link" disabled={pending}
             onClick={async () => {
               if (!(await confirmDialog({
                 title: "Leave this conversation?",
@@ -105,15 +105,15 @@ export default function ThreadPanel({ threadId, me, members, messages, addable }
           return (
             <div key={first.id} style={{ marginBottom: 10 }}>
               <div style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: mine ? "var(--navy)" : "var(--ink)" }}>
+                <span className="t-small" style={{ fontWeight: 700, color: mine ? "var(--navy)" : "var(--ink)" }}>
                   {mine ? "You" : first.authorName}
                 </span>
-                <span className="mut" style={{ fontSize: 11 }}>{fmtWhen(first.createdAt)}</span>
+                <span className="mut t-meta">{fmtWhen(first.createdAt)}</span>
               </div>
               {g.map((m) => (
                 <div key={m.id} style={{ display: "flex", gap: 6, alignItems: "baseline" }}>
-                  <div style={{
-                    fontSize: 13, whiteSpace: "pre-wrap", overflowWrap: "anywhere",
+                  <div className="t-body" style={{
+                    whiteSpace: "pre-wrap", overflowWrap: "anywhere",
                     color: m.deletedAt ? "var(--mut)" : "var(--ink)",
                     fontStyle: m.deletedAt ? "italic" : "normal",
                   }}>
@@ -144,12 +144,12 @@ export default function ThreadPanel({ threadId, me, members, messages, addable }
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           }}
-          style={{ flex: 1, resize: "vertical", fontSize: 13 }} />
+          className="t-body" style={{ flex: 1, resize: "vertical" }} />
         <button className="btn sm accent" disabled={pending || !body.trim()} onClick={send}>
           {pending ? "Sending..." : "Send"}
         </button>
       </div>
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

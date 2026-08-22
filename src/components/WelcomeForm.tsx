@@ -55,10 +55,10 @@ export default function WelcomeForm({ email, suggested, kinds, brandName }: {
 
   return (
     <form onSubmit={submit}>
-      <div style={{ fontWeight: 700, fontSize: 16, color: "var(--navy)", marginBottom: 4 }}>
+      <div className="t-title" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
         Welcome to {brandName}
       </div>
-      <p className="mut" style={{ fontSize: 13, marginTop: 0 }}>
+      <p className="mut t-body" style={{ marginTop: 0 }}>
         One minute, once. Signed in as <b style={{ color: "var(--ink)" }}>{email}</b>.
       </p>
 
@@ -103,7 +103,7 @@ export default function WelcomeForm({ email, suggested, kinds, brandName }: {
         disabled={pending || !name.trim()}>
         {pending ? "Saving..." : "Start working"}
       </button>
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </form>
   );
 }

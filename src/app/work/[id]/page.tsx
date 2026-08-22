@@ -168,7 +168,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   const minutes = timeRows.reduce((n, t) => n + t.minutes, 0);
   const place = inst
     ? { href: `/instruments/${inst.id}`, label: `${inst.externalId}${systemLabel(inst, unitRows) ? ` - ${systemLabel(inst, unitRows)}` : ""}` }
-    : { href: `/assets/${asset!.id}`, label: `${asset!.kind}${asset!.model ? ` — ${asset!.model}` : ""}${asset!.serial ? ` (SN ${asset!.serial})` : ""}` };
+    : { href: `/assets/${asset!.id}`, label: `${asset!.kind}${asset!.model ? ` - ${asset!.model}` : ""}${asset!.serial ? ` (SN ${asset!.serial})` : ""}` };
 
   // Work is filed against the ORDER, which resolveTarget then checks belongs to
   // this record - so the panels below write rows that show up in both places.
@@ -265,13 +265,13 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           { key: "job", label: "The job", node: (
       <div className="card">
         {entFlag && (
-          <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginTop: 10 }}>
+          <div className="t-small" style={{ padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginTop: 10 }}>
             {entFlag}
           </div>
         )}
 
         {wo.body && (
-          <div style={{ fontSize: 13, whiteSpace: "pre-wrap", borderLeft: "3px solid var(--line)", padding: "4px 10px", margin: "10px 0" }}>
+          <div className="t-body" style={{ whiteSpace: "pre-wrap", borderLeft: "3px solid var(--line)", padding: "4px 10px", margin: "10px 0" }}>
             {wo.body}
           </div>
         )}
@@ -279,8 +279,8 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         {wo.closeSummary && (
           <div style={{ marginTop: 10, background: "#F6FAF6", borderLeft: "3px solid #2E6B2E", padding: "8px 10px" }}>
             <div className="eyebrow" style={{ marginBottom: 2 }}>What was done</div>
-            <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{wo.closeSummary}</div>
-            {wo.closedBy && <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>Closed by {wo.closedBy}</div>}
+            <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{wo.closeSummary}</div>
+            {wo.closedBy && <div className="mut t-meta" style={{ marginTop: 4 }}>Closed by {wo.closedBy}</div>}
           </div>
         )}
 
@@ -301,7 +301,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           ) },
           { key: "tasks", label: "Tasks", node: (
       <TasksPanel target={target} tasks={fullTasks} people={directoryNames(people)} mentionable={mentionable}
-        systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
+        systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
         today={today} canEdit={canAdd} isStaff={staff} copyTargets={[]}
         procedureChoices={procedureChoices} />
           ) },
@@ -315,7 +315,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         <PartsPanel target={target}
           parts={redactParts(woPartRows, user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)
             .map((pp) => ({ ...pp, createdAt: pp.createdAt.toISOString() }))}
-          systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
+          systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
           canEdit={canAdd} isStaff={staff}
           showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
       )}
@@ -364,20 +364,20 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
                 display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
                 padding: "8px 4px", borderTop: "1px solid var(--line)",
               }}>
-                <Link href={`/purchasing/${p.id}`} className="mono"
-                  style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>
+                <Link href={`/purchasing/${p.id}`} className="mono t-small"
+                  style={{ fontWeight: 700, color: "var(--navy)", textDecoration: "none" }}>
                   {p.number}
                 </Link>
-                <span style={{ fontSize: 13 }}>{p.vendor}</span>
+                <span className="t-body">{p.vendor}</span>
                 <span className={`pill ${PO_TONE[p.status] ?? "neutral"}`}>
                   {PO_LABEL[p.status] ?? p.status}
                 </span>
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {t.received}/{t.ordered} received
                   {receipts.length ? ` · ${receipts.length} receipt${receipts.length === 1 ? "" : "s"} on file` : ""}
                 </span>
                 {showCosts && t.cents > 0 && (
-                  <span className="mono" style={{ fontSize: 11, marginLeft: "auto", color: "var(--slate)" }}>
+                  <span className="mono t-meta" style={{ marginLeft: "auto", color: "var(--slate)" }}>
                     {formatCents(t.cents)}{t.unpriced ? ` +${t.unpriced} unpriced` : ""}
                   </span>
                 )}

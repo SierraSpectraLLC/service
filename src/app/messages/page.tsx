@@ -118,18 +118,18 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
           cells: {
             dot: r.unread > 0 ? <Dot tone="info" /> : null,
             who: (
-              <span style={{ fontSize: 13, fontWeight: r.unread ? 700 : 600 }}>
+              <span className="t-body" style={{ fontWeight: r.unread ? 700 : 600 }}>
                 {r.title}
                 {r.members > 2 && <span className="mut" style={{ fontWeight: 400 }}> · {r.members} people</span>}
               </span>
             ),
             last: (
-              <span className="mut" style={{ display: "block", fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span className="mut t-small" style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {r.lastWho ? `${r.lastWho}: ` : ""}{r.lastLine}
               </span>
             ),
             new: r.unread > 0 ? <Pill tone="bad">{r.unread} new</Pill> : null,
-            when: <span className="mut" style={{ fontSize: 11 }}>{r.when}</span>,
+            when: <span className="mut t-meta">{r.when}</span>,
           },
         }))}
         empty="No conversations yet - message anyone at your organization, or anyone you share a system with"

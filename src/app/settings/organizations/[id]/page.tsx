@@ -115,7 +115,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     <div>
       {isOwner && (
         <div style={{ marginBottom: 2 }}>
-          <Link href="/settings/organizations" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Organizations</Link>
+          <Link href="/settings/organizations" className="mut t-body" style={{ textDecoration: "none" }}>← Organizations</Link>
         </div>
       )}
 

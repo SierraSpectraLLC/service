@@ -110,19 +110,19 @@ export default function UsagePanel({ rows, recent, windowDays, filter: urlFilter
             dot: <Dot tone={STATUS_TONE[r.status]} />,
             who: (
               <span style={{ minWidth: 0, display: "block" }}>
-                <span style={{ display: "block", fontSize: 13, fontWeight: 700 }}>{r.name || r.email.split("@")[0]}</span>
-                <span className="mut" style={{ display: "block", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis" }}>
+                <span className="t-body" style={{ display: "block", fontWeight: 700 }}>{r.name || r.email.split("@")[0]}</span>
+                <span className="mut t-meta" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {r.email}{r.orgName ? ` · ${r.orgName}` : ""}{r.role ? ` · ${r.role.replace("_", " ")}` : ""}
                   {/* Which door, because a password sign-in used to leave no trace. */}
                   {r.hasPassword ? " · has a password" : ""}
                 </span>
               </span>
             ),
-            seen: <span style={{ fontSize: 12 }}>{sinceWords(date(r.lastSeenAt) ?? date(r.lastLoginAt), now)}</span>,
+            seen: <span className="t-small">{sinceWords(date(r.lastSeenAt) ?? date(r.lastLoginAt), now)}</span>,
             logins: (
-              <span style={{ fontSize: 12 }}>
+              <span className="t-small">
                 {r.logins30 || <span className="mut">-</span>}
-                {r.methods.length > 0 && <span className="mut" style={{ fontSize: 11 }}> · {r.methods.join(", ")}</span>}
+                {r.methods.length > 0 && <span className="mut t-meta"> · {r.methods.join(", ")}</span>}
               </span>
             ),
             status: <Pill tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Pill>,
@@ -140,7 +140,7 @@ export default function UsagePanel({ rows, recent, windowDays, filter: urlFilter
       {feed && (
         <>
           <div className="sec-head" style={{ marginTop: 8 }}><span>Sign-in log</span></div>
-          <p className="mut" style={{ fontSize: 12, marginTop: 0 }}>
+          <p className="mut t-small" style={{ marginTop: 0 }}>
             Every door opened, newest first. A run of these from one address in one minute is worth a
             look; one a month from somebody who is here daily is normal.
           </p>
@@ -154,14 +154,14 @@ export default function UsagePanel({ rows, recent, windowDays, filter: urlFilter
             rows={recent.map((e) => ({
               key: e.id,
               cells: {
-                who: <span style={{ fontSize: 13 }}>{e.email}</span>,
+                who: <span className="t-body">{e.email}</span>,
                 method: <Pill tone={e.method === "password" ? "info" : "neutral"}>{e.method}</Pill>,
                 meta: (
-                  <span className="mut" style={{ fontSize: 11 }}>
+                  <span className="mut t-meta">
                     {[e.orgName, e.role.replace("_", " "), e.device, e.ip].filter(Boolean).join(" · ")}
                   </span>
                 ),
-                when: <span className="mut" style={{ fontSize: 11 }}>{sinceWords(new Date(e.at), now)}</span>,
+                when: <span className="mut t-meta">{sinceWords(new Date(e.at), now)}</span>,
               },
             }))}
             empty="No sign-ins recorded yet"

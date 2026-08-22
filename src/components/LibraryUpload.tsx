@@ -105,9 +105,9 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
           or drop them anywhere on this page
           {folderName ? <> · into <b style={{ fontWeight: 700 }}>{folderName}</b></> : ""}
         </span>
-        {full && <span style={{ fontSize: 12, color: "var(--t-bad-fg)" }}>Storage is full - delete something or raise the limit.</span>}
+        {full && <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>Storage is full - delete something or raise the limit.</span>}
       </div>
-      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {!open && error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
 
       <input ref={ref} type="file" multiple style={{ display: "none" }}
         onChange={(e) => { void send(e.target.files); e.target.value = ""; }} />
@@ -131,7 +131,7 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
             Files land in {folderName ? <b>{folderName}</b> : "your storage"} and are attached to no
             system, no unit and no job. Up to {fmtBytes(maxBytes)} each.
           </div>
-          <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
+          <div className="mut t-small" style={{ marginTop: 8 }}>
             You can also drop files anywhere on the page - no dialog needed.
           </div>
         </Dialog>
@@ -148,7 +148,7 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
             border: "2px dashed var(--navy)",
           }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>Drop to upload</div>
-            <div className="mut" style={{ fontSize: 12, marginTop: 4 }}>
+            <div className="mut t-small" style={{ marginTop: 4 }}>
               {folderName ? <>Files land in <b style={{ fontWeight: 700 }}>{folderName}</b>. </> : "Files land in your storage. "}
               Nothing is attached to a system.
             </div>

@@ -78,35 +78,35 @@ export default function MakersCard({ makers }: { makers: MakerRow[] }) {
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 4 }}>Manufacturers &amp; vendors</div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
+      <div className="mut t-meta" style={{ marginBottom: 10 }}>
         One list every maker and vendor field suggests from. Renaming here renames it everywhere it&apos;s recorded, in one go.
       </div>
       {makers.map((m) => (
         <div key={m.name.toLowerCase()} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>{m.name}</span>
-          <span className="mut" style={{ fontSize: 11 }}>{makerUsageLine(m) || "not used yet"}</span>
+          <span className="t-body" style={{ fontWeight: 700 }}>{m.name}</span>
+          <span className="mut t-meta">{makerUsageLine(m) || "not used yet"}</span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 10, flexShrink: 0 }}>
-            <button className="btn link" style={{ fontSize: 11 }} disabled={pending} onClick={() => rename(m)}>rename</button>
+            <button className="btn link" disabled={pending} onClick={() => rename(m)}>rename</button>
             {m.id === null
-              ? <button className="btn link" style={{ fontSize: 11 }} disabled={pending} title="Seen on records but not in the book yet" onClick={() => define(m)}>add to book</button>
-              : <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending} onClick={() => remove(m)}>remove</button>}
+              ? <button className="btn link" disabled={pending} title="Seen on records but not in the book yet" onClick={() => define(m)}>add to book</button>
+              : <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending} onClick={() => remove(m)}>remove</button>}
           </span>
         </div>
       ))}
       {makers.length === 0 && (
-        <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>Nothing yet - add the makers and vendors you deal with below.</div>
+        <div className="mut t-small" style={{ marginBottom: 6 }}>Nothing yet - add the makers and vendors you deal with below.</div>
       )}
       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={draft.includes("\n") ? 4 : 1}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) add(); }}
           placeholder='New makers/vendors - "Shimadzu", or one per line'
-          style={{ flex: "1 1 200px", fontSize: 13, maxWidth: 300, resize: "vertical" }} />
+          className="t-body" style={{ flex: "1 1 200px", maxWidth: 300, resize: "vertical" }} />
         <button className="btn sm accent" onClick={add} disabled={pending || !draft.trim()}>
           {splitNames(draft).length > 1 ? `Add ${splitNames(draft).length} names` : "Add"}
         </button>
       </div>
-      {note && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {note && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

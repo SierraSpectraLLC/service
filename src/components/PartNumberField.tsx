@@ -132,7 +132,7 @@ export default function PartNumberField({
               )}
               <span style={{ minWidth: 0, flex: 1 }}>
                 <span style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
-                  <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{h.partNumber}</span>
+                  <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{h.partNumber}</span>
                   <span style={{ fontSize: 12.5 }}>{h.name || <span className="mut">unnamed</span>}</span>
                   {/* What it costs, where the reader is allowed to know - the
                       answer to "is this the one to order" is half price. */}

@@ -77,12 +77,12 @@ export default function InboxPanel({ items, prefs, filter }: {
             title: n.href ? (
               // Reading is a side effect of following the link, not a step
               // the user has to remember - fire it and let navigation go on.
-              <Link href={n.href} style={{ textDecoration: "none", color: "inherit", fontWeight: n.read ? 400 : 700, fontSize: 13 }}
+              <Link href={n.href} className="t-body" style={{ textDecoration: "none", color: "inherit", fontWeight: n.read ? 400 : 700 }}
                 onClick={() => { if (!n.read) markNotificationRead(n.id); }}>
                 {n.title}
               </Link>
             ) : (
-              <span style={{ fontSize: 13, fontWeight: n.read ? 400 : 700 }}>{n.title}</span>
+              <span className="t-body" style={{ fontWeight: n.read ? 400 : 700 }}>{n.title}</span>
             ),
             kind: <span className="mut">{kindLabel(n.kind)}</span>,
             when: <span className="mut">{n.when}</span>,
@@ -97,7 +97,7 @@ export default function InboxPanel({ items, prefs, filter }: {
       <Panel title="Email preferences"
         hint="Everything always lands in this inbox; these only control which kinds also email you.">
         {NOTIFY_KINDS.map((k) => (
-          <label key={k.kind} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13, cursor: "pointer" }}>
+          <label key={k.kind} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", cursor: "pointer" }}>
             <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} className="check"
               onChange={(e) => {
                 const on = e.target.checked;

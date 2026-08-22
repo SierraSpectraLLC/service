@@ -71,18 +71,18 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
           <div key={n.id} style={{ padding: "7px 0", borderTop: "1px solid var(--line)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               <span style={{ fontSize: 12.5, fontWeight: 700 }}>{n.author}</span>
-              <span className="mut" style={{ fontSize: 11 }}>{fmtWhen(n.createdAt)}</span>
+              <span className="mut t-meta">{fmtWhen(n.createdAt)}</span>
               {n.editedAt && (
-                <span className="mut" style={{ fontSize: 11 }} title={`Edited ${fmtWhen(n.editedAt)}`}>· edited</span>
+                <span className="mut t-meta" title={`Edited ${fmtWhen(n.editedAt)}`}>· edited</span>
               )}
               {!open && (mine || removable) && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                   {mine && (
-                    <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                    <button className="btn link" disabled={pending}
                       onClick={() => { setError(""); setEditing({ id: n.id, draft: n.text }); }}>edit</button>
                   )}
                   {removable && (
-                    <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
+                    <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                       onClick={async () => {
                         if (!(await confirmDialog({
                           title: mine ? "Delete your comment?" : `Delete ${n.author}'s comment?`,
@@ -107,14 +107,14 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
                     if (e.key === "Escape") setEditing(null);
                     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); }
                   }}
-                  style={{ flex: "1 1 240px", fontSize: 13, resize: "vertical" }} />
+                  className="t-body" style={{ flex: "1 1 240px", resize: "vertical" }} />
                 <span style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
                   <button className="btn sm accent" onClick={save} disabled={pending || !editing.draft.trim()}>Save</button>
                   <button className="btn sm" onClick={() => setEditing(null)} disabled={pending}>Cancel</button>
                 </span>
               </div>
             ) : (
-              <div style={{ fontSize: 13, whiteSpace: "pre-wrap", marginTop: 2 }}>{n.text}</div>
+              <div className="t-body" style={{ whiteSpace: "pre-wrap", marginTop: 2 }}>{n.text}</div>
             )}
           </div>
         );
@@ -123,13 +123,13 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
       {canPost && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <MentionBox people={people} value={text} onChange={setText} onEnter={post}
-            placeholder="Add a comment... @name to notify" style={{ flex: 1, fontSize: 13 }} />
+            placeholder="Add a comment... @name to notify" className="t-body" style={{ flex: 1 }} />
           <button className="btn sm primary" onClick={post} disabled={pending || !text.trim()}>
             {pending ? "Posting..." : "Post"}
           </button>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

@@ -154,7 +154,7 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
                 <span key={g} className="pill warn">{g}</span>
               ))}
             </div>
-            <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>{term.publicSummary}</p>
+            <p className="t-lead" style={{ lineHeight: 1.6, margin: 0 }}>{term.publicSummary}</p>
           </div>
         </div>
       </div>
@@ -169,15 +169,15 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
       {upkeep.length > 0 && (
         <div className="card">
           <H>Maintenance schedule</H>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+          <div className="mut t-small" style={{ marginBottom: 8 }}>
             What a {term.name} needs, and how often.
           </div>
           {upkeep.map((j) => (
             <div key={j.name} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{j.name}</span>
+              <span className="t-body" style={{ fontWeight: 600 }}>{j.name}</span>
               <span className="pill good">{j.every}</span>
               {j.parts.length > 0 && (
-                <span className="mut" style={{ fontSize: 12 }}>takes {j.parts.join(", ")}</span>
+                <span className="mut t-small">takes {j.parts.join(", ")}</span>
               )}
             </div>
           ))}
@@ -190,13 +190,13 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
           {parts.map((p) => (
             <div key={p.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{p.partNumber}</span>
-                <span style={{ fontSize: 13 }}>{p.name}</span>
+                <span className="mono t-body" style={{ fontWeight: 700, color: "var(--navy)" }}>{p.partNumber}</span>
+                <span className="t-body">{p.name}</span>
                 {p.kind === "kit" && <span className="pill accent" style={{ fontSize: 10 }}>kit</span>}
-                {p.manufacturer && <span className="mut" style={{ fontSize: 12 }}>{p.manufacturer}{p.mfrPartNumber ? ` ${p.mfrPartNumber}` : ""}</span>}
+                {p.manufacturer && <span className="mut t-small">{p.manufacturer}{p.mfrPartNumber ? ` ${p.mfrPartNumber}` : ""}</span>}
               </div>
               {p.kind === "kit" && linesFor(p.id).length > 0 && (
-                <div className="mut" style={{ fontSize: 12, paddingLeft: 12, marginTop: 2 }}>
+                <div className="mut t-small" style={{ paddingLeft: 12, marginTop: 2 }}>
                   contains {linesFor(p.id).map((l) => `${l.qty > 1 ? `${l.qty}× ` : ""}${l.name || l.partNumber}`).join(" · ")}
                 </div>
               )}
@@ -209,11 +209,11 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
       {notes.length > 0 && (
         <div className="card">
           <H>Service notes on file</H>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+          <div className="mut t-small" style={{ marginBottom: 8 }}>
             {notes.length} note{notes.length === 1 ? "" : "s"} our engineers have written about this equipment. Readable inside the portal.
           </div>
           {notes.slice(0, 10).map((n) => (
-            <div key={n.id} style={{ fontSize: 13, padding: "4px 0", borderTop: "1px solid var(--line)" }}>
+            <div key={n.id} className="t-body" style={{ padding: "4px 0", borderTop: "1px solid var(--line)" }}>
               {n.title || "Field note"}
             </div>
           ))}
@@ -223,21 +223,21 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
       {/* The soft sell: not "buy software" - "keep track of the one you own". */}
       <div className="card" style={{ background: "#F7F9FC" }}>
         <H>Own {article(term.name)} {term.name}?</H>
-        <p style={{ fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>
+        <p className="t-lead" style={{ lineHeight: 1.6, marginTop: 0 }}>
           Start a free record and this schedule, its parts list and its service history live in one place -
           with reminders before the work is due rather than after.
         </p>
         <Link href="/login" className="btn primary" style={{ textDecoration: "none" }}>
           Track your {term.assetType.toLowerCase()}
         </Link>
-        <div className="mut" style={{ fontSize: 12, marginTop: 10 }}>
+        <div className="mut t-small" style={{ marginTop: 10 }}>
           Service this equipment for a living? This library is one shop&apos;s, kept as it works
           {brand.name !== brand.operatorName ? ` on ${brand.name}` : ""} -{" "}
           <Link href="/login">see what that looks like</Link>.
         </div>
       </div>
 
-      <div className="mut" style={{ fontSize: 11, lineHeight: 1.6, marginTop: 4 }}>
+      <div className="mut t-meta" style={{ lineHeight: 1.6, marginTop: 4 }}>
         {term.manufacturer} and {term.name} are used to identify the equipment this page describes.{" "}
         {brand.operatorName} is an independent service provider and is not affiliated with, authorized by,
         or endorsed by {term.manufacturer}. Specifications and intervals are recorded from our own service

@@ -122,7 +122,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
         }}>
           {picked.size > 0 ? (
             <>
-              <b style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>{picked.size} selected</b>
+              <b className="t-body" style={{ color: "var(--t-bad-fg)" }}>{picked.size} selected</b>
               <button className="btn sm" onClick={clear} disabled={pending}>Clear</button>
               <button className="btn sm accent" style={{ marginLeft: "auto", background: "#A32D2D", borderColor: "#A32D2D" }}
                 onClick={remove} disabled={pending}>
@@ -131,7 +131,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
             </>
           ) : (
             <>
-              <span style={{ fontSize: 13, color: "var(--t-warn-fg)" }}>
+              <span className="t-body" style={{ color: "var(--t-warn-fg)" }}>
                 <b>{visibleDupes.length}</b> row{visibleDupes.length === 1 ? " looks" : "s look"} like duplicate
                 {visibleDupes.length === 1 ? "" : "s"} of another.
               </span>
@@ -143,7 +143,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
       {rows.length > 0 && (
         <div className="reg-head">
@@ -190,20 +190,20 @@ export default function AssetRegistryList({ rows, canSelect }: {
                   )}
                   <span title={a.status}><Dot tone={a.statusTone} /></span>
                   <span className="reg-cell">
-                    <Link href={`/assets/${a.id}`} style={{ fontSize: 13, fontWeight: 700, textDecoration: "none", color: "inherit" }}>
+                    <Link href={`/assets/${a.id}`} className="t-body" style={{ fontWeight: 700, textDecoration: "none", color: "inherit" }}>
                       {a.model || <span className="mut">(no model)</span>}
                     </Link>
                     {/* Text, not a second pill: the row's one pill is its status. */}
                     {isDupe && (
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "var(--t-warn-fg)" }}
+                      <span className="t-meta" style={{ marginLeft: 6, fontWeight: 700, color: "var(--t-warn-fg)" }}
                         title="Matches an earlier row: same serial, or same type/model/owner/location on the same system">
                         dupe?
                       </span>
                     )}
                   </span>
-                  <span className="reg-cell mono" style={mut}>{a.serial || "—"}</span>
-                  <span className="reg-cell" style={mut}>{a.manufacturer || "—"}</span>
-                  <span className="reg-cell" style={mut}>{a.owner || "—"}</span>
+                  <span className="reg-cell mono" style={mut}>{a.serial || "-"}</span>
+                  <span className="reg-cell" style={mut}>{a.manufacturer || "-"}</span>
+                  <span className="reg-cell" style={mut}>{a.owner || "-"}</span>
                   <span className="reg-cell" style={mut}>{a.whereLabel}</span>
                   <span>
                     <span className={`pill ${a.statusTone}`}>{a.status}</span>

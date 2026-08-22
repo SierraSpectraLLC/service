@@ -112,10 +112,10 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
               dot: r.unread > 0 ? <Dot tone="info" /> : null,
               who: <span style={{ fontSize: 13.5, fontWeight: r.on ? 800 : 700 }}>{r.name}</span>,
               last: r.lastLine
-                ? <span className="mut" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                ? <span className="mut t-small" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
                     <b style={{ fontWeight: 600 }}>{r.lastWho}:</b> {r.lastLine}
                   </span>
-                : <span className="mut" style={{ fontSize: 12 }}>nothing said yet</span>,
+                : <span className="mut t-small">nothing said yet</span>,
               new: r.unread > 0 ? <Pill tone="info">{r.unread} new</Pill> : null,
               when: <span className="mut" style={{ fontSize: 11.5 }}>{r.when}</span>,
             },
@@ -145,7 +145,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
         />
       ) : (
         <div className="card">
-          <div className="mut" style={{ fontSize: 13 }}>
+          <div className="mut t-body">
             Your sign-in isn&apos;t attached to an organization yet, so you have no general room.
           </div>
         </div>
@@ -153,7 +153,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
 
       <div className="section-head" style={{ marginTop: 16 }}>
         <span className="section-name">Recent system discussions</span>
-        <span className="mut" style={{ fontSize: 12, marginLeft: 8 }}>Tap through to reply on the system&apos;s page.</span>
+        <span className="mut t-small" style={{ marginLeft: 8 }}>Tap through to reply on the system&apos;s page.</span>
       </div>
       <DataTable
         cols={[
@@ -167,7 +167,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
           href: `/instruments/${p.instrumentId}`,
           cells: {
             dot: p.audience === "internal" ? <Dot tone="warn" /> : null,
-            who: <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{label.get(p.instrumentId!) ?? "?"}</span>,
+            who: <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{label.get(p.instrumentId!) ?? "?"}</span>,
             last: (
               <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
                 <b>{p.author}</b>{p.audience === "internal" ? <> <Pill tone="warn">internal</Pill></> : null} · {p.body}

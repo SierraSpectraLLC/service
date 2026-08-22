@@ -276,14 +276,14 @@ function FrozenShelf({ title, blurb, verb, rows }: {
   return (
     <div className="card">
       <div className="card-title">{title}</div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>{blurb}</div>
+      <div className="mut t-meta" style={{ marginBottom: 10 }}>{blurb}</div>
       {rows.map((r) => (
         <div key={r.id} style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-          <Link href={`/records/${r.id}`} className="mono" style={{ fontWeight: 700, fontSize: 13, textDecoration: "none", color: "var(--navy)" }}>
+          <Link href={`/records/${r.id}`} className="mono t-body" style={{ fontWeight: 700, textDecoration: "none", color: "var(--navy)" }}>
             {r.externalId}
           </Link>
-          <span style={{ fontSize: 13 }}>{r.label || <span className="mut">No assets were listed</span>}</span>
-          <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>{verb} {shopTime(r.revokedAt)}</span>
+          <span className="t-body">{r.label || <span className="mut">No assets were listed</span>}</span>
+          <span className="mut t-small" style={{ marginLeft: "auto" }}>{verb} {shopTime(r.revokedAt)}</span>
         </div>
       ))}
     </div>

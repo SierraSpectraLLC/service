@@ -91,8 +91,8 @@ export default function PersonnelForm(props: {
         <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "2px 0 10px" }}>
           <Toggle on={view} label="Client sign-in" onClick={() => { setView(!view); setBarMsg(""); }} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>Client sign-in</div>
-            <div className="mut" style={{ fontSize: 11 }}>Master switch. Off blocks every non-staff sign-in, whatever each organization&apos;s list says.</div>
+            <div className="t-body" style={{ fontWeight: 700 }}>Client sign-in</div>
+            <div className="mut t-meta">Master switch. Off blocks every non-staff sign-in, whatever each organization&apos;s list says.</div>
           </div>
         </div>
 
@@ -126,18 +126,18 @@ export default function PersonnelForm(props: {
                 <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   {/* Their header color, so the list looks like the workspaces do. */}
                   <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: o.themeColor || "var(--line)" }} />
-                  <span style={{ fontSize: 14, fontWeight: 700 }}>{o.name}</span>
+                  <span className="t-lead" style={{ fontWeight: 700 }}>{o.name}</span>
                 </span>
               ),
               kind: <Pill tone={o.kind === "provider" ? "warn" : "info"}>{o.kind}</Pill>,
               flags: (
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {[props.operatorOrgId === o.id ? "operator" : "",
                     props.showSheetSync && props.sheetOrgId === o.id ? "sheet sync" : ""].filter(Boolean).join(" · ")}
                 </span>
               ),
               reach: (
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {o.systems} system{o.systems === 1 ? "" : "s"} ·{" "}
                   {o.logins === 0
                     ? "nobody can sign in"
@@ -153,34 +153,34 @@ export default function PersonnelForm(props: {
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           <input value={orgDraft.name} onChange={(e) => setOrgDraft({ ...orgDraft, name: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") submitOrg(); }}
-            placeholder="New organization name" style={{ flex: "1 1 160px", fontSize: 13 }} />
+            placeholder="New organization name" className="t-body" style={{ flex: "1 1 160px" }} />
           <select value={orgDraft.kind} onChange={(e) => setOrgDraft({ ...orgDraft, kind: e.target.value })}
-            style={{ width: "auto", fontSize: 12 }}>
+            className="t-small" style={{ width: "auto" }}>
             <option value="client">client - owns systems</option>
             <option value="provider">provider - services them</option>
           </select>
           <button className="btn sm accent" onClick={submitOrg} disabled={pending || !orgDraft.name.trim()}>Add</button>
         </div>
-        {orgError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{orgError}</div>}
+        {orgError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{orgError}</div>}
       </Panel>
 
       {/* A sign-in with no organization has no scope, so it can't sign in at all. */}
       {props.orphans.length > 0 && (
         <div className="card" style={{ borderColor: "#EAD9B0", background: "#FDF8EE" }}>
           <div className="card-title" style={{ color: "var(--t-warn-fg)" }}>Sign-ins with no organization</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+          <div className="mut t-small" style={{ marginBottom: 8 }}>
             These cannot sign in until they name one - a login with no organization has nothing to see.
           </div>
           {props.orphans.map((r) => (
             <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-              <span className="mono" style={{ fontSize: 12 }}>{r.entry}</span>
+              <span className="mono t-small">{r.entry}</span>
               <select defaultValue="" disabled={pending} aria-label={`Organization for ${r.entry}`}
                 onChange={(e) => { const v = parseInt(e.target.value); if (v) startTransition(async () => { await setClientAccessOrg(r.id, v); }); }}
-                style={{ width: "auto", fontSize: 11, padding: "1px 4px" }}>
+                className="t-meta" style={{ width: "auto", padding: "1px 4px" }}>
                 <option value="">choose an organization</option>
                 {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
-              <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
+              <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
                 onClick={async () => {
                   if (!(await confirmDialog({ title: `Remove ${r.entry}?`, action: `Remove ${r.entry}`, tone: "bad" }))) return;
                   setError("");
@@ -191,7 +191,7 @@ export default function PersonnelForm(props: {
                 }}>remove</button>
             </div>
           ))}
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
         </div>
       )}
 
@@ -204,12 +204,12 @@ export default function PersonnelForm(props: {
           your own people in <a href="/settings/admin">Admin</a>, a client&apos;s on their organization&apos;s page.</>}>
         {props.directory.map((p) => (
           <div key={p.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
+            <span className="t-body" style={{ fontWeight: 700 }}>{p.name}</span>
             {p.org && <span className="pill neutral">{p.org}</span>}
-            <span className="mut mono" style={{ fontSize: 11, marginLeft: "auto" }}>{p.email}</span>
+            <span className="mut mono t-meta" style={{ marginLeft: "auto" }}>{p.email}</span>
           </div>
         ))}
-        {props.directory.length === 0 && <div className="mut" style={{ fontSize: 12 }}>Nobody has a login yet.</div>}
+        {props.directory.length === 0 && <div className="mut t-small">Nobody has a login yet.</div>}
       </Panel>
 
       <SaveBar dirty={dirty} saving={pending} message={barMsg}

@@ -69,7 +69,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
       opacity: s.archived ? 0.6 : 1,
     }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>{siteLabel(s)}</span>
+        <span className="t-body" style={{ fontWeight: 700 }}>{siteLabel(s)}</span>
         {s.systems > 0 && (
           <span className="pill info">
             {s.systems} system{s.systems === 1 ? "" : "s"}
@@ -78,15 +78,15 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
         {s.archived && <span className="pill faint">closed</span>}
         {canEdit && (
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-            <button className="btn link" style={{ fontSize: 11 }} onClick={() => openEdit(s)}>edit</button>
-            <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+            <button className="btn link" onClick={() => openEdit(s)}>edit</button>
+            <button className="btn link" disabled={pending}
               onClick={() => startTransition(async () => { await archiveOrgSite(s.id, !s.archived); toast({ message: s.archived ? "Reopened the site" : "Closed the site" }); })}>
               {s.archived ? "reopen" : "close"}
             </button>
           </span>
         )}
       </div>
-      {s.address && <div className="mut" style={{ fontSize: 12 }}>{addressLine(s.address)}</div>}
+      {s.address && <div className="mut t-small">{addressLine(s.address)}</div>}
       {(s.contactName || s.contactPhone) && (
         <div className="mut" style={{ fontSize: 11.5 }}>
           {[s.contactName, s.contactPhone].filter(Boolean).join(" · ")}
@@ -97,7 +97,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
       {s.accessNotes && (
         <div style={{ marginTop: 6 }}>
           <div className="eyebrow" style={{ marginBottom: 2 }}>Getting in</div>
-          <div style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{s.accessNotes}</div>
+          <div className="t-small" style={{ whiteSpace: "pre-wrap" }}>{s.accessNotes}</div>
         </div>
       )}
     </div>
@@ -107,13 +107,13 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
     <>
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Billing address</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+        <div className="mut t-small" style={{ marginBottom: 8 }}>
           Where {orgName}&apos;s invoices go. One per company - the labs are below.
         </div>
         <textarea value={billing} rows={4} disabled={!canEdit || pending}
           onChange={(e) => { setBilling(e.target.value); setBillingMsg(""); }}
           placeholder={"Accounts Payable\n123 Cedar St, Suite 400\nReno NV 89501"}
-          style={{ width: "100%", fontSize: 13, marginBottom: 6 }} />
+          className="t-body" style={{ width: "100%", marginBottom: 6 }} />
         {canEdit && (
           <button className="btn sm" disabled={pending || billing === billingAddress}
             onClick={() => startTransition(async () => {
@@ -124,7 +124,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
           </button>
         )}
         {billingMsg && (
-          <span style={{ fontSize: 12, marginLeft: 8, color: billingMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>
+          <span className="t-small" style={{ marginLeft: 8, color: billingMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>
             {billingMsg}
           </span>
         )}
@@ -140,14 +140,14 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             </button>
           )}
         </div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+        <div className="mut t-small" style={{ marginBottom: 10 }}>
           Where the instruments actually are, and everything a tech needs before driving
           there. A system points at one of these.
         </div>
 
         {live.map(row)}
         {live.length === 0 && (
-          <div className="mut" style={{ fontSize: 13 }}>No sites yet.</div>
+          <div className="mut t-body">No sites yet.</div>
         )}
         {closed.length > 0 && (
           <details style={{ marginTop: 6 }}>
@@ -157,7 +157,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             {closed.map(row)}
           </details>
         )}
-        {error && !sheet && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+        {error && !sheet && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
       </div>
 
       {sheet && (
@@ -197,7 +197,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             <textarea value={draft.accessNotes} rows={3} style={{ width: "100%", marginBottom: 4 }}
               placeholder={"Parking garage on Cedar, $30/day - street parking is 2hr only.\nLoading dock round the back, badge needed."}
               onChange={(e) => setDraft({ ...draft, accessNotes: e.target.value })} />
-            <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+            <div className="mut t-meta" style={{ marginBottom: 8 }}>
               The part nobody writes down and everybody needs at 7am. Shown on every system
               installed here.
             </div>

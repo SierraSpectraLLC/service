@@ -106,7 +106,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
           </button>
         )}
       </div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+      <div className="mut t-meta" style={{ marginBottom: 8 }}>
         {sub ?? "Manuals, links and field notes, filed on the model in the catalog - every system with this equipment sees the same shelf."}
       </div>
 
@@ -126,13 +126,13 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               {(["link", "note"] as const).map((k) => (
                 <button key={k} type="button" aria-pressed={draft.kind === k}
                   onClick={() => setDraft({ ...draft, kind: k })}>
-                  {k === "link" ? "🔗 Link" : "✎ Note"}
+                  {k === "link" ? "↗ Link" : "✎ Note"}
                 </button>
               ))}
             </div>
-            <select value={draft.scope} aria-label="Filed under"
+            <select value={draft.scope} aria-label="Filed under" className="t-small"
               onChange={(e) => setDraft({ ...draft, scope: parseInt(e.target.value) })}
-              style={{ width: "auto", fontSize: 12 }}>
+              style={{ width: "auto" }}>
               {scopes.map((s, i) => <option key={`${s.assetType}|${s.model}`} value={i}>{s.label}</option>)}
             </select>
           </div>
@@ -158,22 +158,22 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
           ) : picked ? (
             <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 8px", marginBottom: 8,
               border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
-              <span aria-hidden style={{ fontSize: 13 }}>{picked.isPhoto ? "🖼" : "📄"}</span>
-              <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span aria-hidden className="t-body">{picked.isPhoto ? "▣" : "▢"}</span>
+              <span className="mono t-small" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {picked.fileName}
               </span>
-              <span className="mut" style={{ fontSize: 11 }}>{picked.where}</span>
-              <button className="btn link" style={{ marginLeft: "auto", fontSize: 11 }}
+              <span className="mut t-meta">{picked.where}</span>
+              <button className="btn link" style={{ marginLeft: "auto" }}
                 onClick={() => setPicked(null)}>change</button>
             </div>
           ) : (
             <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "#fff", padding: 8, marginBottom: 8 }}>
               <input value={fileFilter} onChange={(e) => setFileFilter(e.target.value)}
                 placeholder="Filter by name, description or where it lives"
-                style={{ fontSize: 12, marginBottom: 6 }} aria-label="Filter files" />
-              {files === "loading" && <div className="mut" style={{ fontSize: 12 }}>Loading the shelf…</div>}
+                className="t-small" style={{ marginBottom: 6 }} aria-label="Filter files" />
+              {files === "loading" && <div className="mut t-small">Loading the shelf…</div>}
               {Array.isArray(files) && files.length === 0 && (
-                <div className="mut" style={{ fontSize: 12 }}>
+                <div className="mut t-small">
                   Nothing stored yet. Upload manuals under Library → Files, then point at them here.
                 </div>
               )}
@@ -181,7 +181,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                 const needle = fileFilter.trim().toLowerCase();
                 const shown = files.filter((f) => !needle
                   || `${f.fileName} ${f.description} ${f.where}`.toLowerCase().includes(needle));
-                if (!shown.length) return <div className="mut" style={{ fontSize: 12 }}>Nothing matches that.</div>;
+                if (!shown.length) return <div className="mut t-small">Nothing matches that.</div>;
                 return (
                   <div style={{ maxHeight: 200, overflowY: "auto" }}>
                     {shown.slice(0, 200).map((f) => (
@@ -190,12 +190,12 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                         style={{ display: "flex", gap: 8, alignItems: "baseline", width: "100%", textAlign: "left",
                           padding: "5px 4px", border: "none", background: "none", cursor: "pointer",
                           borderTop: "1px solid var(--line)" }}>
-                        <span aria-hidden style={{ fontSize: 12 }}>{f.isPhoto ? "🖼" : "📄"}</span>
-                        <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <span aria-hidden className="t-small">{f.isPhoto ? "▣" : "▢"}</span>
+                        <span className="mono t-small" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {f.fileName}
                         </span>
-                        <span className="mut" style={{ fontSize: 11 }}>{f.where}</span>
-                        <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{fmtBytes(f.size)}</span>
+                        <span className="mut t-meta">{f.where}</span>
+                        <span className="mut t-meta" style={{ marginLeft: "auto", flexShrink: 0 }}>{fmtBytes(f.size)}</span>
                       </button>
                     ))}
                   </div>
@@ -215,9 +215,9 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               actually knows the answer. Skippable - an unreviewed row is honest,
               and simply stays out of anything licensed. */}
           <label>Where it came from <span className="mut" style={{ fontWeight: 400 }}>(decides what can be licensed on)</span></label>
-          <select value={draft.provenance} aria-label="Where it came from"
+          <select value={draft.provenance} aria-label="Where it came from" className="t-small"
             onChange={(e) => setDraft({ ...draft, provenance: e.target.value })}
-            style={{ width: "auto", fontSize: 12, marginBottom: 4 }}>
+            style={{ width: "auto", marginBottom: 4 }}>
             <option value="">Not saying yet</option>
             {PROVENANCE_CHOICES.map((c) => <option key={c} value={c}>{PROVENANCE_LABEL[c]}</option>)}
           </select>
@@ -232,15 +232,15 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
           <div className="eyebrow" style={{ margin: "6px 0 2px" }}>{g}</div>
           {refs.filter((r) => refScopeLabel(r) === g).map((r) => (
             <div key={r.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-              <span aria-hidden style={{ fontSize: 12, marginTop: 1 }}>{r.kind === "link" ? "🔗" : "✎"}</span>
+              <span aria-hidden className="t-small" style={{ marginTop: 1 }}>{r.kind === "link" ? "↗" : "✎"}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {r.kind === "link" ? (
-                  <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600 }}>
+                  <a href={r.url} target="_blank" rel="noreferrer" className="t-body" style={{ fontWeight: 600 }}>
                     {r.title || r.url} ↗
                   </a>
                 ) : (
                   <>
-                    {r.title && <div style={{ fontSize: 13, fontWeight: 700 }}>{r.title}</div>}
+                    {r.title && <div className="t-body" style={{ fontWeight: 700 }}>{r.title}</div>}
                     {r.body && <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{r.body}</div>}
                     {r.url && (looksLikeImage(r.url) ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -248,7 +248,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                         <img src={r.url} alt={r.title || "reference"} style={{ maxHeight: 120, maxWidth: "100%", borderRadius: 6, marginTop: 4, display: "block" }} />
                       </a>
                     ) : (
-                      <a href={r.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>attachment ↗</a>
+                      <a href={r.url} target="_blank" rel="noreferrer" className="t-small">attachment ↗</a>
                     ))}
                   </>
                 )}

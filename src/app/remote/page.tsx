@@ -124,18 +124,18 @@ export default async function RemotePage() {
 
       {!configured && (
         <div className="card" style={{ borderLeft: "4px solid #8A5410" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+          <div className="t-body" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
             No support host configured yet
           </div>
-          <div className="mut" style={{ fontSize: 12 }}>{NOT_CONFIGURED}</div>
+          <div className="mut t-small">{NOT_CONFIGURED}</div>
         </div>
       )}
       {configured && !engineReachable && (
         <div className="card" style={{ borderLeft: "4px solid #8A5410" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+          <div className="t-body" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
             Can&apos;t reach the support host
           </div>
-          <div className="mut" style={{ fontSize: 12 }}>
+          <div className="mut t-small">
             Showing the last known state. Connecting may still work.
           </div>
         </div>

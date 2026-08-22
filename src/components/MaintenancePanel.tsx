@@ -124,7 +124,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
     return (
       <div key={s.id} style={{ padding: "7px 0", borderTop: "1px solid var(--line)", opacity: s.paused ? 0.6 : 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>{s.title}</span>
+          <span className="t-body" style={{ fontWeight: 700 }}>{s.title}</span>
           <span className="pill accent">{cadenceLabel(s.everyDays)}</span>
           {s.paused ? (
             <span className="pill neutral">paused</span>
@@ -145,8 +145,8 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             )
           )}
           {s.onAsset && !inGroup && <span className="pill neutral">{s.onAsset}</span>}
-          {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
-          {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
+          {s.assignee && <span className="mut t-meta">{s.assignee}</span>}
+          {s.lastDone && <span className="mut t-meta">last done {mdy(s.lastDone)}</span>}
           {canEdit && (
             <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
               {/* A schedule was only a promise without this: the first cycle
@@ -165,12 +165,12 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   }}>{!advisory && (overdue || dueToday) ? "Start" : "Do it now"}</button>
               )}
               {s.openTaskId !== null && (
-                <span className="mut" style={{ fontSize: 11 }}>in Tasks</span>
+                <span className="mut t-meta">in Tasks</span>
               )}
               {/* An early start that nobody has touched can simply be taken
                   back - the click created a task, never moved the dates. */}
               {canEdit && s.openTaskId !== null && !s.paused && s.nextDue > today && (
-                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                <button className="btn link" disabled={pending}
                   title="Removes the task the early start created. The schedule's due date was never touched."
                   onClick={() => startTransition(async () => {
                     const res = await undoRunPmNow(s.id);
@@ -179,24 +179,24 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   })}>undo start</button>
               )}
               {canEdit && (
-                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                <button className="btn link" disabled={pending}
                   title="File a completion that happened before the software was watching"
                   onClick={() => {
                     setLogging(logging === s.id ? null : s.id);
                     setLogDraft({ date: "", note: "", doneBy: "", advanceSchedule: true });
                   }}>log past done</button>
               )}
-              <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+              <button className="btn link" disabled={pending}
                 onClick={() => setEditing((m) => e ? (() => { const n = { ...m }; delete n[s.id]; return n; })() : ({
                   ...m, [s.id]: { assignee: s.assignee, everyDays: String(s.everyDays), nextDue: s.nextDue, lastDone: s.lastDone },
                 }))}>{e ? "cancel" : "edit"}</button>
-              <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+              <button className="btn link" disabled={pending}
                 onClick={() => startTransition(async () => {
                   const res = await setPmPaused(s.id, !s.paused);
                   if (res?.error) setError(res.error);
                   else toast({ message: s.paused ? "Resumed the schedule" : "Paused the schedule" });
                 })}>{s.paused ? "resume" : "pause"}</button>
-              <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
+              <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                 onClick={async () => {
                   const reason = await confirmReason({
                     title: `Stop scheduling "${s.title}"?`,
@@ -213,21 +213,21 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             </span>
           )}
         </div>
-        {s.body && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
+        {s.body && <div className="mut t-small" style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
         {/* One past completion, filed as the Done task it would have left
             behind - so the vendor's 2024 visit exists as history, not memory. */}
         {logging === s.id && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
             <input type="date" value={logDraft.date} aria-label="Date it was done"
               onChange={(ev) => setLogDraft({ ...logDraft, date: ev.target.value })}
-              style={{ width: "auto", fontSize: 12 }} />
+              className="t-small" style={{ width: "auto" }} />
             <input value={logDraft.doneBy} placeholder="By (vendor or engineer, optional)"
               onChange={(ev) => setLogDraft({ ...logDraft, doneBy: ev.target.value })}
-              style={{ width: "auto", flex: "1 1 130px", fontSize: 12 }} />
+              className="t-small" style={{ width: "auto", flex: "1 1 130px" }} />
             <input value={logDraft.note} placeholder="Note (optional)"
               onChange={(ev) => setLogDraft({ ...logDraft, note: ev.target.value })}
-              style={{ width: "auto", flex: "2 1 150px", fontSize: 12 }} />
-            <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, margin: 0, fontWeight: 400 }}>
+              className="t-small" style={{ width: "auto", flex: "2 1 150px" }} />
+            <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400 }}>
               <input type="checkbox" checked={logDraft.advanceSchedule} style={{ width: 14, height: 14 }}
                 onChange={(ev) => setLogDraft({ ...logDraft, advanceSchedule: ev.target.checked })} />
               set next due from it
@@ -248,12 +248,12 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               {/* partLabel rather than a second spelling of it: this line sits
                   next to the button that actually orders the part, so it is the
                   last place that should disagree with the task about how many. */}
-              <span className="mono mut" style={{ fontSize: 11 }}>{partLabel(pt)}</span>
+              <span className="mono mut t-meta">{partLabel(pt)}</span>
               {canEdit && (requested[key]
-                ? <span style={{ fontSize: 11, color: requested[key] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
+                ? <span className="t-meta" style={{ color: requested[key] === "ok" ? "#2E6B2E" : "#A32D2D" }}>
                     {requested[key] === "ok" ? "Requested - see Parts" : requested[key]}
                   </span>
-                : <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                : <button className="btn link" disabled={pending}
                     onClick={() => startTransition(async () => {
                       const res = await requestPmPart(s.id, pt.number);
                       setRequested((m) => ({ ...m, [key]: res?.error ?? "ok" }));
@@ -264,19 +264,19 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         })}
         {e && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
-            <span className="mut" style={{ fontSize: 11 }}>every</span>
+            <span className="mut t-meta">every</span>
             <input type="number" min={1} max={3650} value={e.everyDays}
               onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, everyDays: ev.target.value } }))}
-              aria-label="Cadence in days" style={{ width: 70, fontSize: 12 }} />
-            <span className="mut" style={{ fontSize: 11 }}>days · next due</span>
+              aria-label="Cadence in days" className="t-small" style={{ width: 70 }} />
+            <span className="mut t-meta">days · next due</span>
             <input type="date" value={e.nextDue}
               onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, nextDue: ev.target.value } }))}
-              style={{ width: "auto", fontSize: 12 }} />
+              className="t-small" style={{ width: "auto" }} />
             {/* The date off the sticker, or the seller's word at intake.
                 Setting it re-suggests next due one cadence later - still
                 editable, because "we know when, not by whom" is the fact
                 being recorded and the calendar is a consequence of it. */}
-            <span className="mut" style={{ fontSize: 11 }}>last done</span>
+            <span className="mut t-meta">last done</span>
             <input type="date" value={e.lastDone} aria-label="Last done"
               onChange={(ev) => {
                 const lastDone = ev.target.value;
@@ -286,9 +286,9 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   nextDue: lastDone && Number.isFinite(days) && days > 0 ? addDays(lastDone, days) : e.nextDue,
                 } }));
               }}
-              style={{ width: "auto", fontSize: 12 }} />
+              className="t-small" style={{ width: "auto" }} />
             <select value={e.assignee} onChange={(ev) => setEditing((m) => ({ ...m, [s.id]: { ...e, assignee: ev.target.value } }))}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               <option value="">unassigned</option>
               {people.map((p) => <option key={p}>{p}</option>)}
             </select>
@@ -304,7 +304,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <button onClick={() => setPanelOpen((v) => !v)} aria-expanded={panelOpen}
           style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
-          <span aria-hidden style={{ fontSize: 11, color: "var(--mut)", width: 12 }}>{panelOpen ? "\u25BE" : "\u25B8"}</span>
+          <span aria-hidden className="t-meta" style={{ color: "var(--mut)", width: 12 }}>{panelOpen ? "\u25BE" : "\u25B8"}</span>
           <span className="card-title">Maintenance</span>
         </button>
         {/* Rolled up, the header keeps the two answers the panel exists for:
@@ -320,7 +320,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 {advisory ? `next cycle ${next.label}` : `next due ${next.label}`}
               </span>
             ) : null}
-            <span className="mut" style={{ fontSize: 11 }}>{schedules.length} schedule{schedules.length === 1 ? "" : "s"}</span>
+            <span className="mut t-meta">{schedules.length} schedule{schedules.length === 1 ? "" : "s"}</span>
           </span>
         )}
         {canEdit && panelOpen && (
@@ -353,7 +353,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input type="date" value={alignDraft.date}
               onChange={(e) => setAlignDraft({ ...alignDraft, date: e.target.value })}
-              style={{ width: "auto", fontSize: 13 }} aria-label="Anchor date" />
+              className="t-body" style={{ width: "auto" }} aria-label="Anchor date" />
             <button className="btn sm accent" disabled={pending || !alignDraft.date}
               onClick={() => startTransition(async () => {
                 const res = await alignMaintenance(target, alignDraft);
@@ -365,14 +365,14 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             </button>
           </div>
           {alignDraft.mode === "lastDone" && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "8px 0 0", fontWeight: 400 }}>
+            <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "8px 0 0", fontWeight: 400 }}>
               <input type="checkbox" checked={alignDraft.fileRecord} style={{ width: 15, height: 15 }}
                 onChange={(e) => setAlignDraft({ ...alignDraft, fileRecord: e.target.checked })} />
               Also file the completed work as records on that date
               <span className="mut">- the visit becomes history, not just a date</span>
             </label>
           )}
-          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="mut t-meta" style={{ marginTop: 6 }}>
             {alignDraft.mode === "lastDone"
               ? "Marks every schedule last done that day - each comes due its own cadence later (quarterly work in 3 months, annual next year)."
               : "Everything falls due together on that day, like a PM visit; each advances by its own cadence once completed."}
@@ -390,14 +390,14 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           <span className="mut" style={{ fontSize: 11.5, flex: "1 1 200px" }}>{posture.note}</span>
           {posture.canToggle && posture.instrumentId !== null && (
             <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+              <button className="btn link" disabled={pending}
                 onClick={() => startTransition(async () => {
                   const res = await setPmPosture(posture.instrumentId!, advisory ? "scheduled" : "advisory");
                   if (res?.error) setError(res.error);
                   else toast({ message: advisory ? "Put maintenance on a schedule" : "Made maintenance reference only" });
                 })}>{advisory ? "put on a schedule" : "make reference only"}</button>
               {!postureIsDefault(posture.stored) && (
-                <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                <button className="btn link" disabled={pending}
                   title="Follow the owning organization again"
                   onClick={() => startTransition(async () => {
                     const res = await setPmPosture(posture.instrumentId!, "");
@@ -412,9 +412,9 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       {/* The quiet counterpart: a scheduled-by-default system offers the way
           out without a banner about a state it is already in. */}
       {posture && !advisory && postureIsDefault(posture.stored) && posture.canToggle && posture.instrumentId !== null && schedules.length > 0 && (
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>
           Due work turns into tasks.{" "}
-          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+          <button className="btn link" disabled={pending}
             title="Keep every schedule as reference - nothing comes due, nothing nags"
             onClick={() => startTransition(async () => {
               const res = await setPmPosture(posture.instrumentId!, "advisory");
@@ -426,7 +426,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       {/* A hand-made schedule here covers THIS record only. Ten similar systems
           means ten copies - which is exactly what the catalog exists to avoid. */}
       {catalogHint && (
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>
           Schedules added here cover only this record. Upkeep every unit of a model or
           system type needs is defined once in{" "}
           <a href="/settings/procedures" style={{ color: "var(--link)" }}>Settings → Procedures &amp; maintenance</a>{" "}
@@ -437,12 +437,12 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       {open && (
         <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
           <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-            placeholder='What recurs, e.g. "Change pump oil"' style={{ width: "100%", fontSize: 13, marginBottom: 6 }} autoFocus />
+            placeholder='What recurs, e.g. "Change pump oil"' className="t-body" style={{ width: "100%", marginBottom: 6 }} autoFocus />
           <textarea value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} rows={2}
-            placeholder="Steps or notes for whoever does it (optional)" style={{ width: "100%", fontSize: 13, marginBottom: 6, resize: "vertical" }} />
+            placeholder="Steps or notes for whoever does it (optional)" className="t-body" style={{ width: "100%", marginBottom: 6, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             <select value={draft.everyDays} onChange={(e) => setDraft({ ...draft, everyDays: e.target.value })}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               {CADENCES.map((c) => <option key={c.days} value={c.days}>{c.label}</option>)}
               {!CADENCES.some((c) => String(c.days) === draft.everyDays) && (
                 <option value={draft.everyDays}>every {draft.everyDays} days</option>
@@ -450,13 +450,13 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             </select>
             <input type="number" min={1} max={3650} value={draft.everyDays}
               onChange={(e) => setDraft({ ...draft, everyDays: e.target.value })}
-              aria-label="Cadence in days" style={{ width: 70, fontSize: 12 }} />
-            <span className="mut" style={{ fontSize: 11 }}>days</span>
-            <span className="mut" style={{ fontSize: 12, marginLeft: 8 }}>first due</span>
+              aria-label="Cadence in days" className="t-small" style={{ width: 70 }} />
+            <span className="mut t-meta">days</span>
+            <span className="mut t-small" style={{ marginLeft: 8 }}>first due</span>
             <input type="date" value={draft.firstDue} onChange={(e) => setDraft({ ...draft, firstDue: e.target.value })}
-              style={{ width: "auto", fontSize: 12 }} />
+              className="t-small" style={{ width: "auto" }} />
             <select value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               <option value="">unassigned</option>
               {people.map((p) => <option key={p}>{p}</option>)}
             </select>
@@ -506,8 +506,8 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             <button onClick={() => setFoldOpen((m) => ({ ...m, [f.key]: !isOpen }))} aria-expanded={isOpen}
               style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", padding: "8px 0", cursor: "pointer", textAlign: "left", flexWrap: "wrap" }}>
               <span aria-hidden style={{ fontSize: 10, color: "var(--mut)", width: 12 }}>{isOpen ? "\u25BE" : "\u25B8"}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: f.state === "paused" ? "var(--mut)" : "var(--navy)" }}>{f.label}</span>
-              <span className="mut" style={{ fontSize: 11 }}>{f.rows.length}</span>
+              <span className="t-body" style={{ fontWeight: 700, color: f.state === "paused" ? "var(--mut)" : "var(--navy)" }}>{f.label}</span>
+              <span className="mut t-meta">{f.rows.length}</span>
               {owedPill}
             </button>
             {isOpen && (
@@ -527,10 +527,10 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       })}
 
       {schedules.length === 0 && !open && (
-        <div className="mut" style={{ fontSize: 12 }}>Nothing scheduled yet.</div>
+        <div className="mut t-small">Nothing scheduled yet.</div>
       )}
       </>)}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

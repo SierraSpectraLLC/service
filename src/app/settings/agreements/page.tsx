@@ -127,7 +127,7 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
           title={chase.length ? "Everything else" : "In force"} />
       )}
 
-      <div className="mut" style={{ fontSize: 12, padding: "0 4px" }}>
+      <div className="mut t-small" style={{ padding: "0 4px" }}>
         Allowances are summed from the work every time this page loads - parts fitted on
         their systems inside the term, closed work orders, hours logged - so what you see
         here is what the record says rather than a balance somebody kept by hand.

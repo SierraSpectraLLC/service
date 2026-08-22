@@ -89,11 +89,11 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
         <div className="card-title" style={{ marginBottom: 0 }}>Catalog photos</div>
-        <span className="mut" style={{ fontSize: 12 }}>
+        <span className="mut t-small">
           {withPhoto} of {entries.length} {entries.length === 1 ? "entry has" : "entries have"} one
         </span>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="mut t-small" style={{ marginBottom: 10 }}>
         A stock photo of the kit itself. It shows on any system or unit of that kind that has no photo of its
         own, and it is not a file on those records - it never reaches their files, their gallery or their storage.
       </div>
@@ -101,7 +101,7 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
       {entries.length > 8 && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
           <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by model, type or maker" style={{ flex: "1 1 180px", fontSize: 12 }} />
+            placeholder="Filter by model, type or maker" className="t-small" style={{ flex: "1 1 180px" }} />
           <span className="seg">
             {(["all", "missing"] as const).map((w) => (
               <button key={w} aria-pressed={only === w} onClick={() => setOnly(w)}>
@@ -112,8 +112,8 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
         </div>
       )}
 
-      {busy && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>Uploading {busy}</div>}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
+      {busy && <div className="mut t-small" style={{ marginBottom: 6 }}>Uploading {busy}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
 
       <input ref={input} type="file" accept="image/*" style={{ display: "none" }}
         onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ""; }} />
@@ -123,8 +123,8 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
         if (!mine.length) return null;
         return (
           <div key={s.kind} style={{ borderTop: "1px solid var(--line)", paddingTop: 10, marginTop: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 700 }}>{s.title}</div>
-            <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>{s.blurb}</div>
+            <div className="t-body" style={{ fontWeight: 700 }}>{s.title}</div>
+            <div className="mut t-meta" style={{ marginBottom: 8 }}>{s.blurb}</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(124px, 1fr))", gap: 10 }}>
               {mine.map((e) => (
                 <div key={e.id} style={{ minWidth: 0 }}>
@@ -132,23 +132,23 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
                     <PhotoThumb src={stockSrc(e.id)} framing={e.photoFraming} alt={label(e)}
                       width="100%" aspect={4 / 3} radius={8} />
                   ) : (
-                    <button onClick={() => pick(e.id)} disabled={!!busy || pending}
+                    <button onClick={() => pick(e.id)} disabled={!!busy || pending} className="t-meta"
                       style={{
                         width: "100%", aspectRatio: "4 / 3", border: "1px dashed var(--line)", borderRadius: 8,
-                        background: "#F7F9FB", color: "var(--mut)", fontSize: 11, cursor: "pointer",
+                        background: "#F7F9FB", color: "var(--mut)", cursor: "pointer",
                       }}>+ photo</button>
                   )}
-                  <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, overflowWrap: "anywhere" }}>{e.name}</div>
-                  <div className="mut" style={{ fontSize: 11 }}>
+                  <div className="t-small" style={{ fontWeight: 700, marginTop: 4, overflowWrap: "anywhere" }}>{e.name}</div>
+                  <div className="mut t-meta">
                     {[e.kind === "model" ? e.assetType : "", e.manufacturer].filter(Boolean).join(" · ") || " "}
                   </div>
                   {e.hasPhoto && (
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
-                      <button className="btn link" style={{ fontSize: 11 }} disabled={!!busy || pending}
+                      <button className="btn link" disabled={!!busy || pending}
                         onClick={() => pick(e.id)}>Replace</button>
-                      <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                      <button className="btn link" disabled={pending}
                         onClick={() => setFraming(e)}>Frame</button>
-                      <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
+                      <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                         aria-label={`Remove the catalog photo for ${label(e)}`}
                         onClick={async () => {
                           if (!(await confirmDialog({
@@ -172,7 +172,7 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
       })}
 
       {shown.length === 0 && (
-        <div className="mut" style={{ fontSize: 12, paddingTop: 8 }}>
+        <div className="mut t-small" style={{ paddingTop: 8 }}>
           {entries.length === 0 ? "Nothing in the catalog yet." : "Nothing matches."}
         </div>
       )}

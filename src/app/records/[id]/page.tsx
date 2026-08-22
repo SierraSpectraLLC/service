@@ -74,31 +74,31 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
         <span className="pill neutral">Frozen record</span>
-        <span className="mut" style={{ fontSize: 12 }}>
+        <span className="mut t-small">
           {handoff
             ? `Handed on ${shopTime(rec.revokedAt)}. Your tenure as it stood that day - it never updates, and the live system has moved on without it.`
             : `Engagement ended ${shopTime(rec.revokedAt)}. Never updates.`}
         </span>
         {rec.supersededAt !== null && (
-          <span className="mut" style={{ fontSize: 12 }}>
+          <span className="mut t-small">
             · Superseded {shopTime(rec.supersededAt)}
-            {current && <> — <Link href={`/records/${current.id}`}>the current record</Link> covers this system</>}
+            {current && <> - <Link href={`/records/${current.id}`}>the current record</Link> covers this system</>}
           </span>
         )}
       </div>
 
       {(d.system.notes || d.assets.length > 0 || d.gases.length > 0) && <div className="card">
-        {d.system.notes && <div className="mut" style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{d.system.notes}</div>}
+        {d.system.notes && <div className="mut t-body" style={{ whiteSpace: "pre-wrap" }}>{d.system.notes}</div>}
 
         {d.assets.length > 0 && (
           <>
             <div className="eyebrow" style={{ marginTop: d.system.notes ? 14 : 0, marginBottom: 6 }}>Assets</div>
             {d.assets.map((a, i) => (
-              <div key={i} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-                <b>{a.kind}</b>{a.model ? ` — ${a.model}` : ""}{a.serial ? <span className="mono mut"> SN {a.serial}</span> : ""}
+              <div key={i} className="t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+                <b>{a.kind}</b>{a.model ? ` - ${a.model}` : ""}{a.serial ? <span className="mono mut"> SN {a.serial}</span> : ""}
                 <span className="mut"> · {a.status}</span>
-                {a.asFound && <div className="mut" style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>As found: {a.asFound}</div>}
-                {a.note && <div className="mut" style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{a.note}</div>}
+                {a.asFound && <div className="mut t-small" style={{ whiteSpace: "pre-wrap" }}>As found: {a.asFound}</div>}
+                {a.note && <div className="mut t-small" style={{ whiteSpace: "pre-wrap" }}>{a.note}</div>}
               </div>
             ))}
           </>
@@ -124,23 +124,23 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
           {d.tasks.map((t, i) => (
             <div key={i} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                <b style={{ fontSize: 13 }}>{t.title}</b>
+                <b className="t-body">{t.title}</b>
                 <span className={`pill ${t.state === "Done" ? "good" : "neutral"}`}>{t.state}</span>
-                {t.assignee && <span className="mut" style={{ fontSize: 12 }}>{t.assignee}</span>}
-                {t.dueDate && <span className="mut" style={{ fontSize: 12 }}>due {t.dueDate}</span>}
-                <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{when(t.createdAt)}</span>
+                {t.assignee && <span className="mut t-small">{t.assignee}</span>}
+                {t.dueDate && <span className="mut t-small">due {t.dueDate}</span>}
+                <span className="mut t-meta" style={{ marginLeft: "auto" }}>{when(t.createdAt)}</span>
               </div>
-              {t.body && <div className="mut" style={{ fontSize: 12, whiteSpace: "pre-wrap", marginTop: 2 }}>{t.body}</div>}
+              {t.body && <div className="mut t-small" style={{ whiteSpace: "pre-wrap", marginTop: 2 }}>{t.body}</div>}
               {t.checklist.map((c, j) => (
-                <div key={j} style={{ fontSize: 12, marginTop: 2, paddingLeft: 12 }}>
+                <div key={j} className="t-small" style={{ marginTop: 2, paddingLeft: 12 }}>
                   {c.done ? "☑" : "☐"} {c.text}
                   {c.notes.map((n, k) => (
-                    <div key={k} className="mut" style={{ paddingLeft: 18, fontSize: 11 }}>{n.author}: {n.text}</div>
+                    <div key={k} className="mut t-meta" style={{ paddingLeft: 18 }}>{n.author}: {n.text}</div>
                   ))}
                 </div>
               ))}
               {t.notes.map((n, j) => (
-                <div key={j} className="mut" style={{ fontSize: 12, marginTop: 2, paddingLeft: 12 }}>{n.author}: {n.text} <span style={{ fontSize: 10 }}>· {when(n.createdAt)}</span></div>
+                <div key={j} className="mut t-small" style={{ marginTop: 2, paddingLeft: 12 }}>{n.author}: {n.text} <span style={{ fontSize: 10 }}>· {when(n.createdAt)}</span></div>
               ))}
             </div>
           ))}
@@ -151,15 +151,15 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
         <div className="card">
           <div className="card-title">Parts &amp; consumables ({d.parts.length})</div>
           {d.parts.map((p, i) => (
-            <div key={i} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+            <div key={i} className="t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
               <b>{p.name}</b>
               {p.partNumber && <span className="mono mut"> {p.partNumber}</span>}
               {p.serial && <span className="mono mut"> SN {p.serial}</span>}
               <span className="pill neutral" style={{ marginLeft: 6 }}>{p.status}</span>
-              <div className="mut" style={{ fontSize: 12 }}>
+              <div className="mut t-small">
                 {[p.vendor, p.qty && `qty ${p.qty}`, p.installedAt && `installed ${p.installedAt}`, p.removedAt && `removed ${p.removedAt}`].filter(Boolean).join(" · ")}
               </div>
-              {p.note && <div className="mut" style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{p.note}</div>}
+              {p.note && <div className="mut t-small" style={{ whiteSpace: "pre-wrap" }}>{p.note}</div>}
             </div>
           ))}
         </div>
@@ -168,15 +168,15 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
       {d.attachments.length > 0 && (
         <div className="card">
           <div className="card-title">Files ({d.attachments.length})</div>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+          <div className="mut t-meta" style={{ marginBottom: 6 }}>
             Links point at the files as they were shared then; one deleted since may no longer open.
           </div>
           {d.attachments.map((a, i) => (
-            <div key={i} style={{ padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
+            <div key={i} className="t-body" style={{ padding: "5px 0", borderTop: "1px solid var(--line)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
               <a href={a.url} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{a.fileName}</a>
               <span className="pill neutral">{a.kind}</span>
-              {a.description && <span className="mut" style={{ fontSize: 12 }}>{a.description}</span>}
-              <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{fmtSize(a.size)} · {when(a.createdAt)}</span>
+              {a.description && <span className="mut t-small">{a.description}</span>}
+              <span className="mut t-meta" style={{ marginLeft: "auto" }}>{fmtSize(a.size)} · {when(a.createdAt)}</span>
             </div>
           ))}
         </div>
@@ -187,8 +187,8 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
           <div className="card-title">Discussion ({d.discussion.length})</div>
           {d.discussion.map((p, i) => (
             <div key={i} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-              <div style={{ fontSize: 12, fontWeight: 700 }}>{p.author} <span className="mut" style={{ fontWeight: 400, fontSize: 11 }}>· {when(p.createdAt)}</span></div>
-              <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{p.body}</div>
+              <div className="t-small" style={{ fontWeight: 700 }}>{p.author} <span className="mut t-meta" style={{ fontWeight: 400 }}>· {when(p.createdAt)}</span></div>
+              <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{p.body}</div>
             </div>
           ))}
         </div>

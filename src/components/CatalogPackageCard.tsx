@@ -58,14 +58,14 @@ export default function CatalogPackageCard({ entries }: { entries: PackageEntry[
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Validation packages</div>
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           {declared.length ? `${declared.length} declared` : "none declared yet"}
         </span>
         <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => setOpen((v) => !v)}>
           {open ? "Done" : "Edit"}
         </button>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+      <div className="mut t-small" style={{ marginBottom: 8 }}>
         The documents a kind of equipment owes on a <b>regulated (GxP)</b> system - IQ/OQ/PQ
         protocols and reports, URS, certs. Declared here once, every regulated system that matches
         shows the checklist with the gaps visible. Systems not marked GxP ignore all of it.
@@ -82,8 +82,8 @@ export default function CatalogPackageCard({ entries }: { entries: PackageEntry[
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {declared.map((e) => (
               <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{e.name}</span>
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="t-body" style={{ fontWeight: 600 }}>{e.name}</span>
+                <span className="mut t-meta">
                   {e.kind === "model" ? e.assetType : e.kind === "asset_type" ? "module type" : "system type"}
                 </span>
                 <span style={{ display: "flex", gap: 4, marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -113,24 +113,24 @@ export default function CatalogPackageCard({ entries }: { entries: PackageEntry[
           <details key={sec.kind} open={!!q.trim() || undefined} style={{ marginTop: 10 }}>
             <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               <span className="eyebrow">{sec.title}</span>
-              <span className="mut" style={{ fontSize: 11 }}>
+              <span className="mut t-meta">
                 {q.trim() ? `${rows.length} of ${all.length}` : `${all.length}`}
                 {set > 0 && ` · ${set} declared`}
               </span>
             </summary>
-            <div className="mut" style={{ fontSize: 11, margin: "4px 0" }}>{sec.blurb}</div>
+            <div className="mut t-meta" style={{ margin: "4px 0" }}>{sec.blurb}</div>
             {rows.map((e) => (
               <div key={e.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
                 <div className="row-hover" onClick={() => setExpanded(expanded === e.id ? null : e.id)}
                   style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", cursor: "pointer" }}>
-                  <span style={{ fontSize: 13, minWidth: 0, flex: "1 1 150px" }}>
+                  <span className="t-body" style={{ minWidth: 0, flex: "1 1 150px" }}>
                     {e.name}
-                    {e.kind === "model" && e.assetType && <span className="mut" style={{ fontSize: 11 }}> · {e.assetType}</span>}
+                    {e.kind === "model" && e.assetType && <span className="mut t-meta"> · {e.assetType}</span>}
                   </span>
-                  <span className="mut" style={{ fontSize: 11 }}>
+                  <span className="mut t-meta">
                     {e.docTypes.length ? `${e.docTypes.length} document${e.docTypes.length === 1 ? "" : "s"}` : "-"}
                   </span>
-                  <span className="mut" style={{ fontSize: 12 }}>{expanded === e.id ? "▾" : "▸"}</span>
+                  <span className="mut t-small">{expanded === e.id ? "▾" : "▸"}</span>
                 </div>
                 {expanded === e.id && (
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap", padding: "6px 0 2px" }}>
@@ -152,7 +152,7 @@ export default function CatalogPackageCard({ entries }: { entries: PackageEntry[
         );
       })}
 
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

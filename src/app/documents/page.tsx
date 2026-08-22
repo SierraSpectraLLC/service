@@ -173,8 +173,8 @@ export default async function DocumentsPage(
           ["Folders", String(folderRows.length), undefined],
         ] as [string, string, string | undefined][]).map(([label, n, tone]) => (
           <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
-            <div style={{ fontSize: 12 }} className="mut">{label}</div>
-            <div className="t-page" style={{ fontSize: 22, fontWeight: 700, color: tone ? `var(--t-${tone}-fg)` : "var(--navy)" }}>{n}</div>
+            <div className="mut t-small">{label}</div>
+            <div className="t-page" style={{ fontWeight: 700, color: tone ? `var(--t-${tone}-fg)` : "var(--navy)" }}>{n}</div>
             {label === "Storage" && quota.limitBytes !== null && (
               <div style={{ height: 5, borderRadius: 999, background: "#E2E8F0", overflow: "hidden", marginTop: 6 }}
                 role="img" aria-label={`${quota.pct}% of file storage used`}>
@@ -197,7 +197,7 @@ export default async function DocumentsPage(
       )}
       <div className="card">
         {!isOwnStore && (
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+          <div className="mut t-small" style={{ marginBottom: 10 }}>
             Everything {quota.storeName} is storing.
           </div>
         )}
@@ -230,7 +230,7 @@ export default async function DocumentsPage(
           canRemoveRecord={isHouseUser}
         />
         {truncated && (
-          <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
+          <div className="mut t-meta" style={{ marginTop: 8 }}>
             Only the newest {CAP} rows are listed; the meter above counts everything.
           </div>
         )}
@@ -248,7 +248,7 @@ export default async function DocumentsPage(
       {/* Half-configured says so rather than vanishing. Staff only - the message
           names environment variables. */}
       {canEdit && isOwnStore && !cloud.configured && cloud.setupProblem && (
-        <div className="card" style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC",
+        <div className="card t-small" style={{ color: "var(--t-warn-fg)", background: "#FAF0DC",
           border: "1px solid #F0C9A0" }}>
           {cloud.setupProblem}
         </div>
@@ -261,7 +261,7 @@ export default async function DocumentsPage(
         <div className="card">
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
             <div className="card-title">Shared with you</div>
-            <span className="mut" style={{ fontSize: 12 }}>
+            <span className="mut t-small">
               {guests.length} file{guests.length === 1 ? "" : "s"} · {fmtBytes(totalBytes(guests))}
             </span>
           </div>

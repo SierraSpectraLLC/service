@@ -117,18 +117,18 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           }>
           {unassigned.length > 6 && (
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by type, model or serial..."
-              style={{ marginBottom: 6, fontSize: 12 }} />
+              className="t-small" style={{ marginBottom: 6 }} />
           )}
           <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff", padding: 4, marginBottom: 8 }}>
             {shown.map((s) => (
-              <label key={s.id} className="row-hover"
-                style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", fontSize: 13, fontWeight: 400, color: "var(--ink)", margin: 0, textTransform: "none", letterSpacing: 0 }}>
+              <label key={s.id} className="row-hover t-body"
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", fontWeight: 400, color: "var(--ink)", margin: 0, textTransform: "none", letterSpacing: 0 }}>
                 <input type="checkbox" checked={checked.includes(s.id)} style={{ width: 15, height: 15, flexShrink: 0 }}
                   onChange={(e) => setChecked((c) => (e.target.checked ? [...c, s.id] : c.filter((x) => x !== s.id)))} />
                 {s.label}
               </label>
             ))}
-            {shown.length === 0 && <div className="mut" style={{ fontSize: 12, padding: 6 }}>Nothing matches.</div>}
+            {shown.length === 0 && <div className="mut t-small" style={{ padding: 6 }}>Nothing matches.</div>}
           </div>
         </Dialog>
       )}
@@ -175,10 +175,10 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           </div>
         </Dialog>
       )}
-      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
+      {!open && error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
 
       {assets.length === 0 && !open && (
-        <div className="mut" style={{ fontSize: 13 }}>No assets listed yet.</div>
+        <div className="mut t-body">No assets listed yet.</div>
       )}
       {assets.map((a) => {
         const statusTone = ASSET_TONE[a.status] ?? "neutral";
@@ -199,8 +199,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
                 width={34} height={34} radius={6} />
             )}
             <span className="pill neutral">{a.kind}</span>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>
-            {a.serial && <span className="mono mut" style={{ fontSize: 12 }}>SN {a.serial}</span>}
+            <span className="t-body" style={{ fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>
+            {a.serial && <span className="mono mut t-small">SN {a.serial}</span>}
             {a.status !== "In service" && <span className={`pill ${statusTone}`}>{a.status}</span>}
             {/* One line each way, so the stack reads as plumbed rather than as
                 an alphabetical parts manifest. */}
@@ -237,7 +237,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
                 </span>
               )}
               {a.openItems > 0 && <span className="pill warn">{a.openItems} open</span>}
-              <span className="mut" style={{ fontSize: 12 }}>→</span>
+              <span className="mut t-small">→</span>
             </span>
           </Link>
           {specsOpen.includes(a.id) && (a.specs?.length ?? 0) > 0 && (

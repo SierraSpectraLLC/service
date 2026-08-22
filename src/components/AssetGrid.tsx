@@ -125,12 +125,12 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
   return (
     <div>
       <div style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
-        <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 880 }}>
+        <table className="t-small" style={{ borderCollapse: "collapse", minWidth: 880 }}>
           <thead>
             <tr>
               <th style={{ width: 26 }} />
               {COLUMNS.map((c) => (
-                <th key={c.key} style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--slate)", width: c.width }}>
+                <th key={c.key} className="t-meta" style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", color: "var(--slate)", width: c.width }}>
                   {c.label}{(c.key === "kind") && " *"}
                 </th>
               ))}
@@ -146,7 +146,7 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
                     {c.key === "kind" ? (
                       <select value={r.kind} aria-label={`Type, row ${i + 1}`}
                         onChange={(e) => setCell(i, "kind", e.target.value)}
-                        style={{ width: "100%", fontSize: 12, padding: "3px 4px" }}>
+                        className="t-small" style={{ width: "100%", padding: "3px 4px" }}>
                         <option value="">-</option>
                         {kinds.map((k) => <option key={k}>{k}</option>)}
                       </select>
@@ -158,7 +158,7 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
                         <input value={r.model} list={`grid-models-${r.kind}`} aria-label={`Model, row ${i + 1}`}
                           onChange={(e) => setCell(i, "model", e.target.value)}
                           onPaste={(e) => onPaste(e, i, ci)}
-                          style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                          className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                         <datalist id={`grid-models-${r.kind}`}>
                           {(models[r.kind] ?? []).map((m) => (
                             <option key={m.name} value={m.name}>{m.manufacturer}</option>
@@ -169,13 +169,13 @@ export default function AssetGrid({ instrumentId, kinds, models, owners, onDone 
                       <input value={r.owner} list="grid-owners" aria-label={`Owner, row ${i + 1}`}
                         onChange={(e) => setCell(i, "owner", e.target.value)}
                         onPaste={(e) => onPaste(e, i, ci)}
-                        style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                        className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                     ) : (
                       <input value={r[c.key]} aria-label={`${c.label}, row ${i + 1}`}
-                        className={"mono" in c && c.mono ? "mono" : undefined}
+                        className={"mono" in c && c.mono ? "mono t-small" : "t-small"}
                         onChange={(e) => setCell(i, c.key, e.target.value)}
                         onPaste={(e) => onPaste(e, i, ci)}
-                        style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                        style={{ width: "100%", padding: "3px 4px" }} />
                     )}
                   </td>
                 ))}

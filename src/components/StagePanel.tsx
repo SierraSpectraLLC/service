@@ -90,7 +90,8 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
           <select
             value=""
             onChange={(e) => { if (e.target.value) toggle(e.target.value); }}
-            style={{ width: "auto", fontSize: 12, padding: "3px 6px", borderRadius: 999, color: "var(--mut)" }}
+            className="t-small"
+            style={{ width: "auto", padding: "3px 6px", borderRadius: 999, color: "var(--mut)" }}
           >
             <option value="">+ Add stage</option>
             {inactive.map((d) => <option key={d.name} value={d.name}>{d.name}</option>)}
@@ -101,7 +102,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
           next to it - and reads as a prompt when it is missing, which is every
           system blocked before a reason was required. */}
       {optimisticStages.includes(BLOCKED_STAGE) && (
-        <div style={{ fontSize: 12, marginTop: 6, color: blockedReason ? "var(--mut)" : "#A32D2D" }}>
+        <div className="t-small" style={{ marginTop: 6, color: blockedReason ? "var(--mut)" : "#A32D2D" }}>
           <b>Blocked:</b>{" "}
           {blockedReason || "no reason recorded"}
           {canEdit && (
@@ -111,7 +112,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </>
   );
 }

@@ -218,7 +218,7 @@ export default function StoreFileList({
 
   if (!files.length) {
     return (
-      <div className="mut" style={{ fontSize: 13, padding: "18px 0", textAlign: "center" }}>
+      <div className="mut t-body" style={{ padding: "18px 0", textAlign: "center" }}>
         {emptyNote ?? "No files yet. Drop one anywhere on this page, or use Upload above."}
       </div>
     );
@@ -255,7 +255,7 @@ export default function StoreFileList({
   const sweepable = shown.filter((f) => picked.has(f.url) && canRemoveShelf && onShelf(f));
 
   const head = (key: SortKey, label: string, extra: React.CSSProperties = {}) => (
-    <button className="btn link" style={{ fontSize: 11, fontWeight: 700, color: "var(--mut)", padding: 0, ...extra }}
+    <button className="btn link" style={{ fontWeight: 700, color: "var(--mut)", padding: 0, ...extra }}
       onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "name" }))}>
       {label}{sort.key === key ? (sort.desc ? " ↓" : " ↑") : ""}
     </button>
@@ -272,7 +272,7 @@ export default function StoreFileList({
             onDrop={dropInto(null)}>All files</button>
           {trail.map((f, i) => (
             <span key={f.id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-              <span className="mut" style={{ fontSize: 12 }}>/</span>
+              <span className="mut t-small">/</span>
               <button className="btn link" style={{ fontSize: 12.5, fontWeight: i === trail.length - 1 ? 700 : 400 }}
                 onClick={() => setAt(f.id)}>{f.name}</button>
             </span>
@@ -291,7 +291,7 @@ export default function StoreFileList({
           <input value={newName} autoFocus placeholder="Folder name" aria-label="Folder name"
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.form?.requestSubmit?.(); }}
-            style={{ flex: "1 1 200px", fontSize: 12 }} />
+            className="t-small" style={{ flex: "1 1 200px" }} />
           <button className="btn sm accent" disabled={pending || !newName.trim()}
             onClick={() => startTransition(async () => {
               const res = await createFolder(storeOrgId, at, newName);
@@ -305,7 +305,7 @@ export default function StoreFileList({
         <input value={filter} onChange={(e) => setFilter(e.target.value)}
           placeholder={searching || folders.length === 0 ? "Search files" : "Search all files"}
           aria-label="Search files"
-          style={{ flex: "1 1 200px", fontSize: 12 }} />
+          className="t-small" style={{ flex: "1 1 200px" }} />
         <span className="seg">
           {(["all", "shelf", "records"] as const).map((w) => (
             <button key={w} aria-pressed={where === w} onClick={() => setWhere(w)}>
@@ -327,11 +327,11 @@ export default function StoreFileList({
           display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8,
           padding: "6px 10px", background: "#EEF4FB", border: "1px solid var(--line)", borderRadius: 8,
         }}>
-          <span style={{ fontSize: 12, fontWeight: 700 }}>{picked.size} selected</span>
-          <span className="mut" style={{ fontSize: 11 }}>
+          <span className="t-small" style={{ fontWeight: 700 }}>{picked.size} selected</span>
+          <span className="mut t-meta">
             {fmtBytes(shown.filter((f) => picked.has(f.url)).reduce((n, f) => n + f.size, 0))}
           </span>
-          <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>clear</button>
+          <button className="btn link" onClick={() => setPicked(new Set())}>clear</button>
           {systems.length > 0 && (
             <select value="" disabled={pending} aria-label="File the selection onto a system"
               onChange={(e) => {
@@ -340,10 +340,10 @@ export default function StoreFileList({
                 const sys = systems.find((x) => x.id === id);
                 fileOnto(shown.filter((f) => picked.has(f.url)), id, sys?.externalId ?? "the system");
               }}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               <option value="">File onto system...</option>
               {systems.map((x) => (
-                <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` — ${x.model}` : ""}</option>
+                <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` - ${x.model}` : ""}</option>
               ))}
             </select>
           )}
@@ -377,12 +377,12 @@ export default function StoreFileList({
           )}
           {shareUrl && (
             <span style={{ display: "inline-flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-              <a href={shareUrl} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: 11, ...oneLine, maxWidth: 260 }}>{shareUrl}</a>
+              <a href={shareUrl} target="_blank" rel="noreferrer" className="mono t-meta" style={{ ...oneLine, maxWidth: 260 }}>{shareUrl}</a>
               <button className="btn sm accent" onClick={() => {
                 void navigator.clipboard?.writeText(shareUrl);
                 setCopied(true); setTimeout(() => setCopied(false), 1500);
               }}>{copied ? "Copied ✓" : "Copy link"}</button>
-              <button className="btn link" style={{ fontSize: 11 }} onClick={() => setShareUrl("")}>done</button>
+              <button className="btn link" onClick={() => setShareUrl("")}>done</button>
             </span>
           )}
           {canOrganise && (
@@ -497,7 +497,7 @@ export default function StoreFileList({
               style={{ textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0, maxWidth: "100%" }}
               title={d.name}>
               <span aria-hidden style={{ color: "var(--t-warn-fg)", flexShrink: 0 }}>▮</span>
-              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 0, ...oneLine }}>{d.name}</span>
+              <span className="t-body" style={{ fontWeight: 700, minWidth: 0, ...oneLine }}>{d.name}</span>
             </button>
           </span>
           <span className="reg-cell">
@@ -509,7 +509,7 @@ export default function StoreFileList({
               const kids = descendantIds(folders, d.id).length;
               const n = inside.length + kids;
               return (
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}
                   {inside.length > 0 ? ` · ${fmtBytes(inside.reduce((t, f) => t + f.size, 0))}` : ""}
                 </span>
@@ -556,7 +556,7 @@ export default function StoreFileList({
 
       {!searching && folderMove !== null && (
         <div style={{ padding: "7px 10px", background: "#F8FAFD", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6 }}>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 4 }}>
+          <div className="mut t-meta" style={{ marginBottom: 4 }}>
             Move &ldquo;{folders.find((f) => f.id === folderMove)?.name}&rdquo; into:
           </div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -574,7 +574,7 @@ export default function StoreFileList({
                     setFolderMove(null); setError("");
                   })}>{o.name}</button>
               ))}
-            <button className="btn link" style={{ fontSize: 11 }} onClick={() => setFolderMove(null)}>cancel</button>
+            <button className="btn link" onClick={() => setFolderMove(null)}>cancel</button>
           </div>
         </div>
       )}
@@ -600,8 +600,8 @@ export default function StoreFileList({
           <span className="reg-cell" style={{ display: "flex", gap: 7, alignItems: "baseline" }}
             title={f.description ? `${f.fileName} - ${f.description}` : f.fileName}>
             <span aria-hidden style={{ color: `var(--t-${glyph(f).tone}-fg)`, flexShrink: 0 }}>{glyph(f).glyph}</span>
-            <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
-              style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", minWidth: 0, flexShrink: 1, ...oneLine }}>
+            <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer" className="t-body"
+              style={{ fontWeight: 600, textDecoration: "none", minWidth: 0, flexShrink: 1, ...oneLine }}>
               {f.fileName}
             </a>
             {f.description && (
@@ -626,7 +626,7 @@ export default function StoreFileList({
               onRemoved={(err) => setError(err)} startTransition={startTransition} />
           </span>
           <span className="reg-cell" style={{ textAlign: "right", overflow: "visible" }}>
-            <span className="mut" style={{ fontSize: 12 }}>{fmtBytes(f.size)}</span>
+            <span className="mut t-small">{fmtBytes(f.size)}</span>
             {canOrganise && (
               <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }}
                 aria-label={`Details for ${f.fileName}`}
@@ -639,8 +639,8 @@ export default function StoreFileList({
           </span>
           {/* One line; widen the column when you want the uploader too - the
               hover title always carries both. */}
-          <span className="reg-cell mut" title={`${f.when} · ${f.uploadedBy}`}
-            style={{ fontSize: 11, textAlign: "right" }}>
+          <span className="reg-cell mut t-meta" title={`${f.when} · ${f.uploadedBy}`}
+            style={{ textAlign: "right" }}>
             {f.when} · {f.uploadedBy}
           </span>
           </span>
@@ -674,7 +674,7 @@ export default function StoreFileList({
                 }}>
                   <span aria-hidden style={{ fontSize: 30, color: "var(--t-warn-fg)" }}>▮</span>
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, ...oneLine }}>{d.name}</div>
+                <div className="t-small" style={{ fontWeight: 700, ...oneLine }}>{d.name}</div>
                 <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</div>
               </button>
             );
@@ -701,7 +701,7 @@ export default function StoreFileList({
                     <span aria-hidden style={{ fontSize: 30, color: `var(--t-${glyph(f).tone}-fg)` }}>{glyph(f).glyph}</span>
                   )}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.25 }}>{f.fileName}</div>
+                <div className="t-small" style={{ fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.25 }}>{f.fileName}</div>
               </a>
               <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>
                 {fmtBytes(f.size)} · {onShelf(f) ? "not on a system" : f.places[0].kind === "shelf" ? "" : (f.places[0] as { label: string }).label}
@@ -712,16 +712,16 @@ export default function StoreFileList({
       )}
 
       {shown.length === 0 && (
-        <div className="mut" style={{ fontSize: 12, padding: "14px 0", textAlign: "center" }}>
+        <div className="mut t-small" style={{ padding: "14px 0", textAlign: "center" }}>
           No file matches &ldquo;{filter}&rdquo;.
         </div>
       )}
       {filedNote && (
-        <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: filedNote.ok ? "#2E6B2E" : "#8A5410" }}>
+        <div className="t-small" style={{ marginTop: 6, fontWeight: 700, color: filedNote.ok ? "#2E6B2E" : "#8A5410" }}>
           {filedNote.text}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
 
       {/* One file, close up: what it is called, what it is, and where it came
           from. A store where a file cannot be renamed is a store that fills up
@@ -781,10 +781,10 @@ export default function StoreFileList({
                     fileOnto([details], id, sys?.externalId ?? "the system");
                     setDetails(null);
                   }}
-                  style={{ fontSize: 12 }}>
+                  className="t-small">
                   <option value="">Choose a system...</option>
                   {systems.map((x) => (
-                    <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` — ${x.model}` : ""}</option>
+                    <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` - ${x.model}` : ""}</option>
                   ))}
                 </select>
                 <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
@@ -817,7 +817,7 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
   return (
     <>
       {records.length === 0 && shelf && (
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           Not on a system
           {removable(shelf) && (
             <button className="btn link row-act" style={{ fontSize: 10, color: "var(--t-bad-fg)", marginLeft: 4 }} disabled={pending}
@@ -864,7 +864,7 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
           )}
         </span>
       ))}
-      {records.length > 2 && <span className="mut" style={{ fontSize: 11 }}>+{records.length - 2}</span>}
+      {records.length > 2 && <span className="mut t-meta">+{records.length - 2}</span>}
     </>
   );
 }

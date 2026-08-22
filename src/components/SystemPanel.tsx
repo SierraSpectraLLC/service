@@ -42,7 +42,7 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   return (
     <select value={value}
       onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setInstrumentLead(instrumentId, e.target.value); })}
-      style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+      className="t-small" style={{ width: "auto", fontWeight: 700 }}>
       {options.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
     </select>
   );
@@ -98,7 +98,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       {instrument.archived && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
           <span className="pill neutral">Archived</span>
-          <span className="mut" style={{ fontSize: 12 }}>
+          <span className="mut t-small">
             Kept for the record{instrument.archivedBy ? ` · by ${instrument.archivedBy}` : ""} · hidden from the dashboard, EOD, and sheet parity.
           </span>
           {canEdit && (
@@ -125,7 +125,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
           {/* Each fact holds together on a narrow screen. Left to wrap freely
               this line broke between "Priority" and its number, which reads as a
               rendering fault rather than as a line that ran out of room. */}
-          <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
+          <div className="mono t-small" style={{ fontWeight: 700, color: "var(--mut)" }}>
             <span style={{ whiteSpace: "nowrap" }}>{instrument.externalId}</span>
             {instrument.client && <> · <span style={{ whiteSpace: "nowrap" }}>{instrument.client}</span></>}
             {" · "}<span style={{ whiteSpace: "nowrap" }}>Priority {instrument.priority}</span>
@@ -152,14 +152,14 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   <span className="pill good">For sale</span>
                 )}
               </div>
-              {instrument.location && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{instrument.location}</div>}
+              {instrument.location && <div className="mut t-small" style={{ marginTop: 2 }}>{instrument.location}</div>}
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-                <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
+                <span className="mut t-small">Lead:</span>
                 {canEdit
                   ? <LeadSelect instrumentId={instrument.id} lead={instrument.lead} people={people} />
-                  : <span style={{ fontSize: 12, fontWeight: 700, color: instrument.lead ? "var(--navy)" : "var(--mut)" }}>{instrument.lead || "-"}</span>}
+                  : <span className="t-small" style={{ fontWeight: 700, color: instrument.lead ? "var(--navy)" : "var(--mut)" }}>{instrument.lead || "-"}</span>}
               </div>
-              <div className="mut" style={{ fontSize: 13, marginTop: 6, whiteSpace: "pre-wrap" }}>{instrument.notes || "No notes."}</div>
+              <div className="mut t-body" style={{ marginTop: 6, whiteSpace: "pre-wrap" }}>{instrument.notes || "No notes."}</div>
             </>
           )}
         </div>
@@ -228,7 +228,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   {/* Two different facts, and the label is the one that does not
                       grant anything. Said here because "Client" reads like
                       ownership to anybody who has not been told otherwise. */}
-                  <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+                  <div className="mut t-meta" style={{ marginTop: 3 }}>
                     Who the work is for. Ownership is under Sharing, and follows a handoff on its own.
                   </div>
                 </div>
@@ -240,7 +240,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                     seven LC modules make a paragraph of it. */}
                 <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                   placeholder={label || "Named from its assets"} />
-                <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+                <div className="mut t-meta" style={{ marginTop: 2 }}>
                   {draft.name.trim()
                     ? "Yours - the assets will never overwrite it."
                     : `Empty, so it's named from its assets: ${label || "nothing listed yet"}`}
@@ -257,7 +257,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   <input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Corner room, bench 3" />
                 </div>
               </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "0 0 8px" }}>
+              <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 8px" }}>
                 <input type="checkbox" checked={draft.gxp} style={{ width: 15, height: 15 }}
                   onChange={(e) => setDraft({ ...draft, gxp: e.target.checked })} />
                 Regulated (GxP)

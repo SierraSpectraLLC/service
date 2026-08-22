@@ -198,7 +198,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
             <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {i.label || <span className="mut">No assets listed yet</span>}
             </span>
-            <span className="mut" style={{ fontSize: 11 }}>
+            <span className="mut t-meta">
               {i.client}{i.category ? ` · ${i.category}` : ""} · P{i.priority}
               {i.lead ? ` · ${i.lead}` : ""}
               {!i.queueMine && <> · with <b>{i.queueWith}</b>{i.queueReason ? ` · ${i.queueReason}` : ""}</>}
@@ -208,11 +208,11 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         stage: i.stages.length ? (
           <span style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
             <StagePill bg={stageColor(i.stages[0]).bg} fg={stageColor(i.stages[0]).fg}>{i.stages[0]}</StagePill>
-            {i.stages.length > 1 && <span className="mut" style={{ fontSize: 11 }}>+{i.stages.length - 1}</span>}
+            {i.stages.length > 1 && <span className="mut t-meta">+{i.stages.length - 1}</span>}
           </span>
         ) : null,
         attn: attn.length
-          ? <span className="mut" style={{ fontSize: 12 }}>{attn.join(" · ")}</span>
+          ? <span className="mut t-small">{attn.join(" · ")}</span>
           : null,
       },
     };
@@ -238,7 +238,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           ...(showShipping ? [["Ship queue + shipped", counts.shipped, "#085041"]] : []),
         ] as [string, number, string][]).map(([label, n, color]) => (
           <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
-            <div style={{ fontSize: 12 }} className="mut">{label}</div>
+            <div className="mut t-small">{label}</div>
             <div style={{ fontSize: 26, fontWeight: 700, color }}>{n}</div>
           </div>
         ))}
@@ -254,12 +254,12 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           actions={
             <>
               {mine.length > MINE_SHOWN && (
-                <button className="btn link" style={{ fontSize: 11 }}
+                <button className="btn link"
                   onClick={() => setSelected((s) => (s.includes("Mine") ? s : [...s, "Mine"]))}>
                   all {mine.length} on the board →
                 </button>
               )}
-              <Link href={myQueueHref} className="btn link" style={{ fontSize: 11 }}>my work orders →</Link>
+              <Link href={myQueueHref} className="btn link">my work orders →</Link>
             </>
           }>
           {mine.slice(0, MINE_SHOWN).map((i) => (
@@ -267,7 +267,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
               {i.down && <Dot tone="bad" label="down" />}
               <Id>{i.externalId}</Id>
-              <span style={{ fontSize: 13, flex: "1 1 200px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span className="t-body" style={{ flex: "1 1 200px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {i.label || <span className="mut">No assets listed yet</span>}
               </span>
               {i.mineNote && <span className="mut" style={{ fontSize: 11.5 }}>{i.mineNote}</span>}
@@ -308,7 +308,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
                   }}>
                     <div className="eyebrow" style={{ marginBottom: 4 }}>Stage</div>
                     {stageNames.map((s) => (
-                      <label key={s} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                      <label key={s} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", cursor: "pointer" }}>
                         <input type="checkbox" checked={selected.includes(s)} onChange={() => toggleFilter(s)}
                           style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
                         {s}
@@ -318,7 +318,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
                       <>
                         <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Lead</div>
                         {LEADS.map((l) => (
-                          <label key={l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                          <label key={l} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", cursor: "pointer" }}>
                             <input type="checkbox" checked={selected.includes(leadKey(l))} onChange={() => toggleFilter(leadKey(l))}
                               style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
                             {l}
@@ -335,7 +335,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
             </div>
             <select value={sortBy} aria-label="Sort the board"
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               <option value="default">Urgency</option>
               <option value="owner">Owner</option>
               <option value="id">System ID</option>
@@ -392,8 +392,8 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           </div>
           {people.length > 0 && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
-              <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
+              <span className="mut t-small">Lead:</span>
+              <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} className="t-small" style={{ width: "auto" }}>
                 <option value="">-</option>
                 {people.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -419,7 +419,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         { tone: "neutral", label: "ours to move" },
         { tone: "faint", label: "with someone else" },
       ]} />
-      {!canEdit && <div className="mut" style={{ fontSize: 12, marginTop: 10 }}>Read-only access.</div>}
+      {!canEdit && <div className="mut t-small" style={{ marginTop: 10 }}>Read-only access.</div>}
     </div>
   );
 }

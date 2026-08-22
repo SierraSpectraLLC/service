@@ -133,7 +133,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
           {open ? "Cancel" : "+ Add prices"}
         </button>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="mut t-small" style={{ marginBottom: 10 }}>
         OEM and third-party prices per part number. &quot;Request part&quot; on a maintenance job
         fills in the cheapest offer here (OEM wins ties), and part forms suggest these
         vendors. Prices only show where costs already do.
@@ -152,12 +152,12 @@ export default function PriceBookCard({ prices, knownVendors }: {
             </>
           }>
           <div style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
-            <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 640 }}>
+            <table className="t-small" style={{ borderCollapse: "collapse", minWidth: 640 }}>
               <thead>
                 <tr>
                   <th style={{ width: 26 }} />
                   {COLUMNS.map((c) => (
-                    <th key={c.key} style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--slate)", width: c.width }}>
+                    <th key={c.key} className="t-meta" style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", color: "var(--slate)", width: c.width }}>
                       {c.label}{["partNumber", "vendor", "price"].includes(c.key) && " *"}
                     </th>
                   ))}
@@ -175,7 +175,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
                           placeholder={c.key === "oem" ? "OEM?" : c.key === "price" ? "129.95" : ""}
                           onChange={(e) => setCell(i, c.key, e.target.value)}
                           onPaste={(e) => onPaste(e, i, ci)}
-                          style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                          className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                       </td>
                     ))}
                     <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
@@ -198,7 +198,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
               download="price-book-template.csv">download template</a>
           </div>
           {failures.length > 0 && (
-            <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>
+            <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>
               {failures.length} row{failures.length === 1 ? "" : "s"} still above:
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                 {failures.map((f) => <li key={f.row}>{f.name}: {f.error}</li>)}
@@ -207,29 +207,29 @@ export default function PriceBookCard({ prices, knownVendors }: {
           )}
         </Dialog>
       )}
-      {saved && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
+      {saved && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
       {prices.length > 8 && (
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by PN or vendor"
-          style={{ fontSize: 13, marginBottom: 10, maxWidth: 260 }} />
+          className="t-body" style={{ marginBottom: 10, maxWidth: 260 }} />
       )}
 
       {prices.length === 0 && !open && (
-        <div className="mut" style={{ fontSize: 13 }}>No prices on file yet.</div>
+        <div className="mut t-body">No prices on file yet.</div>
       )}
       {groups.map((offers) => (
         <div key={normalizePn(offers[0].partNumber)} style={{ borderTop: "1px solid var(--line)", padding: "8px 0" }}>
-          <div className="mono" style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{offers[0].partNumber}</div>
+          <div className="mono t-body" style={{ fontWeight: 700, marginBottom: 4 }}>{offers[0].partNumber}</div>
           {offers.map((p, i) => (
             <div key={p.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "2px 0", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13 }}>{p.vendor}</span>
+              <span className="t-body">{p.vendor}</span>
               {p.isOem && <span className="pill accent">OEM</span>}
-              <span style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? "#085041" : undefined }}>{formatCents(p.priceCents)}</span>
-              {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>order ↗</a>}
-              {p.note && <span className="mut" style={{ fontSize: 12 }}>{p.note}</span>}
+              <span className="t-body" style={{ fontWeight: 700, color: i === 0 ? "#085041" : undefined }}>{formatCents(p.priceCents)}</span>
+              {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="t-small">order ↗</a>}
+              {p.note && <span className="mut t-small">{p.note}</span>}
               <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-                <button className="btn link" style={{ fontSize: 11 }} onClick={() => editRow(p)}>edit</button>
-                <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
+                <button className="btn link" onClick={() => editRow(p)}>edit</button>
+                <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove ${p.vendor}'s ${formatCents(p.priceCents)} price for PN ${p.partNumber}?`,

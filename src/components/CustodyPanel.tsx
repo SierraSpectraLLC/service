@@ -53,7 +53,7 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
           </button>
         )}
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="mut t-small" style={{ marginBottom: 10 }}>
         Currently owned by <b style={{ color: "var(--ink)" }}>{ownerName}</b>.
       </div>
 
@@ -79,7 +79,7 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
                             {keep ? " and read-only access." : " and loses live access."}</li>
                           <li>
                             {providers.length
-                              ? <>Access is unchanged for {providers.map((p) => p.name).join(", ")} — they keep working the system.</>
+                              ? <>Access is unchanged for {providers.map((p) => p.name).join(", ")} - they keep working the system.</>
                               : <>Nobody else currently has access.</>}
                           </li>
                           <li>Part costs and PO numbers recorded by {ownerName} stay hidden from the new owner.</li>
@@ -120,9 +120,9 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
             <input value={note} onChange={(e) => setNote(e.target.value)}
               placeholder="Shipped to end customer, PO 4471" />
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, marginBottom: 10 }}>
+          <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} style={{ width: 15, height: 15 }} />
-            Keep {ownerName} on as a viewer — usual when they resold it and still want visibility.
+            Keep {ownerName} on as a viewer - usual when they resold it and still want visibility.
           </label>
 
           {/* The confirm carries the consequence list; see the rationale on
@@ -131,18 +131,18 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
       )}
 
       {events.length === 0 && (
-        <div className="mut" style={{ fontSize: 13 }}>No ownership changes recorded.</div>
+        <div className="mut t-body">No ownership changes recorded.</div>
       )}
       {events.map((e) => (
-        <div key={e.id} style={{ borderTop: "1px solid var(--line)", padding: "6px 0", fontSize: 13 }}>
+        <div key={e.id} className="t-body" style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700 }}>
               {e.fromName && e.toName ? `${e.fromName} → ${e.toName}` : e.toName || e.fromName || "unknown"}
             </span>
-            <span className="mut" style={{ fontSize: 11 }}>{KIND_WORD[e.kind] ?? e.kind}</span>
-            <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{e.when}</span>
+            <span className="mut t-meta">{KIND_WORD[e.kind] ?? e.kind}</span>
+            <span className="mut t-meta" style={{ marginLeft: "auto" }}>{e.when}</span>
           </div>
-          {e.note && <div className="mut" style={{ fontSize: 12 }}>{e.note}</div>}
+          {e.note && <div className="mut t-small">{e.note}</div>}
         </div>
       ))}
     </div>

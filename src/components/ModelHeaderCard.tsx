@@ -50,9 +50,10 @@ export default function ModelHeaderCard({ termId, name, hasPhoto }: {
               style={{ width: 132, height: 132, objectFit: "cover", borderRadius: 10, border: "1px solid var(--line)", background: "#F7F9FC" }} />
           ) : (
             <button onClick={() => input.current?.click()} disabled={!!busy}
+              className="t-small"
               style={{
                 width: 132, height: 132, borderRadius: 10, border: "1px dashed #C7D2E0", background: "#F7F9FC",
-                color: "var(--mut)", fontSize: 12, cursor: "pointer",
+                color: "var(--mut)", cursor: "pointer",
               }}>
               {busy ? "Uploading..." : "+ Add a photo"}
               <span style={{ display: "block", fontSize: 10, marginTop: 4 }}>shows on every unit</span>
@@ -62,15 +63,15 @@ export default function ModelHeaderCard({ termId, name, hasPhoto }: {
             onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ""; }} />
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div className="mut" style={{ fontSize: 12 }}>
+          <div className="mut t-small">
             The catalog&apos;s stock photo for {name}: it shows on every unit that has no photo of its own.
           </div>
           {hasPhoto && (
-            <button className="btn link" style={{ fontSize: 11, marginTop: 8 }} onClick={() => input.current?.click()} disabled={!!busy}>
+            <button className="btn link" style={{ marginTop: 8 }} onClick={() => input.current?.click()} disabled={!!busy}>
               {busy ? "Uploading..." : "replace photo"}
             </button>
           )}
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
         </div>
       </div>
     </div>

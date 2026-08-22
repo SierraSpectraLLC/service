@@ -31,15 +31,15 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
         return (
           <div key={r.id} style={{ border: `1px solid ${isClaim ? "#D9BFA6" : "#EAD9B0"}`, background: isClaim ? "#FBF1E8" : "#FDF8EE", borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <b style={{ fontSize: 13 }}>{r.orgName}</b>
+              <b className="t-body">{r.orgName}</b>
               {isClaim
                 ? <span className="pill warn">claims ownership</span>
                 : r.orgKind === "provider" && <span className="pill warn">provider</span>}
-              <span className="mut" style={{ fontSize: 12 }}>{r.requestedBy} · {r.when}</span>
+              <span className="mut t-small">{r.requestedBy} · {r.when}</span>
             </div>
-            {r.message && <div className="mut" style={{ fontSize: 12, whiteSpace: "pre-wrap", marginTop: 2 }}>{r.message}</div>}
+            {r.message && <div className="mut t-small" style={{ whiteSpace: "pre-wrap", marginTop: 2 }}>{r.message}</div>}
             {isClaim && !isOperator && (
-              <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+              <div className="mut t-meta" style={{ marginTop: 4 }}>
                 Ownership claims are decided by the platform operator.
               </div>
             )}
@@ -82,7 +82,7 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
           </div>
         );
       })}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
     </>
   );
 }

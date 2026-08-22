@@ -119,14 +119,14 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
                 </select>
               )}
               {mayRemove && (
-                <button className="chip-x" aria-label={`Remove ${s.name}`} disabled={pending} onClick={() => remove(s)}
-                  style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
+                <button className="chip-x t-small" aria-label={`Remove ${s.name}`} disabled={pending} onClick={() => remove(s)}
+                  style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
               )}
             </span>
           );
         })}
         {shares.length === 0 && (
-          <span className="mut" style={{ fontSize: 12 }}>Not shared with anyone.</span>
+          <span className="mut t-small">Not shared with anyone.</span>
         )}
         {(canManageAll || canAddProvider) && options.length > 0 && !adding && (
           <button className="btn link" onClick={() => setAdding(true)}>
@@ -139,7 +139,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
         <div style={{ marginTop: 8 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {options.map((o) => (
-              <label key={o.id} style={{ display: "flex", alignItems: "center", gap: 5, margin: 0, fontSize: 12, fontWeight: 400, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 999, padding: "3px 10px", cursor: "pointer", background: picked.includes(o.id) ? "#EEF6EE" : "#fff" }}>
+              <label key={o.id} className="t-small" style={{ display: "flex", alignItems: "center", gap: 5, margin: 0, fontWeight: 400, color: "var(--ink)", border: "1px solid var(--line)", borderRadius: 999, padding: "3px 10px", cursor: "pointer", background: picked.includes(o.id) ? "#EEF6EE" : "#fff" }}>
                 <input type="checkbox" checked={picked.includes(o.id)} onChange={() => toggle(o.id)}
                   style={{ width: 13, height: 13 }} />
                 {o.name}{o.kind === "provider" ? <span className="mut">(provider)</span> : null}
@@ -148,7 +148,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
             {canManageAll && (
-              <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+              <select value={level} onChange={(e) => setLevel(e.target.value)} className="t-small" style={{ width: "auto" }}>
                 <option value="view">can view</option>
                 <option value="edit">can edit</option>
               </select>
@@ -166,7 +166,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
           organization; see lib/owner. */}
       {canManageAll && (
         <div style={{ display: "flex", gap: 6, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span className="mut" style={{ fontSize: 12 }}>Owner:</span>
+          <span className="mut t-small">Owner:</span>
           <select value={offPlatform ? "other" : ownerOrgId ?? ""} disabled={pending}
             onChange={(e) => {
               const v = e.target.value;
@@ -180,7 +180,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
                   : "Cleared the owner" });
               });
             }}
-            style={{ width: "auto", fontSize: 12 }}>
+            className="t-small" style={{ width: "auto" }}>
             <option value="">Unassigned - platform-stewarded</option>
             {/* Any organization can own equipment, providers included - a
                 service company owns its own warehouse stock. */}
@@ -209,7 +209,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
             </button>
           )}
           {!offPlatform && ownerOrgId === null && match !== null && (
-            <span className="mut" style={{ fontSize: 11 }}>
+            <span className="mut t-meta">
               Recorded as &ldquo;{ownerName}&rdquo; but owned by nobody here - {match.name} cannot see it.
             </span>
           )}
@@ -217,21 +217,21 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
             <>
               <input value={typed} maxLength={120} disabled={pending} placeholder="Company name"
                 onChange={(e) => setTyped(e.target.value)}
-                style={{ width: "auto", flex: "1 1 160px", fontSize: 12 }} />
+                className="t-small" style={{ width: "auto", flex: "1 1 160px" }} />
               <button className="btn sm accent" disabled={pending}
                 onClick={() => startTransition(async () => {
                   const res = await doSetOwner(targetId, null, typed);
                   if (res?.error) setError(res.error);
                   else toast({ message: "Saved the owner name" });
                 })}>Save</button>
-              <span className="mut" style={{ fontSize: 11 }}>
+              <span className="mut t-meta">
                 A name only - nobody gains access from this.
               </span>
             </>
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </>
   );
 }

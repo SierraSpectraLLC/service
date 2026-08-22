@@ -41,7 +41,7 @@ export default function NewMessageButton({ people }: {
   };
 
   if (people.length === 0) {
-    return <span className="mut" style={{ fontSize: 11 }}>Nobody to message yet</span>;
+    return <span className="mut t-meta">Nobody to message yet</span>;
   }
 
   return (
@@ -69,7 +69,7 @@ export default function NewMessageButton({ people }: {
                   {p.name} <span className="mut">· {p.org}</span>
                 </button>
               ))}
-              {shown.length === 0 && <span className="mut" style={{ fontSize: 11 }}>Nobody matches.</span>}
+              {shown.length === 0 && <span className="mut t-meta">Nobody matches.</span>}
             </div>
 
             {/* Only worth naming once it's a group; two people are named by

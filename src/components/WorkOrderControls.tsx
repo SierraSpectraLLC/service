@@ -93,7 +93,7 @@ export default function WorkOrderControls({
             {/* For the job opened by mistake. Cancelling is for one that was
                 real and called off; this is for one that never should have
                 existed - and it releases its work rather than taking it. */}
-            <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
+            <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
               onClick={async () => {
                 const why = await confirmReason({
                   title: `Delete ${number}?`,
@@ -129,7 +129,7 @@ export default function WorkOrderControls({
           <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={3} autoFocus
             placeholder="Replaced the deuterium lamp and re-ran the baseline - back in spec."
             style={{ width: "100%", marginBottom: 6 }} />
-          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+          <div className="mut t-meta" style={{ marginBottom: 8 }}>
             This is what {number} leaves behind. The tasks, hours and parts on it are counted and
             added for you, and it goes on the system&apos;s discussion where the client will see it.
           </div>
@@ -172,7 +172,7 @@ export default function WorkOrderControls({
         </Dialog>
       )}
 
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

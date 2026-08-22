@@ -65,7 +65,7 @@ export default function QueuePanel({
             With {holderName}
           </span>
         )}
-        <span className="mut" style={{ fontSize: 12 }}>
+        <span className="mut t-small">
           {days === 0 ? "since today" : `${days} day${days === 1 ? "" : "s"}`} · {since}
         </span>
         {canKick && (
@@ -77,12 +77,12 @@ export default function QueuePanel({
       </div>
 
       {reason && (
-        <div style={{ fontSize: 13, borderLeft: "3px solid var(--line)", padding: "4px 10px", margin: "6px 0" }}>
+        <div className="t-body" style={{ borderLeft: "3px solid var(--line)", padding: "4px 10px", margin: "6px 0" }}>
           {reason}
         </div>
       )}
       {!reason && (
-        <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
+        <div className="mut t-small" style={{ marginBottom: 6 }}>
           {isMine
             ? "Nobody is waiting on anyone else. Move it to a client's queue when the next step is theirs."
             : `${holderName} has the next move on this system.`}
@@ -116,23 +116,23 @@ export default function QueuePanel({
                 placeholder="Running application tests / your N2 generator tech" />
             </div>
           </div>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
+          <div className="mut t-meta" style={{ marginBottom: 10 }}>
             {targetName || "They"} get a notification with that reason, and {externalId} drops off
             our board until it comes back. Access, ownership and history are untouched, and the
             days it spends there don&apos;t count against our turnaround.
           </div>
         </Dialog>
       )}
-      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {!open && error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
       {legs.length > 0 && (
         <>
           <div className="eyebrow" style={{ margin: "12px 0 4px" }}>Handovers</div>
           {legs.map((l) => (
-            <div key={l.id} style={{ borderTop: "1px solid var(--line)", padding: "5px 0", fontSize: 12 }}>
+            <div key={l.id} className="t-small" style={{ borderTop: "1px solid var(--line)", padding: "5px 0" }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
                 <span style={{ fontWeight: 700 }}>{l.fromName} → {l.toName}</span>
-                <span className="mut" style={{ marginLeft: "auto", fontSize: 11 }}>
+                <span className="mut t-meta" style={{ marginLeft: "auto" }}>
                   {l.actor.split("@")[0]} · {l.when}
                 </span>
               </div>

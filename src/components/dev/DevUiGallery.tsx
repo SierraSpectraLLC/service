@@ -277,7 +277,7 @@ export default function DevUiGallery() {
             settingsHref="/settings"
             userName="Rita Vasquez" orgName="Sierra Spectral" />
           <b style={{ letterSpacing: "-0.2px" }}>RIDGELINE</b>
-          <span style={{ fontSize: 11, opacity: 0.75 }}>burger opens the drawer inline here</span>
+          <span className="t-meta" style={{ opacity: 0.75 }}>burger opens the drawer inline here</span>
         </div>
       </div>
 

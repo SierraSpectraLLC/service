@@ -247,7 +247,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </div>
         {children}
         <div className="container app-footer" style={{ paddingTop: 24, paddingBottom: 18 }}>
-          <div className="mut mono" style={{ fontSize: 11 }}>
+          <div className="mut mono t-meta">
             build {process.env.NEXT_PUBLIC_BUILD_SHA} ·{" "}
             {new Date(process.env.NEXT_PUBLIC_BUILD_TIME || 0).toLocaleString("en-US", {
               timeZone: "America/Los_Angeles", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",

@@ -26,11 +26,11 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
 
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>{assetDesc}</div>
+      <div className="t-lead" style={{ fontWeight: 700, color: "var(--navy)" }}>{assetDesc}</div>
       {state === "sent" ? (
         <div style={{ marginTop: 8 }}>
           <span className="pill warn">Requested</span>
-          <span className="mut" style={{ fontSize: 12, marginLeft: 6 }}>Under review.</span>
+          <span className="mut t-small" style={{ marginLeft: 6 }}>Under review.</span>
         </div>
       ) : (
         <div style={{ marginTop: 8 }}>
@@ -46,8 +46,8 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
             placeholder={claiming
               ? "How you came to own it - e.g. \"Purchased from Acme Instruments, PO 4471, March 2024.\" Ownership is granted by review, not by knowing the serial."
               : "Who you are and why you're asking, e.g. \"We service this instrument for Acme Labs.\""}
-            style={{ resize: "vertical", fontSize: 13 }} />
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
+            className="t-body" style={{ resize: "vertical" }} />
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
           <button className="btn sm accent" style={{ marginTop: 6 }} disabled={pending}
             onClick={() => {
               setError("");

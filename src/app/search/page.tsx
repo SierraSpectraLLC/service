@@ -135,7 +135,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       ? await db.select({ id: assets.id, kind: assets.kind, model: assets.model, serial: assets.serial })
           .from(assets).where(inArray(assets.id, [...assetIds]))
       : [];
-    const assetLabels = new Map(assetRows.map((a) => [a.id, `${a.kind} — ${a.model || a.serial || "(no model)"}`]));
+    const assetLabels = new Map(assetRows.map((a) => [a.id, `${a.kind} - ${a.model || a.serial || "(no model)"}`]));
     const named = ids.size
       ? await db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model, name: instruments.name })
           .from(instruments).where(and(inArray(instruments.id, [...ids]), inSystems(instruments.id)))
@@ -216,7 +216,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         ) : undefined}
       />
       {q.length >= 2 && (
-        <div className="mut" style={{ fontSize: 12, margin: "0 0 8px" }}>
+        <div className="mut t-small" style={{ margin: "0 0 8px" }}>
           {hits.length} match{hits.length === 1 ? "" : "es"} for &ldquo;{q}&rdquo;
         </div>
       )}
@@ -232,8 +232,8 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             href: h.href,
             group: h.group,
             cells: {
-              title: <span style={{ fontSize: 13 }}>{h.title}</span>,
-              where: <span className="mut" style={{ fontSize: 11 }}>{h.where}{h.sub ? ` · ${h.sub}` : ""}</span>,
+              title: <span className="t-body">{h.title}</span>,
+              where: <span className="mut t-meta">{h.where}{h.sub ? ` · ${h.sub}` : ""}</span>,
             },
           }))}
         />
@@ -247,10 +247,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
               {m.listing && (
                 <div style={{ border: "1px solid #BFDDBF", background: "#F3FAF3", borderRadius: 8, padding: "10px 12px", marginTop: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                    <b style={{ fontSize: 14, color: "var(--navy)" }}>{m.desc}</b>
+                    <b className="t-lead" style={{ color: "var(--navy)" }}>{m.desc}</b>
                     <span className="pill good">For sale</span>
                   </div>
-                  {m.listing.note && <div className="mut" style={{ fontSize: 12, marginTop: 2, whiteSpace: "pre-wrap" }}>{m.listing.note}</div>}
+                  {m.listing.note && <div className="mut t-small" style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{m.listing.note}</div>}
                   <a href={`/listing/${m.listing.token}`} target="_blank" rel="noreferrer" className="btn sm accent"
                     style={{ display: "inline-block", marginTop: 8, textDecoration: "none" }}>View listing</a>
                 </div>
@@ -266,7 +266,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
       {q.length >= 2 && hits.length === 0 && outside.length === 0 && (
         <div className="card">
-          <div className="mut" style={{ fontSize: 13 }}>
+          <div className="mut t-body">
             Nothing found.{q.length < MIN_SERIAL_LOOKUP ? " Serial numbers need at least 4 characters." : ""}
           </div>
           {mayCreate && <CreateSystemForm serial={q} kinds={kinds} models={createModels} categories={createCategories} />}

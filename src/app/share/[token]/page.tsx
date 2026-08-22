@@ -47,13 +47,13 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
       <div className="card">
         {files.map((f) => (
           <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
-            <a href={`/api/share/${token}/file/${f.id}`} style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+            <a href={`/api/share/${token}/file/${f.id}`} className="t-body" style={{ fontWeight: 600, textDecoration: "none", flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
               {f.fileName}
             </a>
-            <span className="mut" style={{ fontSize: 12, flexShrink: 0 }}>{fmtBytes(f.size)}</span>
+            <span className="mut t-small" style={{ flexShrink: 0 }}>{fmtBytes(f.size)}</span>
           </div>
         ))}
-        {files.length === 0 && <div className="mut" style={{ fontSize: 13 }}>The shared files are gone.</div>}
+        {files.length === 0 && <div className="mut t-body">The shared files are gone.</div>}
         {files.length > 1 && (
           <div style={{ marginTop: 12 }}>
             <a className="btn sm primary" href={`/api/share/${token}/zip`} style={{ textDecoration: "none" }}>

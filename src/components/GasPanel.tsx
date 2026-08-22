@@ -15,7 +15,8 @@ function GasStatusSelect({ row }: { row: GasRow }) {
     <select
       value={status}
       onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await setGasStatus(row.id, e.target.value); })}
-      style={{ width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: `var(--t-${GAS_TONE[status] ?? "neutral"}-bg)`, color: `var(--t-${GAS_TONE[status] ?? "neutral"}-fg)`, cursor: "pointer" }}
+      className="t-meta"
+      style={{ width: "auto", fontWeight: 700, padding: "3px 6px", borderRadius: 999, background: `var(--t-${GAS_TONE[status] ?? "neutral"}-bg)`, color: `var(--t-${GAS_TONE[status] ?? "neutral"}-fg)`, cursor: "pointer" }}
     >
       {GAS_STATES.map((s) => <option key={s}>{s}</option>)}
     </select>
@@ -59,7 +60,7 @@ export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {gases.map((g) => (
           <div key={g.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, fontWeight: 700, width: 76 }}>{g.gas}</span>
+            <span className="t-body" style={{ fontWeight: 700, width: 76 }}>{g.gas}</span>
             {canEdit ? (
               <GasStatusSelect row={g} />
             ) : (
@@ -72,20 +73,21 @@ export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }
                 onBlur={() => saveNote(g)}
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                 placeholder='Tank details... e.g. "tank #A-441, swapped Jul 18"'
-                style={{ flex: "1 1 180px", fontSize: 12, padding: "4px 9px" }}
+                className="t-small"
+                style={{ flex: "1 1 180px", padding: "4px 9px" }}
               />
             ) : (
-              g.note && <span className="mut" style={{ fontSize: 12 }}>{g.note}</span>
+              g.note && <span className="mut t-small">{g.note}</span>
             )}
             {isStaff && (
-              <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }}
+              <button className="btn link" style={{ color: "var(--t-bad-fg)" }}
                 onClick={() => startTransition(async () => { await removeInstrumentGas(g.id); toast({ message: `Removed ${g.gas}` }); })}>remove</button>
             )}
           </div>
         ))}
-        {gases.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No gas requirements recorded.</div>}
+        {gases.length === 0 && <div className="mut t-small">No gas requirements recorded.</div>}
       </div>
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
       {canEdit && (
         <div style={{ marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           {adding ? (

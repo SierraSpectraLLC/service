@@ -71,9 +71,9 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
         <div className="card-title">Needed on systems</div>
         <span className="pill warn">{parts.length}</span>
-        {picked.size > 0 && <span className="mut" style={{ fontSize: 11 }}>{picked.size} selected</span>}
+        {picked.size > 0 && <span className="mut t-meta">{picked.size} selected</span>}
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+      <div className="mut t-small" style={{ marginBottom: 8 }}>
         Parts marked <b>Needed</b> on an instrument or unit - a system is waiting on each of these.
         Order them here, or hand the list to a client who buys their own.
       </div>
@@ -83,9 +83,9 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
           style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)", cursor: "pointer", margin: 0 }}>
           <input type="checkbox" checked={picked.has(p.id)} onChange={() => toggle(p.id)}
             style={{ width: 15, height: 15, flexShrink: 0 }} aria-label={`Select ${p.name}`} />
-          <span style={{ fontSize: 13, flex: "1 1 150px", minWidth: 0 }}>{p.name}</span>
-          {p.partNumber && <span className="mono mut" style={{ fontSize: 11 }}>{p.partNumber}</span>}
-          {p.qty && p.qty !== "1" && <span className="mut" style={{ fontSize: 11 }}>x{p.qty}</span>}
+          <span className="t-body" style={{ flex: "1 1 150px", minWidth: 0 }}>{p.name}</span>
+          {p.partNumber && <span className="mono mut t-meta">{p.partNumber}</span>}
+          {p.qty && p.qty !== "1" && <span className="mut t-meta">x{p.qty}</span>}
           {p.vendor && <span className="pill neutral">{p.vendor}</span>}
           {p.externalId && p.instrumentId !== null && (
             <Link href={`/instruments/${p.instrumentId}`} onClick={(e) => e.stopPropagation()}
@@ -108,7 +108,7 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
         <div style={{ marginTop: 10, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <select value={roomId} onChange={(e) => setRoomId(e.target.value)}
-              style={{ width: "auto", fontSize: 12 }} aria-label="Deliver to stockroom">
+              className="t-small" style={{ width: "auto" }} aria-label="Deliver to stockroom">
               {rooms.map((r) => <option key={r.id} value={String(r.id)}>{r.name}</option>)}
             </select>
             <button className="btn sm accent" disabled={pending || !roomId || vendors.length !== 1}
@@ -131,17 +131,17 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
             )}
           </div>
           {vendors.length > 1 && (
-            <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+            <div className="mut t-meta" style={{ marginTop: 6 }}>
               Selected parts come from {vendors.length} vendors ({vendors.join(", ")}) - one order goes to one vendor.
             </div>
           )}
           {vendors.length === 0 && (
-            <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+            <div className="mut t-meta" style={{ marginTop: 6 }}>
               None of these name a vendor. Set one on the part, or in the parts book.
             </div>
           )}
           {askOrgs.length > 1 && (
-            <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+            <div className="mut t-meta" style={{ marginTop: 6 }}>
               Selected parts belong to different organizations - ask one at a time.
             </div>
           )}
@@ -151,7 +151,7 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
               <input value={note} onChange={(e) => setNote(e.target.value)}
                 placeholder="Anything to add - urgency, which visit it's for (optional)"
-                style={{ width: "auto", flex: "2 1 200px", fontSize: 12 }} />
+                className="t-small" style={{ width: "auto", flex: "2 1 200px" }} />
               <button className="btn sm accent" disabled={pending}
                 onClick={() => startTransition(async () => {
                   const res = await sendPartsRequest(askOrgs[0], [...picked], note);
@@ -161,7 +161,7 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
                 })}>
                 {pending ? "Sending..." : `Send to ${askOrgName}`}
               </button>
-              <span className="mut" style={{ fontSize: 11, flexBasis: "100%" }}>
+              <span className="mut t-meta" style={{ flexBasis: "100%" }}>
                 They stay <b>Needed</b> here - nothing has been ordered - but the record will say
                 who was asked and when.
               </span>
@@ -171,7 +171,7 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
       )}
 
       {msg && (
-        <div style={{ fontSize: 12, marginTop: 8, fontWeight: 700, color: msg.error ? "#A32D2D" : "#2E6B2E" }}>
+        <div className="t-small" style={{ marginTop: 8, fontWeight: 700, color: msg.error ? "#A32D2D" : "#2E6B2E" }}>
           {msg.text}
         </div>
       )}

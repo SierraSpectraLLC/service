@@ -32,7 +32,7 @@ export default function SignatureBlock({ signatures, operatorName, clientName }:
             <span style={{ marginLeft: "auto" }}>{s.when}</span>
           </div>
           <div className="t-meta" style={{ marginTop: 2 }}>
-            {s.meaning} — {s.snapshot.tasksDone} of {s.snapshot.tasksTotal} tasks complete
+            {s.meaning} - {s.snapshot.tasksDone} of {s.snapshot.tasksTotal} tasks complete
             {s.snapshot.requiredTests.length > 0 && (
               <>, mandatory tests evidenced: {s.snapshot.requiredTests.map((t) => t.title).join(", ")}</>
             )}
@@ -49,13 +49,13 @@ export default function SignatureBlock({ signatures, operatorName, clientName }:
       {signatures.length === 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ borderBottom: "1px solid var(--ink)", height: 36 }} />
-          <div style={{ fontSize: 11, marginTop: 4 }}>{operatorName} — signature / date</div>
+          <div style={{ fontSize: 11, marginTop: 4 }}>{operatorName} - signature / date</div>
         </div>
       )}
 
       <div style={{ marginTop: 24 }}>
         <div style={{ borderBottom: "1px solid var(--ink)", height: 36 }} />
-        <div style={{ fontSize: 11, marginTop: 4 }}>{clientName} — accepted by / date</div>
+        <div style={{ fontSize: 11, marginTop: 4 }}>{clientName} - accepted by / date</div>
       </div>
     </div>
   );

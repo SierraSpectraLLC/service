@@ -55,25 +55,25 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
         <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", margin: "8px 0" }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ flex: "1 1 200px" }}>
-              <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>Company</label>
+              <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>Company</label>
               <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
-                placeholder="Northwind Analytical" style={{ width: "100%", fontSize: 13 }} />
+                placeholder="Northwind Analytical" className="t-body" style={{ width: "100%" }} />
             </div>
             <div style={{ flex: "1 1 220px" }}>
-              <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>Their first owner</label>
+              <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>Their first owner</label>
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email"
-                placeholder="owner@northwind.com" style={{ width: "100%", fontSize: 13 }} />
+                placeholder="owner@northwind.com" className="t-body" style={{ width: "100%" }} />
             </div>
             <button className="btn sm accent" disabled={pending || !name.trim() || !email.trim()} onClick={submit}>
               {pending ? "Opening..." : "Open"}
             </button>
           </div>
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
         </div>
       )}
       {unassigned.length > 0 && (
         <div style={{ fontSize: 12.5, color: "var(--t-warn-fg)", background: "#FAF0DC", borderRadius: 8, padding: "7px 10px", margin: "8px 0" }}>
-          No company set for {unassigned.join(", ")} — they see nothing until one is.
+          No company set for {unassigned.join(", ")} - they see nothing until one is.
         </div>
       )}
 
@@ -93,7 +93,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
           cells: {
             name: (
               <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                <b style={{ fontSize: 13 }}>{r.name}</b>
+                <b className="t-body">{r.name}</b>
                 {r.id === rootOrgId && <Pill tone="info">runs the platform</Pill>}
               </span>
             ),
@@ -103,7 +103,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
             systems: <span style={{ fontSize: 12.5 }}>{r.live}{r.systems !== r.live && <span className="mut"> of {r.systems}</span>}</span>,
             machines: <span style={{ fontSize: 12.5 }}>{r.machines}</span>,
             invited: <span style={{ fontSize: 12.5 }}>{r.invitedOnto || <span className="mut">-</span>}</span>,
-            since: <span className="mut" style={{ fontSize: 12 }}>{r.since}</span>,
+            since: <span className="mut t-small">{r.since}</span>,
           },
         }))}
         empty="No workspaces yet"

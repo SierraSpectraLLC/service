@@ -71,7 +71,7 @@ export default async function AdminSettingsPage() {
             const inst = byId.get(r.instrumentId);
             return (
               <div key={r.id} style={{ borderTop: "1px solid var(--line)", paddingTop: 8, marginTop: 8 }}>
-                <Link href={`/instruments/${r.instrumentId}`} className="mono" style={{ fontSize: 12, fontWeight: 700, textDecoration: "none", color: "var(--navy)" }}>
+                <Link href={`/instruments/${r.instrumentId}`} className="mono t-small" style={{ fontWeight: 700, textDecoration: "none", color: "var(--navy)" }}>
                   {inst?.externalId ?? `system ${r.instrumentId}`}
                 </Link>
                 <AccessRequestsPanel isOperator requests={[{
@@ -101,8 +101,8 @@ export default async function AdminSettingsPage() {
           return (
             <details key={inst.id} style={{ borderTop: "1px solid var(--line)" }}>
               <summary className="row-hover" style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "9px 4px", cursor: "pointer", listStyle: "none" }}>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{inst.externalId}</span>
-                <span style={{ fontSize: 13, flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{inst.externalId}</span>
+                <span className="t-body" style={{ flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {label || <span className="mut">No assets listed</span>}
                   {inst.client && <span className="mut"> · {inst.client}</span>}
                 </span>
@@ -112,7 +112,7 @@ export default async function AdminSettingsPage() {
                     {pendingBySystem.get(inst.id)!.length} waiting
                   </span>
                 )}
-                <span className="mut" style={{ fontSize: 12 }}>
+                <span className="mut t-small">
                   {ownerName ? `owned by ${ownerName}` : "unclaimed"}
                   {shares.length > 0 && ` · shared with ${shares.length}`}
                 </span>
@@ -124,7 +124,7 @@ export default async function AdminSettingsPage() {
                 <SharePanel targetId={inst.id} shares={shares.map((s) => ({ orgId: s.orgId, name: s.name, kind: s.kind, access: s.access }))}
                   orgOptions={orgRows} ownerOrgId={inst.ownerOrgId} canManageAll canAddProvider={false} />
                 {records.length > 0 && (
-                  <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
+                  <div className="mut t-meta" style={{ marginTop: 8 }}>
                     Frozen records held by: {records.map((r) => `${r.orgName} (${r.kind === "handoff" ? "handed on" : "access ended"} ${shopTime(r.revokedAt)})`).join(", ")}
                   </div>
                 )}

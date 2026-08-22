@@ -150,7 +150,7 @@ export default function ImportPanel() {
 
           {step === "upload" && (
             <>
-              <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+              <div className="mut t-small" style={{ marginBottom: 10 }}>
                 Export your sheet as CSV and bring it here. Rows sharing a System ID become one
                 system; rows without one become shelf assets.
               </div>
@@ -163,7 +163,7 @@ export default function ImportPanel() {
                 )} download="import-template.csv">download the template</a>
               </div>
               {raw && (
-                <div className="mut" style={{ fontSize: 12, marginTop: 10 }}>
+                <div className="mut t-small" style={{ marginTop: 10 }}>
                   Loaded: <b>{fileName || "pasted CSV"}</b> · {body.length} data row{body.length === 1 ? "" : "s"}.
                   Choosing another file starts over.
                 </div>
@@ -178,13 +178,13 @@ export default function ImportPanel() {
                 {skipped.size > 0 ? ` (${skipped.size} skipped)` : ""}
               </div>
               <div style={{ overflowX: "auto" }}>
-                <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 480 }}>
+                <table className="t-small" style={{ borderCollapse: "collapse", minWidth: 480 }}>
                   <thead>
                     <tr>
                       {headers.map((h, i) => (
                         <th key={i} style={{ textAlign: "left", padding: "4px 8px 2px", borderBottom: "1px solid var(--line)" }}>
                           <div className="mut" style={{ fontWeight: 400, marginBottom: 2 }}>{h || `column ${i + 1}`}</div>
-                          <select value={mapping[i] ?? ""} style={{ width: "auto", fontSize: 11 }}
+                          <select value={mapping[i] ?? ""} className="t-meta" style={{ width: "auto" }}
                             aria-label={`Field for ${h || `column ${i + 1}`}`}
                             onChange={(e) => setMapping((m) => m.map((f, j) => (j === i ? (e.target.value as FieldKey) : f)))}>
                             {FIELDS.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
@@ -206,7 +206,7 @@ export default function ImportPanel() {
                   </tbody>
                 </table>
               </div>
-              {body.length > 6 && <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>...and {body.length - 6} more.</div>}
+              {body.length > 6 && <div className="mut t-meta" style={{ marginTop: 4 }}>...and {body.length - 6} more.</div>}
               <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <button className="btn sm accent" onClick={() => run(true)} disabled={pending}>
                   {pending ? "Checking..." : "Check (no changes)"}
@@ -218,7 +218,7 @@ export default function ImportPanel() {
 
           {step === "preview" && checked && (
             <>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--navy)" }}>{summary}</div>
+              <div className="t-body" style={{ fontWeight: 700, marginBottom: 8, color: "var(--navy)" }}>{summary}</div>
 
               {problems.length > 0 && (
                 <div className="card" style={{ borderColor: "var(--t-warn-fg)", background: "var(--t-warn-bg)" }}>
@@ -232,8 +232,8 @@ export default function ImportPanel() {
                   </div>
                   {problems.map((r) => (
                     <div key={r.row} className="row-reveal" style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-                      <span className="mono" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}>Row {r.row}</span>
-                      <span style={{ fontSize: 12, minWidth: 0 }}>{r.error}</span>
+                      <span className="mono t-small" style={{ fontWeight: 700, flexShrink: 0 }}>Row {r.row}</span>
+                      <span className="t-small" style={{ minWidth: 0 }}>{r.error}</span>
                       <span style={{ marginLeft: "auto", flexShrink: 0 }}>
                         <RowActions inline={1} menuLabel={`Fixes for row ${r.row}`} items={[
                           { label: "Skip row", onClick: () => { skipRow(r.row); setStep("map"); } },
@@ -254,11 +254,11 @@ export default function ImportPanel() {
                 rows={(results ?? []).map((r) => ({
                   key: r.row,
                   cells: {
-                    row: <span className="mono" style={{ fontSize: 12 }}>{r.row}</span>,
+                    row: <span className="mono t-small">{r.row}</span>,
                     action: <span style={{ fontSize: 12.5 }}>{r.action}</span>,
                     note: r.error
-                      ? <span style={{ fontSize: 12, color: "var(--t-bad-fg)" }}>{r.error}</span>
-                      : <span className="mut" style={{ fontSize: 12 }}>ok</span>,
+                      ? <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{r.error}</span>
+                      : <span className="mut t-small">ok</span>,
                   },
                 }))}
                 empty="The check returned nothing."
@@ -287,22 +287,22 @@ export default function ImportPanel() {
 
           {step === "import" && (
             <>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: "var(--t-good-fg)" }}>{summary}</div>
+              <div className="t-body" style={{ fontWeight: 700, marginBottom: 8, color: "var(--t-good-fg)" }}>{summary}</div>
               {results && (
                 <div style={{ maxHeight: 260, overflowY: "auto", marginBottom: 10 }}>
                   {results.slice(0, 30).map((r) => (
-                    <div key={r.row} style={{ fontSize: 12, padding: "3px 0", borderTop: "1px solid var(--line)", color: r.error ? "var(--t-bad-fg)" : "var(--ink)" }}>
-                      Row {r.row}: {r.action}{r.error ? ` — ${r.error}` : ""}
+                    <div key={r.row} className="t-small" style={{ padding: "3px 0", borderTop: "1px solid var(--line)", color: r.error ? "var(--t-bad-fg)" : "var(--ink)" }}>
+                      Row {r.row}: {r.action}{r.error ? ` - ${r.error}` : ""}
                     </div>
                   ))}
-                  {results.length > 30 && <div className="mut" style={{ fontSize: 11, paddingTop: 4 }}>...and {results.length - 30} more.</div>}
+                  {results.length > 30 && <div className="mut t-meta" style={{ paddingTop: 4 }}>...and {results.length - 30} more.</div>}
                 </div>
               )}
               <a href="/" className="btn sm" style={{ display: "inline-block", textDecoration: "none" }}>Go to the dashboard</a>
             </>
           )}
 
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 10 }}>{error}</div>}
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 10 }}>{error}</div>}
         </div>
       </div>
     </div>

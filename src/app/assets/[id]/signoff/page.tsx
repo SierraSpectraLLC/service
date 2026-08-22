@@ -96,14 +96,14 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
   return (
     <div className="container page">
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <Link href={`/assets/${asset.id}`} className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
+        <Link href={`/assets/${asset.id}`} className="mut t-body" style={{ textDecoration: "none" }}>
           ← Back to the asset
         </Link>
         <span style={{ marginLeft: "auto" }} />
         <PrintButton />
       </div>
       {openTasks > 0 && (
-        <div className="no-print" style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+        <div className="no-print t-small" style={{ color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
           Heads up: {openTasks} task{openTasks === 1 ? " is" : "s are"} not Done - only completed work prints below.
         </div>
       )}
@@ -113,7 +113,7 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
           title="Asset delivery & sign-off" date={shopMonthDay(new Date())}
           docId={asset.serial ? `SN ${asset.serial}` : undefined} />
 
-        <Row label="Asset" value={`${asset.kind} — ${asset.model || "(no model)"}`} />
+        <Row label="Asset" value={`${asset.kind} - ${asset.model || "(no model)"}`} />
         <Row label="Serial #" value={asset.serial} />
         <Row label="Manufacturer" value={asset.manufacturer} />
         <Row label="Owner" value={asset.owner} />

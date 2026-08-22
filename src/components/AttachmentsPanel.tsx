@@ -349,9 +349,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <button className="btn" onClick={() => setLibrary(null)}>Close</button>
             </>
           }>
-          {library === "loading" && <div className="mut" style={{ fontSize: 12 }}>Loading…</div>}
+          {library === "loading" && <div className="mut t-small">Loading…</div>}
           {Array.isArray(library) && library.length === 0 && (
-            <div className="mut" style={{ fontSize: 12 }}>
+            <div className="mut t-small">
               The library is empty. Files land there from the PDF studio, or from an upload with no record.
             </div>
           )}
@@ -363,9 +363,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                   setLibraryError(res?.error ?? "");
                   if (!res?.error) { setLibrary(null); toast({ message: `Filed ${f.fileName}` }); }
                 })}>+ file it here</button>
-              <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+              <span className="mono t-small" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={f.description || f.fileName}>{f.fileName}</span>
-              <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{fmtSize(f.size)}</span>
+              <span className="mut t-meta" style={{ marginLeft: "auto", flexShrink: 0 }}>{fmtSize(f.size)}</span>
             </div>
           ))}
         </Dialog>
@@ -380,22 +380,22 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
           {staged.map((s) => (
             <div key={s.key} style={{ marginBottom: 10, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 700, flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span className="mono t-small" style={{ fontWeight: 700, flex: "1 1 160px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {s.file.name}
                 </span>
-                <span className="mut" style={{ fontSize: 11 }}>{fmtSize(s.file.size)}</span>
-                <select value={s.kind} disabled={uploading} onChange={(e) => patch(s.key, { kind: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
+                <span className="mut t-meta">{fmtSize(s.file.size)}</span>
+                <select value={s.kind} disabled={uploading} onChange={(e) => patch(s.key, { kind: e.target.value })} className="t-small" style={{ width: "auto" }}>
                   {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
                 </select>
                 {!uploading && (
-                  <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }}
+                  <button className="btn link" style={{ color: "var(--t-bad-fg)" }}
                     onClick={() => setStaged((x) => x.filter((y) => y.key !== s.key))}>remove</button>
                 )}
               </div>
               <input value={s.description} disabled={uploading}
                 onChange={(e) => patch(s.key, { description: e.target.value })}
                 placeholder='Description... e.g. "post-repair tune, passed at 101% of spec"'
-                style={{ marginTop: 6, fontSize: 12, padding: "5px 9px" }} />
+                className="t-small" style={{ marginTop: 6, padding: "5px 9px" }} />
               {s.state === "uploading" && (
                 <div style={{ marginTop: 6, height: 6, borderRadius: 999, background: "var(--line)", overflow: "hidden" }}>
                   {s.mode === "progress"
@@ -404,7 +404,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 </div>
               )}
               {s.state === "uploading" && (
-                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
+                <div className="mut t-meta" style={{ marginTop: 3 }}>
                   {s.mode === "relay"
                     ? "direct upload blocked - sending through the server instead..."
                     : s.mode === "compat"
@@ -412,8 +412,8 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                       : `${s.progress}%${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`}
                 </div>
               )}
-              {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "var(--t-good-fg)" }}>Uploaded ✓</div>}
-              {s.state === "failed" && <div style={{ fontSize: 11, marginTop: 3, color: "var(--t-bad-fg)" }}>Failed: {s.error}</div>}
+              {s.state === "done" && <div className="t-meta" style={{ marginTop: 3, color: "var(--t-good-fg)" }}>Uploaded ✓</div>}
+              {s.state === "failed" && <div className="t-meta" style={{ marginTop: 3, color: "var(--t-bad-fg)" }}>Failed: {s.error}</div>}
             </div>
           ))}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -428,10 +428,10 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       )}
 
       {docs.length === 0 && staged.length === 0 && (
-        <div className="mut" style={{ fontSize: 13 }}>No files attached to this system yet.</div>
+        <div className="mut t-body">No files attached to this system yet.</div>
       )}
       {photos > 0 && (
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>
           {photoCount(photos)} in the Photos section.
         </div>
       )}
@@ -441,25 +441,25 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
           return (
             <div key={a.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "9px 12px", marginBottom: 8, background: "#FAFBFD" }}>
               <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-                <input className="mono" value={editDraft.fileName}
+                <input className="mono t-body" value={editDraft.fileName}
                   onChange={(e) => setEditDraft({ ...editDraft, fileName: e.target.value })}
-                  style={{ flex: "2 1 180px", fontSize: 13 }} />
+                  style={{ flex: "2 1 180px" }} />
                 <select value={editDraft.kind} onChange={(e) => setEditDraft({ ...editDraft, kind: e.target.value })}
-                  style={{ width: "auto", fontSize: 12 }}>
+                  className="t-small" style={{ width: "auto" }}>
                   {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
                 </select>
               </div>
               <input value={editDraft.description}
                 onChange={(e) => setEditDraft({ ...editDraft, description: e.target.value })}
                 placeholder='Description... e.g. "post-repair tune, passed at 101% of spec"'
-                style={{ fontSize: 12, padding: "5px 9px", marginBottom: 8 }} />
+                className="t-small" style={{ padding: "5px 9px", marginBottom: 8 }} />
               {/* Validity, for paper that goes stale - a calibration cert, a
                   qualification report. Dated files feed the expiry attention. */}
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-                <span className="mut" style={{ fontSize: 11 }}>Valid until</span>
+                <span className="mut t-meta">Valid until</span>
                 <input type="date" value={editDraft.expiresOn}
                   onChange={(e) => setEditDraft({ ...editDraft, expiresOn: e.target.value })}
-                  style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
+                  className="t-small" style={{ width: "auto", padding: "3px 6px" }} />
                 {editDraft.expiresOn && (
                   <button className="btn link" onClick={() => setEditDraft({ ...editDraft, expiresOn: "" })}>never expires</button>
                 )}
@@ -485,12 +485,12 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                   style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} />
               </a>
             ) : (
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: `var(--t-${m.tone}-bg)`, color: `var(--t-${m.tone}-fg)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
+              <div className="t-title" style={{ width: 32, height: 32, borderRadius: 8, background: `var(--t-${m.tone}-bg)`, color: `var(--t-${m.tone}-fg)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{m.glyph}</div>
             )}
             <div style={{ minWidth: 0, flex: "1 1 190px" }}>
-              <div className="mono" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
-              {a.description && <div style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{a.description}</div>}
-              <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
+              <div className="mono t-body" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
+              {a.description && <div className="t-small" style={{ marginTop: 2, overflowWrap: "anywhere" }}>{a.description}</div>}
+              <div className="mut t-meta" style={{ marginTop: 2 }}>
                 <span className={`pill ${m.tone}`}>{a.kind}</span>
                 {a.expiresOn && today && (() => {
                   const days = daysUntil(a.expiresOn, today);
@@ -512,7 +512,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                   const v = e.target.value ? parseInt(e.target.value) : null;
                   startTransition(async () => { await setAttachmentTask(a.id, v); toast({ message: v ? "Filed as evidence" : "Unlinked from the task" }); });
                 }}
-                style={{ width: "auto", minWidth: 0, maxWidth: 150, fontSize: 11, padding: "1px 4px", flexShrink: 0 }}>
+                className="t-meta" style={{ width: "auto", minWidth: 0, maxWidth: 150, padding: "1px 4px", flexShrink: 0 }}>
                 <option value="">not evidence</option>
                 {evidenceTasks.map((t) => (
                   <option key={t.id} value={t.id}>{t.required ? "★ " : ""}{t.title}</option>
@@ -520,14 +520,14 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               </select>
             )}
             {listingCuration && (
-              <label style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontSize: 11, fontWeight: 400, color: a.showOnListing ? "#2E6B2E" : "var(--mut)", flexShrink: 0, textTransform: "none", letterSpacing: 0 }}
+              <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: a.showOnListing ? "#2E6B2E" : "var(--mut)", flexShrink: 0, textTransform: "none", letterSpacing: 0 }}
                 title="Public buyers see this file on the listing page">
                 <input type="checkbox" checked={a.showOnListing} style={{ width: 14, height: 14 }}
                   onChange={(e) => { const on = e.target.checked; startTransition(async () => { await setAttachmentListed(a.id, on); toast({ message: on ? "Added to the listing" : "Removed from the listing" }); }); }} />
                 on listing
               </label>
             )}
-            <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ fontSize: 12, textDecoration: "none", flexShrink: 0 }}>download</a>
+            <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" className="t-small" style={{ textDecoration: "none", flexShrink: 0 }}>download</a>
             {canEdit && (
               <button className="btn link" style={{ fontSize: 12, flexShrink: 0 }}
                 onClick={() => { setEditDraft({ fileName: a.fileName, kind: a.kind, description: a.description, expiresOn: a.expiresOn }); setEditing(a.id); }}

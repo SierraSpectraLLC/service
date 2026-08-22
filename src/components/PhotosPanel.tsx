@@ -181,10 +181,10 @@ export default function PhotosPanel({
           opacity: on ? 1 : 0.65,
         }}>
         {thumb}
-        <span aria-hidden style={{
+        <span aria-hidden className="t-body" style={{
           position: "absolute", top: 4, left: 4, width: 20, height: 20, borderRadius: 10,
           background: on ? "#1D6396" : "rgba(255,255,255,0.85)",
-          color: "#fff", fontSize: 13, lineHeight: "20px", textAlign: "center",
+          color: "#fff", lineHeight: "20px", textAlign: "center",
           border: "1px solid #1D6396", fontWeight: 700,
         }}>{on ? "✓" : ""}</span>
       </button>
@@ -195,7 +195,7 @@ export default function PhotosPanel({
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <div className="card-title" style={{ marginBottom: 0 }}>Photos</div>
-        <span className="mut" style={{ fontSize: 12 }}>
+        <span className="mut t-small">
           {ordered.length === 0 ? "none yet" : photoCount(ordered.length)}
         </span>
         {canEdit && (
@@ -219,7 +219,7 @@ export default function PhotosPanel({
 
       {selecting && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <span className="mut" style={{ fontSize: 12 }}>
+          <span className="mut t-small">
             {picked.size === 0 ? "Tap photos to select" : `${picked.size} selected`}
           </span>
           <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
@@ -233,19 +233,19 @@ export default function PhotosPanel({
         </div>
       )}
 
-      {busy && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>{busy}</div>}
+      {busy && <div className="mut t-small" style={{ marginBottom: 6 }}>{busy}</div>}
       {storageFull && canEdit && (
-        <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>
+        <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>
           Storage is full - remove a file or raise the limit.
         </div>
       )}
 
       {shared && ordered.length > 0 && (
-        <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>Shared with {shared} - one machine, one set of photos.</div>
+        <div className="mut t-meta" style={{ marginBottom: 6 }}>Shared with {shared} - one machine, one set of photos.</div>
       )}
 
       {ordered.length === 0 ? (
-        <div className="mut" style={{ fontSize: 13 }}>No photos yet.</div>
+        <div className="mut t-body">No photos yet.</div>
       ) : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
@@ -254,7 +254,7 @@ export default function PhotosPanel({
                 unchosen record still displays the catalog's stock photo of the
                 model everywhere else, so calling this one "the cover" because
                 it happens to be newest would be a lie about the system. */}
-            <div className="mut" style={{ fontSize: 11, marginTop: 4, maxWidth: 240, overflowWrap: "anywhere" }}>
+            <div className="mut t-meta" style={{ marginTop: 4, maxWidth: 240, overflowWrap: "anywhere" }}>
               {chosen ? "Cover" : "Newest · no cover chosen"} · {lead.uploadedBy} · {lead.when}
             </div>
             {canEdit && !selecting && (
@@ -290,18 +290,18 @@ export default function PhotosPanel({
                   <Tile p={p} width={104} height={78} radius={8} alt={p.fileName} />
                   {canEdit && !selecting && (
                     <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
-                      <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                      <button className="btn link" disabled={pending}
                         onClick={() => act(() => setCoverPhoto(target, p.id), "Set the cover photo")}>Cover</button>
-                      <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                      <button className="btn link" disabled={pending}
                         onClick={() => setFraming(p)}>Frame</button>
                       {catalogScopes.length > 0 && (
-                        <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                        <button className="btn link" disabled={pending}
                           title="File this to the catalog so every unit like this one sees it"
                           onClick={() => { setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: p.id, fileName: p.fileName }); }}>
                           Catalog
                         </button>
                       )}
-                      <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
+                      <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                         aria-label={`Remove ${p.fileName}`} onClick={() => remove(p)}>×</button>
                     </div>
                   )}
@@ -312,7 +312,7 @@ export default function PhotosPanel({
         </div>
       )}
 
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
       {/* File a photo to the catalog's reference shelf. The note is the point:
           a picture with nothing written on it is a picture nobody can act on. */}

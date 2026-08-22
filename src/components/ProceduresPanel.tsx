@@ -98,14 +98,14 @@ function ScopeField({ scope, options, onChange }: {
         {scope.map((m) => (
           <span key={m} className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {m}
-            <button type="button" className="chip-x" aria-label={`Remove ${m}`}
+            <button type="button" className="chip-x t-small" aria-label={`Remove ${m}`}
               onClick={() => onChange(scope.filter((s) => s !== m))}
-              style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
+              style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
           </span>
         ))}
         <input value={filter} onChange={(e) => setFilter(e.target.value)}
           placeholder={options.length ? "Type to filter models..." : "No models in the catalog yet - define them in Settings → Catalog"}
-          style={{ border: "none", flex: "1 1 120px", minWidth: 100, padding: "3px 4px", fontSize: 12 }} />
+          className="t-small" style={{ border: "none", flex: "1 1 120px", minWidth: 100, padding: "3px 4px" }} />
       </div>
       {available.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6, maxHeight: 96, overflowY: "auto" }}>
@@ -414,10 +414,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
           boxShadow: scopeChips.length ? "inset 3px 0 0 #6B4FA0" : "none",
         }}>
         {filter === "all" && (
-          <span className="drag-handle mut" aria-label="Drag to reorder" tabIndex={0}
+          <span className="drag-handle mut t-body" aria-label="Drag to reorder" tabIndex={0}
             onPointerDown={(e) => startDrag(e, listKey, assetType, listIds, i.id)} onPointerMove={moveDrag}
             onPointerUp={endDrag} onPointerCancel={endDrag}
-            style={{ fontSize: 13, userSelect: "none", padding: "2px 2px" }}>⠿</span>
+            style={{ userSelect: "none", padding: "2px 2px" }}>⠿</span>
         )}
         {/* One dot says what the row IS (see the legend); required reads red. */}
         <span title={i.required ? "Required before sign-off" : ROLE_LABEL[role]}>
@@ -426,17 +426,17 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         <button onClick={() => openEdit(i)} disabled={pending}
           style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "none", padding: 0, cursor: "pointer" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{i.name}</span>
+            <span className="t-body" style={{ fontWeight: 700, color: "var(--ink)" }}>{i.name}</span>
             {/* The one pill: the cadence when it has one, else what it is. */}
             {i.intervalDays !== null
               ? <span className={`pill ${ROLE_TONE[role]}`}>{cadenceLabel(i.intervalDays)}</span>
               : <span className={`pill ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>}
           </div>
           {i.notes && (
-            <div className="mut" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.notes}</div>
+            <div className="mut t-meta" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.notes}</div>
           )}
           {/* Everything else the pills used to shout, as one quiet line. */}
-          <div className="mut" style={{ fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div className="mut t-meta" style={{ marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {[
               (i.kind === "test" || summarizeItem({ ...i }) !== "Done / not done") ? summarizeItem({ ...i }) : "",
               i.required ? "required" : "",
@@ -501,7 +501,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       {/* The one fact that saves the copy/paste: definitions here apply
           themselves. Without this line, people write upkeep onto each system
           by hand and never find out they didn't have to. */}
-      <div className="mut" style={{ fontSize: 12, margin: "4px 0 10px", maxWidth: 720 }}>
+      <div className="mut t-small" style={{ margin: "4px 0 10px", maxWidth: 720 }}>
         Define work once - for a whole system type, a module type, or specific models. Anything
         with a cadence becomes a <b>maintenance schedule on every matching unit automatically</b>,
         existing and new; anything marked &ldquo;at intake&rdquo; is created as checkout work when
@@ -516,7 +516,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "8px 10px", borderRadius: 8, background: "#F5F2FB" }}>
           <label style={{ margin: 0 }}>Copy from</label>
           <select value={seedFrom} onChange={(e) => { setSeedFrom(e.target.value); setSeedNote(""); }}
-            aria-label="Copy procedures from" style={{ width: "auto", fontSize: 12 }}>
+            aria-label="Copy procedures from" className="t-small" style={{ width: "auto" }}>
             <option value="">another model...</option>
             {copyFrom.map((m) => (
               <option key={m.name} value={m.name}>{m.name} ({m.count} to copy)</option>
@@ -536,10 +536,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             }}>
             {pending ? "Copying..." : `Copy to ${focus.model}`}
           </button>
-          <span className="mut" style={{ fontSize: 11 }}>
+          <span className="mut t-meta">
             {focus.model} gets its own copies - edit them here without touching the model they came from.
           </span>
-          {seedNote && <span style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, width: "100%" }}>{seedNote} ✓</span>}
+          {seedNote && <span className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, width: "100%" }}>{seedNote} ✓</span>}
         </div>
       )}
 
@@ -601,7 +601,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             </>
           }>
             <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="Move to system type"
-              style={{ marginBottom: 10, fontSize: 13 }}>
+              className="t-body" style={{ marginBottom: 10 }}>
               <option value="">Choose a system type...</option>
               {categories.filter((c) => c !== moving.from).map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
@@ -664,7 +664,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         onToggle={(k) => setFilter(k as FilterKey)}
       />
       <div style={{ height: 8 }} />
-      {saved && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
+      {saved && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
       {/* One accordion, the Catalog's shape: System first, then a band per
           system category. An open band shows every module type inside it
@@ -697,17 +697,17 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             <span style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)", letterSpacing: "-0.2px" }}>
               {band.key === "system" ? "System-wide" : band.label}
             </span>
-            <span className="mut" style={{ fontSize: 12 }}>
+            <span className="mut t-small">
               {bandRows.length
                 ? `${bandRows.length} procedure${bandRows.length === 1 ? "" : "s"}${bandRecur ? ` · ${bandRecur} maintenance` : ""}`
                 : "no procedures yet"}
               {band.key !== "system" && ` · ${band.types.length} type${band.types.length === 1 ? "" : "s"}`}
             </span>
-            <span className="mut" style={{ marginLeft: "auto", fontSize: 12 }}>{bandOpen ? "▴" : "▾"}</span>
+            <span className="mut t-small" style={{ marginLeft: "auto" }}>{bandOpen ? "▴" : "▾"}</span>
           </div>
           {bandOpen && (
             <div style={{ padding: "10px 0 12px" }}>
-              {band.subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{band.subtitle}</div>}
+              {band.subtitle && <div className="mut t-small" style={{ marginBottom: 10 }}>{band.subtitle}</div>}
               {band.types.map((bandType) => {
                 const g = GROUPS.find((x) => x.type === bandType) ?? { type: bandType, label: bandType, subtitle: undefined };
                 const listKey = `${band.key}::${g.type}`;
@@ -721,14 +721,14 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                         heading inside it said nothing. */}
                     {!isSystemBand && (
                       <div style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "0 0 6px" }}>
-                        <span style={{ fontSize: 13, fontWeight: 700 }}>{g.label}</span>
-                        <span className="mut" style={{ fontSize: 11 }}>
+                        <span className="t-body" style={{ fontWeight: 700 }}>{g.label}</span>
+                        <span className="mut t-meta">
                           {all.length ? `${all.length} procedure${all.length === 1 ? "" : "s"}` : "none yet"}
                         </span>
                         {/* Filed in the wrong place: move the type, keeping its
                             models and their makers. Only inside a real category. */}
                         {band.key !== "__loose" && (
-                          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+                          <button className="btn link" disabled={pending}
                             onClick={() => {
                               setMoving({ assetType: g.type, from: band.key });
                               setMoveTo(""); setSaved(""); setError("");
@@ -737,7 +737,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                       </div>
                     )}
                     {all.length > 0 && list.length === 0 && (
-                      <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>
+                      <div className="mut t-small" style={{ marginBottom: 6 }}>
                         {hidden} hidden by the {FILTERS.find((f) => f.key === filter)?.label} filter.
                       </div>
                     )}
@@ -745,7 +745,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                       {list.map((i) => renderRow(i, g.type, band.key, listKey, list.map((x) => x.id)))}
                     </div>
                     {list.length > 0 && hidden > 0 && (
-                      <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+                      <div className="mut t-meta" style={{ marginBottom: 6 }}>
                         +{hidden} more hidden by the filter.
                       </div>
                     )}
@@ -834,12 +834,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 {/* "Inspect and/or replace X" has two honest endings and a bare
                     checkmark records neither. On, the generated task closes only
                     by recording which happened - like a test records its number. */}
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "0 0 8px", fontWeight: 400, color: "var(--ink)" }}>
+                <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "0 0 8px", fontWeight: 400, color: "var(--ink)" }}>
                   <input type="checkbox" checked={draft.resultType === "inspect_replace"} style={{ width: 15, height: 15, marginTop: 2 }}
                     onChange={(e) => setDraft({ ...draft, resultType: e.target.checked ? "inspect_replace" : "pass_fail" })} />
                   <span>
                     Inspect / Replace outcome
-                    <span className="mut" style={{ display: "block", fontSize: 11 }}>
+                    <span className="mut t-meta" style={{ display: "block" }}>
                       The task can&apos;t be closed until whoever did it records which happened -
                       inspected (what was found) or replaced (what went in). Both are documented
                       with name and time, like a test result.
@@ -847,12 +847,12 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                   </span>
                 </label>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
+                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
                     <input type="checkbox" checked={draft.requiresNote} style={{ width: 15, height: 15 }}
                       onChange={(e) => setDraft({ ...draft, requiresNote: e.target.checked })} />
                     Require a note
                   </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
+                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
                     <input type="checkbox" checked={draft.consumesPart} style={{ width: 15, height: 15 }}
                       onChange={(e) => setDraft({ ...draft, consumesPart: e.target.checked })} />
                     Consumes a part
@@ -867,13 +867,13 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               border: `1px solid ${!timingValid && error ? "#A32D2D" : "var(--line)"}`,
               borderRadius: 8, background: "#fff", padding: "8px 10px", marginBottom: 10,
             }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: 0 }}>
+              <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
                 <input type="checkbox" checked={draft.runsAtIntake} style={{ width: 15, height: 15 }}
                   onChange={(e) => setDraft({ ...draft, runsAtIntake: e.target.checked })} />
                 At intake - created once when a {isSystem ? "system" : "unit of this type"} is added
               </label>
               <>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "8px 0 0" }}>
+                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "8px 0 0" }}>
                     <input type="checkbox" checked={draft.repeats} style={{ width: 15, height: 15 }}
                       onChange={(e) => setDraft({ ...draft, repeats: e.target.checked })} />
                     Maintenance - repeats on a cadence, scheduled on every {isSystem ? "system" : "unit"} it covers, existing and new
@@ -881,7 +881,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                   {draft.repeats && (
                     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8, paddingLeft: 21 }}>
                       <select value={draft.intervalDays} onChange={(e) => setDraft({ ...draft, intervalDays: e.target.value })}
-                        style={{ width: "auto", fontSize: 12 }} aria-label="Cadence preset">
+                        className="t-small" style={{ width: "auto" }} aria-label="Cadence preset">
                         {CADENCES.map((c) => <option key={c.days} value={c.days}>{c.label}</option>)}
                         {!CADENCES.some((c) => c.days === draft.intervalDays) && (
                           <option value={draft.intervalDays}>every {draft.intervalDays} days</option>
@@ -889,19 +889,19 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                       </select>
                       <input type="number" min={1} max={3650} value={draft.intervalDays} inputMode="numeric"
                         onChange={(e) => setDraft({ ...draft, intervalDays: e.target.value })}
-                        aria-label="Cadence in days" style={{ width: 76, fontSize: 12 }} />
-                      <span className="mut" style={{ fontSize: 11 }}>days</span>
+                        aria-label="Cadence in days" className="t-small" style={{ width: 76 }} />
+                      <span className="mut t-meta">days</span>
                     </div>
                   )}
                 </>
             </div>
 
-            <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, margin: "0 0 10px", fontWeight: 400, color: "var(--ink)" }}>
+            <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "0 0 10px", fontWeight: 400, color: "var(--ink)" }}>
               <input type="checkbox" checked={draft.required} style={{ width: 15, height: 15, marginTop: 2 }}
                 onChange={(e) => setDraft({ ...draft, required: e.target.checked })} />
               <span>
                 Required for sign-off
-                <span className="mut" style={{ display: "block", fontSize: 11 }}>
+                <span className="mut t-meta" style={{ display: "block" }}>
                   {draft.kind === "test"
                     ? "Nobody can sign off until this test is done and a report is filed against it."
                     : "Nobody can sign off until this is done."}
@@ -922,7 +922,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                   </button>
                 ))}
               </div>
-              <span className="mut" style={{ fontSize: 11 }}>
+              <span className="mut t-meta">
                 Groups this under IQ/OQ/PQ on regulated (GxP) systems. Others ignore it.
               </span>
             </div>
@@ -941,14 +941,14 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 ))}
               </div>
             </div>
-            <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
+            <div className="mut t-meta" style={{ marginBottom: 10 }}>
               {PROVENANCE_BLURB[(draft.provenance || "") as keyof typeof PROVENANCE_BLURB]}
             </div>
 
             {/* Only on edit, and only when the timing actually changed: what
                 happens to existing units, with the opt-in to apply it now. */}
             {timingChange && (
-              <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 10 }}>
+              <div className="t-small" style={{ padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 10 }}>
                 {timingChange === "changed" && (
                   <>Existing units keep their current cadence; only units added from now on get the new one.</>
                 )}
@@ -958,7 +958,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 {timingChange === "removed" && (
                   <>Existing units keep their schedules; this only stops new units from getting one.</>
                 )}
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, margin: "6px 0 0", fontWeight: 700 }}>
+                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0 0", fontWeight: 700 }}>
                   <input type="checkbox" checked={applyNow} style={{ width: 15, height: 15 }}
                     onChange={(e) => setApplyNow(e.target.checked)} />
                   {timingChange === "changed" && "Also re-time existing units now"}
@@ -972,7 +972,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             <textarea value={draft.notes} rows={2}
               onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
               placeholder="What doing this involves (optional)"
-              style={{ width: "100%", marginBottom: 10, resize: "vertical", fontSize: 13 }} />
+              className="t-body" style={{ width: "100%", marginBottom: 10, resize: "vertical" }} />
 
             {/* The steps as boxes rather than as a paragraph. Every task this
                 makes - at intake and on every cycle - arrives with them
@@ -982,7 +982,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             <textarea value={draft.checklist} rows={5}
               onChange={(e) => setDraft({ ...draft, checklist: e.target.value })}
               placeholder={"Remove & Sonicate:\nLow-Pressure Funnel Assembly\nHigh-Pressure Funnel Assembly"}
-              style={{ width: "100%", marginBottom: 4, resize: "vertical", fontSize: 13 }} />
+              className="t-body" style={{ width: "100%", marginBottom: 4, resize: "vertical" }} />
             <div className="mut" style={{ fontSize: 10.5, marginBottom: 10 }}>
               End a line with a colon to make it a section label instead of a tick box.
               {(() => {
@@ -1012,7 +1012,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                         const n = parseInt(e.target.value, 10);
                         setPart({ qty: Number.isFinite(n) && n > 1 ? n : undefined });
                       }}
-                      style={{ width: 56, fontSize: 13 }} />
+                      className="t-body" style={{ width: 56 }} />
                     <PartNumberField value={pt.number} style={{ flex: 1, fontSize: 13 }}
                       onChange={(number) => setPart({ number })}
                       onPick={(part) => setPart({ number: part.partNumber, name: pt.name.trim() || part.name })} />
@@ -1029,22 +1029,22 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                       parts tagged for its model. */}
                   {!isSystem && (modelOptions[sheet.assetType] ?? []).length > 0 && (
                     <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-                      <span className="mut" style={{ fontSize: 11 }}>fits</span>
+                      <span className="mut t-meta">fits</span>
                       {partModels.length === 0 && (
                         <span className="pill faint">any model</span>
                       )}
                       {partModels.map((m) => (
                         <span key={m} className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                           {m}
-                          <button type="button" className="chip-x" aria-label={`This part no longer fits ${m}`}
+                          <button type="button" className="chip-x t-small" aria-label={`This part no longer fits ${m}`}
                             onClick={() => setPart({ models: partModels.filter((x) => x !== m) })}
-                            style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>×</button>
+                            style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
                         </span>
                       ))}
                       {modelPool.length > 0 && (
                         <select value="" aria-label="Limit this part to a model"
                           onChange={(e) => { if (e.target.value) setPart({ models: [...partModels, e.target.value] }); }}
-                          style={{ width: "auto", fontSize: 11, padding: "2px 6px" }}>
+                          className="t-meta" style={{ width: "auto", padding: "2px 6px" }}>
                           <option value="">+ model...</option>
                           {modelPool.map((m) => <option key={m} value={m}>{m}</option>)}
                         </select>
@@ -1065,7 +1065,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 <label>System types</label>
                 <ScopeField scope={draft.categoryScope} options={categories}
                   onChange={(next) => setDraft({ ...draft, categoryScope: next })} />
-                <div className="mut" style={{ fontSize: 11, marginTop: -4, marginBottom: 8 }}>
+                <div className="mut t-meta" style={{ marginTop: -4, marginBottom: 8 }}>
                   Leave empty and it covers every system in the workspace - which is rarely
                   what an annual PM means.
                 </div>
@@ -1075,7 +1075,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 <label>Models</label>
                 <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}
                   onChange={(next) => setDraft({ ...draft, modelScope: next })} />
-                <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                <div className="mut t-meta" style={{ marginTop: 4 }}>
                   Same work, different part number per model? Keep ONE procedure covering all of
                   them and tag each part above with the models it fits. Duplicate the procedure
                   only when the work itself differs by model.
@@ -1089,7 +1089,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                     <label>System types it belongs to</label>
                     <ScopeField scope={draft.categoryScope} options={categoriesByType[sheet.assetType] ?? []}
                       onChange={(next) => setDraft({ ...draft, categoryScope: next })} />
-                    <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                    <div className="mut t-meta" style={{ marginTop: 4 }}>
                       Empty covers every system type a {sheet.assetType.toLowerCase()} serves
                       ({(categoriesByType[sheet.assetType] ?? []).join(", ")}).
                     </div>
@@ -1099,8 +1099,8 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             )}
 
             {/* The live sentence: what this will actually do. */}
-            <div style={{
-              fontSize: 12, marginTop: 10, padding: "7px 10px", borderRadius: 8,
+            <div className="t-small" style={{
+              marginTop: 10, padding: "7px 10px", borderRadius: 8,
               background: sentence ? "#F1F4F8" : "#FBE9E9",
               color: sentence ? "var(--slate)" : "#A32D2D",
               fontWeight: sentence ? 400 : 700,
@@ -1111,7 +1111,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {focus && sharedBeyondFocus && (
               <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "#F5F2FB" }}>
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700 }}>Apply this edit to</span>
+                  <span className="t-small" style={{ fontWeight: 700 }}>Apply this edit to</span>
                   <div className="seg" role="group" aria-label="Apply this edit to">
                     <button type="button" aria-pressed={applyScope === "all"} onClick={() => setApplyScope("all")}>
                       All covered models
@@ -1121,7 +1121,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                     </button>
                   </div>
                 </div>
-                <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+                <div className="mut t-meta" style={{ marginTop: 4 }}>
                   {applyScope === "all"
                     ? `Other models using this procedure get the change too${editingRow?.modelScope.length ? ` (${editingRow.modelScope.length} models)` : " (every model of the type)"}.`
                     : `${focus.model} gets its own copy with this edit; the shared version stays as it was for everyone else, and ${focus.model}'s existing schedules follow the copy.`}

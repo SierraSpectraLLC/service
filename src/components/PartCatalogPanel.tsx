@@ -178,8 +178,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       ),
       name: (
         <span style={{ minWidth: 0, display: "block", opacity: r.archived ? 0.55 : 1 }}>
-          <span style={{ display: "block", fontSize: 13 }}>{r.name || <span className="mut">unnamed</span>}</span>
-          <span className="mut" style={{ display: "block", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span className="t-body" style={{ display: "block" }}>{r.name || <span className="mut">unnamed</span>}</span>
+          <span className="mut t-meta" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {[
               r.manufacturer && `${r.manufacturer}${r.mfrPartNumber ? ` ${r.mfrPartNumber}` : ""}`,
               r.kind === "kit" && r.lines.length ? kitContents(r.lines) : "",
@@ -192,19 +192,19 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       aka: r.aliases.length ? (
         /* The other numbers it answers to, as a count the row can afford -
            the full list, superseded ones marked, rides in the title. */
-        <span className="mut" style={{ fontSize: 11 }}
+        <span className="mut t-meta"
           title={r.aliases.map((a) => `${isSuperseded(a) ? "was" : "="} ${a.partNumber}${a.manufacturer ? ` (${a.manufacturer})` : ""}`).join("\n")}>
           {r.aliases.length} other number{r.aliases.length === 1 ? "" : "s"}
         </span>
       ) : null,
       fit: (
-        <span className="mut" style={{ fontSize: 11 }}
+        <span className="mut t-meta"
           title={[...r.assetTypes, ...r.models].join(", ") || undefined}>
           {[r.assetTypes.length ? r.assetTypes.join(", ") : "", r.models.length ? `${r.models.length} model${r.models.length === 1 ? "" : "s"}` : ""]
             .filter(Boolean).join(" · ")}
         </span>
       ),
-      price: <span className="mut" style={{ fontSize: 11 }}>{bestPrice(r.partNumber)}</span>,
+      price: <span className="mut t-meta">{bestPrice(r.partNumber)}</span>,
     },
   });
 
@@ -215,8 +215,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       pn: <Id>{u.partNumber}</Id>,
       name: (
         <span style={{ minWidth: 0, display: "block" }}>
-          <span style={{ display: "block", fontSize: 13 }}>{u.name || <span className="mut">unnamed</span>}</span>
-          <span className="mut" style={{ display: "block", fontSize: 11 }}>
+          <span className="t-body" style={{ display: "block" }}>{u.name || <span className="mut">unnamed</span>}</span>
+          <span className="mut t-meta" style={{ display: "block" }}>
             {[u.sources.join(", "), u.models.slice(0, 3).join(", ")].filter(Boolean).join(" · ")}
           </span>
         </span>
@@ -267,7 +267,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
         }
       />
       {facet === "undescribed" && (
-        <div className="mut" style={{ fontSize: 11, margin: "0 0 8px" }}>
+        <div className="mut t-meta" style={{ margin: "0 0 8px" }}>
           Numbers on real work - fitted, stocked, ordered, named by a maintenance task, or packed
           inside a kit - with no catalog entry yet. Describing one keeps everything already said about it.
         </div>
@@ -339,21 +339,21 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                 return (
                   <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center", flexWrap: "wrap" }}>
                     <select value={a.kind} onChange={(e) => setAlias({ kind: e.target.value })}
-                      aria-label="Whose number this is" style={{ width: "auto", fontSize: 12 }}>
+                      aria-label="Whose number this is" className="t-small" style={{ width: "auto" }}>
                       {ALIAS_KINDS.map((k) => <option key={k} value={k}>{ALIAS_KIND_LABEL[k]}</option>)}
                     </select>
-                    <input className="mono" value={a.partNumber} placeholder="PN"
+                    <input className="mono t-small" value={a.partNumber} placeholder="PN"
                       aria-label="Part number"
                       onChange={(e) => setAlias({ partNumber: e.target.value })}
-                      style={{ flex: "1 1 130px", fontSize: 12 }} />
+                      style={{ flex: "1 1 130px" }} />
                     <input value={a.manufacturer ?? ""} list="maker-book" placeholder={a.kind === "shop" ? "-" : "Who makes it"}
                       aria-label="Manufacturer" disabled={a.kind === "shop"}
                       onChange={(e) => setAlias({ manufacturer: e.target.value })}
-                      style={{ flex: "1 1 110px", fontSize: 12 }} />
+                      className="t-small" style={{ flex: "1 1 110px" }} />
                     <input value={a.note ?? ""} placeholder={isSuperseded(a) ? "when it changed" : "e.g. pack of 10"}
                       aria-label="Note"
                       onChange={(e) => setAlias({ note: e.target.value })}
-                      style={{ flex: "1 1 120px", fontSize: 12 }} />
+                      className="t-small" style={{ flex: "1 1 120px" }} />
                     <button className="btn link" aria-label={`Remove ${a.partNumber || "number"}`}
                       style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
                       onClick={() => setDraft({ ...draft, aliases: draft.aliases.filter((_, i) => i !== idx) })}>×</button>
@@ -420,7 +420,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                             if (e.target.value === ph.caption) return;
                             startTransition(async () => { await setPartPhotoCaption(ph.id, e.target.value); router.refresh(); });
                           }}
-                          style={{ width: "100%", fontSize: 11, padding: "3px 5px", marginTop: 2 }} />
+                          className="t-meta" style={{ width: "100%", padding: "3px 5px", marginTop: 2 }} />
                         {i > 0 && (
                           <button className="btn link" style={{ fontSize: 10.5 }} disabled={pending}
                             onClick={() => startTransition(async () => { await makePartPhotoCover(ph.id); router.refresh(); })}>
@@ -455,13 +455,13 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
             {draft.kind === "kit" && (
               <div style={{ marginBottom: 8 }}>
                 <label>What is in it</label>
-                <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+                <div className="mut t-meta" style={{ marginBottom: 6 }}>
                   For reading, not for counting. A kit is stocked and issued as one sealed bag -
                   exploding it would have the shelf claim ten septa are loose when they are not.
                 </div>
                 {lines.map((l, i) => (
                   <div key={i} style={{ display: "flex", gap: 6, marginBottom: 4 }}>
-                    <input type="number" min={1} value={l.qty} aria-label="Quantity" style={{ width: 64, fontSize: 12 }}
+                    <input type="number" min={1} value={l.qty} aria-label="Quantity" className="t-small" style={{ width: 64 }}
                       onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, qty: parseInt(e.target.value) || 1 } : x))} />
                     {/* A kit's contents are the fastest way to put undescribed
                         numbers in the book; resolving here means the ones that
@@ -470,9 +470,9 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                       onChange={(partNumber) => setLines(lines.map((x, j) => j === i ? { ...x, partNumber } : x))}
                       onPick={(part) => setLines(lines.map((x, j) => j === i
                         ? { ...x, partNumber: part.partNumber, name: x.name.trim() || part.name } : x))} />
-                    <input value={l.name} placeholder="What it is" style={{ flex: 1, fontSize: 12 }}
+                    <input value={l.name} placeholder="What it is" className="t-small" style={{ flex: 1 }}
                       onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} />
-                    <button className="btn link" style={{ fontSize: 11 }}
+                    <button className="btn link"
                       onClick={() => setLines(lines.filter((_, j) => j !== i))}>×</button>
                   </div>
                 ))}
@@ -496,7 +496,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   </button>
                 );
               })}
-              {assetTypes.length === 0 && <span className="mut" style={{ fontSize: 11 }}>No module types in the catalog yet.</span>}
+              {assetTypes.length === 0 && <span className="mut t-meta">No module types in the catalog yet.</span>}
             </div>
 
             {/* The models within those types, when the number is model-specific:
@@ -538,7 +538,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   <span style={{ fontWeight: 600 }}>{p.vendor}</span>
                   {p.isOem && <span className="pill info">OEM</span>}
                   <span className="mono">{formatCents(p.priceCents)}</span>
-                  {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>link ↗</a>}
+                  {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="t-meta">link ↗</a>}
                   <button className="btn link" aria-label={`Remove ${p.vendor}'s price`} disabled={pending}
                     style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 12 }}
                     onClick={() => startTransition(async () => { await deletePartPrice(p.id); router.refresh(); })}>×</button>
@@ -547,14 +547,14 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
                 <input value={vendorDraft.vendor} list="maker-book" placeholder="Vendor"
                   onChange={(e) => setVendorDraft({ ...vendorDraft, vendor: e.target.value })}
-                  style={{ flex: "1 1 110px", fontSize: 12 }} />
+                  className="t-small" style={{ flex: "1 1 110px" }} />
                 <input value={vendorDraft.price} placeholder="$" inputMode="decimal"
                   onChange={(e) => setVendorDraft({ ...vendorDraft, price: e.target.value })}
-                  style={{ flex: "0 1 80px", fontSize: 12 }} />
-                <input className="mono" value={vendorDraft.url} placeholder="https://... (optional)"
+                  className="t-small" style={{ flex: "0 1 80px" }} />
+                <input className="mono t-small" value={vendorDraft.url} placeholder="https://... (optional)"
                   onChange={(e) => setVendorDraft({ ...vendorDraft, url: e.target.value })}
-                  style={{ flex: "2 1 160px", fontSize: 12 }} />
-                <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, margin: 0, fontWeight: 400, color: "var(--ink)" }}>
+                  style={{ flex: "2 1 160px" }} />
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--ink)" }}>
                   <input type="checkbox" checked={vendorDraft.isOem} style={{ width: 14, height: 14 }}
                     onChange={(e) => setVendorDraft({ ...vendorDraft, isOem: e.target.checked })} />
                   OEM

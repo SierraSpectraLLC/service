@@ -53,7 +53,7 @@ export default async function EquipmentIndexPage() {
         not copied from anybody&apos;s manual.</>}>
 
       {rows.length === 0 && (
-        <div className="card mut" style={{ fontSize: 13 }}>
+        <div className="card mut t-body">
           Nothing published yet.
         </div>
       )}
@@ -73,8 +73,8 @@ export default async function EquipmentIndexPage() {
                   <img src={stockSrc(r.id)} alt="" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
                 )}
                 <span style={{ minWidth: 0 }}>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: 700 }}>{r.name}</span>
-                  <span className="mut" style={{ fontSize: 11 }}>{r.assetType}</span>
+                  <span className="t-body" style={{ display: "block", fontWeight: 700 }}>{r.name}</span>
+                  <span className="mut t-meta">{r.assetType}</span>
                 </span>
               </Link>
             ))}

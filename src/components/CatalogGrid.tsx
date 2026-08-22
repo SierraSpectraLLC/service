@@ -96,12 +96,12 @@ export default function CatalogGrid({ assetTypes, categoryNames, knownMakers, de
   return (
     <div>
       <div style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
-        <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 580 }}>
+        <table className="t-small" style={{ borderCollapse: "collapse", minWidth: 580 }}>
           <thead>
             <tr>
               <th style={{ width: 26 }} />
               {COLUMNS.map((c) => (
-                <th key={c.key} style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", fontSize: 11, color: "var(--slate)", width: c.width }}>
+                <th key={c.key} className="t-meta" style={{ textAlign: "left", padding: "6px 6px", borderBottom: "1px solid var(--line)", color: "var(--slate)", width: c.width }}>
                   {c.label}{(c.key === "assetType" || c.key === "name") && " *"}
                 </th>
               ))}
@@ -115,7 +115,7 @@ export default function CatalogGrid({ assetTypes, categoryNames, knownMakers, de
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   <select value={r.assetType} aria-label={`Module type, row ${i + 1}`}
                     onChange={(e) => setCell(i, "assetType", e.target.value)}
-                    style={{ width: "100%", fontSize: 12, padding: "3px 4px" }}>
+                    className="t-small" style={{ width: "100%", padding: "3px 4px" }}>
                     <option value="">-</option>
                     {assetTypes.map((t) => <option key={t}>{t}</option>)}
                   </select>
@@ -124,20 +124,20 @@ export default function CatalogGrid({ assetTypes, categoryNames, knownMakers, de
                   <input value={r.name} aria-label={`Model, row ${i + 1}`}
                     onChange={(e) => setCell(i, "name", e.target.value)}
                     onPaste={(e) => onPaste(e, i, 1)}
-                    style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                    className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                 </td>
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   <input value={r.manufacturer} list="catalog-makers" aria-label={`Manufacturer, row ${i + 1}`}
                     onChange={(e) => setCell(i, "manufacturer", e.target.value)}
                     onPaste={(e) => onPaste(e, i, 2)}
-                    style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                    className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                 </td>
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   <input value={r.categories} list="catalog-systemtypes" aria-label={`System types, row ${i + 1}`}
                     placeholder="all system types"
                     onChange={(e) => setCell(i, "categories", e.target.value)}
                     onPaste={(e) => onPaste(e, i, 3)}
-                    style={{ width: "100%", fontSize: 12, padding: "3px 4px" }} />
+                    className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
                 </td>
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   {rows.length > 1 && (

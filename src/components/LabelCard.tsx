@@ -43,7 +43,7 @@ export default async function LabelCard({ url, headline, lines, brandName, logoU
       </div>
       <div className="no-print" style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <PrintButton />
-        <span className="mut" style={{ fontSize: 12, alignSelf: "center" }}>
+        <span className="mut t-small" style={{ alignSelf: "center" }}>
           Scanning the code opens this record in the portal (sign-in still applies).
         </span>
       </div>

@@ -54,7 +54,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
   const fitted = partRows.filter((p) => p.status === "Installed" || p.status === "Removed");
   const label = inst
     ? systemLabel(inst, assetRows)
-    : `${soloAsset.kind}${soloAsset.model ? ` — ${soloAsset.model}` : ""}`;
+    : `${soloAsset.kind}${soloAsset.model ? ` - ${soloAsset.model}` : ""}`;
   const category = inst?.category ?? "";
   const saleNote = inst?.saleNote ?? soloAsset?.saleNote ?? "";
 
@@ -70,14 +70,14 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
           {category && <span className="pill info">{category}</span>}
           <span className="pill good">For sale</span>
         </div>
-        {saleNote && <div style={{ fontSize: 14, marginTop: 8, whiteSpace: "pre-wrap" }}>{saleNote}</div>}
+        {saleNote && <div className="t-lead" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{saleNote}</div>}
 
         {assetRows.length > 0 && (
           <>
             <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>{inst ? "What's in the system" : "The unit"}</div>
             {assetRows.map((a) => (
-              <div key={a.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-                <b>{a.kind}</b>{a.model ? ` — ${a.model}` : ""}{a.manufacturer ? ` · ${a.manufacturer}` : ""}
+              <div key={a.id} className="t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+                <b>{a.kind}</b>{a.model ? ` - ${a.model}` : ""}{a.manufacturer ? ` · ${a.manufacturer}` : ""}
                 {a.serial && <span className="mono mut"> · SN {a.serial}</span>}
               </div>
             ))}
@@ -89,10 +89,10 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
         <div className="card">
           <div className="card-title">Completed work ({taskRows.length})</div>
           {taskRows.map((t) => (
-            <div key={t.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+            <div key={t.id} className="t-body" style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
               <span>{t.title}</span>
               {t.origin === "checkout" && <span className="pill neutral">checkout</span>}
-              {t.completedAt && <span className="mut" style={{ fontSize: 11, marginLeft: "auto", whiteSpace: "nowrap" }}>{shopMonthDay(t.completedAt)}</span>}
+              {t.completedAt && <span className="mut t-meta" style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>{shopMonthDay(t.completedAt)}</span>}
             </div>
           ))}
         </div>
@@ -102,11 +102,11 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
         <div className="card">
           <div className="card-title">Parts fitted &amp; pulled ({fitted.length})</div>
           {fitted.map((p) => (
-            <div key={p.id} style={{ padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+            <div key={p.id} className="t-body" style={{ padding: "5px 0", borderTop: "1px solid var(--line)" }}>
               <b>{p.name}</b>
               {p.partNumber && <span className="mono mut"> PN {p.partNumber}</span>}
               {p.serial && <span className="mono mut"> SN {p.serial}</span>}
-              <span className="mut" style={{ fontSize: 12 }}>
+              <span className="mut t-small">
                 {p.status === "Installed" ? ` · installed${p.installedAt ? ` ${p.installedAt}` : ""}` : ` · removed${p.removedAt ? ` ${p.removedAt}` : ""}`}
               </span>
             </div>
@@ -118,10 +118,10 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
         <div className="card">
           <div className="card-title">Documentation</div>
           {fileRows.map((a) => (
-            <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
+            <div key={a.id} className="t-body" style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
               <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{a.fileName}</a>
               <span className="pill neutral">{a.kind}</span>
-              {a.description && <span className="mut" style={{ fontSize: 12 }}>{a.description}</span>}
+              {a.description && <span className="mut t-small">{a.description}</span>}
             </div>
           ))}
         </div>

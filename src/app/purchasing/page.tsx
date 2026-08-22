@@ -101,14 +101,14 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         vendor: (
           <span style={{ minWidth: 0, display: "block" }}>
             <span style={{ fontWeight: 600 }}>{p.vendor}</span>
-            <span className="mut" style={{ display: "block", fontSize: 11 }}>
+            <span className="mut t-meta" style={{ display: "block" }}>
               → {p.stockroomId === null ? "(room gone)" : roomName.get(p.stockroomId) ?? "?"}
             </span>
           </span>
         ),
         state: <Pill tone={PO_TONE[p.status] ?? "neutral"}>{PO_LABEL[p.status] ?? p.status}</Pill>,
         recd: <span className="mut">{t.received} of {t.ordered}{p.expectedAt ? ` · exp ${p.expectedAt}` : ""}</span>,
-        total: showCosts && t.priced > 0 ? <b style={{ fontSize: 13 }}>{formatCents(t.cents)}</b> : null,
+        total: showCosts && t.priced > 0 ? <b className="t-body">{formatCents(t.cents)}</b> : null,
         when: <span className="mut">{shopMonthDay(p.createdAt)}</span>,
       },
     };

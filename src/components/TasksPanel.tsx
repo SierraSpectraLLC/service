@@ -77,10 +77,10 @@ function TaskStateSelect({ task }: { task: Task }) {
         setRefused("");
         const res = await setTaskState(task.id, e.target.value);
         if (res?.error) setRefused(res.error);
-      })} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+      })} className="t-small" style={{ width: "auto", fontWeight: 700 }}>
         {TASK_STATES.map((s) => <option key={s}>{s}</option>)}
       </select>
-      {refused && <span style={{ fontSize: 11, color: "var(--t-bad-fg)", flexBasis: "100%" }}>{refused}</span>}
+      {refused && <span className="t-meta" style={{ color: "var(--t-bad-fg)", flexBasis: "100%" }}>{refused}</span>}
     </>
   );
 }
@@ -125,7 +125,7 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
     <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 10, marginBottom: 12, background: "#fff" }}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginBottom: 6 }}>
         <span className="eyebrow">Result</span>
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           {RESULT_LABEL[spec.resultType] ?? spec.resultType}
           {spec.target ? ` · target ${spec.target}` : ""}
           {band ? ` · passes ${band}` : ""}
@@ -143,10 +143,10 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
             {r.passed === true ? "Pass" : r.passed === false ? "Fail"
               : /^(inspected|replaced)$/i.test(r.value) ? r.value : "Recorded"}
           </span>
-          {!/^(inspected|replaced)$/i.test(r.value) && <span style={{ fontSize: 13, fontWeight: 600 }}>{r.value}</span>}
-          {band && <span className="mut" style={{ fontSize: 11 }}>of {band}</span>}
-          {r.note && <span className="mut" style={{ fontSize: 12 }}>- {r.note}</span>}
-          <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>
+          {!/^(inspected|replaced)$/i.test(r.value) && <span className="t-body" style={{ fontWeight: 600 }}>{r.value}</span>}
+          {band && <span className="mut t-meta">of {band}</span>}
+          {r.note && <span className="mut t-small">- {r.note}</span>}
+          <span className="mut t-meta" style={{ marginLeft: "auto" }}>
             {r.recordedBy}{r.recordedAt ? ` · ${when(r.recordedAt)}` : ""}
           </span>
           {canEdit && <button className="btn link" onClick={() => setEditing(true)}>correct it</button>}
@@ -164,13 +164,13 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
           ) : (
             <input value={value} onChange={(e) => setValue(e.target.value)} aria-label="What it read"
               placeholder={spec.resultType === "note" ? "What you found" : spec.target ? `e.g. ${spec.target}` : "e.g. 5.2 mL/min"}
-              style={{ width: "auto", flex: "1 1 140px", fontSize: 13 }} />
+              className="t-body" style={{ width: "auto", flex: "1 1 140px" }} />
           )}
           <input value={note} onChange={(e) => setNote(e.target.value)} aria-label="Conditions or anything odd"
             placeholder={spec.resultType === "inspect_replace"
               ? value === "Replaced" ? "What went in - part #, serial (optional)" : "What you found (optional)"
               : "Conditions, anything odd (optional)"}
-            style={{ width: "auto", flex: "2 1 180px", fontSize: 13 }} />
+            className="t-body" style={{ width: "auto", flex: "2 1 180px" }} />
           <button className="btn sm accent" disabled={pending || !resultIsRecorded(spec.resultType, value)} onClick={save}>
             {pending ? "Recording..." : "Record"}
           </button>
@@ -185,8 +185,8 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
         </div>
       )}
 
-      {!canEdit && !r && <div className="mut" style={{ fontSize: 12 }}>Not recorded yet.</div>}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
+      {!canEdit && !r && <div className="mut t-small">Not recorded yet.</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -198,7 +198,7 @@ function AssigneeSelect({ task, people }: { task: Task; people: string[] }) {
   const options = ["", ...people, ...(assignee && !people.includes(assignee) ? [assignee] : [])];
   return (
     <select value={assignee} onChange={(e) => startTransition(async () => { setOptimistic(e.target.value); await assignTask(task.id, e.target.value); })}
-      style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
+      className="t-small" style={{ width: "auto", fontWeight: 700 }}>
       {options.map((p) => <option key={p} value={p}>{p || "-"}</option>)}
     </select>
   );
@@ -297,13 +297,13 @@ export default function TasksPanel({
     };
     return (
       <div key={m.id} style={{ marginBottom: kind === "task" ? 6 : 0 }}>
-        <div style={{ fontSize: 12 }}>
+        <div className="t-small">
           <b style={{ color: "var(--navy)" }}>{m.author}</b>{" "}
-          <span className="mut" style={{ fontSize: 11 }}>{when(m.createdAt)}</span>
+          <span className="mut t-meta">{when(m.createdAt)}</span>
           {canEdit && !isEditing && (
             <>
-              {" "}<button className="btn link" style={{ fontSize: 11 }} onClick={() => setInput(key, m.text)}>edit</button>
-              <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)", padding: "0 4px" }}
+              {" "}<button className="btn link" onClick={() => setInput(key, m.text)}>edit</button>
+              <button className="btn link" style={{ color: "var(--t-bad-fg)", padding: "0 4px" }}
                 onClick={async () => {
                   if (!(await confirmDialog({ title: "Delete this note?", action: "Delete note", tone: "bad" }))) return;
                   startTransition(async () => {
@@ -318,11 +318,11 @@ export default function TasksPanel({
           <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
             <input value={noteDraft as string} onChange={(e) => setInput(key, e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setInput(key, false); }}
-              autoFocus style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+              autoFocus className="t-small" style={{ flex: 1, padding: "5px 9px" }} />
             <button className="btn sm" onClick={save}>Save</button>
           </div>
         ) : (
-          <div style={{ fontSize: 13 }}>{m.text}</div>
+          <div className="t-body">{m.text}</div>
         )}
       </div>
     );
@@ -365,9 +365,9 @@ export default function TasksPanel({
               aria-label={`Copy ${t.title}`} style={{ width: 15, height: 15, flexShrink: 0, pointerEvents: "none" }} />
           )}
           <span className={`pill ${TASK_TONE[t.state] ?? "neutral"}`}>{t.state}</span>
-          <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
+          <span className="t-body" style={{ fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {progress.total > 0 && (
-            <span className="mut" style={{ fontSize: 11 }}>{progress.done}/{progress.total}</span>
+            <span className="mut t-meta">{progress.done}/{progress.total}</span>
           )}
           {/* A test reads as a test in a list of twenty, and carries its verdict
               once it has one - the reading is the outcome, not the checkbox. */}
@@ -398,8 +398,8 @@ export default function TasksPanel({
             </span>
           )}
           <DueChip due={t.dueDate} done={isDone} today={today} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
-          <span className="mut" style={{ fontSize: 12 }}>{linkTo ? "→" : open ? "▾" : "▸"}</span>
+          <span className="t-small" style={{ fontWeight: 700, color: t.assignee ? "var(--navy)" : "var(--mut)" }}>{t.assignee || "-"}</span>
+          <span className="mut t-small">{linkTo ? "→" : open ? "▾" : "▸"}</span>
       </>);
     return (
       <div key={t.id} id={`task-${t.id}`}
@@ -438,11 +438,11 @@ export default function TasksPanel({
                 <textarea value={editDraft.body} onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })} rows={2} style={{ marginBottom: 8, resize: "vertical" }} />
               </Dialog>
             )}
-            {editing !== t.id && t.body && <div style={{ fontSize: 13, marginBottom: 10 }}>{t.body}</div>}
+            {editing !== t.id && t.body && <div className="t-body" style={{ marginBottom: 10 }}>{t.body}</div>}
             {t.test && <TestResultBlock task={t} canEdit={canEdit} />}
             {canEdit && editing !== t.id && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-                <span className="mut" style={{ fontSize: 12 }}>Status:</span>
+                <span className="mut t-small">Status:</span>
                 <TaskStateSelect task={t} />
                 {/* Which job this belongs to, if any. The common case is a job
                     that grew - the order was opened and the tasks answering it
@@ -450,7 +450,7 @@ export default function TasksPanel({
                     also how work predating the work-order tag gets adopted. */}
                 {jobs.length > 0 && (
                   <>
-                    <span className="mut" style={{ fontSize: 12 }}>Job:</span>
+                    <span className="mut t-small">Job:</span>
                     <select value={t.workOrderId ?? ""} aria-label={`Job for ${t.title}`}
                       onChange={(e) => {
                         const to = e.target.value ? parseInt(e.target.value) : null;
@@ -464,30 +464,30 @@ export default function TasksPanel({
                           else setJobNote(null);
                         });
                       }}
-                      style={{ width: "auto", maxWidth: 200, fontSize: 12 }}>
+                      className="t-small" style={{ width: "auto", maxWidth: 200 }}>
                       <option value="">on its own</option>
                       {jobs.map((j) => <option key={j.id} value={j.id}>{j.number}</option>)}
                     </select>
                     {jobNote?.id === t.id && (
-                      <span style={{ fontSize: 11, color: "var(--t-bad-fg)" }}>{jobNote.text}</span>
+                      <span className="t-meta" style={{ color: "var(--t-bad-fg)" }}>{jobNote.text}</span>
                     )}
                   </>
                 )}
-                <span className="mut" style={{ fontSize: 12 }}>Assignee:</span>
+                <span className="mut t-small">Assignee:</span>
                 <AssigneeSelect task={t} people={people} />
                 {systemAssets.length > 0 && (
                   <>
-                    <span className="mut" style={{ fontSize: 12 }}>For:</span>
+                    <span className="mut t-small">For:</span>
                     <select value={t.assetId ?? ""} onChange={(e) => startTransition(() => setTaskAsset(t.id, e.target.value ? parseInt(e.target.value) : null))}
-                      style={{ width: "auto", maxWidth: 180, fontSize: 12 }}>
+                      className="t-small" style={{ width: "auto", maxWidth: 180 }}>
                       <option value="">Whole system</option>
                       {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
                     </select>
                   </>
                 )}
-                <span className="mut" style={{ fontSize: 12 }}>Due:</span>
+                <span className="mut t-small">Due:</span>
                 <input type="date" value={t.dueDate} onChange={(e) => startTransition(() => setTaskDue(t.id, e.target.value))}
-                  style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
+                  className="t-small" style={{ width: "auto", padding: "3px 6px" }} />
                 <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
                 {(isStaff || t.origin === "checkout") && (
                   <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 12, fontWeight: 700 }}
@@ -520,7 +520,7 @@ export default function TasksPanel({
                   ) : (
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <ItemCheckbox item={c} canEdit={canEdit} />
-                    <span style={{ fontSize: 13, flex: 1, textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--mut)" : "var(--ink)" }}>{c.text}</span>
+                    <span className="t-body" style={{ flex: 1, textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--mut)" : "var(--ink)" }}>{c.text}</span>
                     <button className="btn link" onClick={() => setInput("threadopen-" + c.id, !tOpen)} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       {n > 0 && <span className="pill info" style={{ padding: "1px 7px" }}>{n}</span>}
                       {tOpen ? "hide" : n > 0 ? "notes" : "+ note"}
@@ -549,7 +549,7 @@ export default function TasksPanel({
                           <MentionBox people={mentionable} value={(inputs["itemnote-" + c.id] as string) || ""}
                             onChange={(v) => setInput("itemnote-" + c.id, v)}
                             onEnter={() => { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); }}
-                            placeholder={n > 0 ? "Reply on this item..." : 'e.g. "passed at 101% of spec"'} style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+                            placeholder={n > 0 ? "Reply on this item..." : 'e.g. "passed at 101% of spec"'} className="t-small" style={{ flex: 1, padding: "5px 9px" }} />
                           <button className="btn sm" onClick={() => { startTransition(() => addItemNote(c.id, (inputs["itemnote-" + c.id] as string) || "")); setInput("itemnote-" + c.id, ""); }}>Post</button>
                         </div>
                       )}
@@ -563,20 +563,20 @@ export default function TasksPanel({
                 <input value={(inputs["item-" + t.id] as string) || ""}
                   onChange={(e) => setInput("item-" + t.id, e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { startTransition(() => addChecklistItem(t.id, (inputs["item-" + t.id] as string) || "")); setInput("item-" + t.id, ""); } }}
-                  placeholder="Add checklist item..." style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+                  placeholder="Add checklist item..." className="t-small" style={{ flex: 1, padding: "5px 9px" }} />
                 <button className="btn sm" onClick={() => { startTransition(() => addChecklistItem(t.id, (inputs["item-" + t.id] as string) || "")); setInput("item-" + t.id, ""); }}>Add</button>
               </div>
             )}
 
             <div className="eyebrow" style={{ margin: "14px 0 6px" }}>Notes</div>
             {t.notes.map((m) => renderNote(m, "task"))}
-            {t.notes.length === 0 && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>No notes yet.</div>}
+            {t.notes.length === 0 && <div className="mut t-small" style={{ marginBottom: 6 }}>No notes yet.</div>}
             {canEdit && (
               <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
                 <MentionBox people={mentionable} value={(inputs["note-" + t.id] as string) || ""}
                   onChange={(v) => setInput("note-" + t.id, v)}
                   onEnter={() => { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); }}
-                  placeholder="Add a note... @name to notify" style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+                  placeholder="Add a note... @name to notify" className="t-small" style={{ flex: 1, padding: "5px 9px" }} />
                 <button className="btn sm" onClick={() => { startTransition(() => addTaskNote(t.id, (inputs["note-" + t.id] as string) || "")); setInput("note-" + t.id, ""); }}>Post</button>
               </div>
             )}
@@ -611,11 +611,11 @@ export default function TasksPanel({
             <span className="t-small" style={{ fontWeight: 700 }}>
               {picked.size === 0 ? "Tick the tasks to copy" : `${picked.size} selected`}
             </span>
-            <button className="btn link" style={{ fontSize: 11 }}
+            <button className="btn link"
               onClick={() => setPicked(new Set(tasks.filter((t) => t.title.trim()).map((t) => t.id)))}>all</button>
-            <button className="btn link" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>none</button>
+            <button className="btn link" onClick={() => setPicked(new Set())}>none</button>
             <select value={copyTo} onChange={(e) => setCopyTo(e.target.value)} aria-label="Copy to"
-              style={{ width: "auto", maxWidth: 260, fontSize: 12 }}>
+              className="t-small" style={{ width: "auto", maxWidth: 260 }}>
               <option value="">Choose where...</option>
               {copyTargets.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
             </select>
@@ -635,10 +635,10 @@ export default function TasksPanel({
                 });
               }}>{pending ? "Copying..." : "Copy"}</button>
           </div>
-          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="mut t-meta" style={{ marginTop: 6 }}>
             Copies arrive open, with nothing ticked and no maintenance schedule attached.
           </div>
-          {copyNote && <div style={{ fontSize: 12, marginTop: 6, fontWeight: 700, color: copyNote.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{copyNote}</div>}
+          {copyNote && <div className="t-small" style={{ marginTop: 6, fontWeight: 700, color: copyNote.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{copyNote}</div>}
         </div>
       )}
 
@@ -669,12 +669,12 @@ export default function TasksPanel({
                     resultType: id ? "" : d.resultType,
                   }));
                 }}
-                style={{ width: "auto", maxWidth: 320, fontSize: 12 }}>
+                className="t-small" style={{ width: "auto", maxWidth: 320 }}>
                 <option value="">scratch</option>
                 {procedureChoices.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
               {draft.procedureId !== null && (
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {procedureChoices.find((x) => x.id === draft.procedureId)?.brings}
                 </span>
               )}
@@ -692,22 +692,22 @@ export default function TasksPanel({
               reason: no single label may decide the layout. */}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span className="mut" style={{ fontSize: 12 }}>Assign:</span>
+              <span className="mut t-small">Assign:</span>
               <select value={draft.assignee} onChange={(e) => setDraft({ ...draft, assignee: e.target.value })}
                 style={{ width: "auto", maxWidth: 150 }}>
                 {["", ...people].map((p) => <option key={p} value={p}>{p || "-"}</option>)}
               </select>
             </span>
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span className="mut" style={{ fontSize: 12 }}>Due:</span>
+              <span className="mut t-small">Due:</span>
               <input type="date" value={draft.dueDate} onChange={(e) => setDraft({ ...draft, dueDate: e.target.value })}
-                style={{ width: "auto", fontSize: 12 }} />
+                className="t-small" style={{ width: "auto" }} />
             </span>
             {systemAssets.length > 0 && (
               <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-                <span className="mut" style={{ fontSize: 12 }}>For:</span>
+                <span className="mut t-small">For:</span>
                 <select value={draft.assetId ?? ""} onChange={(e) => setDraft({ ...draft, assetId: e.target.value ? parseInt(e.target.value) : null })}
-                  style={{ width: "auto", maxWidth: 180, fontSize: 12 }}>
+                  className="t-small" style={{ width: "auto", maxWidth: 180 }}>
                   <option value="">Whole system</option>
                   {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
                 </select>
@@ -719,10 +719,10 @@ export default function TasksPanel({
                 pass/fail with a note, not a tick. */}
             {draft.procedureId === null && (
             <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <span className="mut" style={{ fontSize: 12 }}>Done means:</span>
+              <span className="mut t-small">Done means:</span>
               <select value={draft.resultType} aria-label="Done means"
                 onChange={(e) => setDraft({ ...draft, resultType: e.target.value })}
-                style={{ width: "auto", fontSize: 12 }}>
+                className="t-small" style={{ width: "auto" }}>
                 <option value="">ticking it off</option>
                 <option value="pass_fail">recording pass / fail</option>
                 <option value="measured">recording a measurement</option>
@@ -765,28 +765,28 @@ export default function TasksPanel({
                 toggleJob(job.id);
               }}
               style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#F5F7FA", flexWrap: "wrap", cursor: "pointer" }}>
-              <a href={`/work/${job.id}`} className="mono" onClick={(e) => e.stopPropagation()}
-                style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
-              <span style={{ fontSize: 13, flex: "1 1 140px" }}>{job.title}</span>
+              <a href={`/work/${job.id}`} className="mono t-small" onClick={(e) => e.stopPropagation()}
+                style={{ fontWeight: 700, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
+              <span className="t-body" style={{ flex: "1 1 140px" }}>{job.title}</span>
               <span className={`pill ${done === rows.length ? "good" : "neutral"}`}>
                 {done} of {rows.length} done
               </span>
-              <span className="mut" style={{ fontSize: 12 }}>{unfolded ? "▾" : "▸"}</span>
+              <span className="mut t-small">{unfolded ? "▾" : "▸"}</span>
             </div>
             {unfolded && rows.map((t) => renderTask(t, t.state === "Done", `/work/${job.id}#task-${t.id}`))}
           </div>
         );
       })}
       {active.map((t) => renderTask(t, false))}
-      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No tasks yet.</div>}
-      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length > 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>All tasks complete.</div>}
+      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length === 0 && <div className="mut t-body">No tasks yet.</div>}
+      {checkout.length === 0 && active.length === 0 && jobBands.length === 0 && complete.length > 0 && <div className="mut t-body" style={{ marginBottom: 8 }}>All tasks complete.</div>}
 
       {complete.length > 0 && (
         <div style={{ marginTop: active.length ? 8 : 0 }}>
           <button onClick={() => setShowDone((v) => !v)}
             style={{ cursor: "pointer", width: "100%", textAlign: "left", background: "#F5F7FA", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="mut" style={{ fontSize: 12 }}>{showDone ? "▾" : "▸"}</span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--slate)" }}>Completed</span>
+            <span className="mut t-small">{showDone ? "▾" : "▸"}</span>
+            <span className="t-small" style={{ fontWeight: 700, color: "var(--slate)" }}>Completed</span>
             <span className="pill good">{complete.length}</span>
           </button>
           {showDone && <div style={{ marginTop: 8 }}>{complete.map((t) => renderTask(t, true))}</div>}

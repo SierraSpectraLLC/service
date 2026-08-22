@@ -243,12 +243,12 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           const domain = r.entry.trim().startsWith("@");
           return (
             <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-              <span className="mono" style={{ fontSize: 13 }}>{r.entry}</span>
+              <span className="mono t-body">{r.entry}</span>
               {domain && <span className="pill info">whole domain</span>}
               {isOwner ? (
                 <select value={r.canEdit ? "editor" : "viewer"} disabled={pending} aria-label={`Role for ${r.entry}`}
                   onChange={(e) => startTransition(async () => { await setClientAccessRole(r.id, e.target.value === "editor"); })}
-                  style={{ width: "auto", fontSize: 11, padding: "1px 4px" }}>
+                  className="t-meta" style={{ width: "auto", padding: "1px 4px" }}>
                   <option value="viewer">viewer</option>
                   <option value="editor">editor</option>
                 </select>
@@ -260,7 +260,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {/* Seeing the systems and seeing what they cost are different
                   questions; one org has people on both sides of that line. */}
               {isOwner ? (
-                <label style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontSize: 11, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
                   title="Whether this person may read this organization's agreements - contract value, allowances, the signed paper">
                   <input type="checkbox" checked={r.canSeeAgreements} disabled={pending} style={{ width: 14, height: 14 }}
                     onChange={(e) => startTransition(async () => { await setClientSeesAgreements(r.id, e.target.checked); })} />
@@ -270,7 +270,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                 <span className="pill neutral">agreements</span>
               ) : null}
               {(isOwner || !domain) && (
-                <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
+                <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove ${r.entry}?`,
@@ -288,14 +288,14 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           );
         })}
         {people.length === 0 && (
-          <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>Nobody here can sign in yet.</div>
+          <div className="mut t-small" style={{ padding: "6px 0" }}>Nobody here can sign in yet.</div>
         )}
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-          <input className="mono" value={entry} onChange={(e) => setEntry(e.target.value)}
+          <input className="mono t-body" value={entry} onChange={(e) => setEntry(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") invite(); }}
             placeholder={isOwner ? "jane@company.com or @company.com" : "colleague@company.com"}
-            style={{ flex: "1 1 190px", fontSize: 13 }} />
-          <select value={role} onChange={(e) => setRole(e.target.value)} style={{ width: "auto", fontSize: 12 }}>
+            style={{ flex: "1 1 190px" }} />
+          <select value={role} onChange={(e) => setRole(e.target.value)} className="t-small" style={{ width: "auto" }}>
             <option value="viewer">viewer</option>
             <option value="editor">editor</option>
           </select>
@@ -303,8 +303,8 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             {pending ? "Inviting..." : "Invite"}
           </button>
         </div>
-        {sent && <div style={{ fontSize: 12, color: "var(--t-good-fg)", marginTop: 6 }}>Invited {sent} - they got an email with a sign-in link.</div>}
-        {peopleError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{peopleError}</div>}
+        {sent && <div className="t-small" style={{ color: "var(--t-good-fg)", marginTop: 6 }}>Invited {sent} - they got an email with a sign-in link.</div>}
+        {peopleError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{peopleError}</div>}
       </Panel>
 
       <Panel title="Workspace appearance"
@@ -317,19 +317,19 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logo} alt={`${org.name} logo`} style={{ height: 22, maxWidth: 100, objectFit: "contain" }} />
             )}
-            <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: 0.3 }}>{platformName.toUpperCase()}</span>
-            <span style={{ fontSize: 11, opacity: 0.75 }}>{platformName} × {org.name}</span>
+            <span className="t-lead" style={{ fontWeight: 700, letterSpacing: 0.3 }}>{platformName.toUpperCase()}</span>
+            <span className="t-meta" style={{ opacity: 0.75 }}>{platformName} × {org.name}</span>
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, fontWeight: 400, color: "var(--ink)" }}>
+          <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontWeight: 400, color: "var(--ink)" }}>
             <input type="checkbox" checked={useDefault} style={{ width: "auto" }}
               onChange={(e) => { setUseDefault(e.target.checked); clearBar(); }} />
             Default look
           </label>
           {!useDefault && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, fontWeight: 400, color: "var(--ink)" }}>
+            <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontWeight: 400, color: "var(--ink)" }}>
               Header color
               <input type="color" value={isValidHex(color) ? color : "#172A4A"}
                 onChange={(e) => { setColor(e.target.value); clearBar(); }}
@@ -343,16 +343,16 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           </button>
           {logo && <button className="btn link" onClick={() => { setLogo(""); clearBar(); }}>remove logo</button>}
         </div>
-        {lookError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{lookError}</div>}
+        {lookError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{lookError}</div>}
       </Panel>
 
       {isOwner && showRecipients && (
         <Panel title="Daily report"
           hint={<>Where {org.name}&apos;s daily update goes. Comma-separated; empty means no report is sent for them.</>}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <input className="mono" value={recipients}
+            <input className="mono t-small" value={recipients}
               onChange={(e) => { setRecipients(e.target.value); clearBar(); }}
-              placeholder="nobody - no report is sent" style={{ flex: "1 1 220px", fontSize: 12 }} />
+              placeholder="nobody - no report is sent" style={{ flex: "1 1 220px" }} />
           </div>
         </Panel>
       )}
@@ -368,35 +368,35 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                 <label key={email} style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", padding: "2px 0" }}>
                   <input type="checkbox" checked={digestTo.includes(email)} disabled={pending}
                     onChange={() => toggleDigest(email)} style={{ width: "auto", margin: 0 }} />
-                  <span className="mono" style={{ fontSize: 12 }}>{email}</span>
+                  <span className="mono t-small">{email}</span>
                   {!people.some((p) => p.entry.trim().toLowerCase() === email) && (
-                    <span className="mut" style={{ fontSize: 11 }}>not a login here</span>
+                    <span className="mut t-meta">not a login here</span>
                   )}
                 </label>
               ))}
             </div>
           ) : (
-            <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+            <div className="mut t-small" style={{ marginBottom: 8 }}>
               Nobody from {org.name} can sign in yet - add their address below, or invite them under People.
             </div>
           )}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-            <input className="mono" value={digestExtra} placeholder="another address"
+            <input className="mono t-small" value={digestExtra} placeholder="another address"
               onChange={(e) => { setDigestExtra(e.target.value); setDigestMsg(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addDigestExtra(); } }}
-              style={{ flex: "1 1 200px", fontSize: 12 }} />
+              style={{ flex: "1 1 200px" }} />
             <button className="btn sm" onClick={addDigestExtra} disabled={pending || !digestExtra.trim()}>Add</button>
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-            <span className="mut" style={{ fontSize: 12 }}>Sends at</span>
+            <span className="mut t-small">Sends at</span>
             <select value={hour} disabled={pending}
               onChange={(e) => { setHour(parseInt(e.target.value)); setDigestMsg(""); }}
-              style={{ width: "auto", fontSize: 12 }}>
+              className="t-small" style={{ width: "auto" }}>
               {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{clockLabel(h)}</option>)}
             </select>
-            <span className="mut" style={{ fontSize: 12 }}>shop time, on</span>
+            <span className="mut t-small">shop time, on</span>
             {WEEK_ORDER.map((d) => (
-              <label key={d} style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 11, margin: 0, fontWeight: 400, cursor: "pointer" }}>
+              <label key={d} className="t-meta" style={{ display: "flex", gap: 3, alignItems: "center", margin: 0, fontWeight: 400, cursor: "pointer" }}>
                 <input type="checkbox" checked={sendDays.includes(d)} disabled={pending}
                   onChange={() => toggleDay(d)} style={{ width: "auto", margin: 0 }} />
                 {DAY_LABELS[d]}
@@ -404,7 +404,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             ))}
           </div>
           {sendDays.length > 0 && sendDays.length < 7 && (
-            <div className="mut" style={{ fontSize: 11, marginTop: -4, marginBottom: 10 }}>
+            <div className="mut t-meta" style={{ marginTop: -4, marginBottom: 10 }}>
               Days it rests fold into the next edition - Monday&apos;s digest covers the weekend&apos;s
               work under its own days, and says nothing extra if there was none.
             </div>
@@ -413,12 +413,12 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             <a className="btn sm" href={`/api/digest/preview?org=${org.id}`} target="_blank" rel="noreferrer">Preview</a>
             <button className="btn sm" onClick={sendDigest} disabled={pending}>Send now</button>
           </div>
-          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="mut t-meta" style={{ marginTop: 6 }}>
             Preview shows today&apos;s edition with real data and sends nothing. Send now emails it
             immediately and counts as today&apos;s, so the schedule won&apos;t send a second copy.
           </div>
           {digestMsg && (
-            <div style={{ fontSize: 12, marginTop: 6, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
+            <div className="t-small" style={{ marginTop: 6, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
           )}
         </Panel>
       )}
@@ -444,7 +444,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {resaleOn ? "can list equipment for sale" : "not a reseller"}
             </span>
           </div>
-          {resaleMsg && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{resaleMsg}</div>}
+          {resaleMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{resaleMsg}</div>}
         </Panel>
       )}
 
@@ -470,7 +470,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {remoteOn ? "their editors can connect" : "support only"}
             </span>
           </div>
-          {remoteMsg && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{remoteMsg}</div>}
+          {remoteMsg && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{remoteMsg}</div>}
         </Panel>
       )}
 
@@ -479,15 +479,15 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           <StorageMeter quota={org.quota} hint={`${org.name}'s own shelf plus the files on every system and unit they own.`} />
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
             <select value={STORAGE_TIERS.some((t) => t.mb === limitMb) ? String(limitMb) : "custom"}
-              aria-label={`File storage limit for ${org.name}`} style={{ width: "auto", fontSize: 12 }}
+              aria-label={`File storage limit for ${org.name}`} className="t-small" style={{ width: "auto" }}
               onChange={(e) => { if (e.target.value !== "custom") { setLimitMb(parseInt(e.target.value)); clearBar(); } }}>
               {STORAGE_TIERS.map((t) => <option key={t.mb} value={t.mb}>{t.label}</option>)}
               {!STORAGE_TIERS.some((t) => t.mb === limitMb) && <option value="custom">{limitMb} MB (custom)</option>}
             </select>
             <input value={String(limitMb)} inputMode="numeric" aria-label="Limit in megabytes"
               onChange={(e) => { setLimitMb(Math.max(0, parseInt(e.target.value.replace(/\D/g, "")) || 0)); clearBar(); }}
-              style={{ width: 90, fontSize: 12 }} />
-            <span className="mut" style={{ fontSize: 11 }}>MB · 0 = no limit</span>
+              className="t-small" style={{ width: 90 }} />
+            <span className="mut t-meta">MB · 0 = no limit</span>
           </div>
         </Panel>
       )}
@@ -502,7 +502,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               otherwise take the only control with it. */}
           {showSheetSync && (org.kind === "client" || org.isSheetOrg) && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13 }}>Google Sheet tracker</span>
+              <span className="t-body">Google Sheet tracker</span>
               {org.isSheetOrg ? (
                 <>
                   <span className="pill good">syncing with {org.name}</span>
@@ -533,8 +533,8 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             </div>
           )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13 }}>Remove this organization</span>
-            <span className="mut" style={{ fontSize: 11 }}>
+            <span className="t-body">Remove this organization</span>
+            <span className="mut t-meta">
               {people.length} sign-in{people.length === 1 ? "" : "s"} stop working, access to {org.systems} system
               {org.systems === 1 ? "" : "s"} ends. The systems and their history are untouched.
             </span>
@@ -555,7 +555,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                 });
               }}>remove</button>
           </div>
-          {dangerError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{dangerError}</div>}
+          {dangerError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{dangerError}</div>}
         </Panel>
       )}
 

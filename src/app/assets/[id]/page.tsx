@@ -279,7 +279,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         imageAlt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`}
         eyebrow={<>{asset.manufacturer || asset.kind}{asset.owner ? <> · for {asset.owner}</> : null}</>}
         id={asset.serial ? `SN ${asset.serial}` : undefined}
-        title={`${asset.kind}${asset.model ? ` — ${asset.model}` : ""}`}
+        title={`${asset.kind}${asset.model ? ` - ${asset.model}` : ""}`}
         meta={[
           homeSystem ? `in ${homeSystem.externalId}` : "on the shelf",
           asset.location,
@@ -346,21 +346,21 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 <div style={{ flex: "1 1 190px", minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                     <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
-                      {asset.kind} — {asset.model || "(no model)"}
+                      {asset.kind} - {asset.model || "(no model)"}
                     </div>
                     {asset.forSale && <span className="pill good">For sale</span>}
                   </div>
-                  <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
+                  <div className="mut t-small" style={{ marginTop: 2 }}>
                     {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
                       asset.location && `@ ${asset.location}`].filter(Boolean).join(" · ") || "No identifiers yet."}
                   </div>
                 </div>
               </div>
-              <div style={{ fontSize: 13, margin: "8px 0 10px" }}>
+              <div className="t-body" style={{ margin: "8px 0 10px" }}>
                 {home ? (
                   <>Currently in{" "}
                     <Link href={`/instruments/${home.id}`} style={{ fontWeight: 700, textDecoration: "none" }}>
-                      {home.externalId} — {home.model}
+                      {home.externalId} - {home.model}
                     </Link>
                   </>
                 ) : (
@@ -369,12 +369,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 {totalMinutes > 0 && <span className="mut"> · {formatHours(totalMinutes)} logged lifetime</span>}
               </div>
               {asset.asFound && (
-                <div style={{ fontSize: 13, background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
+                <div className="t-body" style={{ background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
                   <span className="eyebrow" style={{ color: "var(--t-warn-fg)" }}>As found</span>
                   <div style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{asset.asFound}</div>
                 </div>
               )}
-              {asset.note && <div className="mut" style={{ fontSize: 13, marginBottom: 10, whiteSpace: "pre-wrap" }}>{asset.note}</div>}
+              {asset.note && <div className="mut t-body" style={{ marginBottom: 10, whiteSpace: "pre-wrap" }}>{asset.note}</div>}
               <AssetControls
                 asset={{ id: asset.id, kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note, status: asset.status, instrumentId: asset.instrumentId, servesAssetId: asset.servesAssetId, servesRole: asset.servesRole }}
                 siblings={serveRows}
@@ -477,17 +477,17 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
                 <div className="card-title">Specifications</div>
                 {isStaff && (
-                  <Link href={`/catalog/${specTerm.id}`} className="btn link" style={{ fontSize: 11, marginLeft: "auto" }}>
+                  <Link href={`/catalog/${specTerm.id}`} className="btn link" style={{ marginLeft: "auto" }}>
                     {modelSpecs.length ? "Edit on the model page" : "Add on the model page"}
                   </Link>
                 )}
               </div>
-              <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+              <div className="mut t-meta" style={{ marginBottom: 8 }}>
                 The {asset.model} sheet - the same numbers on every unit of the model.
               </div>
               {modelSpecs.length
                 ? <SpecTable specs={modelSpecs} />
-                : <div className="mut" style={{ fontSize: 12 }}>No specs recorded for this model yet.</div>}
+                : <div className="mut t-small">No specs recorded for this model yet.</div>}
             </div>
           ) }] : []),
           // The model's shelf: manuals and field notes filed on the catalog,
@@ -522,30 +522,30 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           { key: "history", label: "Service history", node: (
             <div className="card">
               <div className="card-title" style={{ marginBottom: 4 }}>Service history</div>
-              <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+              <div className="mut t-small" style={{ marginBottom: 10 }}>
                 Lifecycle plus every task, part, and hour on this asset - its own work and anything tagged to it
                 on a system, across every system it has lived in.
               </div>
               {history.map((h, i) => (
-                <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap", alignItems: "baseline" }}>
-                  <span className="mut mono" style={{ fontSize: 11, flexShrink: 0, width: 108 }}>{shopTime(h.at)}</span>
+                <div key={i} className="t-body" style={{ display: "flex", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap", alignItems: "baseline" }}>
+                  <span className="mut mono t-meta" style={{ flexShrink: 0, width: 108 }}>{shopTime(h.at)}</span>
                   {h.instrumentId !== null && (label.get(h.instrumentId) ? (
-                    <Link href={`/instruments/${h.instrumentId}`} className="mono" style={{ fontSize: 11, fontWeight: 700, color: "var(--navy)", textDecoration: "none", flexShrink: 0 }}>
+                    <Link href={`/instruments/${h.instrumentId}`} className="mono t-meta" style={{ fontWeight: 700, color: "var(--navy)", textDecoration: "none", flexShrink: 0 }}>
                       {label.get(h.instrumentId)}
                     </Link>
                   ) : (
                     // Work done while the unit lived somewhere the viewer can't see:
                     // the event stays in the history, the system stays anonymous.
-                    <span className="mut mono" style={{ fontSize: 11, flexShrink: 0 }}>another system</span>
+                    <span className="mut mono t-meta" style={{ flexShrink: 0 }}>another system</span>
                   ))}
                   {KIND_LABEL[h.kind] && <span className="pill neutral">{KIND_LABEL[h.kind]}</span>}
                   <span style={{ flex: 1, minWidth: 160 }}>
                     {h.text}
-                    {h.detail && <span className="mut" style={{ fontSize: 12 }}> — {h.detail}</span>}
+                    {h.detail && <span className="mut t-small"> - {h.detail}</span>}
                   </span>
                 </div>
               ))}
-              {history.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No history yet.</div>}
+              {history.length === 0 && <div className="mut t-body">No history yet.</div>}
             </div>
           ) },
           { key: "activity", label: "Activity", node: (

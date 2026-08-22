@@ -77,14 +77,14 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
   };
 
   if (!items.length) {
-    return <div className="mut" style={{ fontSize: 13 }}>Nothing on this shelf yet.</div>;
+    return <div className="mut t-body">Nothing on this shelf yet.</div>;
   }
 
   return (
     <>
       {items.length > 8 && (
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by PN, description or bin"
-          style={{ fontSize: 13, marginBottom: 10, maxWidth: 280 }} />
+          className="t-body" style={{ marginBottom: 10, maxWidth: 280 }} />
       )}
 
       {shown.map((i) => {
@@ -93,19 +93,19 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
         return (
           <div key={i.id} style={{ borderTop: "1px solid var(--line)", padding: "8px 0" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{i.partNumber}</span>
-              {i.name && <span style={{ fontSize: 13 }}>{i.name}</span>}
+              <span className="mono t-body" style={{ fontWeight: 700 }}>{i.partNumber}</span>
+              {i.name && <span className="t-body">{i.name}</span>}
               {i.bin && <span className="pill neutral">bin {i.bin}</span>}
               <span className={`pill ${short ? "bad" : "good"}`}>
                 {i.qty} on hand
               </span>
               {short && (
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   reorder at {i.minQty} · short {shortBy(i)}
                 </span>
               )}
               {showCosts && i.unitCostCents !== null && (
-                <span className="mut" style={{ fontSize: 11 }}>{formatCents(i.unitCostCents)} ea</span>
+                <span className="mut t-meta">{formatCents(i.unitCostCents)} ea</span>
               )}
               <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
                 {canIssue && targets.length > 0 && (
@@ -143,7 +143,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                 )}
               </span>
             </div>
-            {i.note && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{i.note}</div>}
+            {i.note && <div className="mut t-small" style={{ marginTop: 2 }}>{i.note}</div>}
 
             {isOpen && (
               <div className="dash-form" style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -157,7 +157,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                   <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" aria-label="How many"
                     style={{ width: 64, textAlign: "center", ...TAP }} />
                   <button className="btn sm" style={TAP} onClick={() => setQty(String((parseInt(qty, 10) || 0) + 1))} aria-label="One more">＋</button>
-                  {open.mode !== "receive" && <span className="mut" style={{ fontSize: 12 }}>of {i.qty}</span>}
+                  {open.mode !== "receive" && <span className="mut t-small">of {i.qty}</span>}
                 </div>
 
                 {open.mode === "issue" && (
@@ -165,7 +165,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                     <select value={targetKey} onChange={(e) => setTargetKey(e.target.value)} aria-label="Where it's going" style={TAP}>
                       {targets.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
                     </select>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                    <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <input type="checkbox" checked={install} onChange={(e) => setInstall(e.target.checked)} style={{ width: 16, height: 16 }} />
                       Installed now (otherwise it lands as Received)
                     </label>
@@ -189,7 +189,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
           </div>
         );
       })}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </>
   );
 }

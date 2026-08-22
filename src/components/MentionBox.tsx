@@ -125,8 +125,8 @@ export default function MentionBox({
                 padding: "7px 9px", border: "none", borderRadius: 7, cursor: "pointer",
                 background: i === active ? "#F1F5F9" : "#fff",
               }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{h.name}</span>
-              {h.org && <span className="mut" style={{ fontSize: 11 }}>{h.org}</span>}
+              <span className="t-body" style={{ fontWeight: 700, color: "var(--navy)" }}>{h.name}</span>
+              {h.org && <span className="mut t-meta">{h.org}</span>}
             </button>
           ))}
         </div>

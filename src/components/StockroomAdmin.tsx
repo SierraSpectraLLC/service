@@ -84,7 +84,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
           </div>
         </Dialog>
       ) : (
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+        <div className="mut t-small" style={{ marginBottom: 10 }}>
           Belongs to <b style={{ color: "var(--ink)" }}>{ownerName}</b>
           {room.location ? ` · ${room.location}` : ""}{room.keeper ? ` · kept by ${room.keeper}` : ""}
         </div>
@@ -92,25 +92,26 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
 
       <div className="eyebrow" style={{ margin: "4px 0 6px" }}>Shared with</div>
       {shares.length === 0 && (
-        <div className="mut" style={{ fontSize: 13 }}>Nobody outside {ownerName}.</div>
+        <div className="mut t-body">Nobody outside {ownerName}.</div>
       )}
       {shares.map((s) => (
         <div key={s.orgId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13 }}>{s.name}</span>
+          <span className="t-body">{s.name}</span>
           <span className="pill accent">{s.kind}</span>
           <select value={s.access} disabled={pending}
             onChange={(e) => startTransition(async () => {
               const res = await setStockroomShare(room.id, s.orgId, e.target.value);
               if (res?.error) setError(res.error);
             })}
+            className="t-meta"
             style={{
-              width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, cursor: "pointer",
+              width: "auto", fontWeight: 700, padding: "3px 6px", borderRadius: 999, cursor: "pointer",
               background: LEVEL[s.access]?.bg, color: LEVEL[s.access]?.fg,
             }}>
             <option value="view">{LEVEL.view.label}</option>
             <option value="issue">{LEVEL.issue.label}</option>
           </select>
-          <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
+          <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
             onClick={() => startTransition(async () => {
               const res = await removeStockroomShare(room.id, s.orgId);
               if (res?.error) setError(res.error);
@@ -145,7 +146,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
         </button>
       ) : null}
 
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

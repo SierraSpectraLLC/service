@@ -119,7 +119,7 @@ export default function PdfCombiner({ target, pdfs, defaultCover, coverLines }: 
               <input type="checkbox" className="check" checked={r.included}
                 onChange={() => setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, included: !x.included } : x)))} />
               <span className="mut t-meta" style={{ width: 18, textAlign: "right" }}>
-                {r.included ? included.indexOf(r) + 1 : "—"}
+                {r.included ? included.indexOf(r) + 1 : "-"}
               </span>
               <button className="btn link t-body" style={{ padding: "0 3px" }} aria-label={`Move ${r.fileName} up`}
                 onClick={() => move(ix, -1)}>↑</button>

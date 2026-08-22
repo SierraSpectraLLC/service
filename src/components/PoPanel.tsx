@@ -67,15 +67,15 @@ export default function PoPanel({ po, lines, canManage, makers }: {
           </span>
         </div>
 
-        <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+        <div className="mut t-small" style={{ marginBottom: 8 }}>
           Raised {po.when}
           {po.sentWhen ? ` · sent ${po.sentWhen}` : ""}
           {po.expectedAt ? ` · expected ${po.expectedAt}` : ""}
           {po.reference ? ` · ref ${po.reference}` : ""}
         </div>
-        {po.note && <div style={{ fontSize: 12, marginBottom: 8 }}>{po.note}</div>}
+        {po.note && <div className="t-small" style={{ marginBottom: 8 }}>{po.note}</div>}
         {po.status === "cancelled" && po.cancelReason && (
-          <div style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
+          <div className="t-small" style={{ color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
             Cancelled: {po.cancelReason}. Anything already received stayed on the shelf.
           </div>
         )}
@@ -112,12 +112,12 @@ export default function PoPanel({ po, lines, canManage, makers }: {
           return (
             <div key={l.id} style={{ borderTop: "1px solid var(--line)", padding: "7px 0" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <span className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{l.partNumber}</span>
-                {l.name && <span style={{ fontSize: 13 }}>{l.name}</span>}
-                <span className="mut" style={{ fontSize: 12 }}>× {l.qtyOrdered}</span>
+                <span className="mono t-body" style={{ fontWeight: 700 }}>{l.partNumber}</span>
+                {l.name && <span className="t-body">{l.name}</span>}
+                <span className="mut t-small">× {l.qtyOrdered}</span>
                 {l.unitCents !== null
-                  ? <span className="mut" style={{ fontSize: 12 }}>{formatCents(l.unitCents)} ea · {formatCents(total!)}</span>
-                  : <span style={{ fontSize: 12, color: "var(--t-warn-fg)" }}>unpriced</span>}
+                  ? <span className="mut t-small">{formatCents(l.unitCents)} ea · {formatCents(total!)}</span>
+                  : <span className="t-small" style={{ color: "var(--t-warn-fg)" }}>unpriced</span>}
                 {l.qtyReceived > 0 && (
                   <span className={`pill ${out === 0 ? "good" : "warn"}`}>{l.qtyReceived} received{out > 0 ? `, ${out} to come` : ""}</span>
                 )}
@@ -134,18 +134,18 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                   )}
                 </span>
               </div>
-              {l.note && <div className="mut" style={{ fontSize: 12 }}>{l.note}</div>}
+              {l.note && <div className="mut t-small">{l.note}</div>}
 
               {editable && (
                 <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
-                  <span className="mut" style={{ fontSize: 11 }}>qty</span>
+                  <span className="mut t-meta">qty</span>
                   <input defaultValue={String(l.qtyOrdered)} inputMode="numeric" aria-label={`Quantity for ${l.partNumber}`}
                     onBlur={(e) => {
                       if (e.target.value.trim() === String(l.qtyOrdered)) return;
                       run(() => setPoLine(l.id, { qty: e.target.value, price: l.unitCents === null ? "" : centsToInput(l.unitCents) }));
                     }}
-                    style={{ width: 60, fontSize: 12 }} />
-                  <span className="mut" style={{ fontSize: 11 }}>unit $</span>
+                    className="t-small" style={{ width: 60 }} />
+                  <span className="mut t-meta">unit $</span>
                   <input defaultValue={l.unitCents === null ? "" : centsToInput(l.unitCents)} aria-label={`Unit price for ${l.partNumber}`}
                     placeholder="129.95"
                     onBlur={(e) => {
@@ -153,7 +153,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                       if (e.target.value.trim() === was) return;
                       run(() => setPoLine(l.id, { qty: String(l.qtyOrdered), price: e.target.value }));
                     }}
-                    style={{ width: 90, fontSize: 12 }} />
+                    className="t-small" style={{ width: 90 }} />
                 </div>
               )}
 
@@ -164,9 +164,9 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                   <span className="mut t-meta">arrived</span>
                   <input value={receiving.qty} onChange={(e) => setReceiving({ ...receiving, qty: e.target.value })}
                     inputMode="numeric" aria-label="How many arrived" style={{ width: 64, minHeight: 34, textAlign: "center" }} />
-                  <span className="mut" style={{ fontSize: 12 }}>of {out}</span>
+                  <span className="mut t-small">of {out}</span>
                   <input value={receiving.note} onChange={(e) => setReceiving({ ...receiving, note: e.target.value })}
-                    placeholder="Packing slip / note" style={{ flex: "1 1 160px", minHeight: 34, fontSize: 13 }} />
+                    placeholder="Packing slip / note" className="t-body" style={{ flex: "1 1 160px", minHeight: 34 }} />
                   <button className="btn sm accent" style={{ minHeight: 34 }} disabled={pending}
                     onClick={() => {
                       const n = parseInt(receiving.qty, 10);
@@ -181,7 +181,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
           );
         })}
 
-        {lines.length === 0 && <div className="mut" style={{ fontSize: 13 }}>Nothing on this order yet.</div>}
+        {lines.length === 0 && <div className="mut t-body">Nothing on this order yet.</div>}
 
         {editable && (adding ? (
           <Dialog open onClose={() => setAdding(false)} title={`Add a line to ${po.number}`}
@@ -233,7 +233,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
         ))}
 
         {lines.length > 0 && (
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, fontSize: 12, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
+          <div className="t-small" style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
             <span className="mut">
               {totals.received} of {totals.ordered} received
               {totals.unpriced ? ` · ${totals.unpriced} line${totals.unpriced === 1 ? "" : "s"} unpriced` : ""}
@@ -254,7 +254,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
               run(() => cancelPurchaseOrder(po.id, why));
             }}>Cancel this order</button>
         )}
-        {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
       </div>
     </>
   );

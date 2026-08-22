@@ -117,7 +117,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
       )}>
         {done ? (
           <div>
-            <div style={{ fontSize: 13, color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 6 }}>
+            <div className="t-body" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 6 }}>
               {done === "already" ? "Already asked ✓" : number ? `${number} opened ✓` : "Sent ✓"}
             </div>
             <div className="mut" style={{ fontSize: 12.5, marginBottom: 12 }}>
@@ -149,37 +149,37 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
                       style={{ flex: "1 1 100px" }}>{w.label}</button>
                   ))}
                 </div>
-                {nextPm && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{nextPm}</div>}
-                <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>
+                {nextPm && <div className="mut t-small" style={{ marginBottom: 10 }}>{nextPm}</div>}
+                <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
                   Anything specific? <span className="mut" style={{ fontWeight: 400 }}>Optional</span>
                 </label>
                 <textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={4} autoFocus
                   placeholder="Lamp is at 900 hours, and we'd like the column checked"
-                  style={{ width: "100%", fontSize: 13, marginBottom: 12 }} />
+                  className="t-body" style={{ width: "100%", marginBottom: 12 }} />
               </>
             ) : (
               <>
-                <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>
+                <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
                   What&apos;s wrong?
                 </label>
                 <input value={summary} onChange={(e) => setSummary(e.target.value)} autoFocus
                   placeholder="Lamp won't ignite" maxLength={160}
-                  style={{ width: "100%", fontSize: 13, marginBottom: 10 }} />
+                  className="t-body" style={{ width: "100%", marginBottom: 10 }} />
 
-                <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>
+                <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
                   Anything else? <span className="mut" style={{ fontWeight: 400 }}>Optional</span>
                 </label>
                 <textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={4}
                   placeholder="Error code, when it started, what you were running"
-                  style={{ width: "100%", fontSize: 13, marginBottom: 10 }} />
+                  className="t-body" style={{ width: "100%", marginBottom: 10 }} />
 
-                <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>
+                <label className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 4 }}>
                   Photos, screenshots or log files <span className="mut" style={{ fontWeight: 400 }}>Optional</span>
                 </label>
                 <input type="file" multiple onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 10))}
-                  style={{ fontSize: 12, marginBottom: files.length ? 6 : 12 }} />
+                  className="t-small" style={{ marginBottom: files.length ? 6 : 12 }} />
                 {files.length > 0 && (
-                  <div className="mut" style={{ fontSize: 11, marginBottom: 12 }}>
+                  <div className="mut t-meta" style={{ marginBottom: 12 }}>
                     {files.map((f) => f.name).join(", ")}
                   </div>
                 )}

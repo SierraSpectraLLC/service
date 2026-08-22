@@ -77,9 +77,9 @@ export default function DiscussionPanel({
           <span className="pill info">{newCount} new</span>
         )}
       </div>
-      {subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>{subtitle}</div>}
+      {subtitle && <div className="mut t-small" style={{ marginBottom: 12 }}>{subtitle}</div>}
 
-      {posts.length === 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>No posts yet.</div>}
+      {posts.length === 0 && <div className="mut t-body" style={{ marginBottom: 8 }}>No posts yet.</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 12 }}>
         {posts.map((p) => {
           const editing = typeof edits[p.id] === "string";
@@ -87,18 +87,18 @@ export default function DiscussionPanel({
             <div key={p.id} style={p.internal ? {
               borderLeft: "3px solid #EAD9B0", background: "#FDF8EE", borderRadius: 6, padding: "4px 8px", margin: "0 -8px",
             } : undefined}>
-              <div style={{ fontSize: 12 }}>
+              <div className="t-small">
                 <b style={{ color: "var(--navy)" }}>{p.author}</b>
-                {p.authorParty && <span className="mut" style={{ fontSize: 11 }}> · {p.authorParty}</span>}{" "}
-                <span className="mut" style={{ fontSize: 11 }}>{when(p.createdAt)}</span>
+                {p.authorParty && <span className="mut t-meta"> · {p.authorParty}</span>}{" "}
+                <span className="mut t-meta">{when(p.createdAt)}</span>
                 {p.internal && (
                   <>{" "}<span className="pill warn">internal</span></>
                 )}
                 {canEdit && !editing && (
                   <>
-                    {" "}<button className="btn link" style={{ fontSize: 11 }}
+                    {" "}<button className="btn link"
                       onClick={() => setEdits((e) => ({ ...e, [p.id]: p.body }))}>edit</button>
-                    <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)", padding: "0 4px" }} disabled={pending}
+                    <button className="btn link" style={{ color: "var(--t-bad-fg)", padding: "0 4px" }} disabled={pending}
                       onClick={async () => {
                         const reason = await confirmReason({
                           title: "Delete this post?",
@@ -119,11 +119,11 @@ export default function DiscussionPanel({
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) saveEdit(p.id);
                       if (e.key === "Escape") setEdits((s) => { const n = { ...s }; delete n[p.id]; return n; });
                     }}
-                    style={{ flex: 1, fontSize: 13, resize: "vertical" }} />
+                    className="t-body" style={{ flex: 1, resize: "vertical" }} />
                   <button className="btn sm" onClick={() => saveEdit(p.id)}>Save</button>
                 </div>
               ) : (
-                <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{renderBody(p.body)}</div>
+                <div className="t-body" style={{ whiteSpace: "pre-wrap" }}>{renderBody(p.body)}</div>
               )}
             </div>
           );
@@ -136,17 +136,17 @@ export default function DiscussionPanel({
         <MentionBox multiline people={people} value={draft} onChange={setDraft} rows={2}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
           placeholder="Write an update or question... @name to notify someone"
-          style={{ flex: 1, fontSize: 13, resize: "vertical" }} />
+          className="t-body" style={{ flex: 1, resize: "vertical" }} />
         <button className="btn sm accent" onClick={submit} disabled={pending || !draft.trim()}>
           {pending ? "Posting..." : "Post"}
         </button>
       </div>
-      <label style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "8px 0 0", fontSize: 12, fontWeight: 400, color: "var(--ink)" }}>
+      <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "8px 0 0", fontWeight: 400, color: "var(--ink)" }}>
         <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)}
           style={{ width: "auto", marginTop: 2 }} />
         <span>
           Internal to {partyName}
-          <span className="mut" style={{ display: "block", fontSize: 11 }}>
+          <span className="mut t-meta" style={{ display: "block" }}>
             {internal
               ? `Only ${partyName} can read this - nobody else on the thread, and no email leaves ${partyName}.`
               : `Off, this goes to ${sharedWith}.`}

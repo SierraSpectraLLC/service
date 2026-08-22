@@ -28,7 +28,7 @@ export default function PushToSheetButton({ instrumentId, externalId }: { instru
         {pending ? "Adding..." : "Add to sheet"}
       </button>
       {msg && (
-        <span style={{ fontSize: 11, color: msg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{msg}</span>
+        <span className="t-meta" style={{ color: msg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{msg}</span>
       )}
     </>
   );

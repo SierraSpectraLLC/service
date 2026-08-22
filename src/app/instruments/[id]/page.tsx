@@ -438,7 +438,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   {pcConsent?.mode === "consent" ? "Request session" : "Connect"}
                 </Link>
               ) : pcAbility.refusal ? (
-                <span className="mut" style={{ fontSize: 11, flexShrink: 0 }}>{pcAbility.refusal}</span>
+                <span className="mut t-meta" style={{ flexShrink: 0 }}>{pcAbility.refusal}</span>
               ) : null
             )}
             {isStaff && modules.sheetSync && <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />}
@@ -572,7 +572,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               });})}
               unassigned={unassignedRows.map((a) => ({
                 id: a.id,
-                label: `${a.kind} — ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
+                label: `${a.kind} - ${a.model || "(no model)"}${a.serial ? ` SN ${a.serial}` : ""}${a.owner ? ` · ${a.owner}` : ""}${a.status !== "Spare" ? ` · ${a.status}` : ""}${a.location ? ` · ${a.location}` : ""}`,
               }))}
               kinds={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
               canEdit={canEdit}
@@ -617,7 +617,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               })} />
           ) },
           { key: "tasks", label: "Tasks", node: (
-            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} mentionable={mentionable} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets}
+            <TasksPanel target={{ instrumentId: inst.id, assetId: null }} tasks={fullTasks} people={directoryNames(peopleRows)} mentionable={mentionable} systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))} today={shopToday()} canEdit={canEdit} isStaff={isStaff} copyTargets={copyTargets}
               // Open jobs, so their tasks fold under one band per job here.
               jobs={woRows.filter((w) => woOpen(w.state)).map((w) => ({ id: w.id, number: w.number, title: w.title, state: w.state }))} />
           ) },
@@ -643,7 +643,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   id: s.id, title: s.title, body: s.body, assignee: s.assignee,
                   everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
                   parts: schedulePartsOf(s),
-                  onAsset: onAsset ? `${onAsset.kind} — ${onAsset.model || onAsset.serial || "?"}` : undefined,
+                  onAsset: onAsset ? `${onAsset.kind} - ${onAsset.model || onAsset.serial || "?"}` : undefined,
                   assetId: s.assetId,
                   openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
                 };
@@ -652,7 +652,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={{ instrumentId: inst.id, assetId: null }}
               parts={redactParts(partRows, user, inst.ownerOrgId, inst.tenantOrgId).map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
-              systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} — ${a.model || a.serial || "?"}` }))}
+              systemAssets={assetRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
               canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
               serviceEvents={serviceEvents} visitNames={visitNames}
               pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />

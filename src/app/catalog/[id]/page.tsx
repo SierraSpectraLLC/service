@@ -234,23 +234,23 @@ export default async function ModelPage({ params, searchParams }: {
       {tab === "parts" && <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
           <div className="card-title">Parts &amp; consumables</div>
-          <Link href="/settings/parts" className="btn link" style={{ fontSize: 11, marginLeft: "auto" }}>Open the parts book</Link>
+          <Link href="/settings/parts" className="btn link" style={{ marginLeft: "auto" }}>Open the parts book</Link>
         </div>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>
           Everything the parts book files under {term.name} - and under any {term.assetType.toLowerCase()} generally.
         </div>
         {modelParts.map((p) => (
           <div key={p.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{p.partNumber}</span>
-              <span style={{ fontSize: 13 }}>{p.name || <span className="mut">no description yet</span>}</span>
+              <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{p.partNumber}</span>
+              <span className="t-body">{p.name || <span className="mut">no description yet</span>}</span>
               <span className={`pill ${p.kind === "kit" ? "accent" : "neutral"}`} style={{ fontSize: 10 }}>
                 {PART_KIND_LABEL[p.kind] ?? p.kind}
               </span>
-              {p.manufacturer && <span className="mut" style={{ fontSize: 11 }}>{p.manufacturer}{p.mfrPartNumber ? ` ${p.mfrPartNumber}` : ""}</span>}
+              {p.manufacturer && <span className="mut t-meta">{p.manufacturer}{p.mfrPartNumber ? ` ${p.mfrPartNumber}` : ""}</span>}
             </div>
             {p.kind === "kit" && (
-              <div className="mut" style={{ fontSize: 11, paddingLeft: 12, marginTop: 2 }}>
+              <div className="mut t-meta" style={{ paddingLeft: 12, marginTop: 2 }}>
                 {kitLines.filter((l) => l.kitId === p.id)
                   .map((l) => `${l.qty > 1 ? `${l.qty}× ` : ""}${l.name || l.partNumber}`).join(" · ") || "empty kit"}
               </div>
@@ -258,7 +258,7 @@ export default async function ModelPage({ params, searchParams }: {
           </div>
         ))}
         {modelParts.length === 0 && (
-          <div className="mut" style={{ fontSize: 12 }}>
+          <div className="mut t-small">
             Nothing filed yet. Tag parts to {term.name} in the parts book and they appear here.
           </div>
         )}
@@ -266,10 +266,10 @@ export default async function ModelPage({ params, searchParams }: {
           <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
             <div className="eyebrow" style={{ marginBottom: 2 }}>Named by maintenance, not yet in the book</div>
             {maintenanceParts.map((pp, n) => (
-              <div key={n} className="mut" style={{ fontSize: 12, padding: "2px 0" }}>
+              <div key={n} className="mut t-small" style={{ padding: "2px 0" }}>
                 {(pp.qty ?? 1) > 1 ? `${pp.qty}× ` : ""}{pp.name || pp.number}
-                {pp.number && pp.name ? <span className="mono" style={{ fontSize: 11 }}> · {pp.number}</span> : null}
-                <span style={{ fontSize: 11 }}> — {pp.procedure}</span>
+                {pp.number && pp.name ? <span className="mono t-meta"> · {pp.number}</span> : null}
+                <span className="t-meta"> - {pp.procedure}</span>
               </div>
             ))}
           </div>
@@ -287,15 +287,15 @@ export default async function ModelPage({ params, searchParams }: {
 
       {tab === "fleet" && <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Fleet</div>
-        <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+        <div className="mut t-meta" style={{ marginBottom: 8 }}>
           Every {term.name} on the books, and where it sits.
         </div>
         {mine.map((a) => (
           <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-            <Link href={`/assets/${a.id}`} className="mono" style={{ fontSize: 12, fontWeight: 700, textDecoration: "none", color: "var(--navy)" }}>
+            <Link href={`/assets/${a.id}`} className="mono t-small" style={{ fontWeight: 700, textDecoration: "none", color: "var(--navy)" }}>
               {a.serial ? `SN ${a.serial}` : `#${a.id}`}
             </Link>
-            <span style={{ fontSize: 12 }}>
+            <span className="t-small">
               {a.instrumentId !== null
                 ? <>on <Link href={`/instruments/${a.instrumentId}`} style={{ fontWeight: 600 }}>{instOf.get(a.instrumentId) ?? `system ${a.instrumentId}`}</Link></>
                 : <span className="mut">on the shelf</span>}
@@ -306,7 +306,7 @@ export default async function ModelPage({ params, searchParams }: {
             }}>{a.status}</span>
           </div>
         ))}
-        {mine.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No unit of this model is recorded yet.</div>}
+        {mine.length === 0 && <div className="mut t-small">No unit of this model is recorded yet.</div>}
       </div>}
     </div>
   );

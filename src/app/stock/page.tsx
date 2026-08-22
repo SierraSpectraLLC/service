@@ -69,8 +69,8 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
         dot: <Dot tone={totals.short > 0 ? "bad" : "neutral"} />,
         name: (
           <span style={{ minWidth: 0, display: "block" }}>
-            <span style={{ fontWeight: 700, fontSize: 14 }}>{room.name}</span>
-            <span className="mut" style={{ display: "block", fontSize: 11 }}>
+            <span className="t-lead" style={{ fontWeight: 700 }}>{room.name}</span>
+            <span className="mut t-meta" style={{ display: "block" }}>
               {orgName(room.orgId)}{room.keeper ? ` · ${room.keeper}` : ""}{room.location ? ` · ${room.location}` : ""}
             </span>
           </span>

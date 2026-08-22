@@ -60,14 +60,14 @@ export default function CatalogGasCard({ entries }: { entries: GasEntry[] }) {
     <div className="card">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <div className="card-title">Gas requirements</div>
-        <span className="mut" style={{ fontSize: 11 }}>
+        <span className="mut t-meta">
           {declared.length ? `${declared.length} declared` : "none declared yet"}
         </span>
         <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => setOpen((v) => !v)}>
           {open ? "Done" : "Edit"}
         </button>
       </div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+      <div className="mut t-small" style={{ marginBottom: 8 }}>
         What each kind of equipment needs plumbed in. A system or unit created from now on gets
         these automatically, as <b>Not connected</b> until somebody hooks it up - so nothing has to
         be typed twice and nothing is quietly assumed to be connected.
@@ -85,8 +85,8 @@ export default function CatalogGasCard({ entries }: { entries: GasEntry[] }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {declared.map((e) => (
               <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{e.name}</span>
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="t-body" style={{ fontWeight: 600 }}>{e.name}</span>
+                <span className="mut t-meta">
                   {e.kind === "model" ? e.assetType : e.kind === "asset_type" ? "module type" : "system type"}
                 </span>
                 <span style={{ display: "flex", gap: 4, marginLeft: "auto", flexWrap: "wrap" }}>
@@ -124,18 +124,18 @@ export default function CatalogGasCard({ entries }: { entries: GasEntry[] }) {
           <details key={sec.kind} open={!!q.trim() || undefined} style={{ marginTop: 10 }}>
             <summary style={{ cursor: "pointer", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               <span className="eyebrow">{sec.title}</span>
-              <span className="mut" style={{ fontSize: 11 }}>
+              <span className="mut t-meta">
                 {q.trim() ? `${rows.length} of ${all.length}` : `${all.length}`}
                 {set > 0 && ` · ${set} declared`}
               </span>
             </summary>
-            <div className="mut" style={{ fontSize: 11, margin: "4px 0" }}>{sec.blurb}</div>
-            {rows.length === 0 && <div className="mut" style={{ fontSize: 12, padding: "4px 0" }}>Nothing matches.</div>}
+            <div className="mut t-meta" style={{ margin: "4px 0" }}>{sec.blurb}</div>
+            {rows.length === 0 && <div className="mut t-small" style={{ padding: "4px 0" }}>Nothing matches.</div>}
             {rows.map((e) => (
               <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-                <span style={{ fontSize: 13, minWidth: 0, flex: "1 1 150px" }}>
+                <span className="t-body" style={{ minWidth: 0, flex: "1 1 150px" }}>
                   {e.name}
-                  {e.kind === "model" && e.assetType && <span className="mut" style={{ fontSize: 11 }}> · {e.assetType}</span>}
+                  {e.kind === "model" && e.assetType && <span className="mut t-meta"> · {e.assetType}</span>}
                 </span>
                 <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                   {GASES.map((g) => {
@@ -155,7 +155,7 @@ export default function CatalogGasCard({ entries }: { entries: GasEntry[] }) {
         );
       })}
 
-      {error &&<div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
+      {error &&<div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

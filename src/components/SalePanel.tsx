@@ -27,7 +27,7 @@ export default function SalePanel({ target = "system", targetId, forSale, saleNo
       <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>Resale</div>
       {!forSale && !editing && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span className="mut" style={{ fontSize: 12 }}>Not for sale.</span>
+          <span className="mut t-small">Not for sale.</span>
           <button className="btn link" onClick={() => setEditing(true)}>List for sale...</button>
         </div>
       )}
@@ -38,7 +38,7 @@ export default function SalePanel({ target = "system", targetId, forSale, saleNo
               <span className="pill good">For sale</span>
               {url && (
                 <>
-                  <a href={url} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: 11 }}>{url.replace(/^https?:\/\//, "")}</a>
+                  <a href={url} target="_blank" rel="noreferrer" className="mono t-meta">{url.replace(/^https?:\/\//, "")}</a>
                   <button className="btn link" onClick={() => { navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
                     {copied ? "copied" : "copy link"}
                   </button>
@@ -46,13 +46,13 @@ export default function SalePanel({ target = "system", targetId, forSale, saleNo
               )}
             </div>
           )}
-          <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
+          <div className="mut t-meta" style={{ marginBottom: 6 }}>
             Public page, no sign-in. Shows history and chosen files only - never location, client, notes or pricing.
           </div>
           <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
             placeholder='Public blurb, e.g. "Refurbished 2025, new pump seals, full checkout passed. Contact sales@..."'
-            style={{ resize: "vertical", fontSize: 13, marginBottom: 6 }} />
-          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
+            className="t-body" style={{ resize: "vertical", marginBottom: 6 }} />
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" disabled={pending}
               onClick={() => {

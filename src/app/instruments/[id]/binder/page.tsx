@@ -103,7 +103,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
   return (
     <div className="container page">
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <Link href={`/instruments/${inst.id}`} className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
+        <Link href={`/instruments/${inst.id}`} className="mut t-body" style={{ textDecoration: "none" }}>
           ← Back to {inst.externalId}
         </Link>
         <span style={{ marginLeft: "auto" }} />
@@ -142,7 +142,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
           <div key={r.docType} style={{ marginBottom: 8, breakInside: "avoid" }}>
             <div style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               {r.docType}
-              {r.required && !r.satisfied && <span style={{ color: "var(--t-bad-fg)", fontWeight: 400, fontSize: 12 }}>— {r.docs.length ? "not approved" : "MISSING"}</span>}
+              {r.required && !r.satisfied && <span style={{ color: "var(--t-bad-fg)", fontWeight: 400, fontSize: 12 }}>- {r.docs.length ? "not approved" : "MISSING"}</span>}
               {!r.required && <span className="mut" style={{ fontWeight: 400, fontSize: 11 }}>beyond the declared package</span>}
             </div>
             {r.docs.map((d) => {
@@ -165,7 +165,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
                   <div className="mut" style={{ marginLeft: 2 }}>{sigLine(d.id)}</div>
                   {chain.map((h) => (
                     <div key={h.id} className="mut" style={{ marginLeft: 12 }}>
-                      superseded: v{h.version} — {sigLine(h.id)}
+                      superseded: v{h.version} - {sigLine(h.id)}
                     </div>
                   ))}
                 </div>
@@ -226,7 +226,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
         {dated.length === 0 && <div className="mut" style={{ fontSize: 13 }}>None on file.</div>}
         {dated.map((a) => (
           <div key={a.id} style={{ fontSize: 13 }}>
-            {a.fileName} <span className="mut">({a.kind})</span> — valid until {a.expiresOn}
+            {a.fileName} <span className="mut">({a.kind})</span> - valid until {a.expiresOn}
             {a.expiresOn < today && <b style={{ color: "var(--t-bad-fg)" }}> · {expiryLabel(a.expiresOn, today)}</b>}
           </div>
         ))}

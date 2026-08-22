@@ -79,7 +79,7 @@ export default function ProvenanceChip({ what, id, value, canEdit }: {
                   display: "block", width: "100%", textAlign: "left", border: "none", background: "none",
                   padding: "5px 6px", cursor: "pointer", borderRadius: 6,
                 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: `var(--t-${PROVENANCE_TONE[c]}-fg)` }}>
+                <span className="t-small" style={{ fontWeight: 700, color: `var(--t-${PROVENANCE_TONE[c]}-fg)` }}>
                   {PROVENANCE_LABEL[c]}{c === shown ? " ✓" : ""}
                 </span>
                 <span className="mut" style={{ display: "block", fontSize: 10, lineHeight: 1.4 }}>

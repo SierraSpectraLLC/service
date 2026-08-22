@@ -83,17 +83,17 @@ export default async function ArchivePage({ searchParams }: { searchParams: Prom
                 <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {labels.get(i.id) || <span className="mut">No assets listed</span>}
                 </span>
-                <span className="mut" style={{ fontSize: 11 }}>{i.client}</span>
+                <span className="mut t-meta">{i.client}</span>
               </span>
             ),
             stage: i.stages.length ? (
               <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <span className="pill" style={{ background: color(i.stages[0]).bg, color: color(i.stages[0]).fg }}>{i.stages[0]}</span>
-                {i.stages.length > 1 && <span className="mut" style={{ fontSize: 11 }}>+{i.stages.length - 1}</span>}
+                {i.stages.length > 1 && <span className="mut t-meta">+{i.stages.length - 1}</span>}
               </span>
             ) : null,
             when: (
-              <span className="mut" style={{ fontSize: 12 }}>
+              <span className="mut t-small">
                 {i.archivedAt ? shopMonthDay(i.archivedAt) : ""}{i.archivedBy ? ` by ${i.archivedBy}` : ""}
               </span>
             ),

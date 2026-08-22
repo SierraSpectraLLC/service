@@ -62,7 +62,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
           </button>
         )}
         {!open && live.length > 0 && (
-          <span className="mut" style={{ fontSize: 11 }}>
+          <span className="mut t-meta">
             {/* Even folded, the fact that doors are open stays on screen. */}
             outsiders can currently {live.some((l) => l.kind === "drop") ? "send you files" : ""}
             {live.some((l) => l.kind === "drop") && live.some((l) => l.kind === "share") ? " and " : ""}
@@ -76,12 +76,12 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
           <div style={{ flex: "1 1 180px" }}>
             <label>Who is it for?</label>
             <input value={label} onChange={(e) => setLabel(e.target.value)} maxLength={80}
-              placeholder='e.g. "Sam at LabZen - G-010 data"' style={{ fontSize: 12 }} />
+              placeholder='e.g. "Sam at LabZen - G-010 data"' className="t-small" />
           </div>
           <div>
             <label>Works until <span className="mut" style={{ fontWeight: 400 }}>(max {MAX_LINK_DAYS} days)</span></label>
             <input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)}
-              min={today} max={addDaysIso(today, MAX_LINK_DAYS)} style={{ fontSize: 12, width: "auto" }} />
+              min={today} max={addDaysIso(today, MAX_LINK_DAYS)} className="t-small" style={{ width: "auto" }} />
           </div>
           <button className="btn sm accent" disabled={pending}
             onClick={() => startTransition(async () => {
@@ -107,7 +107,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
               {l.kind === "drop" ? "⇩ receive" : "⇧ share"}
             </span>
             <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0 }}>{l.label || `Link until ${l.expiresOn}`}</span>
-            <span className="mut" style={{ fontSize: 11 }}>
+            <span className="mut t-meta">
               {state}
               {l.kind === "drop"
                 ? `${l.folderName ? ` · into ${l.folderName}` : ""}${l.count ? ` · ${l.count} received` : " · nothing yet"}`
@@ -115,12 +115,12 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
             </span>
             {!dead && (
               <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                <button className="btn link" style={{ fontSize: 11 }}
+                <button className="btn link"
                   onClick={() => {
                     void navigator.clipboard?.writeText(urlOf(l));
                     setCopiedId(l.id); setTimeout(() => setCopiedId(null), 1500);
                   }}>{copiedId === l.id ? "copied ✓" : "copy link"}</button>
-                <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
+                <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: "Kill this link?",
@@ -139,12 +139,12 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
         );
       })}
       {open && links.length === 0 && (
-        <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>
+        <div className="mut t-small" style={{ padding: "6px 0" }}>
           No links yet. &ldquo;Receive files&rdquo; makes one an outsider can send files through;
           selecting files and pressing Share makes one they can read.
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
     </div>
   );
 }

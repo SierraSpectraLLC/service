@@ -225,7 +225,7 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
               {gripBtn(inRight(key) ? "←" : "→",
                 `Move ${p.label} to the ${inRight(key) ? "left" : "right"} column`,
                 () => setColumn(key, !inRight(key)))}
-              <button className="btn link" style={{ fontSize: 11, padding: "0 5px", fontWeight: 700 }}
+              <button className="btn link" style={{ padding: "0 5px", fontWeight: 700 }}
                 aria-label={`Hide ${p.label}`} onClick={() => setHidden(key, true)}>Hide</button>
             </span>
           </div>
@@ -261,13 +261,13 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
       {(editing || hiddenKeys.length > 0) && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
           {!editing && hiddenKeys.length > 0 && (
-            <button className="btn link" style={{ fontSize: 11 }} onClick={() => setEditing(true)}>
+            <button className="btn link" onClick={() => setEditing(true)}>
               {hiddenKeys.length} section{hiddenKeys.length === 1 ? "" : "s"} hidden
             </button>
           )}
           {editing && (
             <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-              <span className="mut" style={{ fontSize: 11 }}>Drag a panel, or use its arrows. Saved to your account.</span>
+              <span className="mut t-meta">Drag a panel, or use its arrows. Saved to your account.</span>
               <button className="btn sm" onClick={reset}>Reset</button>
               <button className="btn sm" onClick={() => setEditing(false)}>Done</button>
             </span>
@@ -285,7 +285,7 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
               </button>
             ))}
           </div>
-          <div className="mut" style={{ fontSize: 11, marginTop: 6 }}>
+          <div className="mut t-meta" style={{ marginTop: 6 }}>
             Hidden for you only, and nothing stops being recorded - a hidden panel&apos;s
             work still happens and still shows on packets and reports.
           </div>

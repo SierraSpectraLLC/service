@@ -49,7 +49,7 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
 
   if (!photos.length) {
     return (
-      <div className="mut" style={{ fontSize: 13 }}>
+      <div className="mut t-body">
         No photos yet. Add them on a system or a unit and they appear here.
       </div>
     );
@@ -87,7 +87,7 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
                 width="100%" aspect={4 / 3} />
             </a>
             {/* One pill per tile: cover. Where it is filed reads as quiet links. */}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4, fontSize: 11 }}>
+            <div className="t-meta" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
               {p.isCover && <span className="pill info">cover</span>}
               {p.places.map((q) => (
                 <span key={q.attachmentId} className="mut">
@@ -97,16 +97,16 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
                 </span>
               ))}
             </div>
-            <div className="mut" style={{ fontSize: 11, marginTop: 2, overflowWrap: "anywhere" }}>
+            <div className="mut t-meta" style={{ marginTop: 2, overflowWrap: "anywhere" }}>
               {p.description || p.fileName}
             </div>
-            <div className="mut" style={{ fontSize: 11 }}>{p.uploadedBy} · {p.when}</div>
+            <div className="mut t-meta">{p.uploadedBy} · {p.when}</div>
           </div>
         ))}
       </div>
 
       {shown.length === 0 && (
-        <div className="mut" style={{ fontSize: 12, paddingTop: 8 }}>No photo matches.</div>
+        <div className="mut t-small" style={{ paddingTop: 8 }}>No photo matches.</div>
       )}
     </>
   );

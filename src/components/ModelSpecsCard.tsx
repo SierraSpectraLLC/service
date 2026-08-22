@@ -64,13 +64,13 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
           </button>
         )}
       </div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
+      <div className="mut t-meta" style={{ marginBottom: 8 }}>
         The numbers you&apos;d otherwise open the manual for. Rows are yours to define - add what matters for a {modelName}.
       </div>
 
       {!editing && specs.length > 0 && <SpecTable specs={specs} />}
       {!editing && specs.length === 0 && (
-        <div className="mut" style={{ fontSize: 12 }}>
+        <div className="mut t-small">
           No specs recorded yet{siblings.length ? " - or start by copying a sibling's sheet and editing the differences" : ""}.
         </div>
       )}
@@ -88,12 +88,12 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
           }>
           {siblings.length > 0 && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-              <select value={copyFrom} onChange={(e) => copy(e.target.value)} style={{ width: "auto", fontSize: 12 }}
+              <select value={copyFrom} onChange={(e) => copy(e.target.value)} className="t-small" style={{ width: "auto" }}
                 aria-label="Copy specs from">
                 <option value="">Copy from...</option>
                 {siblings.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.specs.length} rows)</option>)}
               </select>
-              <span className="mut" style={{ fontSize: 11 }}>Fills rows you don&apos;t have; never overwrites yours.</span>
+              <span className="mut t-meta">Fills rows you don&apos;t have; never overwrites yours.</span>
             </div>
           )}
           {rows.map((r, i) => (
@@ -101,12 +101,12 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
               <input value={r.name} list="spec-names" placeholder='e.g. "Max pressure"'
                 aria-label={`Spec name, row ${i + 1}`}
                 onChange={(e) => setRow(i, { name: e.target.value })}
-                style={{ flex: "0 1 220px", fontSize: 13 }} />
+                className="t-body" style={{ flex: "0 1 220px" }} />
               <input value={r.value} placeholder='e.g. "1300 bar"'
                 aria-label={`Spec value, row ${i + 1}`}
                 onChange={(e) => setRow(i, { value: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter" && i === rows.length - 1 && rows.length < MAX_SPECS) setRows((rs) => [...rs, { name: "", value: "" }]); }}
-                style={{ flex: "1 1 200px", fontSize: 13 }} />
+                className="t-body" style={{ flex: "1 1 200px" }} />
               <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
                 onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}>×</button>
             </div>
