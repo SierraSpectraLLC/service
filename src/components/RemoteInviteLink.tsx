@@ -29,13 +29,13 @@ export default function RemoteInviteLink({ orgId, orgName }: { orgId: number; or
         }}>{pending ? "Building..." : "Build a 24-hour link"}</button>
 
       {link && (
-        <div style={{ marginTop: 10, fontSize: 12 }}>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 3 }}>enrolls into {orgName}</div>
+        <div className="t-small" style={{ marginTop: 10 }}>
+          <div className="mut t-meta" style={{ marginBottom: 3 }}>enrolls into {orgName}</div>
           <a href={link} target="_blank" rel="noreferrer" className="mono"
             style={{ overflowWrap: "anywhere" }}>{link}</a>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }
