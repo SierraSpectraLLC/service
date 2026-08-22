@@ -112,7 +112,9 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .page-title { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; color: var(--navy); margin: 0; line-height: 1.2; }
 .page-sub { flex-basis: 100%; font-size: 13px; color: var(--mut); margin: -6px 0 0; }
-.page-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* min/max width so a wide actions cluster (a facet strip in the head) scrolls
+   inside itself on a phone instead of widening the page. */
+.page-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }
 
 /* ── Empty states ───────────────────────────────────────────────────────────
    A quiet, centred block instead of one stranded sentence: the page still
@@ -468,27 +470,29 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .mnav-burger:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 .mnav-tabbar { display: none; }
 .mnav-drawer { display: none; }
-@media (max-width: 639px) {
+/* Tablet band: the desktop nav stays, but nothing may wrap - measured at 768
+   the full-size row broke into two lines. Tighter links, no workspace suffix,
+   and the brand name gives way (ellipsis) before anything stacks. */
+@media (min-width: 768px) and (max-width: 979px) {
+  .header-row { flex-wrap: nowrap; gap: 8px; }
+  .header-nav { flex-wrap: nowrap; min-width: 0; }
+  /* Descendant, not child: the Operations/Library menu summaries carry
+     .nav-link too and have to shrink with the rest. */
+  .header-nav .nav-link { padding: 5px 6px; font-size: 12px; }
+  .brand-org { display: none; }
+  /* The wordmark yields at tablet width; the logo keeps the corner. */
+  .brand-name { display: none; }
+  .nav-utility { padding-left: 7px; }
+}
+/* Below 768 the compressed desktop row still cannot hold five links plus the
+   utility cluster (measured 790px of content at 700), so the burger-and-drawer
+   header extends up to there. The bottom tab bar stays a phone thing. */
+@media (max-width: 767px) {
   .header-row { flex-wrap: nowrap; gap: 8px; }
   /* The links and their menus leave the header; the utility cluster stays. */
   .header-nav > .nav-link, .header-nav > .menu { display: none; }
   .brand-org { display: none; }
   .mnav-burger { display: inline-flex; }
-
-  .mnav-tabbar {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
-    display: flex; background: var(--card); border-top: 1px solid var(--line);
-    padding: 6px 4px calc(8px + env(safe-area-inset-bottom));
-  }
-  .mnav-tabbar a {
-    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-    font-size: 10.5px; font-weight: 600; color: var(--mut); text-decoration: none;
-  }
-  .mnav-tabbar a.active { color: var(--navy); }
-  .mnav-tabbar a:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; border-radius: 6px; }
-  /* The page ends above the bar, not underneath it. */
-  body.has-tabbar { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
-  body.has-tabbar .savebar { bottom: calc(58px + env(safe-area-inset-bottom)); }
 
   .mnav-drawer { display: block; position: fixed; inset: 0; z-index: 45; }
   .mnav-pane {
@@ -506,6 +510,22 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
     color: var(--ink); text-decoration: none;
   }
   .mnav-pane a.active { background: var(--t-info-bg); color: var(--navy); font-weight: 600; }
+}
+@media (max-width: 639px) {
+  .mnav-tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
+    display: flex; background: var(--card); border-top: 1px solid var(--line);
+    padding: 6px 4px calc(8px + env(safe-area-inset-bottom));
+  }
+  .mnav-tabbar a {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    font-size: 10.5px; font-weight: 600; color: var(--mut); text-decoration: none;
+  }
+  .mnav-tabbar a.active { color: var(--navy); }
+  .mnav-tabbar a:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; border-radius: 6px; }
+  /* The page ends above the bar, not underneath it. */
+  body.has-tabbar { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
+  body.has-tabbar .savebar { bottom: calc(58px + env(safe-area-inset-bottom)); }
 }
 
 /* ── Tabs (Settings and other sectioned pages) ──────────────────────────────

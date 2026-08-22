@@ -17,7 +17,9 @@ import type { Tone } from "@/lib/tones";
    both variants and pin the fixed pieces in place, so the inventory shows
    every state at any width. Dev route only - production never loads this. */
 const NAV_FRAME_CSS = `
-  .navframe { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-bottom: 12px; background: var(--bg); }
+  /* The desktop-variant fixture is deliberately wider than a phone; it
+     scrolls inside its own frame rather than widening the page. */
+  .navframe { border: 1px solid var(--line); border-radius: 12px; overflow-x: auto; overflow-y: hidden; margin-bottom: 12px; background: var(--bg); }
   .navframe-bar { background: var(--navy); color: #fff; display: flex; align-items: center; gap: 10px; padding: 8px 12px; flex-wrap: wrap; }
   .navframe .mnav-burger { display: inline-flex; }
 
@@ -142,7 +144,7 @@ export default function DevUiGallery() {
     <div className="container wide">
       <PageHead title="UI inventory" sub="Every kit component with fixture props. Development only."
         crumb={<span>dev › <b>ui</b></span>}
-        actions={<span className="facets">
+        actions={<span className="facets" style={{ minWidth: 0, maxWidth: "100%", overflowX: "auto", flexWrap: "nowrap" }}>
           {anchor("dialog-md", "Dialog md")}
           {anchor("dialog-sm", "Dialog sm")}
           {anchor("dialog-steps", "Dialog steps")}
