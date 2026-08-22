@@ -13,6 +13,7 @@ import {
   PART_KINDS, PART_KIND_LABEL, searchCatalog, type PartAlias,
 } from "@/lib/partCatalog";
 import type { UncataloguedPart } from "@/lib/partCatalog";
+import type { Tone } from "@/lib/tones";
 import PartNumberField, { forgetCatalog } from "./PartNumberField";
 
 export type CatalogRow = {
@@ -27,14 +28,11 @@ export type CatalogRow = {
 
 export type PartPhoto = { id: number; url: string; caption: string };
 
-const KIND_COLOR: Record<string, { bg: string; fg: string }> = {
-  part: { bg: "#E7F2FA", fg: "#1D6396" },
-  consumable: { bg: "#FAF0DC", fg: "#8A5410" },
-  kit: { bg: "#EDEBFA", fg: "#4F45A3" },
+const KIND_TONE: Record<string, Tone> = {
+  part: "info",
+  consumable: "warn",
+  kit: "accent",
 };
-
-/** {bg,fg} is how this codebase names a chip's palette; CSS wants other words. */
-const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg });
 
 const emptyDraft = {
   partNumber: "", name: "", manufacturer: "", mfrPartNumber: "",
@@ -165,7 +163,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{r.partNumber}</span>
               <span style={{ fontSize: 13 }}>{r.name || <span className="mut">unnamed</span>}</span>
-              <span className="pill" style={pill(KIND_COLOR[r.kind] ?? KIND_COLOR.part)}>{PART_KIND_LABEL[r.kind]}</span>
+              <span className={`pill ${KIND_TONE[r.kind] ?? "info"}`}>{PART_KIND_LABEL[r.kind]}</span>
               {/* The other numbers it answers to. Shown on the row rather than
                   hidden in the sheet, because the number somebody is holding is
                   as likely to be one of these as the one on the left. */}
@@ -190,7 +188,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
               {r.photos.length > 1 && (
                 <span className="mut" style={{ fontSize: 11 }}>▣ {r.photos.length}</span>
               )}
-              {r.archived && <span className="pill" style={{ background: "#F4F6F9", color: "#94A3B8" }}>retired</span>}
+              {r.archived && <span className="pill faint">retired</span>}
             </div>
             <div className="mut" style={{ fontSize: 11 }}>
               {[
@@ -237,15 +235,15 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                 <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{u.partNumber}</span>
                 <span style={{ fontSize: 12, minWidth: 0 }}>{u.name || <span className="mut">unnamed</span>}</span>
                 {u.sources.includes("maintenance") && (
-                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}
+                  <span className="pill good"
                     title="Named by a maintenance task or PM schedule">maintenance</span>
                 )}
                 {u.sources.includes("kit") && (
-                  <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}
+                  <span className="pill warn"
                     title="Listed inside a kit's contents">🧰 kit</span>
                 )}
                 {u.models.slice(0, 3).map((m) => (
-                  <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{m}</span>
+                  <span key={m} className="pill accent">{m}</span>
                 ))}
                 <span className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}>describe</span>
               </div>
@@ -499,7 +497,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
               {prices.filter((p) => p.partNumber.toLowerCase() === draft.partNumber.trim().toLowerCase()).map((p) => (
                 <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5 }}>
                   <span style={{ fontWeight: 600 }}>{p.vendor}</span>
-                  {p.isOem && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>OEM</span>}
+                  {p.isOem && <span className="pill info">OEM</span>}
                   <span className="mono">{formatCents(p.priceCents)}</span>
                   {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>link ↗</a>}
                   <button className="btn link" aria-label={`Remove ${p.vendor}'s price`} disabled={pending}
