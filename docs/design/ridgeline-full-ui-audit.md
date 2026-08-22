@@ -1,19 +1,35 @@
 # Ridgeline — full UI audit and rebuild plan
 
-Repo: `SierraSpectraLLC/service` · 54 routes · 113 components · `globals.css` 509 lines · no CSS framework.
+Repo: `SierraSpectraLLC/service` · 55 routes · 113 components · `globals.css` 509 lines · no CSS framework.
+
+> **Corrected 2026-08-22** against the codebase. Counts below are measured, not estimated.
+> Facts that constrain the plan:
+> - **Stage colors are data, not code.** `stage_defs` stores `bg`/`fg` hex per tenant
+>   (`src/db/schema.ts`), read by `src/lib/stageDefs.ts`; tenants can create custom stages
+>   with arbitrary colors. `STAGE_COLOR` in `src/lib/stages.ts` is only the seed/fallback.
+>   Converting stages to tones is a schema migration + lossy mapping — out of scope for the
+>   tone pass.
+> - **Some color records feed email HTML.** `src/lib/digest.ts` and `src/lib/eodEmail.ts`
+>   render emails, where literal inline hex is required. They keep their hex; do not sweep them.
+> - **`src/components/CatalogForm.tsx` contains a literal NUL byte** (the `"\x00any"` sentinel
+>   key). grep classifies the file as binary and silently skips it — every grep in this
+>   project must use `-a`, and the file is converted by hand. The sentinel must be preserved
+>   byte-for-byte.
+> - The companion doc `ridgeline-ui-audit-and-prompts.md` (Prompts 0–2, B2) is not in this
+>   repo; this document is the source of truth.
 
 ## 1. Findings that apply to the whole app
 
 | # | Finding | Evidence | Consequence |
 |---|---|---|---|
-| 1 | **Styling is per-element, not per-system.** | 3,121 inline `style={{}}`; 69 hex colors in TSX vs 14 CSS variables; `fontSize` set inline 1,471 times (12/11/13 by feel) | Nothing can be changed globally. Every page drifts. This is the root cause of "it looks messy." |
-| 2 | **Pills have no vocabulary.** | 197 `className="pill"`, each with inline bg/fg; 17 color pairs that are really 6 meanings | Same status looks different on different pages; near-duplicate hexes (#E5F3E5 / #E8F3EC) |
-| 3 | **Destructive actions use the browser's `window.confirm()`.** | 36 call sites across 22 components | Unstyled OS dialog, can't show what's about to happen, can't be undone, looks broken on mobile |
-| 4 | **Inline "dashed forms" are the only create/edit pattern.** | 37 `.dash-form` blocks open in place inside cards | Cards grow and push content; forms have no title, no validation area, no consistent footer; on mobile they open below the fold |
+| 1 | **Styling is per-element, not per-system.** | 3,121 inline `style={{}}`; 70 unique hex colors in TSX vs 17 `:root` variables; `fontSize:` set inline 1,617 times (12/11/13 by feel) | Nothing can be changed globally. Every page drifts. This is the root cause of "it looks messy." |
+| 2 | **Pills have no vocabulary.** | 197 `className="pill"`, each with inline bg/fg; ~45 distinct color pairs that are really ~7 meanings | Same status looks different on different pages; near-duplicate hexes (#E5F3E5 / #E8F3EC) |
+| 3 | **Destructive actions use the browser's `window.confirm()`.** | 28 call sites across 20 components. CustodyPanel is the deliberate exception: an armed two-click button with a consequence list, because a browser's "suppress additional dialogs" checkbox makes native `confirm()` silently return false (see the comment in the file). A non-native `ConfirmDialog` satisfies that same rationale. | Unstyled OS dialog, can't show what's about to happen, can't be undone, looks broken on mobile |
+| 4 | **Inline "dashed forms" are the only create/edit pattern.** | 31 `.dash-form` blocks across 21 components, open in place inside cards | Cards grow and push content; forms have no title, no validation area, no consistent footer; on mobile they open below the fold |
 | 5 | **Twelve separate sheet/modal implementations.** | `.sheet` used 12× (ProceduresPanel alone has 4); each manages its own scrim, header, close, and footer | No shared Dialog — every sheet differs in header, padding, buttons |
-| 6 | **Ten table implementations.** | `.reg`, `.grid-row`, `<table>` in CatalogGrid, AssetGrid, TenantConsole, PriceBookCard, ImportPanel, UsagePanel, SpecTable, StockGrid | Different header styles, striping, hover, and mobile behavior per table |
+| 6 | **Ten table implementations.** | `.reg`, `.grid-row`, `<table>` in CatalogGrid, AssetGrid, TenantConsole, PriceBookCard, ImportPanel, SpecTable, StockGrid; UsagePanel is a `.grid-row` div grid, not a `<table>` | Different header styles, striping, hover, and mobile behavior per table |
 | 7 | **No feedback layer.** | No toast/snackbar; only `NotificationCenter`; most actions give no confirmation | User can't tell if Save worked |
-| 8 | **Navigation has three levels and two systems.** | Top nav (5 links + 2 dropdowns) · Settings 2-row tabs · catalog sub-tabs; no mobile nav (header wraps) | On a phone the header is 3 rows of wrapped pills |
+| 8 | **Navigation has three levels and two systems.** | Top nav (3 fixed links + Inventory when the module is on + 2 staff-only dropdowns) · Settings 2-row tabs · catalog sub-tabs; no mobile nav (`.header-nav` wraps) | On a phone the header is 3 rows of wrapped pills |
 | 9 | **Record pages are 15–20 stacked cards.** | `instruments/[id]` 748 lines, 20 panels; `assets/[id]` 16 panels; plus drag-to-reorder "arrange mode" | Good bones (`.section-bar`, `.band-label`, `.panel-flow`) but each panel invents its own title row, list, and actions |
 | 10 | **Identifiers aren't typographically distinct.** | `--mono` exists; `.mono` used sparingly | Serials, part numbers, WO numbers, model names read as prose |
 
@@ -49,7 +65,7 @@ Lines = current page file length (component sizes not included). Issues are the 
 | `/assets/[id]` | R | 16 panels, PanelLayout | 534 | Every panel its own title style. → `Panel` everywhere; AssetControls' 3 confirms → `ConfirmDialog`. |
 | `/assets/[id]/label` | P | LabelCard | 38 | Fine; use `PrintHeader`. |
 | `/assets/[id]/signoff` | P | SignoffPanel, SignatureBlock | 201 | Fine; `PrintHeader`, signature block styling shared. |
-| `/instruments/[id]` | R | 20 panels, PanelLayout | 748 | Biggest page. Same as assets; CustodyPanel 3 confirms, QueuePanel dash-form, ClientRequest sheet → shared Dialog. |
+| `/instruments/[id]` | R | 20 panels, PanelLayout | 748 | Biggest page. Same as assets; CustodyPanel's armed two-click handoff (no native confirm — see §1.3) → `ConfirmDialog`, QueuePanel dash-form, ClientRequest sheet → shared Dialog. |
 | `/instruments/[id]/binder` | P | — | 246 | Validation binder; `PrintHeader`, `DataTable` for the procedure index. |
 | `/instruments/[id]/label`, `/signoff` | P | as assets | | same |
 | `/catalog/[id]` (model page) | R | ModelHeaderCard, ModelSpecsCard, PublishModelCard, ProceduresPanel, ReferencePanel | 276 | 7 stacked cards → hero + tabs (see model-page mockup). |
@@ -73,6 +89,10 @@ Lines = current page file length (component sizes not included). Issues are the 
 | `/remote`, `/remote/[id]`, `/remote/enroll/[orgId]` | U | RemoteDevicesPanel, RemoteInviteLink | 159/106/171 | Device list → `DataTable` (name, org, last seen dot, RowActions); session page keeps `.fill-window`; enroll → `X`-style single card. |
 | `/equipment`, `/equipment/[slug]` | X | SpecTable | 87/248 | Public catalog. → public header, `CardGrid`, model page with spec `DataTable`. |
 | `/lookup` | X | — | 11 | Serial lookup; single card, mono input. |
+| `/records/[id]` | R | ActivityFeed | 200 | Frozen engagement record (dossier snapshot). → `RecordHero` + `Panel`s, read-only. |
+| `/share/[token]` | X | — | 69 | Tokenized share page. → `PublicShell`. |
+| `/drop/[token]` | X | — | 62 | Tokenized file drop. → `PublicShell`. |
+| `/listing/[token]` | X | — | 134 | Public sale listing. → `PublicShell` (see archetypes prototype). |
 | `/checkout` | U | — | 7 | Redirect/stub. |
 | `/welcome`, `/whats-new` | F/X | WelcomeForm | 44/44 | Single `Panel`. |
 | `/login` | X | LoginForm | 116 | Single card, operator brand, magic-link field; `.container.form` kept. |
@@ -87,18 +107,18 @@ Lines = current page file length (component sizes not included). Issues are the 
 | `/settings/parts` | PartCatalogPanel (sheet), PriceBookCard (dash-form, confirm) | 162 | → Option A ledger. |
 | `/settings/organizations`, `/[id]` | PersonnelForm (confirm), OrgSettingsForm (3 confirms), SitesCard (sheet), AgreementsPanel (sheet) | 50/169 | → org list `DataTable`; org record = `RecordHero` + tabs (Profile · Sites · People · Agreements · Access). |
 | `/settings/admin` | SharePanel, AccessRequestsPanel (confirm), HouseMembersPanel (dash-form) | 144 | → `Panel`s; requests as `DataTable` with approve/deny RowActions. |
-| `/settings/activity` | UsagePanel (`<table>`) | 108 | → `DataTable`. |
+| `/settings/activity` | UsagePanel (`.grid-row` div grid) | 108 | → `DataTable`. |
 | `/settings/tenants` | TenantConsole (`<table>`) | 77 | → `DataTable`. |
 | `/agreements` | AgreementsPanel (sheet, 671 lines) | 93 | → `DataTable` of agreements (client, type, term, status dot) + `Dialog` for new/renew. |
 | `/admin/access` | — | 6 | redirect |
 
-### Dialog inventory (12 sheets + 37 inline forms + 36 confirms → 3 components)
+### Dialog inventory (12 sheets + 31 inline forms + 28 confirms → 3 components)
 
 | Today | Count | Becomes |
 |---|---|---|
 | `.sheet` modals (Photos, Sites, NewMessage, StoreFileList, PartCatalog, Procedures ×4, Agreements, NewStockroom, ClientRequest) | 12 | `Dialog` |
-| `.dash-form` inline create/edit (Tasks ×3, Assets ×3, PO ×3, WorkOrders ×2, StockroomAdmin ×2, Attachments ×2, WorkOrderControls ×2, + 15 singles) | 37 | `Dialog` for create; `InlineEdit` (single field, Enter/Esc) for one-line edits |
-| `window.confirm()` | 36 | `ConfirmDialog` |
+| `.dash-form` inline create/edit (Tasks ×3, Assets ×3, PO ×3, WorkOrders ×2, StockroomAdmin ×2, Attachments ×2, WorkOrderControls ×2, + 14 singles) | 31 | `Dialog` for create; `InlineEdit` (single field, Enter/Esc) for one-line edits |
+| `window.confirm()` (plus CustodyPanel's armed two-click handoff) | 28 | `ConfirmDialog` |
 
 ## 4. The component kit (what every archetype is built from)
 
@@ -144,12 +164,12 @@ FOUNDATION. Read src/app/globals.css fully and keep its commented style. No Tail
 
 1. Add tone variables (neutral, faint, info, good, warn, accent, bad — bg/fg pairs from the existing inline pill colors), .pill.{tone}, .dot.{tone}, a type scale (.t-meta 11 / .t-small 12 / .t-body 13 / .t-lead 14 / .t-title 16 / .t-page 22, .t-mono-id), spacing vars --sp-1..5 and .stack-N / .row-N utilities.
 2. Create src/components/ui/ with: Pill, Dot, Legend, Id, PageHead, Toolbar, FacetStrip, SectionHead, RowActions, Panel, EmptyState, Field, Seg, Tabs. Each wraps an existing globals.css class where one exists (.page-head, .empty, .seg, .tabs, .subtabs). None may contain inline styles.
-3. Convert every {bg,fg} color record exported from src/lib (procedureRole.ROLE_COLOR, provenance, stage colors, any others — grep "bg:") to a Tone name.
-4. Typecheck + tests. Show me the tone mapping table for the 17 existing pill color pairs before applying.
+3. Convert the STATIC {bg,fg} color records exported from src/lib to a Tone name: WO_COLOR (workOrders), PROVENANCE_STYLE, STANDING_COLOR (agreements AND gxp), DOC_STATE_COLOR (gxp), ROLE_COLOR (procedureRole), and po.ts. Do NOT touch stage colors (DB-backed per tenant), digest.ts, or eodEmail.ts (email HTML keeps literal hex).
+4. Typecheck + tests. Show me the tone mapping table for all ~45 existing pill color pairs before applying.
 ```
 
 ```
-SWEEP. Remove the ~3,100 inline style objects, biggest files first (ProceduresPanel, TasksPanel, StoreFileList, MaintenancePanel, PartCatalogPanel, AgreementsPanel, OrgSettingsForm, PartsPanel, ConfigurationForm, AttachmentsPanel, Dashboard, PdfStudio, then everything else). Layout-only objects → .row-N/.stack-N; fontSize → .t-*; pill colors → <Pill tone>; hex → nearest variable (ask me if none fits). Runtime-dependent styles (data-driven widths, org brand colors) may stay. JSX structure and behavior unchanged in this pass. One commit per file with the removed count. Report before/after totals.
+SWEEP. (Re-sequenced: runs AFTER the Phase 2–4 conversions, on files that survive them mostly intact, with a residue pass as the second-to-last block. Every grep uses -a; CatalogForm.tsx is swept by hand, preserving its "\x00any" sentinel byte-for-byte. Per-file before/after screenshots at 375 and 1280.) Remove the ~3,100 inline style objects, biggest files first (ProceduresPanel, TasksPanel, StoreFileList, MaintenancePanel, PartCatalogPanel, AgreementsPanel, OrgSettingsForm, PartsPanel, ConfigurationForm, AttachmentsPanel, Dashboard, PdfStudio, then everything else). Layout-only objects → .row-N/.stack-N; fontSize → .t-*; pill colors → <Pill tone>; hex → nearest variable (ask me if none fits). Runtime-dependent styles (data-driven widths, org brand colors) may stay. JSX structure and behavior unchanged in this pass. One commit per file with the removed count. Report before/after totals.
 ```
 
 ### Phase 2 — The three things every page shares
