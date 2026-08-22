@@ -11,6 +11,8 @@ import { formatCents } from "@/lib/money";
 import { canSeeCosts } from "@/lib/redact";
 import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import NeededPartsCard from "@/components/NeededPartsCard";
+import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
+import type { DataRow } from "@/components/ui/DataTable";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +21,10 @@ export const dynamic = "force-dynamic";
  * destination room's access, so a client's own purchasing shows up in their
  * portal and a provider only sees orders for rooms they can stock.
  */
-export default async function PurchasingPage() {
+export default async function PurchasingPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  const { q = "", status = "" } = await searchParams;
 
   const [rooms, myShares, orgRows] = await Promise.all([
     db.select().from(stockrooms).where(forTenant(stockrooms.tenantOrgId, readTenant(user))).orderBy(asc(stockrooms.name)),
@@ -65,57 +68,75 @@ export default async function PurchasingPage() {
   // seeing them - the same rule createPurchaseOrder enforces server-side.
   const orderRooms = rooms.filter((r) => stockAccess(user, r, myShares.find((s) => s.stockroomId === r.id)).issue);
   const roomOrg = new Map(seeRooms.map((r) => [r.id, r.orgId]));
-  const open = pos.filter((p) => p.status === "draft" || p.status === "sent" || p.status === "partial");
-  const closed = pos.filter((p) => !open.includes(p));
+  const isOpen = (p: typeof pos[number]) => p.status === "draft" || p.status === "sent" || p.status === "partial";
 
-  const row = (p: typeof pos[number]) => {
+  const needle = q.trim().toLowerCase();
+  const hit = (p: typeof pos[number]) =>
+    !needle
+    || p.number.toLowerCase().includes(needle)
+    || p.vendor.toLowerCase().includes(needle)
+    || (p.stockroomId !== null && (roomName.get(p.stockroomId) ?? "").toLowerCase().includes(needle));
+  const shown = pos.filter((p) => (!status || p.status === status) && hit(p));
+  const open = shown.filter(isOpen);
+  const closed = shown.filter((p) => !isOpen(p));
+  const statusHref = (s: string) => {
+    const p = new URLSearchParams();
+    if (needle) p.set("q", needle);
+    if (s && s !== status) p.set("status", s);
+    return `/purchasing${p.size ? `?${p}` : ""}`;
+  };
+
+  const toRow = (p: typeof pos[number]): DataRow => {
     const mine = lines.filter((l) => l.poId === p.id);
     const t = poTotals(mine);
     // Order value follows the destination room's owner, same rule as part cost.
     const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null, p.tenantOrgId);
-    return (
-      <div key={p.id} style={{ borderTop: "1px solid var(--line)", padding: "9px 0", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <Link href={`/purchasing/${p.id}`} className="mono" style={{ fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
-          {p.number}
-        </Link>
-        <span className={`pill ${PO_TONE[p.status] ?? "neutral"}`}>
-          {PO_LABEL[p.status] ?? p.status}
-        </span>
-        <span style={{ fontSize: 13 }}>{p.vendor}</span>
-        <span className="mut" style={{ fontSize: 12 }}>
-          → {p.stockroomId === null ? "(room gone)" : roomName.get(p.stockroomId) ?? "?"}
-        </span>
-        <span className="mut" style={{ fontSize: 12 }}>
-          {t.received} of {t.ordered} received
-        </span>
-        {p.expectedAt && <span className="mut" style={{ fontSize: 12 }}>· expected {p.expectedAt}</span>}
-        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "baseline" }}>
-          {showCosts && t.priced > 0 && <b style={{ fontSize: 13 }}>{formatCents(t.cents)}</b>}
-          <span className="mut" style={{ fontSize: 11 }}>{shopMonthDay(p.createdAt)}</span>
-        </span>
-      </div>
-    );
+    return {
+      key: p.id,
+      href: `/purchasing/${p.id}`,
+      group: isOpen(p) ? "Open" : "Closed",
+      cells: {
+        dot: <Dot tone={PO_TONE[p.status] ?? "neutral"} />,
+        po: <Id>{p.number}</Id>,
+        vendor: (
+          <span style={{ minWidth: 0, display: "block" }}>
+            <span style={{ fontWeight: 600 }}>{p.vendor}</span>
+            <span className="mut" style={{ display: "block", fontSize: 11 }}>
+              → {p.stockroomId === null ? "(room gone)" : roomName.get(p.stockroomId) ?? "?"}
+            </span>
+          </span>
+        ),
+        state: <Pill tone={PO_TONE[p.status] ?? "neutral"}>{PO_LABEL[p.status] ?? p.status}</Pill>,
+        recd: <span className="mut">{t.received} of {t.ordered}{p.expectedAt ? ` · exp ${p.expectedAt}` : ""}</span>,
+        total: showCosts && t.priced > 0 ? <b style={{ fontSize: 13 }}>{formatCents(t.cents)}</b> : null,
+        when: <span className="mut">{shopMonthDay(p.createdAt)}</span>,
+      },
+    };
   };
 
   return (
     <div className="container wide">
-      <div className="crumb">Operations › <b>Purchasing</b></div>
-      <div className="page-head">
-        <h1 className="page-title">Purchasing</h1>
-        {open.length > 0 && (
-          <span className="pill info">
-            {open.length} open
-          </span>
-        )}
-        <span className="page-actions">
-          <Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>
-        </span>
-        <p className="page-sub">
-          Orders are raised from a stockroom&apos;s reorder list, priced from the price book.
-          Receiving here is what puts stock on the shelf, so the count and the paperwork
-          can&apos;t drift apart.
-        </p>
-      </div>
+      <PageHead
+        crumb={<>Operations › <b>Purchasing</b></>}
+        title="Purchasing"
+        sub="Orders are raised from a stockroom's reorder list, priced from the price book. Receiving here is what puts stock on the shelf, so the count and the paperwork can't drift apart."
+        actions={<Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>}
+      />
+      <Toolbar
+        search={
+          <form action="/purchasing">
+            {status && <input type="hidden" name="status" value={status} />}
+            <input name="q" defaultValue={q} placeholder="PO number, vendor or room" aria-label="Search orders" />
+          </form>
+        }
+        facets={
+          <FacetStrip facets={Object.keys(PO_LABEL).map((s) => ({
+            key: s, label: PO_LABEL[s],
+            count: pos.filter((p) => p.status === s && hit(p)).length || undefined,
+            on: status === s, href: statusHref(s),
+          }))} />
+        }
+      />
       {/* The floor's queue, above the paperwork: these have systems waiting. */}
       <NeededPartsCard
         parts={needed.map((n) => ({
@@ -130,22 +151,26 @@ export default async function PurchasingPage() {
         canOrder={orderRooms.length > 0}
       />
 
-      <div className="card">
-        {open.length === 0 && closed.length === 0 && (
-          <div className="empty">
-            <b>No orders yet</b>
-            Open a stockroom and use its <b style={{ display: "inline" }}>Needs ordering</b> list to raise the first one.
-          </div>
-        )}
-        {open.map(row)}
-      </div>
-
-      {closed.length > 0 && (
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 4 }}>Closed</div>
-          {closed.map(row)}
-        </div>
-      )}
+      <DataTable
+        cols={[
+          { key: "dot", label: "", width: "12px" },
+          { key: "po", label: "PO", width: "90px" },
+          { key: "vendor", label: "Vendor", width: "minmax(160px, 1.6fr)" },
+          { key: "state", label: "Status", width: "120px" },
+          { key: "recd", label: "Received", width: "minmax(120px, 1fr)", hideMobile: true },
+          { key: "total", label: "Total", width: "90px", align: "right", hideMobile: true },
+          { key: "when", label: "Raised", width: "70px", align: "right", hideMobile: true },
+        ]}
+        rows={[...open.map(toRow), ...closed.map(toRow)]}
+        empty="No orders yet - open a stockroom and use its Needs ordering list to raise the first one"
+      />
+      <Legend items={[
+        { tone: "neutral", label: "draft" },
+        { tone: "info", label: "ordered" },
+        { tone: "warn", label: "part-received" },
+        { tone: "good", label: "received" },
+        { tone: "faint", label: "cancelled" },
+      ]} />
     </div>
   );
 }

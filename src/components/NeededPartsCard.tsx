@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { toast } from "@/components/ui/Toast";
 import { useMemo, useState, useTransition } from "react";
 import { orderNeededParts, sendPartsRequest } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
@@ -56,7 +57,9 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
   const toggle = (id: number) =>
     setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  // Success is a toast; an error stays on the card next to what failed.
   const done = (text: string, error = false) => {
+    if (!error) { toast({ message: text }); return; }
     setMsg({ text, error });
     setTimeout(() => setMsg(null), 6000);
   };
