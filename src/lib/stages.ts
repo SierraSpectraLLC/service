@@ -174,11 +174,11 @@ export const STAGE_COLOR: Record<string, { bg: string; fg: string }> = {
   "In service": { bg: "#E4F0E4", fg: "#2E6B2E" },
   "Maintenance due": { bg: "#FAF0DC", fg: "#8A5410" },
 };
-export const TASK_COLOR: Record<string, { bg: string; fg: string }> = {
-  Open: { bg: "#EEF1F5", fg: "#475569" },
-  "In progress": { bg: "#E7F2FA", fg: "#1D6396" },
-  Blocked: { bg: "#FBE9E9", fg: "#A32D2D" },
-  Done: { bg: "#E5F3E5", fg: "#2E6B2E" },
+export const TASK_TONE: Record<string, Tone> = {
+  Open: "neutral",
+  "In progress": "info",
+  Blocked: "bad",
+  Done: "good",
 };
 export const PART_COLOR: Record<string, { bg: string; fg: string }> = {
   Suggested: { bg: "#FAF0DC", fg: "#8A5410" },

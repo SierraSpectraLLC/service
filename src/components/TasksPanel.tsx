@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { promptReason } from "@/lib/reason";
 import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
-import { TASK_STATES, TASK_COLOR } from "@/lib/stages";
+import { TASK_STATES, TASK_TONE } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
 import {
@@ -42,10 +42,9 @@ function DueChip({ due, done, today }: { due: string; done: boolean; today: stri
   const label = `${parseInt(m)}/${parseInt(d)}`;
   const overdue = !done && due < today;
   const soon = !done && due === today;
-  const bg = overdue ? "#FBE9E9" : soon ? "#FAF0DC" : "#EEF1F5";
-  const fg = overdue ? "#A32D2D" : soon ? "#8A5410" : "#475569";
+  const tone = overdue ? "bad" : soon ? "warn" : "neutral";
   return (
-    <span className="pill" style={{ background: bg, color: fg }} title={`Due ${y}-${m}-${d}`}>
+    <span className={`pill ${tone}`} title={`Due ${y}-${m}-${d}`}>
       {overdue ? "overdue " : soon ? "due today" : "due "}{soon ? "" : label}
     </span>
   );
@@ -108,10 +107,8 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const band = toleranceBand(spec);
   const live = evaluateResult(spec, value);
   const r = task.result;
-  const verdictColor = (p: boolean | null) =>
-    p === true ? { background: "#E5F3E5", color: "#2E6B2E" }
-      : p === false ? { background: "#FBE9E9", color: "#A32D2D" }
-      : { background: "#EEF1F5", color: "#475569" };
+  const verdictTone = (p: boolean | null) =>
+    p === true ? "good" : p === false ? "bad" : "neutral";
 
   const save = () => {
     setError("");
@@ -136,11 +133,11 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
       {/* Recorded: the reading, what it means, and who stands behind it. */}
       {r && !editing && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span className="pill" style={
-            /^replaced$/i.test(r.value) ? { background: "#FDF0E7", color: "#9A5B12" }
-              : /^inspected$/i.test(r.value) ? { background: "#E7F2FA", color: "#1D6396" }
-              : verdictColor(r.passed)
-          }>
+          <span className={`pill ${
+            /^replaced$/i.test(r.value) ? "warn"
+              : /^inspected$/i.test(r.value) ? "info"
+              : verdictTone(r.passed)
+          }`}>
             {r.passed === true ? "Pass" : r.passed === false ? "Fail"
               : /^(inspected|replaced)$/i.test(r.value) ? r.value : "Recorded"}
           </span>
@@ -179,7 +176,7 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
           {/* The verdict before it is committed, so a bad reading is obvious
               while the instrument is still in front of you. */}
           {live.why && live.passed !== null && (
-            <span className="pill" style={{ ...verdictColor(live.passed), flexShrink: 0 }}>
+            <span className={`pill ${verdictTone(live.passed)}`} style={{ flexShrink: 0 }}>
               {live.passed ? "in band" : "out of band"}
             </span>
           )}
@@ -362,7 +359,7 @@ export default function TasksPanel({
             <input type="checkbox" checked={picked.has(t.id)} readOnly tabIndex={-1}
               aria-label={`Copy ${t.title}`} style={{ width: 15, height: 15, flexShrink: 0, pointerEvents: "none" }} />
           )}
-          <span className="pill" style={{ background: TASK_COLOR[t.state]?.bg, color: TASK_COLOR[t.state]?.fg }}>{t.state}</span>
+          <span className={`pill ${TASK_TONE[t.state] ?? "neutral"}`}>{t.state}</span>
           <span style={{ fontSize: 13, fontWeight: 700, flex: "1 1 160px", minWidth: 0, textDecoration: isDone ? "line-through" : "none", color: isDone ? "var(--mut)" : "var(--ink)" }}>{t.title}</span>
           {progress.total > 0 && (
             <span className="mut" style={{ fontSize: 11 }}>{progress.done}/{progress.total}</span>
@@ -370,14 +367,14 @@ export default function TasksPanel({
           {/* A test reads as a test in a list of twenty, and carries its verdict
               once it has one - the reading is the outcome, not the checkbox. */}
           {t.test && (
-            <span className="pill" style={
-              t.result?.passed === true ? { background: "#E5F3E5", color: "#2E6B2E" }
-              : t.result?.passed === false ? { background: "#FBE9E9", color: "#A32D2D" }
-              : t.result && /^replaced$/i.test(t.result.value) ? { background: "#FDF0E7", color: "#9A5B12" }
-              : t.result && /^inspected$/i.test(t.result.value) ? { background: "#E7F2FA", color: "#1D6396" }
-              : t.result ? { background: "#EEF1F5", color: "#475569" }
-              : { background: "#FAF0DC", color: "#8A5410" }
-            }>
+            <span className={`pill ${
+              t.result?.passed === true ? "good"
+              : t.result?.passed === false ? "bad"
+              : t.result && /^replaced$/i.test(t.result.value) ? "warn"
+              : t.result && /^inspected$/i.test(t.result.value) ? "info"
+              : t.result ? "neutral"
+              : "warn"
+            }`}>
               {/* For a pass/fail the value IS the verdict, so printing both
                   read "fail Fail". The verdict word alone for those; for a
                   measurement the number, with its verdict when there is one. */}
@@ -387,11 +384,11 @@ export default function TasksPanel({
                 : t.test.resultType === "inspect_replace" ? "outcome needed" : "no result"}
             </span>
           )}
-          {assetLabel(t.assetId) && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{assetLabel(t.assetId)}</span>}
+          {assetLabel(t.assetId) && <span className="pill accent">{assetLabel(t.assetId)}</span>}
           {/* Work the client asked for, rather than work we found. Reads differently
               in a list of twenty, and answers "who is waiting on this". */}
           {(t.origin === "issue" || t.origin === "pm_request") && (
-            <span className="pill" style={{ background: "#FDF0E7", color: "#9A5B12" }}>
+            <span className="pill warn">
               {t.origin === "issue" ? "reported" : "requested"}
             </span>
           )}
@@ -514,7 +511,7 @@ export default function TasksPanel({
                     <ItemCheckbox item={c} canEdit={canEdit} />
                     <span style={{ fontSize: 13, flex: 1, textDecoration: c.done ? "line-through" : "none", color: c.done ? "var(--mut)" : "var(--ink)" }}>{c.text}</span>
                     <button className="btn link" onClick={() => setInput("threadopen-" + c.id, !tOpen)} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      {n > 0 && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396", padding: "1px 7px" }}>{n}</span>}
+                      {n > 0 && <span className="pill info" style={{ padding: "1px 7px" }}>{n}</span>}
                       {tOpen ? "hide" : n > 0 ? "notes" : "+ note"}
                     </button>
                     {isStaff && (
@@ -716,7 +713,7 @@ export default function TasksPanel({
         <div style={{ marginBottom: active.length ? 12 : 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <span className="eyebrow">Checkout</span>
-            <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{checkout.length}</span>
+            <span className="pill accent">{checkout.length}</span>
           </div>
           {checkout.map((t) => renderTask(t, false))}
           {active.length > 0 && <div className="eyebrow" style={{ margin: "10px 0 6px" }}>Tasks</div>}
@@ -746,9 +743,7 @@ export default function TasksPanel({
               <a href={`/work/${job.id}`} className="mono" onClick={(e) => e.stopPropagation()}
                 style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)", textDecoration: "none" }}>{job.number}</a>
               <span style={{ fontSize: 13, flex: "1 1 140px" }}>{job.title}</span>
-              <span className="pill" style={done === rows.length
-                ? { background: "#E5F3E5", color: "#2E6B2E" }
-                : { background: "#EEF1F5", color: "#475569" }}>
+              <span className={`pill ${done === rows.length ? "good" : "neutral"}`}>
                 {done} of {rows.length} done
               </span>
               <span className="mut" style={{ fontSize: 12 }}>{unfolded ? "▾" : "▸"}</span>
@@ -767,7 +762,7 @@ export default function TasksPanel({
             style={{ cursor: "pointer", width: "100%", textAlign: "left", background: "#F5F7FA", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
             <span className="mut" style={{ fontSize: 12 }}>{showDone ? "▾" : "▸"}</span>
             <span style={{ fontSize: 12, fontWeight: 700, color: "var(--slate)" }}>Completed</span>
-            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{complete.length}</span>
+            <span className="pill good">{complete.length}</span>
           </button>
           {showDone && <div style={{ marginTop: 8 }}>{complete.map((t) => renderTask(t, true))}</div>}
         </div>
