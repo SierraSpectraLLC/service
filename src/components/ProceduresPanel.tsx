@@ -13,6 +13,7 @@ import { procedureRole, ROLE_LABEL, ROLE_TONE } from "@/lib/procedureRole";
 import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
 import ProvenanceChip from "./ProvenanceChip";
 import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
+import type { Tone } from "@/lib/tones";
 
 export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
@@ -26,9 +27,9 @@ export type ProcedureRow = {
   provenance?: string;
 };
 
-const KIND_GLYPH: Record<string, { glyph: string; bg: string; fg: string }> = {
-  task: { glyph: "☐", bg: "#E7F2FA", fg: "#1D6396" },
-  test: { glyph: "◎", bg: "#EDEBFA", fg: "#4F45A3" },
+const KIND_GLYPH: Record<string, { glyph: string; tone: Tone }> = {
+  task: { glyph: "☐", tone: "info" },
+  test: { glyph: "◎", tone: "accent" },
 };
 
 const CADENCES = [
@@ -89,9 +90,9 @@ function ScopeField({ scope, options, onChange }: {
   return (
     <div>
       <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "#fff", padding: 6, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-        {scope.length === 0 && <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>All models</span>}
+        {scope.length === 0 && <span className="pill faint">All models</span>}
         {scope.map((m) => (
-          <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span key={m} className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {m}
             <button type="button" className="chip-x" aria-label={`Remove ${m}`}
               onClick={() => onChange(scope.filter((s) => s !== m))}
@@ -433,7 +434,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             onPointerUp={endDrag} onPointerCancel={endDrag}
             style={{ fontSize: 13, userSelect: "none", padding: "2px 2px" }}>⠿</span>
         )}
-        <span aria-hidden style={{ width: 20, height: 20, borderRadius: 5, background: k.bg, color: k.fg, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>
+        <span aria-hidden style={{ width: 20, height: 20, borderRadius: 5, background: `var(--t-${k.tone}-bg)`, color: `var(--t-${k.tone}-fg)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>
           {k.glyph}
         </span>
         <button onClick={() => openEdit(i)} disabled={pending}
@@ -451,11 +452,11 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               </span>
             )}
             {i.required && (
-              <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}
+              <span className="pill bad"
                 title="Must be done before sign-off; a test also needs a report on file">Required</span>
             )}
             {i.qualification && (
-              <span className="pill" style={{ background: "#E9E4F5", color: "#5B3E96" }}
+              <span className="pill accent"
                 title={`${QUAL_LABEL[i.qualification] ?? i.qualification} work on regulated (GxP) systems`}>
                 {i.qualification}
               </span>
@@ -469,19 +470,19 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 cadence pill. See lib/procedureRole. */}
             <span className={`pill ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>
             {i.intervalDays !== null && (
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{cadenceLabel(i.intervalDays)}</span>
+              <span className="pill good">{cadenceLabel(i.intervalDays)}</span>
             )}
             {scopeChips.length ? (
               <>
                 {scopeChips.slice(0, 2).map((m) => (
-                  <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{m}</span>
+                  <span key={m} className="pill accent">{m}</span>
                 ))}
                 {scopeChips.length > 2 && (
-                  <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>+{scopeChips.length - 2}</span>
+                  <span className="pill accent">+{scopeChips.length - 2}</span>
                 )}
               </>
             ) : (
-              <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>
+              <span className="pill faint">
                 {assetType === "system" ? "All systems" : "All models"}
               </span>
             )}
@@ -491,10 +492,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {shared && (
               i.categoryScope.length ? (
                 i.categoryScope.map((c) => (
-                  <span key={c} className="pill" style={{ background: "#E0F0EE", color: "#0F6B5F" }}>{c}</span>
+                  <span key={c} className="pill good">{c}</span>
                 ))
               ) : (
-                <span className="pill" style={{ background: "#E0F0EE", color: "#0F6B5F" }}
+                <span className="pill good"
                   title={`Appears under ${served.join(" and ")} alike - edit to scope it to one`}>
                   all {served.length} system types
                 </span>
@@ -1076,10 +1077,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                     <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
                       <span className="mut" style={{ fontSize: 11 }}>fits</span>
                       {partModels.length === 0 && (
-                        <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>any model</span>
+                        <span className="pill faint">any model</span>
                       )}
                       {partModels.map((m) => (
-                        <span key={m} className="pill" style={{ background: "#EDEBFA", color: "#4F45A3", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span key={m} className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                           {m}
                           <button type="button" className="chip-x" aria-label={`This part no longer fits ${m}`}
                             onClick={() => setPart({ models: partModels.filter((x) => x !== m) })}
