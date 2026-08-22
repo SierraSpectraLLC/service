@@ -70,15 +70,15 @@ export default function CloudLibraryCard({ account, brokenReason, note: handshak
           the disconnect it belongs with. */}
       <div className="card-title">OneDrive, Teams and SharePoint</div>
       {handshake && (
-        <div style={{ fontSize: 12, marginTop: 6, color: handshake === "connected" ? "#2E6B2E" : "#A32D2D" }}>
+        <div className="t-small" style={{ marginTop: 6, color: handshake === "connected" ? "var(--t-good-fg)" : "var(--t-bad-fg)" }}>
           {handshake === "connected" ? "Connected ✓" : handshake}
         </div>
       )}
-      {busy && <div className="mut" style={{ fontSize: 12, marginTop: 6 }}>Copying {busy}...</div>}
-      {note && <div style={{ fontSize: 12, marginTop: 6, color: "#2E6B2E", fontWeight: 700 }}>{note}</div>}
-      {error && <div style={{ fontSize: 12, marginTop: 6, color: "#A32D2D" }}>{error}</div>}
+      {busy && <div className="mut t-small" style={{ marginTop: 6 }}>Copying {busy}...</div>}
+      {note && <div className="t-small" style={{ marginTop: 6, color: "var(--t-good-fg)", fontWeight: 700 }}>{note}</div>}
+      {error && <div className="t-small" style={{ marginTop: 6, color: "var(--t-bad-fg)" }}>{error}</div>}
       {full && account && (
-        <div style={{ fontSize: 12, marginTop: 6, color: "#A32D2D" }}>
+        <div className="t-small" style={{ marginTop: 6, color: "var(--t-bad-fg)" }}>
           Storage is full - remove a file or raise the limit before copying more in.
         </div>
       )}
