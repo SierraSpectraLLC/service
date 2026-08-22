@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { logPastWorkOrder, openWorkOrder } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { WO_LABEL, WO_SEVERITIES, WO_TONE, woLine, woOpen } from "@/lib/workOrders";
 
 export type WorkOrderRow = {
@@ -108,7 +110,23 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
           was done. "What was done" is the one required thing - a backfilled
           job with no summary is a date, not history. */}
       {past && (
-        <div className="dash-form" style={{ marginBottom: 8 }}>
+        <Dialog open onClose={() => setPast(false)} title="Record a past job"
+          context="Filed already closed, on the date it was done."
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setPast(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !pastDraft.title.trim() || !pastDraft.summary.trim() || !pastDraft.date}
+                onClick={() => startTransition(async () => {
+                  const res = await logPastWorkOrder(target, pastDraft);
+                  if (res?.error) { setError(res.error); return; }
+                  setPast(false); setPastDraft({ title: "", summary: "", date: "", reference: "", doneBy: "" });
+                  toast({ message: "Filed the past job, closed" });
+                })}>
+                {pending ? "Filing..." : "File it, closed"}
+              </button>
+            </>
+          }>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div style={{ flex: "2 1 180px" }}>
               <label>What was the job? *</label>
@@ -136,20 +154,20 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
                 placeholder="Engineer or vendor (optional)" />
             </div>
           </div>
-          <button className="btn sm accent" disabled={pending || !pastDraft.title.trim() || !pastDraft.summary.trim() || !pastDraft.date}
-            onClick={() => startTransition(async () => {
-              const res = await logPastWorkOrder(target, pastDraft);
-              if (res?.error) { setError(res.error); return; }
-              setPast(false); setPastDraft({ title: "", summary: "", date: "", reference: "", doneBy: "" });
-            })}>
-            {pending ? "Filing..." : "File it, closed"}
-          </button>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+        </Dialog>
       )}
 
       {open && (
-        <div className="dash-form" style={{ marginBottom: 8 }}>
+        <Dialog open onClose={() => setOpen(false)} title="Open a work order"
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={file} disabled={pending || !title.trim()}>
+                {pending ? "Opening..." : assignee ? `Open & dispatch to ${assignee}` : "Open work order"}
+              </button>
+            </>
+          }>
           <label>What is the job? *</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={160}
             placeholder="Lamp won't ignite" style={{ marginBottom: 8 }} />
@@ -177,11 +195,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
               {assignee && <span className="mut" style={{ fontSize: 11 }}>{assignee} gets notified the moment it files.</span>}
             </div>
           )}
-          <button className="btn sm accent" onClick={file} disabled={pending || !title.trim()}>
-            {pending ? "Opening..." : assignee ? `Open & dispatch to ${assignee}` : "Open work order"}
-          </button>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+        </Dialog>
       )}
       {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
       {flag && (
