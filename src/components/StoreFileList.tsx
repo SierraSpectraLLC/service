@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
 import {
   attachLibraryFile, createFolder, createShareLink, deleteAttachment, deleteFolder,
   moveFilesToFolder, moveFolder, renameFolder, saveFileColumns, updateAttachment,
@@ -356,8 +356,14 @@ export default function StoreFileList({
           {canOrganise && !shareUrl && (
             <button className="btn sm" disabled={pending}
               title="A link anyone can open - no account needed. Lasts two weeks; revoke it under Links."
-              onClick={() => {
-                const label = window.prompt("Name this share (optional) - e.g. who it's for:", "") ?? "";
+              onClick={async () => {
+                const label = await inputDialog({
+                  title: "Share these files",
+                  body: "A link anyone can open - no account needed. Lasts two weeks; revoke it under Links.",
+                  action: "Create link", label: "Label",
+                  hint: "Optional - e.g. who it's for.", allowEmpty: true,
+                });
+                if (label === null) return;
                 startTransition(async () => {
                   const ids = shown.filter((f) => picked.has(f.url)).map((f) => f.places[0].attachmentId);
                   const res = await createShareLink(ids, {
@@ -515,8 +521,11 @@ export default function StoreFileList({
             {canOrganise && (
               <>
                 <button className="btn link row-act" style={{ fontSize: 10.5 }} disabled={pending}
-                  onClick={() => {
-                    const next = window.prompt(`Rename "${d.name}" to?`, d.name);
+                  onClick={async () => {
+                    const next = await inputDialog({
+                      title: `Rename "${d.name}"`, action: "Rename",
+                      label: "New name", initial: d.name,
+                    });
                     if (next === null) return;
                     startTransition(async () => {
                       const res = await renameFolder(d.id, next);

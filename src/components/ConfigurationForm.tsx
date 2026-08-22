@@ -6,7 +6,7 @@ import {
   setBranding, setOperatorOrg, setModule, setDigestHour, sendDigestNow,
   setPlatformAppearance,
 } from "@/app/actions";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, inputDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
 import Field from "@/components/ui/Field";
@@ -206,9 +206,12 @@ export default function ConfigurationForm(props: {
       else setStageDraft({ name: "", bg: "#C9DAF8" });
     });
   };
-  const doRename = (s: StageRow) => {
-    const next = window.prompt(`Rename stage "${s.name}" to:`, s.name);
-    if (!next || next.trim() === s.name) return;
+  const doRename = async (s: StageRow) => {
+    const next = await inputDialog({
+      title: `Rename stage "${s.name}"`, action: "Rename",
+      label: "New name", initial: s.name,
+    });
+    if (!next || next === s.name) return;
     setStageError("");
     startTransition(async () => {
       const res = await renameStage(s.id, next);

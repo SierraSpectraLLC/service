@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addVocabTerms, deleteVocabTerm, renameMaker } from "@/app/actions";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, inputDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import { makerUsageLine, type MakerRow } from "@/lib/makers";
 
@@ -35,14 +35,18 @@ export default function MakersCard({ makers }: { makers: MakerRow[] }) {
     });
   };
 
-  const rename = (m: MakerRow) => {
-    const next = window.prompt(`Rename "${m.name}" everywhere - models, systems, units, parts, purchasing:`, m.name);
-    if (next === null || !next.trim() || next.trim() === m.name) return;
+  const rename = async (m: MakerRow) => {
+    const next = await inputDialog({
+      title: `Rename "${m.name}"`,
+      body: "Applies everywhere - models, systems, units, parts, purchasing.",
+      action: "Rename", label: "New name", initial: m.name,
+    });
+    if (next === null || !next || next === m.name) return;
     setError(""); setNote("");
     startTransition(async () => {
-      const res = await renameMaker(m.name, next.trim());
+      const res = await renameMaker(m.name, next);
       if (res?.error) { setError(res.error); return; }
-      setNote(`"${m.name}" is now "${next.trim()}" on ${res.changed ?? 0} record${res.changed === 1 ? "" : "s"}`);
+      setNote(`"${m.name}" is now "${next}" on ${res.changed ?? 0} record${res.changed === 1 ? "" : "s"}`);
     });
   };
 

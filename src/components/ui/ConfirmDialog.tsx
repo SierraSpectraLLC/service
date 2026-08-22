@@ -29,10 +29,29 @@ export type ConfirmOptions = {
   cancel?: string;
 };
 
+export type InputOptions = ConfirmOptions & {
+  /** The field's label. Defaults to "Name". */
+  label?: string;
+  initial?: string;
+  placeholder?: string;
+  hint?: string;
+  /** Resolve "" as a valid answer - for genuinely optional input. */
+  allowEmpty?: boolean;
+};
+
+/** What the dialog's text field looks like and when its answer counts. */
+type InputSpec = {
+  label: string;
+  placeholder?: string;
+  hint?: string;
+  initial: string;
+  minLen: number;
+};
+
 type Pending = {
   opts: ConfirmOptions;
-  /** Set for confirmReason: the confirm also collects an audit reason. */
-  withReason?: boolean;
+  /** Set when the dialog also collects a string: confirmReason or inputDialog. */
+  input?: InputSpec;
   resolve: (answer: boolean | string | null) => void;
 };
 
@@ -67,35 +86,65 @@ export function confirmReasonText(what: string): Promise<string | null> {
 export function confirmReason(opts: ConfirmOptions): Promise<string | null> {
   current?.resolve(null);
   return new Promise<string | null>((resolve) => {
-    current = { opts, withReason: true, resolve: resolve as Pending["resolve"] };
+    current = {
+      opts,
+      input: {
+        label: "Reason", placeholder: "Recorded in the audit trail",
+        hint: "A few words, kept with the record of this action.",
+        initial: "", minLen: 3,
+      },
+      resolve: resolve as Pending["resolve"],
+    };
+    notify?.();
+  });
+}
+
+/**
+ * window.prompt's successor for plain input - a rename, a label, a
+ * type-to-confirm. Resolves the trimmed value, or null on Cancel, Escape,
+ * or the scrim. Unlike native prompt it survives the browser's "suppress
+ * dialogs" checkbox, and its action button names the act.
+ */
+export function inputDialog(opts: InputOptions): Promise<string | null> {
+  current?.resolve(null);
+  return new Promise<string | null>((resolve) => {
+    current = {
+      opts,
+      input: {
+        label: opts.label ?? "Name", placeholder: opts.placeholder,
+        hint: opts.hint, initial: opts.initial ?? "",
+        minLen: opts.allowEmpty ? 0 : 1,
+      },
+      resolve: resolve as Pending["resolve"],
+    };
     notify?.();
   });
 }
 
 export function ConfirmHost() {
   const [pending, setPending] = useState<Pending | null>(null);
-  const [reason, setReason] = useState("");
+  const [value, setValue] = useState("");
 
   useEffect(() => {
-    notify = () => { setPending(current); setReason(""); };
+    notify = () => { setPending(current); setValue(current?.input?.initial ?? ""); };
     // A call made before hydration finished still shows.
-    if (current) setPending(current);
+    if (current) { setPending(current); setValue(current.input?.initial ?? ""); }
     return () => { notify = null; };
   }, []);
 
   if (!pending) return null;
-  const { opts, withReason } = pending;
+  const { opts, input } = pending;
   const settle = (answer: boolean | string | null) => {
     pending.resolve(answer);
     if (current === pending) current = null;
     setPending(null);
-    setReason("");
+    setValue("");
   };
-  const cancelValue = withReason ? null : false;
-  const ready = !withReason || reason.trim().length >= 3;
+  const cancelValue = input ? null : false;
+  const ready = !input || value.trim().length >= input.minLen;
   const confirm = () => {
     if (!ready) return;
-    settle(withReason ? reason.trim() : true);
+    settle(input ? value.trim() : true);
   };
 
   return (
@@ -106,7 +155,7 @@ export function ConfirmHost() {
           <button type="button" className="btn" onClick={() => settle(cancelValue)}>
             {opts.cancel ?? "Cancel"}
           </button>
-          <button type="button" autoFocus={!withReason} disabled={!ready}
+          <button type="button" autoFocus={!input} disabled={!ready}
             className={`btn ${opts.tone === "bad" ? "danger" : "primary"}`}
             onClick={confirm}>
             {opts.action}
@@ -114,14 +163,14 @@ export function ConfirmHost() {
         </>
       }>
       {opts.body != null && <div className="t-body">{opts.body}</div>}
-      {withReason && (
+      {input && (
         <div className="field" style={{ marginTop: opts.body != null ? 10 : 0 }}>
-          <label htmlFor="confirm-reason">Reason</label>
-          <input id="confirm-reason" value={reason} autoFocus maxLength={300}
-            placeholder="Recorded in the audit trail"
-            onChange={(e) => setReason(e.target.value)}
+          <label htmlFor="confirm-input">{input.label}</label>
+          <input id="confirm-input" value={value} autoFocus maxLength={300}
+            placeholder={input.placeholder}
+            onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") confirm(); }} />
-          <div className="field-hint">A few words, kept with the record of this action.</div>
+          {input.hint && <div className="field-hint">{input.hint}</div>}
         </div>
       )}
     </Dialog>
