@@ -102,6 +102,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="container wide">
+      <div className="crumb">Operations › <b>Metrics</b></div>
       <div className="page-head">
         <h1 className="page-title">Metrics</h1>
         <span className="page-actions">

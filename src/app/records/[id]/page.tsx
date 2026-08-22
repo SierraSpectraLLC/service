@@ -52,8 +52,8 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="container page">
-      <div style={{ marginBottom: 10 }}>
-        <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Dashboard</Link>
+      <div className="crumb">
+        <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Dashboard</Link> › <b>Engagement record</b>
       </div>
 
       <div className="card">

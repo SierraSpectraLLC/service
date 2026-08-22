@@ -95,6 +95,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
 
   return (
     <div className="container wide">
+      <div className="crumb">Operations › <b>EOD update</b></div>
       <div className="page-head">
         <h1 className="page-title">EOD update</h1>
         <span className="page-actions"><EodDateNav date={date} today={today} dates={dates} /></span>

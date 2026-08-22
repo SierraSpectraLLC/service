@@ -387,9 +387,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           keeps their labels whole), so on a phone they have to go onto another
           line rather than push the page wider than the screen. */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <Link href="/" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
-          ← All instruments
-        </Link>
+        <div className="crumb" style={{ margin: 0 }}>
+          <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
+        </div>
         <span style={{ marginLeft: "auto" }} />
 
         {/* Anybody who can see the system can ask for help with it - including a

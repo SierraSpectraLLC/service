@@ -99,6 +99,7 @@ export default async function PurchasingPage() {
 
   return (
     <div className="container wide">
+      <div className="crumb">Operations › <b>Purchasing</b></div>
       <div className="page-head">
         <h1 className="page-title">Purchasing</h1>
         {open.length > 0 && (

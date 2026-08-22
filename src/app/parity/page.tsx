@@ -16,6 +16,7 @@ export default async function ParityPage() {
   const openCount = diffs.filter((d) => !d.resolved).length;
   return (
     <div className="container wide">
+      <div className="crumb">Operations › <b>Sheet parity</b></div>
       <div className="page-head">
         <h1 className="page-title">Google Sheet parity</h1>
         <span className="mut" style={{ fontSize: 12 }}>

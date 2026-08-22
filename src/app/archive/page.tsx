@@ -29,6 +29,7 @@ export default async function ArchivePage() {
 
   return (
     <div className="container page">
+      <div className="crumb">Operations › <b>Archived</b></div>
       <div className="page-head">
         <h1 className="page-title">Archived systems</h1>
         <p className="page-sub">Retired from the active fleet, kept in full. Open one to restore it.</p>

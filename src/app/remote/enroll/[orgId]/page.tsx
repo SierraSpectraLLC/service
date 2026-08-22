@@ -65,8 +65,10 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
 
   return (
     <div className="container page">
+      <div className="crumb">
+        Operations › <Link href="/remote" style={{ textDecoration: "none", color: "inherit" }}>Remote support</Link> › <b>Enroll a machine</b>
+      </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <Link href="/remote" className="btn sm" style={{ textDecoration: "none" }}>← Machines</Link>
         <h1 style={{ fontSize: 20, margin: 0 }}>Enroll a machine</h1>
         <span className="pill info">{org.name}</span>
       </div>

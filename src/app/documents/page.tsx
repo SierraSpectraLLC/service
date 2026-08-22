@@ -138,6 +138,7 @@ export default async function DocumentsPage(
 
   return (
     <div className="container fluid">
+      <div className="crumb">Library › <b>Files</b></div>
       <div className="page-head">
         <h1 className="page-title">Files</h1>
         <span className="mut" style={{ fontSize: 12 }}>

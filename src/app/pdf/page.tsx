@@ -99,6 +99,7 @@ export default async function PdfStudioPage() {
 
   return (
     <div className="container split">
+      <div className="crumb">Library › <b>PDF studio</b></div>
       <div className="page-head">
         <h1 className="page-title">PDF studio</h1>
         <p className="page-sub">Pull pages from any PDF, reorder them, and save the packet where it belongs.</p>

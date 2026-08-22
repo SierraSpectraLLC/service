@@ -21,6 +21,7 @@ export default async function WhatsNewPage() {
 
   return (
     <div className="container" style={{ maxWidth: 720 }}>
+      <div className="crumb"><b>What&apos;s new</b></div>
       <div className="page-head">
         <h1 className="page-title">What&apos;s new in Baseline</h1>
       </div>

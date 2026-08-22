@@ -68,7 +68,9 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
   return (
     <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <Link href="/purchasing" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Purchasing</Link>
+        <div className="crumb" style={{ margin: 0 }}>
+          Operations › <Link href="/purchasing" style={{ textDecoration: "none", color: "inherit" }}>Purchasing</Link> › <b>{po.number}</b>
+        </div>
         {room && (
           <Link href={`/stock/${room.id}`} className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
             {room.name} →

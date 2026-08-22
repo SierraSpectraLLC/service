@@ -141,7 +141,9 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
   return (
     <div className="container wide">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <Link href="/stock" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← All inventory</Link>
+        <div className="crumb" style={{ margin: 0 }}>
+          <Link href="/stock" style={{ textDecoration: "none", color: "inherit" }}>Inventory</Link> › <b>{room.name}</b>
+        </div>
         {acc.issue && (
           <Link href="/purchasing" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
             Purchase orders

@@ -63,6 +63,7 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="container page">
+      <div className="crumb">Library › <b>Gallery</b></div>
       <div className="page-head">
         <h1 className="page-title">Gallery</h1>
         <span className="mut" style={{ fontSize: 12 }}>

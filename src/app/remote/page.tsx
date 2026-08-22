@@ -114,6 +114,7 @@ export default async function RemotePage() {
 
   return (
     <div className="container page">
+      <div className="crumb">Operations › <b>Remote support</b></div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <h1 style={{ fontSize: 20, margin: 0 }}>Remote support</h1>
         <span className="mut" style={{ fontSize: 12 }}>

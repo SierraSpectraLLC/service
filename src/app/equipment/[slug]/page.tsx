@@ -130,9 +130,8 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
     <div className="container page" style={{ maxWidth: 860 }}>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
 
-      <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-        <Link href="/equipment" style={{ textDecoration: "none" }}>Equipment library</Link>
-        {" / "}{term.assetType}
+      <div className="crumb">
+        <Link href="/equipment" style={{ textDecoration: "none", color: "inherit" }}>Equipment library</Link> › <b>{term.assetType}</b>
       </div>
 
       <div className="card">

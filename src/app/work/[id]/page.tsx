@@ -218,7 +218,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   return (
     <div className="container page">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <Link href="/work" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← All work orders</Link>
+        <div className="crumb" style={{ margin: 0 }}>
+          <Link href="/work" style={{ textDecoration: "none", color: "inherit" }}>Work orders</Link> › <b>{wo.number}</b>
+        </div>
         <Link href={place.href} className="mut" style={{ fontSize: 13, textDecoration: "none", marginLeft: "auto" }}>
           {place.label} →
         </Link>

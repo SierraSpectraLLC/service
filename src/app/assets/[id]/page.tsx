@@ -257,9 +257,9 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   return (
     <div className="container split">
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <Link href="/assets" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
-          ← Assets
-        </Link>
+        <div className="crumb" style={{ margin: 0 }}>
+          <Link href="/assets" style={{ textDecoration: "none", color: "inherit" }}>Assets</Link> › <b>{asset.model || asset.kind}</b>
+        </div>
         <span style={{ marginLeft: "auto" }} />
         {/* A unit on no system can't be worked the way a system can - no stages,
             no queue, no sign-off packet, and nothing on the dashboard. This is

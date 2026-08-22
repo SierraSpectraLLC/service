@@ -12,6 +12,7 @@ export default async function ImportPage() {
 
   return (
     <div className="container wide">
+      <div className="crumb">Library › <b>Import spreadsheet</b></div>
       <div className="page-head">
         <h1 className="page-title">Import from a spreadsheet</h1>
       </div>

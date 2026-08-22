@@ -58,7 +58,9 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
   return (
     <div className="fill-window" style={{ padding: "12px 16px", maxWidth: 2200, margin: "0 auto", width: "100%" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
-        <Link href="/remote" className="btn sm" style={{ textDecoration: "none" }}>← Machines</Link>
+        <div className="crumb" style={{ margin: 0 }}>
+          <Link href="/remote" style={{ textDecoration: "none", color: "inherit" }}>Remote support</Link> ›
+        </div>
         <h1 style={{ fontSize: 18, margin: 0 }}>{label}</h1>
         {host && <span className="mono mut" style={{ fontSize: 11 }}>{host}</span>}
         {row.orgName && (

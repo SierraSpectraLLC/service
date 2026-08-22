@@ -35,10 +35,8 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="container page">
-      <div className="no-print" style={{ marginBottom: 10 }}>
-        <Link href="/messages" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
-          ← All messages
-        </Link>
+      <div className="crumb no-print">
+        <Link href="/messages" style={{ textDecoration: "none", color: "inherit" }}>Messages</Link> › <b>Thread</b>
       </div>
       <ThreadPanel
         threadId={threadId}

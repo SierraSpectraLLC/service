@@ -114,7 +114,9 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="container page">
-      <Link href="/settings/catalog" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Equipment catalog</Link>
+      <div className="crumb">
+        Settings › <Link href="/settings/catalog" style={{ textDecoration: "none", color: "inherit" }}>Catalog</Link> › <b>{term.name}</b>
+      </div>
       <ModelHeaderCard
         termId={term.id} name={term.name} assetType={term.assetType}
         manufacturer={term.manufacturer} categories={term.categories} gases={term.gases}
