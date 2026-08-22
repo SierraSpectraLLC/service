@@ -20,7 +20,7 @@
 import { and, asc, eq, gte, inArray, lt, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, tasks, workOrders,
+  appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
 } from "@/db/schema";
 import { BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { TONE_HEX } from "@/lib/tones";
@@ -224,6 +224,18 @@ export function courts(items: PendingItem[]): Record<Court, PendingItem[]> {
 // ---------------------------------------------------------------------------
 
 type GasIssue = { externalId: string; gas: string; status: string; note: string };
+/**
+ * A recorded test verdict of Fail, still standing. The sharpest line in the
+ * digest: a failed REQUIRED test blocks release sign-off (lib/signoff), and
+ * either way somebody decides today whether to re-run it or chase the fault.
+ */
+type FailedTest = {
+  externalId: string; title: string;
+  /** What it read, unit and all - the claim, not our summary of it. */
+  value: string;
+  days: number | null;
+  required: boolean;
+};
 type WorkBlock = { externalId: string; label: string; lines: string[] };
 type BoardRow = {
   externalId: string; label: string; stages: string[];
@@ -242,6 +254,7 @@ export type DigestSection = {
   followUps: FollowUp[];
   handoffs: HandoffItem[];
   gas: GasIssue[];
+  failedTests: FailedTest[];
   work: WorkBlock[];
   /** "9 changes logged since yesterday by joe, chris" - internal only. */
   activity: string;
@@ -277,7 +290,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
   const ids = rows.map((r) => r.id);
 
   const none = <T,>() => Promise.resolve([] as T[]);
-  const [labels, gasRows, partRows, taskRows, woRows, updateRows, auditRows, orgRows] = await Promise.all([
+  const [labels, gasRows, partRows, taskRows, woRows, updateRows, auditRows, orgRows, resultRows] = await Promise.all([
     getSystemLabels(rows),
     ids.length ? db.select().from(instrumentGases).where(inArray(instrumentGases.instrumentId, ids)) : none<typeof instrumentGases.$inferSelect>(),
     ids.length ? db.select().from(parts).where(inArray(parts.instrumentId, ids)) : none<typeof parts.$inferSelect>(),
@@ -295,7 +308,33 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     )) : none<typeof eodUpdates.$inferSelect>(),
     db.select().from(auditLog).where(gte(auditLog.createdAt, cutoff)),
     db.select().from(orgs),
+    // Every recorded verdict on these systems' tests, once: the failures
+    // become the attention card, and the window's completed tests carry
+    // their verdict into the narrative lines.
+    ids.length
+      ? db.select({
+          taskId: taskResults.taskId, value: taskResults.value, passed: taskResults.passed,
+          recordedAt: taskResults.recordedAt,
+          instrumentId: tasks.instrumentId, taskState: tasks.state,
+          title: tasks.title, procedureId: tasks.procedureId,
+        }).from(taskResults).innerJoin(tasks, eq(taskResults.taskId, tasks.id))
+          .where(inArray(tasks.instrumentId, ids))
+      : none<{
+          taskId: number; value: string; passed: boolean | null; recordedAt: Date;
+          instrumentId: number | null; taskState: string; title: string; procedureId: number | null;
+        }>(),
   ]);
+
+  // Which failed tests are mandatory - those block sign-off (lib/signoff).
+  const failedProcIds = [...new Set(resultRows
+    .filter((r) => r.passed === false && r.procedureId !== null)
+    .map((r) => r.procedureId as number))];
+  const requiredProcs = new Set(
+    (failedProcIds.length
+      ? await db.select({ id: procedures.id }).from(procedures)
+          .where(and(inArray(procedures.id, failedProcIds), eq(procedures.required, true)))
+      : []).map((p) => p.id),
+  );
 
   const orgName = (id: number | null) =>
     id === null ? brand.operatorName : (orgRows.find((o) => o.id === id)?.name ?? "another organization");
@@ -317,7 +356,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     const systems = rows.filter((r) => (r.ownerOrgId ?? null) === ownerId);
     const section: DigestSection = {
       orgId: ownerId, name: orgName(ownerId),
-      board: [], pending: [], followUps: [], handoffs: [], gas: [], work: [], activity: "",
+      board: [], pending: [], followUps: [], handoffs: [], gas: [], failedTests: [], work: [], activity: "",
     };
     const sysIds = new Set(systems.map((s) => s.id));
 
@@ -356,6 +395,15 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
           for (const x of g.filter((x) => gasAttention(x.status))) {
             section.gas.push({ externalId: i.externalId, gas: x.gas, status: x.status, note: x.note });
           }
+          // A Fail stands until the test is re-run or the record moves on -
+          // repeating it each morning is the digest doing its job.
+          for (const f of resultRows.filter((r) => r.instrumentId === i.id && r.passed === false)) {
+            section.failedTests.push({
+              externalId: i.externalId, title: f.title, value: f.value,
+              days: daysSince(f.recordedAt, now),
+              required: f.procedureId !== null && requiredProcs.has(f.procedureId),
+            });
+          }
         }
       }
 
@@ -370,7 +418,14 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
         if (u.actionItem?.trim()) lines.push(`${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`);
       }
       for (const t of taskRows.filter((t) => t.instrumentId === i.id && t.state === "Done" && t.completedAt && t.completedAt >= cutoff)) {
-        lines.push(`${tagOf(t.completedAt!)}Completed: ${t.title}`);
+        // A completed test carries its verdict: "Completed: Flow Check" says
+        // a box was ticked; the number and the word Pass say what happened.
+        const v = resultRows.find((r) => r.taskId === t.id);
+        const verdict = !v ? ""
+          : v.passed === true ? ` - Pass${v.value && !/^pass$/i.test(v.value) ? ` (${v.value})` : ""}`
+          : v.passed === false ? ` - FAIL${v.value && !/^fail$/i.test(v.value) ? ` (${v.value})` : ""}`
+          : v.value ? ` - ${v.value}` : "";
+        lines.push(`${tagOf(t.completedAt!)}Completed: ${t.title}${verdict}`);
       }
       for (const w of woRows.filter((w) => w.instrumentId === i.id
         && ((w.resolvedAt && w.resolvedAt >= cutoff) || (w.closedAt && w.closedAt >= cutoff)))) {
@@ -479,6 +534,26 @@ function renderHandoffs(section: DigestSection, internal: boolean, operatorName:
     <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">${esc(sub)}</div>${lines}`);
 }
 
+/**
+ * Failed tests, the sharpest card in the section: a recorded number outside
+ * its limits. Repeated every morning while the Fail stands - a re-run that
+ * passes replaces the result and clears the line.
+ */
+function renderFailedTests(section: DigestSection, internal: boolean): string {
+  if (!section.failedTests.length) return "";
+  const lines = section.failedTests.map((f) => {
+    const req = f.required ? ` <span style="color:${TONE_HEX.bad.fg};font-size:12px;font-weight:bold;">· blocks sign-off</span>` : "";
+    const age = f.days !== null && f.days > 0 ? ` <span style="color:${EMAIL.faint};">· ${f.days}d</span>` : "";
+    return `<div style="margin:2px 0;">${sysId(f.externalId)} &nbsp;${esc(f.title)}: ${esc(f.value)}${req}${age}</div>`;
+  }).join("");
+  const sub = internal
+    ? "A failed required test blocks release sign-off until it is re-run or the failure is resolved."
+    : "Recorded results outside their pass limits.";
+  return card(`<b style="color:${TONE_HEX.bad.fg};">Failed tests (${section.failedTests.length})</b>
+    <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">${esc(sub)}</div>${lines}`,
+    TONE_HEX.bad.fg, TONE_HEX.bad.bg);
+}
+
 function renderGas(section: DigestSection): string {
   if (!section.gas.length) return "";
   const lines = section.gas.map((g) =>
@@ -550,10 +625,11 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
          <span style="font-size:12px;color:${EMAIL.muted};">&nbsp; ${esc(counts)}</span>
        </div>`
     : "";
-  const quiet = !section.pending.length && !section.gas.length && !section.followUps.length
+  const quiet = !section.pending.length && !section.gas.length && !section.followUps.length && !section.failedTests.length
     ? `<div style="font-family:${EMAIL.font};font-size:13px;color:${TONE_HEX.good.fg};margin:8px 0;">Nothing blocked - every system is moving.</div>`
     : "";
   return header
+    + renderFailedTests(section, internal)
     + renderGas(section)
     + (internal ? renderFollowUps(section) : "")
     + renderPending(section, internal, operatorName)
@@ -578,6 +654,7 @@ export function digestCounts(sections: DigestSection[]) {
     followUps: sections.reduce((n, s) => n + s.followUps.length, 0),
     handoffs: sections.reduce((n, s) => n + s.handoffs.length, 0),
     gas: sections.reduce((n, s) => n + s.gas.length, 0),
+    failed: sections.reduce((n, s) => n + s.failedTests.length, 0),
   };
 }
 
@@ -594,6 +671,7 @@ function summaryStrip(n: ReturnType<typeof digestCounts>): string {
         ${cell(String(n.us), "on us", n.us ? TONE_HEX.bad.fg : EMAIL.faint)}
         ${cell(String(n.partner), "on partners", n.partner ? TONE_HEX.warn.fg : EMAIL.faint)}
         ${cell(String(n.followUps), "to chase", n.followUps ? TONE_HEX.warn.fg : EMAIL.faint)}
+        ${cell(String(n.failed), "failed tests", n.failed ? TONE_HEX.bad.fg : EMAIL.faint)}
         ${cell(String(n.handoffs), "handed off", EMAIL.muted)}
         ${cell(String(n.gas), "gas issues", n.gas ? TONE_HEX.bad.fg : EMAIL.faint)}
       </tr>
@@ -638,7 +716,7 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
 
   const body = renderDigestBody(sections, true, operatorName, window);
 
-  const busy = n.partner + n.us + n.followUps + n.gas;
+  const busy = n.partner + n.us + n.followUps + n.gas + n.failed;
   // Constant on purpose: a subject carrying the date or the day's counts
   // started a new Gmail conversation every morning. The counts are in the
   // preheader, which is the line an inbox shows beside the subject anyway.
@@ -649,7 +727,9 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
     logoUrl: brand.operatorLogoUrl || undefined,
     tagline: `Daily digest · ${today}`,
     preheader: busy
-      ? `${today} - ${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase, ${n.gas} gas issue${n.gas === 1 ? "" : "s"} across ${n.systems} systems.`
+      ? `${today} - ${n.us} on us, ${n.partner} on partners, ${n.followUps} to chase`
+        + `${n.failed ? `, ${n.failed} failed test${n.failed === 1 ? "" : "s"}` : ""}`
+        + `, ${n.gas} gas issue${n.gas === 1 ? "" : "s"} across ${n.systems} systems.`
       : `${today} - all ${n.systems} systems moving, nothing blocked, nothing to chase.`,
     width: 680,
     body,
