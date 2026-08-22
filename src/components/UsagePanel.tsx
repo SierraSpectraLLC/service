@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { matchesQuery } from "@/lib/search";
 import { STATUS_LABEL, sinceWords, type Status } from "@/lib/loginLog";
+import type { Tone } from "@/lib/tones";
 
 /** Dates cross the server boundary as strings and are revived here. */
 type Row = {
@@ -17,11 +18,11 @@ type Recent = {
   role: string; device: string; ip: string; at: string;
 };
 
-const STATUS_COLOR: Record<Status, { bg: string; fg: string }> = {
-  active: { bg: "#E5F3E5", fg: "#2E6B2E" },
-  quiet: { bg: "#FAF0DC", fg: "#8A5410" },
-  dormant: { bg: "#FBE9E9", fg: "#A32D2D" },
-  never: { bg: "#EEF1F5", fg: "#475569" },
+const STATUS_TONE: Record<Status, Tone> = {
+  active: "good",
+  quiet: "warn",
+  dormant: "bad",
+  never: "neutral",
 };
 
 const FILTERS: { key: "all" | Status; label: string }[] = [
@@ -89,7 +90,7 @@ export default function UsagePanel({ rows, recent, windowDays }: {
           <div>Person</div><div>Last seen</div><div>Sign-ins (30d)</div><div>Status</div>
         </div>
         {shown.map((r) => {
-          const c = STATUS_COLOR[r.status];
+          const statusTone = STATUS_TONE[r.status];
           return (
             <div key={r.email} className="row-hover"
               style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr", gap: 8, alignItems: "center", padding: "8px 4px", borderTop: "1px solid var(--line)" }}>
@@ -109,10 +110,9 @@ export default function UsagePanel({ rows, recent, windowDays }: {
                 )}
               </div>
               <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-                <span className="pill" style={{ background: c.bg, color: c.fg }}>{STATUS_LABEL[r.status]}</span>
+                <span className={`pill ${statusTone}`}>{STATUS_LABEL[r.status]}</span>
                 {r.hasPassword && (
-                  <span className="pill" title="Signs in without waiting for mail"
-                    style={{ background: "#E7F2FA", color: "#1D6396" }}>password</span>
+                  <span className="pill info" title="Signs in without waiting for mail">password</span>
                 )}
               </div>
             </div>
@@ -131,7 +131,7 @@ export default function UsagePanel({ rows, recent, windowDays }: {
           {recent.map((e) => (
             <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "7px 4px", borderTop: "1px solid var(--line)" }}>
               <span style={{ fontSize: 13 }}>{e.email}</span>
-              <span className="pill" style={{ background: e.method === "password" ? "#E7F2FA" : "#EEF1F5", color: e.method === "password" ? "#1D6396" : "#475569" }}>
+              <span className={`pill ${e.method === "password" ? "info" : "neutral"}`}>
                 {e.method}
               </span>
               <span className="mut" style={{ fontSize: 11 }}>
