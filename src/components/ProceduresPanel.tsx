@@ -16,6 +16,7 @@ import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tall
 import type { Tone } from "@/lib/tones";
 import Dialog from "@/components/ui/Dialog";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { Dot, FacetStrip, Legend, PageHead } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
 export type ProcedureRow = {
@@ -418,79 +419,38 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             onPointerUp={endDrag} onPointerCancel={endDrag}
             style={{ fontSize: 13, userSelect: "none", padding: "2px 2px" }}>⠿</span>
         )}
-        <span aria-hidden style={{ width: 20, height: 20, borderRadius: 5, background: `var(--t-${k.tone}-bg)`, color: `var(--t-${k.tone}-fg)`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>
-          {k.glyph}
+        {/* One dot says what the row IS (see the legend); required reads red. */}
+        <span title={i.required ? "Required before sign-off" : ROLE_LABEL[role]}>
+          <Dot tone={i.required ? "bad" : ROLE_TONE[role]} />
         </span>
         <button onClick={() => openEdit(i)} disabled={pending}
           style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "none", padding: 0, cursor: "pointer" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{i.name}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{i.name}</span>
+            {/* The one pill: the cadence when it has one, else what it is. */}
+            {i.intervalDays !== null
+              ? <span className={`pill ${ROLE_TONE[role]}`}>{cadenceLabel(i.intervalDays)}</span>
+              : <span className={`pill ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>}
+          </div>
           {i.notes && (
             <div className="mut" style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.notes}</div>
           )}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2, alignItems: "center" }}>
-            {/* Tests always summarize; a task only when it has something to
-                say (an outcome, a required note) - "Done / not done" is noise. */}
-            {(i.kind === "test" || summarizeItem({ ...i }) !== "Done / not done") && (
-              <span className="mono" style={{ fontSize: 11, color: "var(--slate)", background: "#F1F4F8", borderRadius: 4, padding: "1px 5px" }}>
-                {summarizeItem({ ...i })}
-              </span>
-            )}
-            {i.required && (
-              <span className="pill bad"
-                title="Must be done before sign-off; a test also needs a report on file">Required</span>
-            )}
-            {i.qualification && (
-              <span className="pill accent"
-                title={`${QUAL_LABEL[i.qualification] ?? i.qualification} work on regulated (GxP) systems`}>
-                {i.qualification}
-              </span>
-            )}
-            {/* Display-only here: the whole row is already a button that opens
-                the sheet, and a button inside a button is both invalid markup
-                and a click that fires twice. The sheet carries the picker. */}
-            <ProvenanceChip what="procedure" id={i.id} value={i.provenance ?? ""} canEdit={false} />
-            {/* What it IS, in the word the shop uses, before the detail of when.
-                The row used to make the reader assemble "this is a PM" from a
-                cadence pill. See lib/procedureRole. */}
-            <span className={`pill ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>
-            {i.intervalDays !== null && (
-              <span className="pill good">{cadenceLabel(i.intervalDays)}</span>
-            )}
-            {scopeChips.length ? (
-              <>
-                {scopeChips.slice(0, 2).map((m) => (
-                  <span key={m} className="pill accent">{m}</span>
-                ))}
-                {scopeChips.length > 2 && (
-                  <span className="pill accent">+{scopeChips.length - 2}</span>
-                )}
-              </>
-            ) : (
-              <span className="pill faint">
-                {assetType === "system" ? "All systems" : "All models"}
-              </span>
-            )}
-            {/* Which system types this row belongs to. Only said when the type
-                serves several - a row that appears under TOC and LC-MS alike
-                must say so, or deleting it "here" surprises "there". */}
-            {shared && (
-              i.categoryScope.length ? (
-                i.categoryScope.map((c) => (
-                  <span key={c} className="pill good">{c}</span>
-                ))
-              ) : (
-                <span className="pill good"
-                  title={`Appears under ${served.join(" and ")} alike - edit to scope it to one`}>
-                  all {served.length} system types
-                </span>
-              )
-            )}
-            {i.parts.map((pt) => (
-              <span key={`${pt.number}|${pt.name}`} className="mono" style={{ fontSize: 11, color: "#8A5410", background: "#FAF0DC", borderRadius: 4, padding: "1px 5px" }}>
-                {pt.number ? `PN ${pt.number}` : pt.name}
-                {pt.models?.length ? ` · ${pt.models.join("/")}` : ""}
-              </span>
-            ))}
+          {/* Everything else the pills used to shout, as one quiet line. */}
+          <div className="mut" style={{ fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {[
+              (i.kind === "test" || summarizeItem({ ...i }) !== "Done / not done") ? summarizeItem({ ...i }) : "",
+              i.required ? "required" : "",
+              i.qualification ? `${i.qualification} on GxP` : "",
+              scopeChips.length
+                ? scopeChips.slice(0, 3).join(", ") + (scopeChips.length > 3 ? ` +${scopeChips.length - 3}` : "")
+                : (assetType === "system" ? "all systems" : "all models"),
+              shared
+                ? (i.categoryScope.length ? i.categoryScope.join(", ") : `all ${served.length} system types`)
+                : "",
+              i.parts.length
+                ? i.parts.map((pt) => (pt.number ? `PN ${pt.number}` : pt.name)).join(", ")
+                : "",
+            ].filter(Boolean).join(" · ")}
           </div>
         </button>
         {/* A new variant on the same type - the LC-30's seal kit isn't the
@@ -535,14 +495,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   };
 
   return (
-    <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-        <div className="card-title">Procedures &amp; maintenance</div>
-        {/* How much of the book could travel with a licensed library. */}
-        {items.length > 0 && (
-          <span className="mut" style={{ fontSize: 10.5 }}>{tallyLine(tallyProvenance(items))}</span>
-        )}
-      </div>
+    <div>
+      <PageHead title="Procedures & maintenance"
+        sub={items.length > 0 ? tallyLine(tallyProvenance(items)) : undefined} />
       {/* The one fact that saves the copy/paste: definitions here apply
           themselves. Without this line, people write upkeep onto each system
           by hand and never find out they didn't have to. */}
@@ -700,19 +655,37 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         );
       })()}
 
-      <div className="seg" role="group" aria-label="Filter procedures" style={{ marginBottom: 10, flexWrap: "wrap" }}>
-        {FILTERS.map((f) => (
-          <button key={f.key} type="button" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
-            {f.label}
-          </button>
-        ))}
-      </div>
+      <FacetStrip
+        facets={FILTERS.map((f) => ({
+          key: f.key, label: f.label,
+          count: f.key === "all" ? items.length : items.filter((i) => passesFilter(i, f.key)).length || undefined,
+          on: filter === f.key,
+        }))}
+        onToggle={(k) => setFilter(k as FilterKey)}
+      />
+      <div style={{ height: 8 }} />
       {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
       {/* One accordion, the Catalog's shape: System first, then a band per
           system category. An open band shows every module type inside it
-          EXPANDED - the old second accordion meant two clicks to see any row,
-          which read as an empty page. */}
+          EXPANDED. From 900px up a sticky band list with counts rides on the
+          left (the redesign's option B); on a phone the accordion headers
+          are the navigation. */}
+      <div className="band-shell">
+      <nav className="band-side" aria-label="Procedure groups">
+        {BANDS.map((band) => {
+          const n = band.types.reduce((acc, ty) => acc + rowsIn(band.key, ty).length, 0);
+          return (
+            <button key={band.key} type="button"
+              className={openBand === band.key ? "active" : undefined}
+              onClick={() => setOpenBand(openBand === band.key ? null : band.key)}>
+              {band.key === "system" ? "System-wide" : band.label}
+              <b>{n || ""}</b>
+            </button>
+          );
+        })}
+      </nav>
+      <div>
       {BANDS.map((band) => {
         const bandRows = band.types.flatMap((ty) => rowsIn(band.key, ty));
         const bandOpen = openBand === band.key;
@@ -788,6 +761,15 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         </div>
         );
       })}
+      </div>
+      </div>
+
+      <Legend items={[
+        { tone: "bad", label: "required before sign-off" },
+        { tone: "good", label: "maintenance" },
+        { tone: "info", label: "at intake" },
+        { tone: "neutral", label: "on demand" },
+      ]} />
 
       {sheet && (
         <Dialog open onClose={() => setSheet(null)}

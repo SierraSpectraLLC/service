@@ -957,6 +957,30 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 /* A line of context under a panel's title, before its fields. */
 .panel-hint { font-size: 12px; color: var(--mut); margin: -2px 0 10px; }
 
+/* ── Band shell ─────────────────────────────────────────────────────────────
+   A grouped page's inner navigation: a sticky band list with counts on the
+   left from 900px up (Procedures uses it; any 5+-group page can), collapsing
+   away on a phone where the bands' own accordion headers do the job. */
+.band-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 0 16px; align-items: start; }
+.band-side {
+  position: sticky; top: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 6px 0 8px;
+}
+.band-side button {
+  display: flex; width: 100%; gap: 6px; align-items: baseline;
+  padding: 7px 14px; font-size: 13px; color: var(--ink);
+  background: none; border: none; border-left: 3px solid transparent;
+  cursor: pointer; text-align: left;
+}
+.band-side button b { margin-left: auto; font-size: 11px; color: var(--mut); font-weight: 600; }
+.band-side button.active { background: var(--t-info-bg); border-left-color: var(--navy); color: var(--navy); font-weight: 600; }
+.band-side button:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
+@media (max-width: 899px) {
+  .band-shell { display: block; }
+  .band-side { display: none; }
+}
+
 /* ── Save bar ───────────────────────────────────────────────────────────────
    One sticky bar saves a whole settings page. It stays out of the way until
    something is dirty, and on a phone it rides above the tab bar. */

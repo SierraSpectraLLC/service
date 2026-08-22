@@ -99,6 +99,27 @@ const FIXTURE = `
     (1, 'Rita Alvarez', 'rita@labzen.test', 'Any word on the checkout date? The lab is planning validation runs.'),
     (1, 'Dev Owner', '${OWNER}', 'Tune passed this morning; sign-off packet goes out tomorrow.');
 
+  INSERT INTO vocab_terms (kind, asset_type, name, categories) VALUES
+    ('category', '', 'LC-MS', '{}'),
+    ('category', '', 'GC-MS', '{}'),
+    ('asset_type', '', 'Mass spec', '{}'),
+    ('asset_type', '', 'Pump', '{}'),
+    ('asset_type', '', 'Autosampler', '{}'),
+    ('model', 'Mass spec', '6495C', '{"LC-MS"}'),
+    ('model', 'Mass spec', 'LCMS-8060', '{"LC-MS"}'),
+    ('model', 'Mass spec', 'ISQ 7000', '{"GC-MS"}'),
+    ('model', 'Pump', '1290 Quat Pump', '{"LC-MS"}'),
+    ('model', 'Autosampler', 'TriPlus RSH', '{"GC-MS"}')
+    ON CONFLICT DO NOTHING;
+
+  INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope) VALUES
+    ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}'),
+    ('system', 'test', 'Leak check', '', 1, true, NULL, '{}'),
+    ('Mass spec', 'task', 'Quarterly source clean', '', 0, false, 90, '{}'),
+    ('Mass spec', 'task', 'Desolvation line swap', 'LCMS-8060 only.', 1, false, 365, '{"LCMS-8060"}'),
+    ('Pump', 'task', 'Seal replacement', '', 0, false, 180, '{}'),
+    ('Autosampler', 'task', 'Needle and septum check', '', 0, true, NULL, '{}');
+
   INSERT INTO notifications (email, kind, title, href, created_at, read_at) VALUES
     ('${OWNER}', 'task_assigned', 'Rita assigned you: Replace turbo and recertify', '/work/2', now() - interval '3 hours', NULL),
     ('${OWNER}', 'discussion', 'Rita Alvarez posted on LZ-001', '/instruments/1', now() - interval '1 day', NULL),
