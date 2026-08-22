@@ -346,7 +346,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   padding-top: 10px; padding-bottom: 10px;
 }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; min-width: 0; }
-.brand-name { font-weight: 800; font-size: 15px; letter-spacing: 0.4px; white-space: nowrap; }
+/* Ellipsis, not overlap: on a narrow phone a long brand name gives way to the
+   utility icons instead of painting underneath them. */
+.brand-name {
+  font-weight: 800; font-size: 15px; letter-spacing: 0.4px; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
 .brand-org {
   font-size: 12px; opacity: 0.72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -609,32 +614,26 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .pdf-drag-hint { display: none; }
 }
 
-/* Bottom sheet (checkout item editor). Scrim + sheet are plain fixed divs -
-   no portal - so keep them last inside the card that opens them. */
+/* Modal sheet (dialogs, the checkout item editor). Scrim + sheet are plain
+   fixed divs - no portal - so keep them last inside the card that opens them.
+   Centred on both axes at every width: `inset: 0` with `margin: auto` does it
+   without a transform, which the entry animation is already using. On a phone
+   it takes the full width and height minus a 12px gutter all round; there is
+   no bottom-sheet variant. */
 .scrim {
   position: fixed; inset: 0; background: rgba(23, 42, 74, 0.35); z-index: 40;
 }
 .sheet {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
-  background: var(--card); border: 1px solid var(--line); border-bottom: none;
-  border-radius: 16px 16px 0 0; padding: 16px;
-  max-width: 560px; margin: 0 auto; max-height: 88dvh; overflow-y: auto;
-  box-shadow: 0 -8px 30px rgba(23, 42, 74, 0.18);
+  position: fixed; inset: 0; margin: auto; z-index: 41;
+  width: calc(100% - 24px); max-width: 560px;
+  height: max-content; max-height: calc(100% - 24px);
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 16px;
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(23, 42, 74, 0.22);
   animation: sheet-up 0.18s ease-out;
 }
 @keyframes sheet-up { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
-/* Rising from the bottom edge is right on a phone, where it lands under a thumb.
-   On a monitor it reads as a drawer stuck to the bottom of the window, a long way
-   from whatever was just clicked - so from tablet width up it is an ordinary
-   centred dialog. `inset: 0` with `margin: auto` centres it on both axes without
-   a transform, which the entry animation is already using. */
-@media (min-width: 700px) {
-  .sheet {
-    inset: 0; margin: auto; height: max-content;
-    border: 1px solid var(--line); border-radius: 14px;
-    box-shadow: 0 12px 40px rgba(23, 42, 74, 0.22);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .sheet { animation: none; }
 }
@@ -782,10 +781,10 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .btn.danger:not(.link):hover { background: #8B2626; border-color: #8B2626; }
 
 /* ── Dialog ─────────────────────────────────────────────────────────────────
-   One modal for the whole app, built on the .sheet responsive rule (bottom
-   sheet on a phone, centred dialog from 700px). The .dialog modifier turns
-   the sheet into a head / scrolling body / foot column so long forms scroll
-   inside while the title and the buttons stay put. */
+   One modal for the whole app, built on the .sheet rule (centred at every
+   width). The .dialog modifier turns the sheet into a head / scrolling body /
+   foot column so long forms scroll inside while the title and the buttons
+   stay put. */
 .sheet.dialog { padding: 0; display: flex; flex-direction: column; }
 .sheet.dialog.sm { max-width: 440px; }
 .sheet.dialog.lg { max-width: 860px; }

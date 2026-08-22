@@ -4,10 +4,9 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 /**
- * The one modal. Built on the .sheet rule (bottom sheet on a phone, centred
- * dialog from 700px), with the three things every hand-rolled sheet in the
- * app kept getting differently: a head that stays put, a body that scrolls,
- * and a foot that stays put.
+ * The one modal. Built on the .sheet rule (centred at every width), with the
+ * three things every hand-rolled sheet in the app kept getting differently:
+ * a head that stays put, a body that scrolls, and a foot that stays put.
  *
  * Keyboard contract (the Phase 2 gate, tested in tests/dialog.test.tsx):
  * focus moves into the dialog on open, Tab cycles inside it and nowhere
