@@ -1,7 +1,10 @@
 # VERIFY - full-route audit of the rebuilt UI
 
 Run against `npm run dev:local` (PGlite fixture), captured with Playwright at
-375 / 768 / 1280. Screenshots for every route live in
+375 / 768 / 1280. The h-scroll and header measurements were captured before the second
+pass; the second pass swaps size-identical classes for inline styles and
+adds dialogs/toasts, so the layout measurements carry over. Screenshots
+for every route live in
 `docs/design/screens/verify/<slug>-<width>.jpg`.
 
 How each column is measured:
@@ -13,13 +16,21 @@ How each column is measured:
 - **No horizontal scroll** - `scrollWidth > innerWidth` measured on every
   route at every width.
 - **No inline fontSize / colour** - `grep -a` counts on the route's own
-  `page.tsx` (component-level residue is listed under Open issues).
-- **Destructive actions via confirmDialog** - `window.confirm` count is 0
-  repo-wide; every reason-collecting destructive action goes through
-  `confirmReason`/`confirmReasonText` (the 42 remaining `window.prompt`
-  sites were converted in this pass). Per-route value is "yes" unless noted.
-- **Mutations toast** - converted pages toast their `startTransition` sites;
-  the components still silent are listed under Open issues.
+  `page.tsx`, after the second pass converted every on-scale inline
+  fontSize (11/12/13/14/16/22) to `.t-*` classes repo-wide. What remains
+  is deliberate: off-scale values, printed-sheet typography, iOS
+  zoom-guard inputs, runtime-computed sizes, and values that conflict
+  with a carrying class's own size (see the runtime-stays list).
+- **Destructive actions via confirmDialog** - `window.confirm`,
+  `window.prompt` and `window.alert` counts are 0 repo-wide; every
+  reason-collecting destructive action goes through `confirmReason` with
+  per-site { title, body, action } copy, and plain input questions go
+  through `inputDialog`. Per-route value is "yes" unless noted.
+- **Mutations toast** - every component the first pass flagged as silent
+  now toasts its success path (past-tense verb + object). The only
+  mutations left without a toast are ones whose feedback is already a
+  navigation, an inline success note, or an optimistic control that
+  visibly flips.
 - **Tab reaches every RowAction** - RowActions renders inline `<button>`s
   plus a `<details><summary>` kebab, both natively focusable; verified live
   by tabbing to the kebabs on /settings/catalog (see keyboard spot-checks).
@@ -45,63 +56,63 @@ How each column is measured:
 
 | Route | Archetype | Header never wraps | No h-scroll | No inline fontSize/colour (page.tsx) | Destructive via confirmDialog | Mutations toast | Tab reaches RowActions | Escape closes Dialogs | Open issues |
 |---|---|---|---|---|---|---|---|---|---|
-| `/` | L+ | yes | yes | 4 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/` | L+ | yes | yes | yes | yes | yes | yes | yes | - |
 | `/admin/access` | redirect | yes | yes | yes | yes | yes | yes | yes | - |
 | `/agreements` | redirect | yes | yes | yes | yes | yes | yes | yes | - |
-| `/archive` | L | yes | yes | 3 fontSize / 2 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/assets` | L | yes | yes | yes | yes | partial: NewAssetForm | yes | yes | silent panels (issue 2) |
-| `/assets/3` | R | yes | yes | 16 fontSize / 2 hex | yes | partial: AttachmentsPanel, GasPanel, MaintenancePanel, PartsPanel, PhotosPanel, SharePanel | yes | yes | inline residue (issue 1); silent panels (issue 2) |
+| `/archive` | L | yes | yes | 0 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/assets` | L | yes | yes | yes | yes | yes | yes | yes | - |
+| `/assets/3` | R | yes | yes | 2 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/assets/3/label` | P | yes | yes | yes | yes | yes | yes | yes | - |
-| `/assets/3/signoff` | P | yes | yes | 13 fontSize / 2 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/catalog/19` | R | yes | yes | 16 fontSize / 0 hex | yes | partial: ModelSpecsCard, PublishModelCard | yes | yes | inline residue (issue 1); silent panels (issue 2) |
+| `/assets/3/signoff` | P | yes | yes | 11 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/catalog/19` | R | yes | yes | 2 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/checkout` | redirect | yes | yes | yes | yes | yes | yes | yes | - |
 | `/dev/ui` | D | yes | yes | yes | yes | yes | yes | yes | - |
-| `/discussions` | U | yes | yes | 9 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/documents` | U | yes | yes | 7 fontSize / 3 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/discussions` | U | yes | yes | 4 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/documents` | U | yes | yes | 1 fontSize / 3 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/drop/devdroptoken12345678` | X | yes | yes | yes | yes | yes | yes | yes | - |
 | `/eod` | F | yes | yes | yes | yes | yes | yes | yes | - |
-| `/equipment` | X | yes | yes | 4 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/equipment/no-such-slug` | X (404) | yes | yes | 16 fontSize / 1 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/equipment` | X | yes | yes | 1 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/equipment/no-such-slug` | X (404) | yes | yes | 3 fontSize / 1 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/gallery` | L | yes | yes | yes | yes | yes | yes | yes | - |
 | `/import` | U | yes | yes | yes | yes | yes | yes | yes | - |
 | `/inbox` | L | yes | yes | yes | yes | yes | yes | yes | - |
-| `/instruments/1` | R | yes | yes | 1 fontSize / 2 hex | yes | partial: AssetsPanel, AttachmentsPanel, ClientRequest, MaintenancePanel, PartsPanel, PhotosPanel, QueuePanel, ValidationPanel | yes | yes | inline residue (issue 1); silent panels (issue 2) |
-| `/instruments/1/binder` | P | yes | yes | 19 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/instruments/1` | R | yes | yes | 0 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/instruments/1/binder` | P | yes | yes | 18 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/instruments/1/label` | P | yes | yes | yes | yes | yes | yes | yes | - |
-| `/instruments/1/signoff` | P | yes | yes | 14 fontSize / 2 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/listing/nosuchtoken12345` | X (404) | yes | yes | 9 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/login` | X | yes | yes | 3 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/instruments/1/signoff` | P | yes | yes | 12 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/listing/nosuchtoken12345` | X (404) | yes | yes | 1 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/login` | X | yes | yes | yes | yes | yes | yes | yes | - |
 | `/lookup?sn=US2405111` | redirect | yes | yes | yes | yes | yes | yes | yes | - |
-| `/maintenance` | L | yes | yes | 3 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/messages` | L | yes | yes | 3 fontSize / 0 hex | yes | partial: NewMessageButton | yes | yes | inline residue (issue 1); silent panels (issue 2) |
+| `/maintenance` | L | yes | yes | yes | yes | yes | yes | yes | - |
+| `/messages` | L | yes | yes | yes | yes | yes | yes | yes | - |
 | `/messages/1` | R | yes | yes | yes | yes | yes | yes | yes | - |
-| `/metrics` | U | yes | yes | 17 fontSize / 3 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/metrics` | U | yes | yes | 0 fontSize / 3 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/parity` | L | yes | yes | yes | yes | yes | yes | yes | - |
 | `/pdf` | U | yes | yes | yes | yes | yes | yes | yes | - |
-| `/purchasing` | L | yes | yes | 2 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/purchasing` | L | yes | yes | yes | yes | yes | yes | yes | - |
 | `/purchasing/1` | R | yes | yes | yes | yes | yes | yes | yes | - |
-| `/records/1` | R | yes | yes | 25 fontSize / 1 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/remote` | L | yes | yes | 4 fontSize / 2 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/remote/1` | R (404) | yes | yes | 5 fontSize / 1 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/remote/enroll/1` | X* | yes | yes | 12 fontSize / 2 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/search?q=LZ` | L | yes | yes | 6 fontSize / 2 hex | yes | partial: LookupPanels | yes | yes | inline residue (issue 1); silent panels (issue 2) |
+| `/records/1` | R | yes | yes | 1 fontSize / 1 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/remote` | L | yes | yes | 0 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/remote/1` | R (404) | yes | yes | 1 fontSize / 1 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/remote/enroll/1` | X* | yes | yes | 5 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/search?q=LZ` | L | yes | yes | 0 fontSize / 2 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/settings` | F | yes | yes | yes | yes | yes | yes | yes | - |
 | `/settings/activity` | L | yes | yes | yes | yes | yes | yes | yes | - |
-| `/settings/admin` | F | yes | yes | 6 fontSize / 0 hex | yes | partial: SharePanel | yes | yes | inline residue (issue 1); silent panels (issue 2) |
-| `/settings/agreements` | L | yes | yes | 1 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/settings/catalog` | A | yes | yes | yes | yes | partial: CatalogGasCard, CatalogPackageCard | yes | yes | silent panels (issue 2) |
+| `/settings/admin` | F | yes | yes | 1 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
+| `/settings/agreements` | L | yes | yes | yes | yes | yes | yes | yes | - |
+| `/settings/catalog` | A | yes | yes | yes | yes | yes | yes | yes | - |
 | `/settings/organizations` | L | yes | yes | yes | yes | yes | yes | yes | - |
-| `/settings/organizations/1` | R | yes | yes | 1 fontSize / 0 hex | yes | partial: SitesCard | yes | yes | inline residue (issue 1); silent panels (issue 2) |
+| `/settings/organizations/1` | R | yes | yes | yes | yes | yes | yes | yes | - |
 | `/settings/parts` | A | yes | yes | yes | yes | yes | yes | yes | - |
 | `/settings/procedures` | A | yes | yes | yes | yes | yes | yes | yes | - |
 | `/settings/tenants` | L | yes | yes | yes | yes | yes | yes | yes | - |
-| `/share/nosuchtoken12345` | X | yes | yes | 3 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/stock` | L | yes | yes | 2 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
-| `/stock/1` | R | yes | yes | 11 fontSize / 4 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/share/nosuchtoken12345` | X | yes | yes | yes | yes | yes | yes | yes | - |
+| `/stock` | L | yes | yes | yes | yes | yes | yes | yes | - |
+| `/stock/1` | R | yes | yes | 0 fontSize / 4 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/welcome` | F | yes | yes | yes | yes | yes | yes | yes | - |
-| `/whats-new` | U | yes | yes | 5 fontSize / 0 hex | yes | yes | yes | yes | inline residue (issue 1) |
+| `/whats-new` | U | yes | yes | 2 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/work` | L | yes | yes | yes | yes | yes | yes | yes | - |
-| `/work/2` | R | yes | yes | 9 fontSize / 3 hex | yes | partial: AttachmentsPanel, PartsPanel, PhotosPanel | yes | yes | inline residue (issue 1); silent panels (issue 2) |
+| `/work/2` | R | yes | yes | 1 fontSize / 3 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 
 ## Keyboard spot-checks
 
@@ -115,43 +126,41 @@ focus-return of the shared Dialog every dialog in the app renders through):
 | confirmReason dialog (hours remove) traps Tab; Escape closes | pass (Tab trapped, Escape closed) |
 | RowActions kebabs on /settings/catalog (5) all reachable by Tab alone | pass |
 
+## Fixed since the first pass
+
+1. **Inline `fontSize` residue**: converted repo-wide (~930 sites across
+   112 files) to the `.t-*` scale; redundant values equal to a carrying
+   class's own size were deleted. The counts left in the table are the
+   deliberate stays described above.
+2. **Silent mutations**: all 21 flagged components now toast; deliberate
+   silences (navigation-as-feedback, inline success notes, optimistic
+   selects) are the only exceptions.
+3. **Generic confirm copy**: the 22 `confirmReasonText` sites each got
+   their own { title, body, action } with a verb naming the act, and the
+   generic helper was deleted.
+4. **`window.prompt` / `window.alert`**: zero remain repo-wide. The five
+   input prompts (plus a bare `prompt()` in the stock recount and the
+   block-reason prompts in `lib/reason.ts`, now deleted) went through the
+   new `inputDialog`, which shares the ConfirmDialog host, focus trap and
+   Escape behavior.
+5. **Em dashes and emoji in rendered text**: 55 em dashes became hyphens
+   and the last emoji (link/photo/document/kit markers) became the same
+   box-glyph vocabulary the attachment kinds use.
+
 ## Open issues (couldn't fix in this pass, listed honestly)
 
-1. **Inline `fontSize` residue inside components.** The sweep covered every
-   file untouched since Phase 1, and the tone hexes were tokenized repo-wide,
-   but panels rewritten during earlier phases (TasksPanel, ProceduresPanel,
-   MaintenancePanel, AgreementsPanel, PartCatalogPanel, and ~100 more files)
-   still size text with inline `fontSize` using the same px values the scale
-   defines. Visually consistent, mechanically unconverted. A follow-up pass
-   converting `fontSize: 11/12/13` to `.t-meta/.t-small/.t-body` per file is
-   pure find-and-replace plus captures.
-2. **Mutations that still do not toast.** ~30 components with
-   `startTransition` mutations have no toast; several are deliberate (LoginForm
-   and WelcomeForm navigate away, ViewAsBar becomes a banner, WhatsNew
-   dismisses itself, DailyUpdatePanel/EodPanel autosave with inline status).
-   The genuinely silent ones worth a pass: AssetsPanel, AttachmentsPanel,
-   GasPanel, MaintenancePanel, PartsPanel, PhotosPanel (single ops),
-   QueuePanel, SharePanel, SignoffPanel, SitesCard, StagePanel, StockShelf,
-   ValidationPanel, LookupPanels, ModelSpecsCard, PublishModelCard,
-   ClientRequest, NewAssetForm, NewMessageButton, CatalogGasCard,
-   CatalogPackageCard.
-3. **confirmReasonText titles are the old prompt sentences.** The 42 converted
-   destructive confirms open the proper dialog with a reason field, but the
-   button says the generic "Confirm" rather than naming the act, and the whole
-   old message rides in the title. Renaming each to `{ title, body, action }`
-   is per-site copywriting.
-4. **`window.prompt` still used for non-destructive input** in five places
-   (StoreFileList share label + folder rename, SystemPanel, MakersCard,
-   ConfigurationForm, CatalogForm "Set maker for all shown") - inputs, not
-   confirms, so they were out of scope for confirmDialog; a small InputDialog
-   would retire them.
-5. **PGlite (dev:local) occasionally aborts under load.** The wasm database
+1. **PGlite (dev:local) occasionally aborts under load.** The wasm database
    can crash during long capture sessions, corrupting its data dir (delete
    `node_modules/.cache/ridgeline-pglite` to recover). Dev-harness-only;
    production uses Neon.
-6. **Not capturable in dev:local**: CloudBrowser/CloudLibraryCard (need a
+2. **Not capturable in dev:local**: CloudBrowser/CloudLibraryCard (need a
    Microsoft app), WhatsNew overlay (needs an undismissed changelog), toast
    popups from NotificationCenter (need a fresh notification mid-session).
+3. **Class-size conflicts left in place**: a handful of `.btn.link` /
+   `.btn.sm` / `.card-title` elements carry an inline fontSize that
+   differs from the class's own size. A bare class swap would change
+   rendering, so they stay inline until each is reviewed for whether the
+   deviation is intentional.
 
 ## Runtime-dependent inline styles that stay (by design)
 
