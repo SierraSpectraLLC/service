@@ -46,7 +46,7 @@ export default async function StockPage() {
       <div className="page-head">
         <h1 className="page-title">Inventory</h1>
         {shortAll > 0 && (
-          <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D", fontWeight: 700 }}>
+          <span className="pill bad">
             {shortAll} line{shortAll === 1 ? "" : "s"} at or below reorder point
           </span>
         )}
@@ -85,14 +85,14 @@ export default async function StockPage() {
               <Link href={`/stock/${room.id}`} style={{ fontSize: 14, fontWeight: 700, textDecoration: "none" }}>
                 {room.name}
               </Link>
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[room.kind] ?? room.kind}</span>
+              <span className="pill neutral">{KIND_LABEL[room.kind] ?? room.kind}</span>
               <span className="mut" style={{ fontSize: 12 }}>{orgName(room.orgId)}</span>
               {room.keeper && <span className="mut" style={{ fontSize: 12 }}>· {room.keeper}</span>}
               {room.location && <span className="mut" style={{ fontSize: 12 }}>· {room.location}</span>}
-              {!acc.issue && <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>read-only</span>}
+              {!acc.issue && <span className="pill faint">read-only</span>}
               <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "baseline" }}>
                 {totals.short > 0 && (
-                  <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D", fontWeight: 700 }}>{totals.short} short</span>
+                  <span className="pill bad">{totals.short} short</span>
                 )}
                 <span className="mut" style={{ fontSize: 12 }}>
                   {totals.lines} line{totals.lines === 1 ? "" : "s"} · {totals.units} unit{totals.units === 1 ? "" : "s"}
