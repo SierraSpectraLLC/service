@@ -159,8 +159,10 @@ export default function PoPanel({ po, lines, canManage, makers }: {
               )}
 
               {isReceiving && (
-                <div className="dash-form" style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <span className="mut" style={{ fontSize: 11 }}>arrived</span>
+                <div className="dash-form" style={{ marginTop: 6 }}>
+                  <div className="panel-head" style={{ marginBottom: 4 }}><span className="card-title" style={{ fontSize: 13 }}>Book in a delivery</span></div>
+                  <div className="row-2">
+                  <span className="mut t-meta">arrived</span>
                   <input value={receiving.qty} onChange={(e) => setReceiving({ ...receiving, qty: e.target.value })}
                     inputMode="numeric" aria-label="How many arrived" style={{ width: 64, minHeight: 34, textAlign: "center" }} />
                   <span className="mut" style={{ fontSize: 12 }}>of {out}</span>
@@ -173,6 +175,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                       run(() => receivePoLine(l.id, n, receiving.note), () => setReceiving(null));
                     }}>{pending ? "Booking..." : "Book in"}</button>
                   <button className="btn sm" style={{ minHeight: 34 }} onClick={() => setReceiving(null)}>Cancel</button>
+                  </div>
                 </div>
               )}
             </div>
