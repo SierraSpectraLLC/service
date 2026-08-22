@@ -23,7 +23,8 @@ import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; f?: string; sort?: string }> }) {
+  const initial = await searchParams;
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
@@ -232,6 +233,7 @@ export default async function Home() {
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
         myQueueHref={user.name ? `/work?who=${encodeURIComponent(user.name)}` : "/work"}
+        initial={{ q: initial.q, f: initial.f, sort: initial.sort }}
         // The ship pipeline is the shop's own axis, and a reseller client's.
         // For everyone else "Ship queue + shipped" is a tile about a business
         // they aren't in - same burial as the resale controls.

@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import PickOrAdd from "./PickOrAdd";
 import CatalogSelect from "./CatalogSelect";
 import { createInstrument } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Panel, Toolbar } from "@/components/ui";
+import type { DataRow } from "@/components/ui/DataTable";
+import { toast } from "@/components/ui/Toast";
 import { matchesQuery } from "@/lib/search";
 
 type StageDefLite = { name: string; bg: string; fg: string };
@@ -29,27 +32,47 @@ type Row = {
   queueMine: boolean; queueWith: string; queueReason: string;
 };
 
-const Pill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
+/** Stage chips keep their per-tenant colors from stage_defs - the one sanctioned hex pill. */
+const StagePill = ({ bg, fg, children }: { bg: string; fg: string; children: React.ReactNode }) => (
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, myQueueHref = "/work" }: {
+export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, myQueueHref = "/work", initial }: {
   data: Row[]; stageDefs: StageDefLite[]; people: string[];
   clients: string[]; categories: string[]; canEdit: boolean; isStaff: boolean;
   /** Ship-pipeline tile: the shop and reseller accounts; clutter for lab clients. */
   showShipping: boolean;
   myQueueHref?: string;
+  /** Filter state from the URL, so a filtered board can be shared and reloaded. */
+  initial?: { q?: string; f?: string; sort?: string };
 }) {
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
   const stageColor = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(() => (initial?.f ? initial.f.split("|").filter(Boolean) : []));
   const [filterOpen, setFilterOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const [sortBy, setSortBy] = useState<"default" | "owner" | "id">("default");
+  const [q, setQ] = useState(initial?.q ?? "");
+  const [sortBy, setSortBy] = useState<"default" | "owner" | "id">(
+    initial?.sort === "owner" || initial?.sort === "id" ? initial.sort : "default");
   const [showNew, setShowNew] = useState(false);
   const [draft, setDraft] = useState({ externalId: "", client: "", category: "", priority: "", lead: "" });
   const [pending, startTransition] = useTransition();
+
+  // The URL mirrors the filter state (debounced for typing), so the filtered
+  // board is a link. replace, not push: filtering is not ten history entries.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    const t = setTimeout(() => {
+      const p = new URLSearchParams();
+      if (q.trim()) p.set("q", q.trim());
+      if (selected.length) p.set("f", selected.join("|"));
+      if (sortBy !== "default") p.set("sort", sortBy);
+      const s = p.toString();
+      router.replace(s ? `/?${s}` : "/", { scroll: false });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, selected, sortBy, router]);
 
   // "Docs expiring" appears only when some visible system could raise it -
   // a fleet with no regulated systems never sees the filter at all.
@@ -57,8 +80,6 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     ...(data.some((i) => i.docIssues.length > 0) ? ["Docs expiring"] : []),
     ...(isStaff ? ["Not on sheet"] : [])];
   const LEADS = [...new Set(data.map((i) => i.lead).filter(Boolean))].sort();
-  const CATS = [...new Set(data.map((i) => i.category).filter(Boolean))].sort();
-  const catKey = (c: string) => `cat:${c}`;
   const leadKey = (l: string) => `lead:${l}`;
   /**
    * Flags cycle: off -> include -> EXCLUDE -> off, an exclusion stored as
@@ -93,11 +114,9 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     // Stages and leads each combine as OR within their group; flags combine as AND.
     const stageSel = selected.filter((f) => stageNames.includes(f));
     const leadSel = selected.filter((f) => f.startsWith("lead:")).map((f) => f.slice(5));
-    const catSel = selected.filter((f) => f.startsWith("cat:")).map((f) => f.slice(4));
-    const flagSel = selected.filter((f) => !stageNames.includes(f) && !f.startsWith("lead:") && !f.startsWith("cat:"));
+    const flagSel = selected.filter((f) => !stageNames.includes(f) && !f.startsWith("lead:"));
     if (stageSel.length) list = list.filter((i) => stageSel.some((s) => i.stages.includes(s)));
     if (leadSel.length) list = list.filter((i) => leadSel.includes(i.lead));
-    if (catSel.length) list = list.filter((i) => catSel.includes(i.category));
     for (const f of flagSel) {
       const no = f.startsWith("!");
       const key = no ? f.slice(1) : f;
@@ -152,13 +171,59 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         priority: parseInt(draft.priority) || 99, lead: draft.lead,
       });
       setShowNew(false);
+      toast({ message: `Created ${draft.externalId.trim()}` });
       setDraft({ externalId: "", client: "", category: "", priority: "", lead: "" });
       router.push(`/instruments/${id}`);
     });
   };
 
+  /** Everything pulling at this system, as one quiet line rather than a pill wall. */
+  const attention = (i: Row) => [
+    ...(i.overdue > 0 ? [`${i.overdue} overdue`] : []),
+    ...(i.openParts > 0 ? [`${i.openParts} open part${i.openParts === 1 ? "" : "s"}`] : []),
+    ...i.gasIssues, ...i.assetIssues, ...i.docIssues,
+    ...(i.missingFromSheet ? ["not on sheet"] : []),
+  ];
+
+  const toRow = (i: Row): DataRow => {
+    const attn = attention(i);
+    return {
+      key: i.id,
+      href: `/instruments/${i.id}`,
+      cells: {
+        dot: <Dot tone={i.down ? "bad" : attn.length ? "warn" : i.queueMine ? "neutral" : "faint"} />,
+        id: <Id>{i.externalId}</Id>,
+        system: (
+          <span style={{ minWidth: 0, display: "block" }}>
+            <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {i.label || <span className="mut">No assets listed yet</span>}
+            </span>
+            <span className="mut" style={{ fontSize: 11 }}>
+              {i.client}{i.category ? ` · ${i.category}` : ""} · P{i.priority}
+              {i.lead ? ` · ${i.lead}` : ""}
+              {!i.queueMine && <> · with <b>{i.queueWith}</b>{i.queueReason ? ` · ${i.queueReason}` : ""}</>}
+            </span>
+          </span>
+        ),
+        stage: i.stages.length ? (
+          <span style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+            <StagePill bg={stageColor(i.stages[0]).bg} fg={stageColor(i.stages[0]).fg}>{i.stages[0]}</StagePill>
+            {i.stages.length > 1 && <span className="mut" style={{ fontSize: 11 }}>+{i.stages.length - 1}</span>}
+          </span>
+        ) : null,
+        attn: attn.length
+          ? <span className="mut" style={{ fontSize: 12 }}>{attn.join(" · ")}</span>
+          : null,
+      },
+    };
+  };
+
   return (
     <div className="container">
+      <PageHead title="Dashboard"
+        actions={canEdit && (
+          <button className="btn sm primary" onClick={() => setShowNew(true)}>+ New instrument</button>
+        )} />
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {([
           ["Total systems", counts.total, "var(--navy)"],
@@ -185,11 +250,9 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           system page is where the job, the tasks and the history already are.
           A capped preview; "all N" is the same set as the Mine filter. */}
       {mine.length > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
-            <div className="card-title">My systems</div>
-            <span className="mut" style={{ fontSize: 11 }}>{mine.length}</span>
-            <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+        <Panel title="My systems" count={mine.length}
+          actions={
+            <>
               {mine.length > MINE_SHOWN && (
                 <button className="btn link" style={{ fontSize: 11 }}
                   onClick={() => setSelected((s) => (s.includes("Mine") ? s : [...s, "Mine"]))}>
@@ -197,121 +260,106 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
                 </button>
               )}
               <Link href={myQueueHref} className="btn link" style={{ fontSize: 11 }}>my work orders →</Link>
-            </span>
-          </div>
+            </>
+          }>
           {mine.slice(0, MINE_SHOWN).map((i) => (
             <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
               style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
-              {i.down && <Pill bg="#A32D2D" fg="#fff">DOWN</Pill>}
-              <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
+              {i.down && <Dot tone="bad" label="down" />}
+              <Id>{i.externalId}</Id>
               <span style={{ fontSize: 13, flex: "1 1 200px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {i.label || <span className="mut">No assets listed yet</span>}
               </span>
               {i.mineNote && <span className="mut" style={{ fontSize: 11.5 }}>{i.mineNote}</span>}
             </Link>
           ))}
-        </div>
+        </Panel>
       )}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ position: "relative" }}>
-          <button className="btn sm" onClick={() => setFilterOpen((v) => !v)} style={{
-            borderRadius: 999,
-            borderColor: selected.length ? "var(--navy)" : "var(--line)",
-            background: selected.length ? "var(--navy)" : "#fff",
-            color: selected.length ? "#fff" : "var(--mut)",
-          }}>
-            Filter by{selected.length ? ` (${selected.length})` : ""} {filterOpen ? "▴" : "▾"}
-          </button>
-          {filterOpen && (
-            <>
-              <div onClick={() => setFilterOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
-              <div style={{
-                position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 21, background: "#fff",
-                border: "1px solid var(--line)", borderRadius: 10, boxShadow: "0 8px 24px rgba(23,42,74,0.14)",
-                padding: "10px 14px", minWidth: 220, maxHeight: "60vh", overflowY: "auto",
-              }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Stage</div>
-                {stageNames.map((s) => (
-                  <label key={s} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
-                    <input type="checkbox" checked={selected.includes(s)} onChange={() => toggleFilter(s)}
-                      style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
-                    {s}
-                  </label>
-                ))}
-                <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Flags</div>
-                <div className="mut" style={{ fontSize: 10, marginBottom: 2 }}>click once to keep, twice to hide</div>
-                {FLAGS.map((f) => {
-                  const st = flagState(f);
-                  return (
-                    <button key={f} type="button" onClick={() => toggleFilter(f)} className="row-hover"
-                      aria-pressed={st !== ""}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8, padding: "4px 2px", fontSize: 13,
-                        cursor: "pointer", width: "100%", textAlign: "left", border: "none",
-                        background: "none", borderRadius: 6,
-                        color: st === "out" ? "#A32D2D" : "var(--ink)",
-                      }}>
-                      <span aria-hidden style={{
-                        width: 15, height: 15, borderRadius: 4, flexShrink: 0, fontSize: 11, lineHeight: "15px",
-                        textAlign: "center", fontWeight: 700,
-                        border: st === "" ? "1px solid #C7D2E0" : "none",
-                        background: st === "in" ? "var(--coral, #E2574C)" : st === "out" ? "#A32D2D" : "transparent",
-                        color: "#fff",
-                      }}>{st === "in" ? "✓" : st === "out" ? "−" : ""}</span>
-                      <span style={{ textDecoration: st === "out" ? "line-through" : "none" }}>{f}</span>
-                    </button>
-                  );
-                })}
-                {LEADS.length > 0 && (
-                  <>
-                    <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Lead</div>
-                    {LEADS.map((l) => (
-                      <label key={l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
-                        <input type="checkbox" checked={selected.includes(leadKey(l))} onChange={() => toggleFilter(leadKey(l))}
+      <Toolbar
+        search={
+          <input value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="ID, module, serial, client, stage..." aria-label="Search the board" />
+        }
+        facets={
+          <FacetStrip
+            facets={FLAGS.map((f) => ({
+              key: f,
+              label: flagState(f) === "out" ? `not ${f}` : f,
+              count: data.filter((i) => matchesFlag(i, f)).length || undefined,
+              on: flagState(f) !== "",
+            }))}
+            onToggle={toggleFilter}
+          />
+        }
+        actions={
+          <>
+            <div style={{ position: "relative" }}>
+              <button className="btn sm" onClick={() => setFilterOpen((v) => !v)}>
+                Stage / lead{selected.some((f) => stageNames.includes(f) || f.startsWith("lead:")) ? " ✓" : ""} {filterOpen ? "▴" : "▾"}
+              </button>
+              {filterOpen && (
+                <>
+                  <div onClick={() => setFilterOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
+                  <div style={{
+                    position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 21, background: "#fff",
+                    border: "1px solid var(--line)", borderRadius: 10, boxShadow: "0 8px 24px rgba(23,42,74,0.14)",
+                    padding: "10px 14px", minWidth: 220, maxHeight: "60vh", overflowY: "auto",
+                  }}>
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>Stage</div>
+                    {stageNames.map((s) => (
+                      <label key={s} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                        <input type="checkbox" checked={selected.includes(s)} onChange={() => toggleFilter(s)}
                           style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
-                        {l}
+                        {s}
                       </label>
                     ))}
-                  </>
-                )}
-                {selected.length > 0 && (
-                  <button className="btn link" style={{ marginTop: 8 }} onClick={() => setSelected([])}>Clear all</button>
-                )}
-              </div>
-            </>
-          )}
+                    {LEADS.length > 0 && (
+                      <>
+                        <div className="eyebrow" style={{ margin: "10px 0 4px" }}>Lead</div>
+                        {LEADS.map((l) => (
+                          <label key={l} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 13, cursor: "pointer" }}>
+                            <input type="checkbox" checked={selected.includes(leadKey(l))} onChange={() => toggleFilter(leadKey(l))}
+                              style={{ width: 15, height: 15, accentColor: "var(--coral)" }} />
+                            {l}
+                          </label>
+                        ))}
+                      </>
+                    )}
+                    {selected.length > 0 && (
+                      <button className="btn link" style={{ marginTop: 8 }} onClick={() => setSelected([])}>Clear all</button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+            <select value={sortBy} aria-label="Sort the board"
+              onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+              style={{ width: "auto", fontSize: 12 }}>
+              <option value="default">Urgency</option>
+              <option value="owner">Owner</option>
+              <option value="id">System ID</option>
+            </select>
+          </>
+        }
+      />
+      {/* Stage and lead selections (and exclusions) as removable chips - the
+          strip above only carries the flags. */}
+      {selected.some((f) => stageNames.includes(f) || f.startsWith("lead:") || f.startsWith("!")) && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", margin: "0 0 10px" }}>
+          {selected.filter((f) => stageNames.includes(f) || f.startsWith("lead:") || f.startsWith("!")).map((f) => {
+            const no = f.startsWith("!");
+            const key = no ? f.slice(1) : f;
+            return (
+              <button key={f} className={`pill ${no ? "bad" : "accent"}`} title={no ? "Hiding these - click to clear" : "Remove filter"}
+                onClick={() => setSelected((sx) => sx.filter((x) => x !== f))}
+                style={{ border: "none", cursor: "pointer" }}>
+                {no ? "not " : ""}{key.startsWith("lead:") ? key.slice(5) : key} ×
+              </button>
+            );
+          })}
         </div>
-        {selected.map((f) => {
-          const no = f.startsWith("!");
-          const key = no ? f.slice(1) : f;
-          return (
-            <button key={f} className="pill" title={no ? "Hiding these - click to clear" : "Remove filter"}
-              onClick={() => setSelected((sx) => sx.filter((x) => x !== f))}
-              style={{
-                background: no ? "#FBE9E9" : "#EDEBFA", color: no ? "#A32D2D" : "#4F45A3",
-                border: "none", cursor: "pointer",
-              }}>
-              {no ? "− " : ""}{key.startsWith("lead:") ? key.slice(5) : key} ×
-            </button>
-          );
-        })}
-        <span style={{ display: "flex", gap: 6, alignItems: "center", marginLeft: "auto" }}>
-          <label className="mut" style={{ margin: 0, fontSize: 11 }} htmlFor="board-sort">Sort</label>
-          <select id="board-sort" value={sortBy} aria-label="Sort the board"
-            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
-            style={{ width: "auto", fontSize: 12 }}>
-            <option value="default">Urgency</option>
-            <option value="owner">Owner</option>
-            <option value="id">System ID</option>
-          </select>
-          {canEdit && (
-            <button className="btn sm primary" onClick={() => setShowNew((v) => !v)}>
-              {showNew ? "Cancel" : "+ New instrument"}
-            </button>
-          )}
-        </span>
-      </div>
+      )}
 
       {showNew && (
         <Dialog open onClose={() => setShowNew(false)} title="New instrument"
@@ -354,64 +402,23 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         </Dialog>
       )}
 
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ID, module, serial, client, stage..." style={{ marginBottom: 12 }} />
-
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div className="grid-row eyebrow" style={{ padding: "9px 14px", borderBottom: "1px solid var(--line)" }}>
-          <span>ID</span><span>System</span><span className="hide-m">Stages</span><span className="hide-m">Parts / gas</span>
-        </div>
-        {filtered.map((i, n) => (
-          <Link key={i.id} href={`/instruments/${i.id}`} className={`grid-row row-hover${n % 2 ? " alt" : ""}`}
-            style={{
-              padding: "11px 14px", borderBottom: "1px solid var(--line)", fontSize: 13, textDecoration: "none",
-              color: "inherit",
-              // Down reads red and beats parked; parked reads as somebody
-              // else's without being hidden.
-              ...(i.down ? { background: "#FDF1F1", borderLeft: "3px solid #C94A4A", paddingLeft: 11 }
-                : i.queueMine ? {} : { background: "#FCFAF5", borderLeft: "3px solid #E8C99B", paddingLeft: 11 }),
-            }}>
-            <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
-            <span style={{ minWidth: 0 }}>
-              <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.label || <span className="mut">No assets listed yet</span>}</span>
-              <span className="mut" style={{ fontSize: 11 }}>
-                {i.client}{i.category ? ` · ${i.category}` : ""} · P{i.priority}
-                {i.lead && <span style={{ color: "var(--navy)", fontWeight: 700 }}> · {i.lead}</span>}
-                {i.missingFromSheet && <span style={{ color: "#A32D2D", fontWeight: 700 }}> · not on sheet</span>}
-              </span>
-              {!i.queueMine && (
-                <span style={{ display: "block", fontSize: 11, color: "#8A5410" }}>
-                  with <b>{i.queueWith}</b>
-                  {i.queueReason ? ` · ${i.queueReason}` : ""}
-                </span>
-              )}
-            </span>
-            <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {i.stages.map((s) => (
-                <Pill key={s} bg={stageColor(s).bg} fg={stageColor(s).fg}>{s}</Pill>
-              ))}
-            </span>
-            <span className="hide-m" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {i.down && <Pill bg="#A32D2D" fg="#fff">DOWN</Pill>}
-              {i.missingFromSheet && <Pill bg="#FBE9E9" fg="#A32D2D">not on sheet</Pill>}
-              {i.overdue > 0 && <Pill bg="#FBE9E9" fg="#A32D2D">{i.overdue} overdue</Pill>}
-              {i.assetIssues.map((x) => (
-                <Pill key={x} bg={x.endsWith("down") ? "#FBE9E9" : "#FAF0DC"} fg={x.endsWith("down") ? "#A32D2D" : "#8A5410"}>{x}</Pill>
-              ))}
-              {i.openParts > 0 && <Pill bg="#FAF0DC" fg="#8A5410">{i.openParts} open</Pill>}
-              {i.gasIssues.map((g) => (
-                <Pill key={g} bg={g.endsWith("low") ? "#FAF0DC" : "#FBE9E9"} fg={g.endsWith("low") ? "#8A5410" : "#A32D2D"}>{g}</Pill>
-              ))}
-              {i.docIssues.map((d) => (
-                <Pill key={d} bg={d.endsWith("expired") ? "#FBE9E9" : "#FAF0DC"} fg={d.endsWith("expired") ? "#A32D2D" : "#8A5410"}>{d}</Pill>
-              ))}
-              {!i.missingFromSheet && !i.overdue && i.assetIssues.length === 0 && i.openParts === 0 && i.gasIssues.length === 0 && i.docIssues.length === 0 && <span className="mut" style={{ fontSize: 12 }}>-</span>}
-            </span>
-          </Link>
-        ))}
-        {filtered.length === 0 && (
-          <div className="mut" style={{ padding: 24, fontSize: 13, textAlign: "center" }}>No instruments match. Clear the filter or search.</div>
-        )}
-      </div>
+      <DataTable
+        cols={[
+          { key: "dot", label: "", width: "12px" },
+          { key: "id", label: "ID", width: "90px" },
+          { key: "system", label: "System", width: "minmax(200px, 2fr)" },
+          { key: "stage", label: "Stage", width: "minmax(120px, 0.9fr)", hideMobile: true },
+          { key: "attn", label: "Attention", width: "minmax(140px, 1fr)", hideMobile: true },
+        ]}
+        rows={filtered.map(toRow)}
+        empty="No instruments match. Clear the filter or search."
+      />
+      <Legend items={[
+        { tone: "bad", label: "down" },
+        { tone: "warn", label: "needs attention" },
+        { tone: "neutral", label: "ours to move" },
+        { tone: "faint", label: "with someone else" },
+      ]} />
       {!canEdit && <div className="mut" style={{ fontSize: 12, marginTop: 10 }}>Read-only access.</div>}
     </div>
   );
