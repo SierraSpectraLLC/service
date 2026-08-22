@@ -11,6 +11,7 @@ import { visibleOrgs } from "@/lib/tenancy";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
+import Panel from "@/components/ui/Panel";
 import { listHouseMembers } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -63,8 +64,7 @@ export default async function AdminSettingsPage() {
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 
       {requestRows.length > 0 && (
-        <div className="card">
-          <div className="card-title">Waiting on a decision ({requestRows.length})</div>
+        <Panel title="Waiting on a decision" count={requestRows.length}>
           {requestRows.map((r) => {
             const inst = byId.get(r.instrumentId);
             return (
@@ -79,19 +79,16 @@ export default async function AdminSettingsPage() {
               </div>
             );
           })}
-        </div>
+        </Panel>
       )}
 
       {/* One row per system, closed by default: at a dozen systems the old
           card-per-system layout was three screens of "Not shared with anyone".
           The summary line answers the audit question - who owns it, who sees
           it - and the full sharing panel opens only for the row being worked. */}
-      <div className="card">
-        <div className="card-title">Access &amp; ownership</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-          Every system, who owns it, and who can see it. Open a row to reassign the owner or
-          change who it is shared with.
-        </div>
+      <Panel title="Access &amp; ownership" count={rows.length}
+        hint="Every system, who owns it, and who can see it. Open a row to reassign the owner or
+          change who it is shared with.">
         {rows.map((inst) => {
           const shares = shareRows.filter((s) => s.instrumentId === inst.id);
           const label = systemLabel(inst, assetRows.filter((a) => a.instrumentId === inst.id));
@@ -136,7 +133,7 @@ export default async function AdminSettingsPage() {
         {rows.length === 0 && (
           <div className="empty"><b>No systems yet</b></div>
         )}
-      </div>
+      </Panel>
     </div>
   );
 }

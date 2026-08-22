@@ -8,6 +8,7 @@ import {
 } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Panel from "@/components/ui/Panel";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
@@ -59,15 +60,12 @@ export default function PersonnelForm(props: {
 
   return (
     <>
-      <div className="card">
-        <div className="card-title">Organizations</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Companies inside this workspace. A client owns systems; a provider services them. Each sees only
+      <Panel title="Organizations" count={props.orgs.length}
+        hint={<>Companies inside this workspace. A client owns systems; a provider services them. Each sees only
           what&apos;s shared with it, and neither runs a workspace of its own - a service company that needs
           its own staff, catalog and clients is set up in{" "}
           {props.isPlatform ? <Link href="/settings/tenants">Service providers</Link> : <b>Service companies</b>}{" "}
-          instead. Open one to set its look, its people and where its reports go.
-        </div>
+          instead. Open one to set its look, its people and where its reports go.</>}>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "2px 0 10px" }}>
           <Toggle on={view} label="Client sign-in" onClick={() => {
@@ -121,7 +119,7 @@ export default function PersonnelForm(props: {
           <button className="btn sm accent" onClick={submitOrg} disabled={pending || !orgDraft.name.trim()}>Add</button>
         </div>
         {orgError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{orgError}</div>}
-      </div>
+      </Panel>
 
       {/* A sign-in with no organization has no scope, so it can't sign in at all. */}
       {props.orphans.length > 0 && (
@@ -158,12 +156,9 @@ export default function PersonnelForm(props: {
           is a login, so this is a window onto the ones that exist rather than a
           second list to keep in step with them. People are added where they get
           their access - the house in Admin, an organization on its own page. */}
-      <div className="card">
-        <div className="card-title">Directory</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Everyone tasks can be assigned to and @mentions can reach. Add somebody by giving them a login:
-          your own people in <a href="/settings/admin">Admin</a>, a client&apos;s on their organization&apos;s page.
-        </div>
+      <Panel title="Directory" count={props.directory.length}
+        hint={<>Everyone tasks can be assigned to and @mentions can reach. Add somebody by giving them a login:
+          your own people in <a href="/settings/admin">Admin</a>, a client&apos;s on their organization&apos;s page.</>}>
         {props.directory.map((p) => (
           <div key={p.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
@@ -172,7 +167,7 @@ export default function PersonnelForm(props: {
           </div>
         ))}
         {props.directory.length === 0 && <div className="mut" style={{ fontSize: 12 }}>Nobody has a login yet.</div>}
-      </div>
+      </Panel>
     </>
   );
 }
