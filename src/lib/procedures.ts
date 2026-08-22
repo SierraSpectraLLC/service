@@ -107,6 +107,8 @@ export type ProcedureTiming = {
   assetType: string;
   runsAtIntake: boolean;
   intervalDays: number | null;
+  /** Usage cadence ("every 2000 injections") - displayed, never cron-scheduled. */
+  usage?: { every: number; unit: string } | null;
   modelScope: string[];
   /** System-level only: which system categories it covers. [] = all of them. */
   categoryScope?: string[];
@@ -119,12 +121,16 @@ export type ProcedureTiming = {
  * caller can show the error instead.
  */
 export function describeProcedure(d: ProcedureTiming): string | null {
-  const when = d.runsAtIntake && d.intervalDays !== null
-    ? `at intake and ${cadenceLabel(d.intervalDays)}`
+  const cadences = [
+    ...(d.intervalDays !== null ? [cadenceLabel(d.intervalDays)] : []),
+    ...(d.usage ? [`every ${d.usage.every} ${d.usage.unit} (tracked by hand)`] : []),
+  ];
+  const when = d.runsAtIntake && cadences.length
+    ? `at intake and ${cadences.join(" and ")}`
     : d.runsAtIntake
       ? "once at intake"
-      : d.intervalDays !== null
-        ? cadenceLabel(d.intervalDays)
+      : cadences.length
+        ? cadences.join(" and ")
         : null;
   if (when === null) return null;
   const where = d.assetType === "system"

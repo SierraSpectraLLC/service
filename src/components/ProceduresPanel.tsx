@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { addProcedure, updateProcedure, deleteProcedure, copyProceduresToModel, forkProcedureForModel, reorderProcedures,
+import { updateProcedure, deleteProcedure, copyProceduresToModel, reorderProcedures,
   copyProcedureToTypes, moveTypeToCategory,
 } from "@/app/actions";
-import { summarizeItem, RESULT_TYPES, RESULT_LABEL } from "@/lib/checkout";
+import { summarizeItem } from "@/lib/checkout";
 import { cadenceLabel } from "@/lib/pm";
-import { describeProcedure, type ProcPart } from "@/lib/procedures";
-import { parseChecklist } from "@/lib/checklist";
-import PartNumberField from "./PartNumberField";
+import { type ProcPart } from "@/lib/procedures";
+import { needsAcceptanceReview, parseAcceptance } from "@/lib/testResult";
+import ProcedureDialog, { type ProcedureSheet } from "./ProcedureDialog";
 import { procedureRole, ROLE_LABEL, ROLE_TONE } from "@/lib/procedureRole";
-import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
+import { QUAL_LABEL } from "@/lib/gxp";
 import ProvenanceChip from "./ProvenanceChip";
 import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
 import type { Tone } from "@/lib/tones";
@@ -22,8 +22,14 @@ import { toast } from "@/components/ui/Toast";
 export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
   resultType: string; target: string | null; tolerancePct: string | null;
+  /** The structured spec (JSON, lib/testResult.Acceptance). "" = legacy prose. */
+  acceptance?: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null; required: boolean;
+  /** Tests only: a report must be on the result before sign-off. */
+  needsReport?: boolean;
+  /** Usage cadence ("every 2000 injections") - displayed, never cron-run. */
+  usageEvery?: number | null; usageUnit?: string;
   qualification: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
   checklist: string;
@@ -36,100 +42,41 @@ const KIND_GLYPH: Record<string, { glyph: string; tone: Tone }> = {
   test: { glyph: "◎", tone: "accent" },
 };
 
-const CADENCES = [
-  { days: "7", label: "weekly" }, { days: "14", label: "every 2 weeks" },
-  { days: "30", label: "monthly" }, { days: "90", label: "quarterly" },
-  { days: "180", label: "every 6 months" }, { days: "365", label: "yearly" },
-];
-
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "intake", label: "At intake" },
   { key: "recurring", label: "Maintenance" },
   { key: "tests", label: "Tests" },
   { key: "tasks", label: "Tasks" },
+  { key: "review", label: "Needs review" },
 ] as const;
 type FilterKey = typeof FILTERS[number]["key"];
 
 const passesFilter = (p: ProcedureRow, f: FilterKey) =>
   f === "all" ? true
     : f === "intake" ? p.runsAtIntake
-    : f === "recurring" ? p.intervalDays !== null
+    : f === "recurring" ? p.intervalDays !== null || !!p.usageEvery
     : f === "tests" ? p.kind === "test"
+    // Tests whose limits still live in prose - moved into structured criteria
+    // by hand, never parsed automatically. See lib/testResult.
+    : f === "review" ? needsAcceptanceReview({ ...p, acceptance: p.acceptance ?? "" })
     : p.kind === "task";
 
-// The sheet's draft. `repeats` and `intervalDays` are separate so switching
-// Repeats off remembers the cadence for when it comes back on.
-type Draft = {
-  kind: string; name: string; notes: string;
-  resultType: string; target: string; tolerancePct: string;
-  requiresNote: boolean; consumesPart: boolean;
-  runsAtIntake: boolean; repeats: boolean; intervalDays: string; required: boolean;
-  qualification: string;
-  parts: ProcPart[]; modelScope: string[]; categoryScope: string[];
-  checklist: string;
-  provenance: string;
-};
-const emptyDraft: Draft = {
-  kind: "task", name: "", notes: "",
-  resultType: "pass_fail", target: "", tolerancePct: "",
-  requiresNote: false, consumesPart: false,
-  // Filters never pre-fill this: a new procedure always starts with both off.
-  // Yearly, because most upkeep worth writing down is annual and picking the
-  // same value on every new procedure is a tax on the common case.
-  runsAtIntake: false, repeats: false, intervalDays: "365", required: false,
-  qualification: "",
-  parts: [], modelScope: [], categoryScope: [], checklist: "", provenance: "",
-};
-
-/** Multiselect over catalog models: chips in the field, type-to-filter list below. */
-function ScopeField({ scope, options, onChange }: {
-  scope: string[]; options: string[]; onChange: (next: string[]) => void;
-}) {
-  const [filter, setFilter] = useState("");
-  const available = options.filter(
-    (o) => !scope.some((s) => s.toLowerCase() === o.toLowerCase())
-      && o.toLowerCase().includes(filter.trim().toLowerCase())
-  );
-  return (
-    <div>
-      <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "#fff", padding: 6, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-        {scope.length === 0 && <span className="pill faint">All models</span>}
-        {scope.map((m) => (
-          <span key={m} className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            {m}
-            <button type="button" className="chip-x t-small" aria-label={`Remove ${m}`}
-              onClick={() => onChange(scope.filter((s) => s !== m))}
-              style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
-          </span>
-        ))}
-        <input value={filter} onChange={(e) => setFilter(e.target.value)}
-          placeholder={options.length ? "Type to filter models..." : "No models in the catalog yet - define them in Settings → Catalog"}
-          className="t-small" style={{ border: "none", flex: "1 1 120px", minWidth: 100, padding: "3px 4px" }} />
-      </div>
-      {available.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6, maxHeight: 96, overflowY: "auto" }}>
-          {available.map((o) => (
-            <button key={o} type="button" className="pill" onClick={() => { onChange([...scope, o]); setFilter(""); }}
-              style={{ border: "1px solid var(--line)", background: "#fff", color: "var(--slate)", cursor: "pointer" }}>
-              + {o}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// The add/edit dialog itself - five stepped sections, the scope ladder, the
+// structured acceptance editor - lives in ProcedureDialog.tsx (prompt B3).
+// This panel owns the catalog LIST: bands, filters, reorder, copy and move.
 
 /**
  * The one procedure catalog: what gets done to equipment, per module type. A
  * row's badges say everything - kind, when it fires, scope, parts - and every
  * badge maps to a control in the one sheet that both adds and edits.
  */
-export default function ProceduresPanel({ items, assetTypes, modelOptions, categories, categoriesByType, focus, copyFrom = [] }: {
+export default function ProceduresPanel({ items, assetTypes, modelOptions, modelsByCategory, categories, categoriesByType, focus, copyFrom = [] }: {
   items: ProcedureRow[];
   assetTypes: string[]; // from Settings > Catalog
   modelOptions: Record<string, string[]>;
+  /** assetType -> system type -> that type's models, for the scope ladder's counts. */
+  modelsByCategory?: Record<string, Record<string, string[]>>;
   categories: string[];                            // system categories, from the catalog
   categoriesByType: Record<string, string[]>;      // which categories each module type serves
   /**
@@ -147,14 +94,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
 }) {
   const [openBand, setOpenBand] = useState<string | null>(focus ? "__focus" : "system");
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [sheet, setSheet] = useState<null | { assetType: string; id?: number }>(null);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
-  // Snapshot of the timing at sheet-open, to detect a change worth warning about.
-  const [timingBefore, setTimingBefore] = useState<{ intervalDays: number | null } | null>(null);
-  const [applyNow, setApplyNow] = useState(false);
-  // Focus mode, editing a procedure other models also use: does this edit go
-  // to all of them, or does this model fork off its own version?
-  const [applyScope, setApplyScope] = useState<"all" | "only">("all");
+  const [sheet, setSheet] = useState<ProcedureSheet | null>(null);
   // Seeding this model from a sibling: which one, and what came of it.
   const [seedFrom, setSeedFrom] = useState("");
   const [seedNote, setSeedNote] = useState("");
@@ -258,30 +198,10 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     // type. Without this, adding under LC-MS also added it to TOC.
     const served = categoriesByType[assetType] ?? [];
     const scoped = bandKey && bandKey !== "system" && bandKey !== "__loose" && bandKey !== "__focus" && served.length > 1;
-    // On a model's page, new work starts scoped to that model; widen from there.
-    setDraft({ ...emptyDraft, categoryScope: scoped ? [bandKey] : [], modelScope: focus ? [focus.model] : [] });
-    setTimingBefore(null);
-    setApplyNow(false);
-    setApplyScope("all");
     setError("");
-    setSheet({ assetType });
+    setSheet({ assetType, bandCategory: scoped ? bandKey : undefined });
   };
-  const draftFrom = (i: ProcedureRow): Draft => ({
-    kind: i.kind, name: i.name, notes: i.notes,
-    resultType: i.resultType, target: i.target ?? "", tolerancePct: i.tolerancePct ?? "",
-    requiresNote: i.requiresNote, consumesPart: i.consumesPart,
-    runsAtIntake: i.runsAtIntake, repeats: i.intervalDays !== null,
-    intervalDays: String(i.intervalDays ?? 365), required: i.required,
-    qualification: i.qualification,
-    parts: i.parts.map((p) => ({ ...p })), modelScope: i.modelScope,
-    categoryScope: i.categoryScope, checklist: i.checklist,
-    provenance: i.provenance ?? "",
-  });
   const openEdit = (i: ProcedureRow) => {
-    setDraft(draftFrom(i));
-    setTimingBefore({ intervalDays: i.intervalDays });
-    setApplyNow(false);
-    setApplyScope("all");
     setError("");
     setSheet({ assetType: i.assetType, id: i.id });
   };
@@ -290,59 +210,8 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   // duplicate, narrow the model scope, change what differs. The system-type
   // scope carries over - a TOC variant belongs to TOC until said otherwise.
   const openDuplicate = (i: ProcedureRow) => {
-    setDraft({ ...draftFrom(i), modelScope: [] });
-    setTimingBefore(null);
-    setApplyNow(false);
     setError("");
-    setSheet({ assetType: i.assetType });
-  };
-
-  const isSystem = sheet?.assetType === "system";
-  const effectiveInterval = draft.repeats ? parseInt(draft.intervalDays) || null : null;
-  const timingValid = draft.runsAtIntake || effectiveInterval !== null;
-
-  // Which timing change is in flight, for the edit-time notice. Only shown
-  // when editing and only when the timing actually changed.
-  const timingChange = sheet?.id && timingBefore
-    ? timingBefore.intervalDays === null && effectiveInterval !== null ? "added"
-      : timingBefore.intervalDays !== null && effectiveInterval === null ? "removed"
-      : timingBefore.intervalDays !== null && effectiveInterval !== null && timingBefore.intervalDays !== effectiveInterval ? "changed"
-      : null
-    : null;
-
-  const save = () => {
-    if (!sheet || !draft.name.trim()) return;
-    if (!timingValid) { setError("Pick when it runs: at intake, on a cadence, or both"); return; }
-    setError("");
-    const payload = {
-      assetType: sheet.assetType, kind: draft.kind, name: draft.name, notes: draft.notes,
-      resultType: draft.resultType, target: draft.target, tolerancePct: draft.tolerancePct,
-      requiresNote: draft.requiresNote, consumesPart: draft.consumesPart,
-      runsAtIntake: draft.runsAtIntake, required: draft.required,
-      qualification: draft.qualification,
-      intervalDays: draft.repeats ? draft.intervalDays : null,
-      parts: draft.parts, modelScope: isSystem ? [] : draft.modelScope,
-      categoryScope: draft.categoryScope, checklist: draft.checklist,
-      provenance: draft.provenance,
-    };
-    startTransition(async () => {
-      const res = sheet.id
-        ? (focus && sharedBeyondFocus && applyScope === "only"
-          // Fork: the shared version loses this model; a copy scoped to it
-          // carries the edit, and its stamped schedules follow.
-          ? await forkProcedureForModel(sheet.id, focus.model, { ...payload, modelScope: [focus.model] })
-          : await updateProcedure(sheet.id, payload, timingChange !== null && applyNow))
-        : await addProcedure(payload);
-      if (res?.error) { setError(res.error); return; }
-      setSheet(null);
-      if (sheet.id) setFlashId(sheet.id);
-      const extra = res && "applied" in res && res.applied ? ` - scheduled on ${res.applied} existing unit${res.applied === 1 ? "" : "s"}`
-        : res && "retimed" in res && res.retimed ? ` - re-timed ${res.retimed} existing schedule${res.retimed === 1 ? "" : "s"}`
-        : res && "unscheduled" in res && res.unscheduled ? ` - unscheduled from ${res.unscheduled} unit${res.unscheduled === 1 ? "" : "s"}`
-        : "";
-      setSaved(`Saved "${draft.name.trim()}"${extra}`);
-      setTimeout(() => setSaved(""), 4000);
-    });
+    setSheet({ assetType: i.assetType, duplicateFrom: i.id });
   };
 
   // Pointer-based reorder (mouse and touch; the handle has touch-action: none
@@ -381,19 +250,6 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     if (d?.dirty) startTransition(() => reorderProcedures(d.assetType, d.ids));
   };
 
-  // In focus mode: is the procedure on the sheet also somebody else's? Empty
-  // scope means every model of the type, so that counts too.
-  const editingRow = sheet?.id ? items.find((x) => x.id === sheet.id) : undefined;
-  const sharedBeyondFocus = !!(focus && editingRow
-    && (editingRow.modelScope.length === 0 || editingRow.modelScope.length > 1));
-
-  const sentence = describeProcedure({
-    assetType: sheet?.assetType ?? "", runsAtIntake: draft.runsAtIntake,
-    intervalDays: effectiveInterval, modelScope: isSystem ? [] : draft.modelScope,
-    categoryScope: draft.categoryScope,
-    parts: draft.parts.filter((p) => p.name.trim() || p.number.trim()),
-  });
-
   const renderRow = (i: ProcedureRow, assetType: string, bandKey: string, listKey: string, listIds: number[]) => {
     const k = KIND_GLYPH[i.kind] ?? KIND_GLYPH.test;
     // A system procedure is narrowed by category, everything else by model.
@@ -430,7 +286,9 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {/* The one pill: the cadence when it has one, else what it is. */}
             {i.intervalDays !== null
               ? <span className={`pill ${ROLE_TONE[role]}`}>{cadenceLabel(i.intervalDays)}</span>
-              : <span className={`pill ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>}
+              : i.usageEvery && i.usageUnit
+                ? <span className={`pill ${ROLE_TONE[role]}`}>every {i.usageEvery} {i.usageUnit}</span>
+                : <span className={`pill ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>}
           </div>
           {i.notes && (
             <div className="mut t-meta" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.notes}</div>
@@ -620,9 +478,13 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             const res = await updateProcedure(row.id, {
               assetType: row.assetType, kind: row.kind, name: row.name, notes: row.notes,
               resultType: row.resultType, target: row.target ?? "", tolerancePct: row.tolerancePct ?? "",
+              acceptance: parseAcceptance(row.acceptance ?? ""),
               requiresNote: row.requiresNote, consumesPart: row.consumesPart,
               runsAtIntake: row.runsAtIntake, required: row.required,
+              needsReport: row.needsReport ?? false,
               intervalDays: row.intervalDays,
+              usage: row.usageEvery && row.usageUnit ? { every: row.usageEvery, unit: row.usageUnit } : null,
+              qualification: row.qualification, checklist: row.checklist, provenance: row.provenance,
               parts: row.parts, modelScope: row.modelScope, categoryScope: rest,
             }, false);
             if (res?.error) { setError(res.error); return; }
@@ -772,363 +634,17 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       ]} />
 
       {sheet && (
-        <Dialog open onClose={() => setSheet(null)}
-          title={`${sheet.id ? "Edit" : "New"} · ${isSystem ? "System" : sheet.assetType}`}
-          footer={
-            <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
-              <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn accent" onClick={save} disabled={pending || !draft.name.trim()}>
-                {pending ? "Saving..." : "Save procedure"}
-              </button>
-            </>
-          }>
-            <div className="seg" role="group" aria-label="Procedure kind" style={{ marginBottom: 12 }}>
-              {(["task", "test"] as const).map((k) => (
-                <button key={k} type="button" aria-pressed={draft.kind === k} onClick={() => setDraft({ ...draft, kind: k })}>
-                  {k === "task" ? "☐ Task" : "◎ Test"}
-                </button>
-              ))}
-            </div>
-
-            <label>Name *</label>
-            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-              placeholder={draft.kind === "task" ? "e.g. Replace inlet septum" : "e.g. Flow Check"}
-              style={{ marginBottom: 10 }} />
-
-            {draft.kind === "test" ? (
-              <div style={{ marginBottom: 10 }}>
-                <label>Result</label>
-                <div className="seg" role="group" aria-label="Result type" style={{ flexWrap: "wrap" }}>
-                  {RESULT_TYPES.map((rt) => (
-                    <button key={rt} type="button" aria-pressed={draft.resultType === rt}
-                      onClick={() => setDraft({ ...draft, resultType: rt })}>
-                      {RESULT_LABEL[rt]}
-                    </button>
-                  ))}
-                </div>
-                {draft.resultType === "measured" && (
-                  <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                    <div style={{ flex: 2 }}>
-                      <label>Target</label>
-                      <input value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })}
-                        placeholder="e.g. 5 mL/min or 2.0 C" />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label>± Tolerance %</label>
-                      <input value={draft.tolerancePct} inputMode="decimal"
-                        onChange={(e) => setDraft({ ...draft, tolerancePct: e.target.value })} placeholder="10" />
-                    </div>
-                  </div>
-                )}
-                {draft.resultType === "note" && (
-                  <div style={{ marginTop: 8 }}>
-                    <label>What to record</label>
-                    <input value={draft.target} onChange={(e) => setDraft({ ...draft, target: e.target.value })}
-                      placeholder="e.g. record lamp hours" />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={{ marginBottom: 10 }}>
-                {/* "Inspect and/or replace X" has two honest endings and a bare
-                    checkmark records neither. On, the generated task closes only
-                    by recording which happened - like a test records its number. */}
-                <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "0 0 8px", fontWeight: 400, color: "var(--ink)" }}>
-                  <input type="checkbox" checked={draft.resultType === "inspect_replace"} style={{ width: 15, height: 15, marginTop: 2 }}
-                    onChange={(e) => setDraft({ ...draft, resultType: e.target.checked ? "inspect_replace" : "pass_fail" })} />
-                  <span>
-                    Inspect / Replace outcome
-                    <span className="mut t-meta" style={{ display: "block" }}>
-                      The task can&apos;t be closed until whoever did it records which happened -
-                      inspected (what was found) or replaced (what went in). Both are documented
-                      with name and time, like a test result.
-                    </span>
-                  </span>
-                </label>
-                <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
-                    <input type="checkbox" checked={draft.requiresNote} style={{ width: 15, height: 15 }}
-                      onChange={(e) => setDraft({ ...draft, requiresNote: e.target.checked })} />
-                    Require a note
-                  </label>
-                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
-                    <input type="checkbox" checked={draft.consumesPart} style={{ width: 15, height: 15 }}
-                      onChange={(e) => setDraft({ ...draft, consumesPart: e.target.checked })} />
-                    Consumes a part
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* When it runs. Both off = invalid; the error lands here. */}
-            <label>When it runs *</label>
-            <div style={{
-              border: `1px solid ${!timingValid && error ? "#A32D2D" : "var(--line)"}`,
-              borderRadius: 8, background: "#fff", padding: "8px 10px", marginBottom: 10,
-            }}>
-              <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
-                <input type="checkbox" checked={draft.runsAtIntake} style={{ width: 15, height: 15 }}
-                  onChange={(e) => setDraft({ ...draft, runsAtIntake: e.target.checked })} />
-                At intake - created once when a {isSystem ? "system" : "unit of this type"} is added
-              </label>
-              <>
-                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "8px 0 0" }}>
-                    <input type="checkbox" checked={draft.repeats} style={{ width: 15, height: 15 }}
-                      onChange={(e) => setDraft({ ...draft, repeats: e.target.checked })} />
-                    Maintenance - repeats on a cadence, scheduled on every {isSystem ? "system" : "unit"} it covers, existing and new
-                  </label>
-                  {draft.repeats && (
-                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8, paddingLeft: 21 }}>
-                      <select value={draft.intervalDays} onChange={(e) => setDraft({ ...draft, intervalDays: e.target.value })}
-                        className="t-small" style={{ width: "auto" }} aria-label="Cadence preset">
-                        {CADENCES.map((c) => <option key={c.days} value={c.days}>{c.label}</option>)}
-                        {!CADENCES.some((c) => c.days === draft.intervalDays) && (
-                          <option value={draft.intervalDays}>every {draft.intervalDays} days</option>
-                        )}
-                      </select>
-                      <input type="number" min={1} max={3650} value={draft.intervalDays} inputMode="numeric"
-                        onChange={(e) => setDraft({ ...draft, intervalDays: e.target.value })}
-                        aria-label="Cadence in days" className="t-small" style={{ width: 76 }} />
-                      <span className="mut t-meta">days</span>
-                    </div>
-                  )}
-                </>
-            </div>
-
-            <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "0 0 10px", fontWeight: 400, color: "var(--ink)" }}>
-              <input type="checkbox" checked={draft.required} style={{ width: 15, height: 15, marginTop: 2 }}
-                onChange={(e) => setDraft({ ...draft, required: e.target.checked })} />
-              <span>
-                Required for sign-off
-                <span className="mut t-meta" style={{ display: "block" }}>
-                  {draft.kind === "test"
-                    ? "Nobody can sign off until this test is done and a report is filed against it."
-                    : "Nobody can sign off until this is done."}
-                </span>
-              </span>
-            </label>
-
-            {/* Which qualification this belongs to, for regulated systems. A
-                grouping, not a behavior change - the work runs the same; the
-                binder and the GxP standing read the tag. */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-              <label style={{ margin: 0 }}>Qualification</label>
-              <div className="seg" role="group" aria-label="Qualification">
-                {["", ...QUALIFICATIONS].map((q) => (
-                  <button key={q || "none"} type="button" aria-pressed={draft.qualification === q}
-                    onClick={() => setDraft({ ...draft, qualification: q })}>
-                    {q || "None"}
-                  </button>
-                ))}
-              </div>
-              <span className="mut t-meta">
-                Groups this under IQ/OQ/PQ on regulated (GxP) systems. Others ignore it.
-              </span>
-            </div>
-
-            {/* Whose words these are. Asked here, once, while the procedure is
-                being written - the only moment the answer is actually known.
-                Decides whether it can travel with a licensed library. */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
-              <label style={{ margin: 0 }}>Where it came from</label>
-              <div className="seg" role="group" aria-label="Where it came from">
-                {["", ...PROVENANCE_CHOICES].map((c) => (
-                  <button key={c || "none"} type="button" aria-pressed={draft.provenance === c}
-                    onClick={() => setDraft({ ...draft, provenance: c })}>
-                    {c ? PROVENANCE_LABEL[c as keyof typeof PROVENANCE_LABEL] : "Not saying"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="mut t-meta" style={{ marginBottom: 10 }}>
-              {PROVENANCE_BLURB[(draft.provenance || "") as keyof typeof PROVENANCE_BLURB]}
-            </div>
-
-            {/* Only on edit, and only when the timing actually changed: what
-                happens to existing units, with the opt-in to apply it now. */}
-            {timingChange && (
-              <div className="t-small" style={{ padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 10 }}>
-                {timingChange === "changed" && (
-                  <>Existing units keep their current cadence; only units added from now on get the new one.</>
-                )}
-                {timingChange === "added" && (
-                  <>Only units added from now on get this schedule; existing units stay unscheduled.</>
-                )}
-                {timingChange === "removed" && (
-                  <>Existing units keep their schedules; this only stops new units from getting one.</>
-                )}
-                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0 0", fontWeight: 700 }}>
-                  <input type="checkbox" checked={applyNow} style={{ width: 15, height: 15 }}
-                    onChange={(e) => setApplyNow(e.target.checked)} />
-                  {timingChange === "changed" && "Also re-time existing units now"}
-                  {timingChange === "added" && "Also schedule existing units now"}
-                  {timingChange === "removed" && "Also remove existing schedules now (their tasks stay)"}
-                </label>
-              </div>
-            )}
-
-            <label>Steps / notes</label>
-            <textarea value={draft.notes} rows={2}
-              onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-              placeholder="What doing this involves (optional)"
-              className="t-body" style={{ width: "100%", marginBottom: 10, resize: "vertical" }} />
-
-            {/* The steps as boxes rather than as a paragraph. Every task this
-                makes - at intake and on every cycle - arrives with them
-                already ticked off nothing, so a fourteen-step teardown stops
-                being one checkbox somebody ticks at the end. */}
-            <label>Checklist <span className="mut" style={{ fontWeight: 400 }}>(one step per line)</span></label>
-            <textarea value={draft.checklist} rows={5}
-              onChange={(e) => setDraft({ ...draft, checklist: e.target.value })}
-              placeholder={"Remove & Sonicate:\nLow-Pressure Funnel Assembly\nHigh-Pressure Funnel Assembly"}
-              className="t-body" style={{ width: "100%", marginBottom: 4, resize: "vertical" }} />
-            <div className="mut" style={{ fontSize: 10.5, marginBottom: 10 }}>
-              End a line with a colon to make it a section label instead of a tick box.
-              {(() => {
-                const n = parseChecklist(draft.checklist).filter((l) => !l.heading).length;
-                return n ? ` ${n} box${n === 1 ? "" : "es"} on every task this makes.` : "";
-              })()}
-            </div>
-
-            <label>Parts it takes</label>
-            <div style={{ marginBottom: 10 }}>
-              {draft.parts.map((pt, idx) => {
-                const partModels = pt.models ?? [];
-                const modelPool = (modelOptions[sheet.assetType] ?? []).filter((m) => !partModels.includes(m));
-                const setPart = (patch: Partial<ProcPart>) =>
-                  setDraft({ ...draft, parts: draft.parts.map((x, i) => (i === idx ? { ...x, ...patch } : x)) });
-                return (
-                <div key={idx} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 8px", marginBottom: 6 }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {/* How many the job takes. An MS120's annual oil change
-                        needs two bottles, and one arriving is the job not
-                        getting done - so this reaches the part that gets
-                        ordered, not just the wording of the task. Blank reads
-                        as 1, which is what every part meant before this. */}
-                    <input type="number" min={1} max={999} value={pt.qty ?? ""} placeholder="1"
-                      aria-label="How many this job takes"
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value, 10);
-                        setPart({ qty: Number.isFinite(n) && n > 1 ? n : undefined });
-                      }}
-                      className="t-body" style={{ width: 56 }} />
-                    <PartNumberField value={pt.number} style={{ flex: 1, fontSize: 13 }}
-                      onChange={(number) => setPart({ number })}
-                      onPick={(part) => setPart({ number: part.partNumber, name: pt.name.trim() || part.name })} />
-                    <PartNumberField value={pt.name} insert="name" className="" ariaLabel="Part name"
-                      placeholder="Name (optional)" style={{ flex: 1, fontSize: 13 }}
-                      onChange={(name) => setPart({ name })}
-                      onPick={(part) => setPart({ name: part.name || part.partNumber, number: pt.number.trim() || part.partNumber })} />
-                    <button className="btn link" aria-label="Remove part" style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
-                      onClick={() => setDraft({ ...draft, parts: draft.parts.filter((_, i) => i !== idx) })}>×</button>
-                  </div>
-                  {/* Which models take THIS part number. One procedure, one
-                      mapping: seals get inspected on every pump, but the LC-20's
-                      kit isn't the LC-30's - each unit's work carries only the
-                      parts tagged for its model. */}
-                  {!isSystem && (modelOptions[sheet.assetType] ?? []).length > 0 && (
-                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-                      <span className="mut t-meta">fits</span>
-                      {partModels.length === 0 && (
-                        <span className="pill faint">any model</span>
-                      )}
-                      {partModels.map((m) => (
-                        <span key={m} className="pill accent" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          {m}
-                          <button type="button" className="chip-x t-small" aria-label={`This part no longer fits ${m}`}
-                            onClick={() => setPart({ models: partModels.filter((x) => x !== m) })}
-                            style={{ border: "none", background: "none", color: "inherit", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
-                        </span>
-                      ))}
-                      {modelPool.length > 0 && (
-                        <select value="" aria-label="Limit this part to a model"
-                          onChange={(e) => { if (e.target.value) setPart({ models: [...partModels, e.target.value] }); }}
-                          className="t-meta" style={{ width: "auto", padding: "2px 6px" }}>
-                          <option value="">+ model...</option>
-                          {modelPool.map((m) => <option key={m} value={m}>{m}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  )}
-                </div>
-                );
-              })}
-              <button type="button" className="btn sm"
-                onClick={() => setDraft({ ...draft, parts: [...draft.parts, { name: "", number: "" }] })}>
-                ＋ Part
-              </button>
-            </div>
-
-            {isSystem ? (
-              <>
-                <label>System types</label>
-                <ScopeField scope={draft.categoryScope} options={categories}
-                  onChange={(next) => setDraft({ ...draft, categoryScope: next })} />
-                <div className="mut t-meta" style={{ marginTop: -4, marginBottom: 8 }}>
-                  Leave empty and it covers every system in the workspace - which is rarely
-                  what an annual PM means.
-                </div>
-              </>
-            ) : (
-              <>
-                <label>Models</label>
-                <ScopeField scope={draft.modelScope} options={modelOptions[sheet.assetType] ?? []}
-                  onChange={(next) => setDraft({ ...draft, modelScope: next })} />
-                <div className="mut t-meta" style={{ marginTop: 4 }}>
-                  Same work, different part number per model? Keep ONE procedure covering all of
-                  them and tag each part above with the models it fits. Duplicate the procedure
-                  only when the work itself differs by model.
-                </div>
-                {/* Only when the type serves several system types is there a
-                    question to answer - a Degasser only LC-MS uses needs no
-                    scope. This is what keeps the TOC sampler's procedures off
-                    the LC-MS sampler and vice versa. */}
-                {(categoriesByType[sheet.assetType] ?? []).length > 1 && (
-                  <div style={{ marginTop: 10 }}>
-                    <label>System types it belongs to</label>
-                    <ScopeField scope={draft.categoryScope} options={categoriesByType[sheet.assetType] ?? []}
-                      onChange={(next) => setDraft({ ...draft, categoryScope: next })} />
-                    <div className="mut t-meta" style={{ marginTop: 4 }}>
-                      Empty covers every system type a {sheet.assetType.toLowerCase()} serves
-                      ({(categoriesByType[sheet.assetType] ?? []).join(", ")}).
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-
-            {/* The live sentence: what this will actually do. */}
-            <div className="t-small" style={{
-              marginTop: 10, padding: "7px 10px", borderRadius: 8,
-              background: sentence ? "#F1F4F8" : "#FBE9E9",
-              color: sentence ? "var(--slate)" : "#A32D2D",
-              fontWeight: sentence ? 400 : 700,
-            }}>
-              {sentence ?? "Never runs - switch on at least one timing above."}
-            </div>
-            {/* One-model mode, shared procedure: where does this edit land? */}
-            {focus && sharedBeyondFocus && (
-              <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 8, background: "#F5F2FB" }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <span className="t-small" style={{ fontWeight: 700 }}>Apply this edit to</span>
-                  <div className="seg" role="group" aria-label="Apply this edit to">
-                    <button type="button" aria-pressed={applyScope === "all"} onClick={() => setApplyScope("all")}>
-                      All covered models
-                    </button>
-                    <button type="button" aria-pressed={applyScope === "only"} onClick={() => setApplyScope("only")}>
-                      Only {focus.model}
-                    </button>
-                  </div>
-                </div>
-                <div className="mut t-meta" style={{ marginTop: 4 }}>
-                  {applyScope === "all"
-                    ? `Other models using this procedure get the change too${editingRow?.modelScope.length ? ` (${editingRow.modelScope.length} models)` : " (every model of the type)"}.`
-                    : `${focus.model} gets its own copy with this edit; the shared version stays as it was for everyone else, and ${focus.model}'s existing schedules follow the copy.`}
-                </div>
-              </div>
-            )}
-        </Dialog>
+        <ProcedureDialog
+          sheet={sheet} items={items} modelOptions={modelOptions}
+          modelsByCategory={modelsByCategory} categories={categories}
+          categoriesByType={categoriesByType} focus={focus}
+          onClose={() => setSheet(null)}
+          onSaved={(name, id, extra) => {
+            setSheet(null);
+            if (id) setFlashId(id);
+            setSaved(`Saved "${name}"${extra}`);
+            setTimeout(() => setSaved(""), 4000);
+          }} />
       )}
     </div>
   );

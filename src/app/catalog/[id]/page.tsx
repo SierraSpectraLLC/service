@@ -80,12 +80,16 @@ export default async function ModelPage({ params, searchParams }: {
   // model multiselect and category logic behave identically here.
   const modelOptions: Record<string, string[]> = {};
   const categoriesByType: Record<string, string[]> = {};
+  // Which of a type's models are filed under which system type - the scope
+  // ladder's "Autosamplers on LC-MS: 3 models" counts.
+  const modelsByCategory: Record<string, Record<string, string[]>> = {};
   for (const t of terms) {
     if (t.kind !== "model" || !t.assetType) continue;
     (modelOptions[t.assetType] ??= []).push(t.name);
     for (const c of t.categories) {
       const seen = (categoriesByType[t.assetType] ??= []);
       if (!seen.includes(c)) seen.push(c);
+      ((modelsByCategory[t.assetType] ??= {})[c] ??= []).push(t.name);
     }
   }
 
@@ -217,13 +221,17 @@ export default async function ModelPage({ params, searchParams }: {
           .sort((a, b) => b.count - a.count)}
         assetTypes={[term.assetType]}
         modelOptions={modelOptions}
+        modelsByCategory={modelsByCategory}
         categories={terms.filter((t) => t.kind === "category").map((t) => t.name)}
         categoriesByType={categoriesByType}
         items={covering.map((r) => ({
           id: r.id, assetType: r.assetType, kind: r.kind, name: r.name, notes: r.notes, position: r.position,
           resultType: r.resultType, target: r.target, tolerancePct: r.tolerancePct,
+          acceptance: r.acceptance,
           requiresNote: r.requiresNote, consumesPart: r.consumesPart,
           runsAtIntake: r.runsAtIntake, intervalDays: r.intervalDays, required: r.required,
+          needsReport: r.needsReport,
+          usageEvery: r.usageEvery, usageUnit: r.usageUnit,
           qualification: r.qualification,
           categoryScope: r.categoryScope,
           parts: parseProcParts(r.parts), modelScope: r.modelScope, checklist: r.checklist,

@@ -860,6 +860,45 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   letter-spacing: -0.1px; margin: 16px 0 8px;
 }
 .dialog-section:first-child { margin-top: 0; }
+.dialog-stepsec > .dialog-section:first-child { margin-top: 16px; }
+.dialog-stepsec:first-of-type > .dialog-section:first-child { margin-top: 0; }
+
+/* The procedure dialog (B3). Desktop: all five sections stack and the step
+   rail scrolls to them. Phone: one section per screen, Back / Next in the
+   footer - the inactive sections simply aren't rendered into the flow. */
+.proc-mnav-btn { display: none; }
+@media (max-width: 639px) {
+  .proc-mnav-btn { display: inline-flex; }
+  .dialog-stepsec:not([data-active]) { display: none; }
+  .dialog-stepsec > .dialog-section:first-child { margin-top: 0; }
+}
+
+/* The scope ladder: one radio row per rung of the tree, most general first. */
+.proc-scope { display: flex; flex-direction: column; gap: 6px; }
+.proc-rung {
+  display: flex; gap: 10px; align-items: flex-start; margin: 0; font-weight: 400;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  background: #fff; cursor: pointer;
+}
+.proc-rung.on { border-color: var(--navy); background: #F1F4F8; }
+.proc-rung input[type="radio"] { width: 15px; height: 15px; margin-top: 3px; flex-shrink: 0; }
+.proc-rung-path { margin-left: auto; flex-shrink: 0; padding-top: 2px; }
+@media (max-width: 639px) { .proc-rung-path { display: none; } }
+
+/* The live covers box under the ladder, and the work-order preview. */
+.proc-covers {
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px;
+  background: #F1F4F8; border: 1px solid var(--line);
+}
+.proc-preview {
+  margin-top: 4px; padding: 8px 10px; border-radius: 8px;
+  border: 1px dashed #B9C4D2; background: #FCFDFE;
+}
+.proc-prevbox {
+  display: inline-block; border: 1px solid var(--line); border-radius: 6px;
+  padding: 3px 8px; font-size: 12px; background: #fff; color: var(--mut);
+  min-width: 64px; text-align: center;
+}
 
 /* Stepped dialogs: a left step rail on a desktop, a thin progress bar on a
    phone. The rail marks each step done (filled check) or needing attention
