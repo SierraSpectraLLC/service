@@ -33,7 +33,7 @@ export default function SalePanel({ target = "system", targetId, forSale, saleNo
         <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
           {forSale && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+              <span className="pill good">For sale</span>
               {url && (
                 <>
                   <a href={url} target="_blank" rel="noreferrer" className="mono" style={{ fontSize: 11 }}>{url.replace(/^https?:\/\//, "")}</a>
