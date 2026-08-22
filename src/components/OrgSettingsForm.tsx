@@ -13,7 +13,7 @@ import { toast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
 import SaveBar from "@/components/ui/SaveBar";
 import { isValidHex, readableTextOn } from "@/lib/theme";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
 import StorageMeter from "@/components/StorageMeter";
 import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
@@ -540,8 +540,8 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {org.systems === 1 ? "" : "s"} ends. The systems and their history are untouched.
             </span>
             <button className="btn sm" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
-              onClick={() => {
-                const reason = promptReason(
+              onClick={async () => {
+                const reason = await confirmReasonText(
                   `Remove ${org.name}?${org.isOperator ? " It operates this instance - reports and packets lose their operator name." : ""} Their ${people.length} sign-in entr${people.length === 1 ? "y" : "ies"} stop working and they lose access to ${org.systems} system${org.systems === 1 ? "" : "s"}.`
                 );
                 if (!reason) return;

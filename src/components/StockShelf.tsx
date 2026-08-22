@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { issueStock, receiveStock, recountStock, transferStock } from "@/app/actions";
 import { needsReorder, shortBy } from "@/lib/stock";
 import { formatCents } from "@/lib/money";
@@ -114,13 +114,13 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                 )}
                 {canManage && (
                   <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
-                    onClick={() => {
+                    onClick={async () => {
                       const counted = prompt(`Counted how many ${i.partNumber} on the shelf?`, String(i.qty));
                       if (counted === null) return;
                       const n = parseInt(counted, 10);
                       if (!Number.isInteger(n) || n < 0) { setError("Count must be a whole number, zero or more"); return; }
                       if (n === i.qty) return;
-                      const why = promptReason(`Post a correction of ${n - i.qty > 0 ? "+" : ""}${n - i.qty}? The ledger keeps both numbers.`);
+                      const why = await confirmReasonText(`Post a correction of ${n - i.qty > 0 ? "+" : ""}${n - i.qty}? The ledger keeps both numbers.`);
                       if (!why) return;
                       startTransition(async () => {
                         const res = await recountStock(i.id, n, why);

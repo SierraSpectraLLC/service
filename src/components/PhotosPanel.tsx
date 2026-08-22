@@ -9,7 +9,7 @@ import {
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { fmtBytes } from "@/lib/storage";
 import { coverIsChosen, fileSrc, orderPhotos, photoCount } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
@@ -114,8 +114,8 @@ export default function PhotosPanel({
   const act = (fn: () => Promise<{ error?: string } | void>) =>
     startTransition(async () => { setError(((await fn()) as { error?: string })?.error ?? ""); });
 
-  const remove = (p: { id: number; fileName: string }) => {
-    const why = promptReason(`Remove "${p.fileName}"? The file is permanently deleted from storage.`);
+  const remove = async (p: { id: number; fileName: string }) => {
+    const why = await confirmReasonText(`Remove "${p.fileName}"? The file is permanently deleted from storage.`);
     if (!why) return;
     act(() => deleteAttachment(p.id, why));
   };
@@ -128,10 +128,10 @@ export default function PhotosPanel({
 
   const stopSelecting = () => { setSelecting(false); setPicked(new Set()); };
 
-  const removePicked = () => {
+  const removePicked = async () => {
     const n = picked.size;
     if (!n) return;
-    const why = promptReason(
+    const why = await confirmReasonText(
       `Remove ${n} photo${n === 1 ? "" : "s"}? The file${n === 1 ? " is" : "s are"} permanently deleted from storage.`);
     if (!why) return;
     const ids = [...picked];

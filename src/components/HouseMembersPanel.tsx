@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { revokeHouseMember, setHouseMember } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
@@ -137,8 +137,8 @@ export default function HouseMembersPanel({ members, myEmail }: {
               </span>
             ) : (
               <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }} disabled={pending}
-                onClick={() => {
-                  const why = promptReason(
+                onClick={async () => {
+                  const why = await confirmReasonText(
                     `Revoke ${m.email}'s access to the whole shop?${m.fromEnv ? " They're also in STAFF_EMAILS, so this records an override." : ""}`,
                   );
                   if (!why) return;

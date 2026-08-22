@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { fmtWhen } from "@/lib/when";
 import {
   addValidationDoc, signValidationDoc, revokeValidationSignature,
@@ -138,8 +138,8 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                 {x.note && <span className="mut">- {x.note}</span>}
                 {x.revokedAt && <span style={{ color: "#A32D2D", textDecoration: "none" }}>withdrawn: {x.revokeReason}</span>}
                 {isStaff && !x.revokedAt && d.state !== "Superseded" && (
-                  <button className="btn link" style={{ textDecoration: "none" }} onClick={() => {
-                    const reason = promptReason(`Withdraw the ${x.role} signature of ${x.signerName}?`);
+                  <button className="btn link" style={{ textDecoration: "none" }} onClick={async () => {
+                    const reason = await confirmReasonText(`Withdraw the ${x.role} signature of ${x.signerName}?`);
                     if (!reason) return;
                     startTransition(async () => {
                       const res = await revokeValidationSignature(x.id, reason);
@@ -182,8 +182,8 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                     <button className="btn sm" onClick={() => openAdd("", d)}
                       title="File a revision - this version becomes Superseded and stays on the record">New version</button>
                     {canDelete(d, active.length) && (
-                      <button className="btn link" style={{ color: "#A32D2D" }} onClick={() => {
-                        const reason = promptReason(`Remove draft "${d.title}"? Only unsigned drafts can be removed.`);
+                      <button className="btn link" style={{ color: "#A32D2D" }} onClick={async () => {
+                        const reason = await confirmReasonText(`Remove draft "${d.title}"? Only unsigned drafts can be removed.`);
                         if (!reason) return;
                         startTransition(async () => {
                           const res = await deleteValidationDoc(d.id, reason);

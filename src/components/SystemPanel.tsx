@@ -1,6 +1,6 @@
 "use client";
 
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { useOptimistic, useState, useTransition } from "react";
 import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
@@ -193,12 +193,12 @@ export default function SystemPanel({ instrument, label, clients, categories, st
               )}
               {isOwner && (
                 <button className="btn link danger"
-                  onClick={() => {
+                  onClick={async () => {
                     const typed = window.prompt(
                       `This permanently deletes ${instrument.externalId} with all its tasks, parts, gases and attachments.\n\nType ${instrument.externalId} to confirm:`
                     );
                     if (typed !== instrument.externalId) return;
-                    const reason = promptReason(`Deleting ${instrument.externalId}.`);
+                    const reason = await confirmReasonText(`Deleting ${instrument.externalId}.`);
                     if (!reason) return;
                     startTransition(async () => { await deleteInstrument(instrument.id, reason); });
                   }}

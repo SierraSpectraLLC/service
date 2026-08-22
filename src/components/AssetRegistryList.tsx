@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { removeAssets } from "@/app/actions";
 import { duplicateIds } from "@/lib/assetDupe";
 import Dot from "@/components/ui/Dot";
@@ -87,10 +87,10 @@ export default function AssetRegistryList({ rows, canSelect }: {
 
   const clear = () => setPicked(new Set());
 
-  const remove = () => {
+  const remove = async () => {
     const ids = [...picked];
     if (!ids.length) return;
-    const why = promptReason(
+    const why = await confirmReasonText(
       `Delete ${ids.length} asset record${ids.length === 1 ? "" : "s"}? Their history goes with them. This can't be undone.`,
     );
     if (!why) return;

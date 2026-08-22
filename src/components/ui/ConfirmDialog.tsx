@@ -55,6 +55,15 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
  * on Cancel/Escape/scrim. The server enforces the reason too - this is the
  * front door, not the lock.
  */
+/**
+ * promptReason's drop-in successor: the same one-string call the old
+ * window.prompt sites made, answered by the dialog instead. The message
+ * becomes the title; the reason field and audit posture are confirmReason's.
+ */
+export function confirmReasonText(what: string): Promise<string | null> {
+  return confirmReason({ title: what, action: "Confirm", tone: "bad" });
+}
+
 export function confirmReason(opts: ConfirmOptions): Promise<string | null> {
   current?.resolve(null);
   return new Promise<string | null>((resolve) => {

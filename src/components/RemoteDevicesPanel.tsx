@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { Dot, Legend, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
@@ -165,8 +165,8 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                 </select>
 
                 <button className="btn link" style={{ color: "#A32D2D", fontSize: 11, marginLeft: "auto" }} disabled={pending}
-                  onClick={() => {
-                    const why = promptReason(
+                  onClick={async () => {
+                    const why = await confirmReasonText(
                       `Remove "${deviceLabel(d.nickname, d.name)}" from remote support? This forgets the machine here - the agent keeps `
                       + "running until somebody uninstalls it on the PC itself.",
                     );

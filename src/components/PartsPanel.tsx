@@ -1,6 +1,6 @@
 "use client";
 
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
@@ -180,8 +180,8 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               <span className="dialog-status" />
               {form.mode === "edit" && isStaff && (
                 <button className="btn link danger"
-                  onClick={() => {
-                    const reason = promptReason(`Delete part record "${draft.name}"? This removes it from the record entirely.`);
+                  onClick={async () => {
+                    const reason = await confirmReasonText(`Delete part record "${draft.name}"? This removes it from the record entirely.`);
                     if (!reason) return;
                     startTransition(async () => { await deletePart((form as { id: number }).id, reason); close(); });
                   }}

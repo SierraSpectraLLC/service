@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
@@ -193,8 +193,8 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   if (res?.error) setError(res.error);
                 })}>{s.paused ? "resume" : "pause"}</button>
               <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
-                onClick={() => {
-                  const reason = promptReason(`Stop scheduling "${s.title}"? Tasks already created stay.`);
+                onClick={async () => {
+                  const reason = await confirmReasonText(`Stop scheduling "${s.title}"? Tasks already created stay.`);
                   if (!reason) return;
                   startTransition(async () => {
                     const res = await removePmSchedule(s.id, reason);

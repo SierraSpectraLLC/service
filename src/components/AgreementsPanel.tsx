@@ -8,7 +8,7 @@ import {
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import {
   AGREEMENT_KINDS, KIND_LABEL, STANDING_LABEL, STANDING_TONE, allowance, kitStates, parseKits,
   renewalLine, standing, type IncludedKit, type Standing,
@@ -318,8 +318,8 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                   <button className="btn link" style={{ fontSize: 11 }} onClick={() => openEdit(r)}>edit</button>
                   <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                    onClick={() => {
-                      const why = promptReason(`Remove ${r.number || KIND_LABEL[r.kind]}?`);
+                    onClick={async () => {
+                      const why = await confirmReasonText(`Remove ${r.number || KIND_LABEL[r.kind]}?`);
                       if (why === null) return;
                       startTransition(async () => {
                         const res = await removeAgreement(r.id, why);

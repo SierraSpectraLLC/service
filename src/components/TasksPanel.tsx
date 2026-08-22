@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { TASK_STATES, TASK_TONE } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
@@ -492,11 +492,11 @@ export default function TasksPanel({
                 <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
                 {(isStaff || t.origin === "checkout") && (
                   <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
-                    onClick={() => {
+                    onClick={async () => {
                       const msg = t.origin === "checkout"
                         ? `Delete checkout item "${t.title}"? Use this for items that don't apply here.`
                         : `Delete task "${t.title}"? Its checklist and notes go with it.`;
-                      const reason = promptReason(msg);
+                      const reason = await confirmReasonText(msg);
                       if (!reason) return;
                       startTransition(async () => { await deleteTask(t.id, reason); setExpanded(null); });
                     }}>Delete</button>

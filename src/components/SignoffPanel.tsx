@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { signOffTarget, revokeSignoff, type WorkTarget } from "@/app/actions";
 import type { Blocker } from "@/lib/signoff";
 
@@ -81,8 +81,8 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
           )}
           {isOwner && (
             <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: 0, marginTop: 3 }} disabled={pending}
-              onClick={() => {
-                const why = promptReason(`Withdraw ${s.signerName}'s sign-off? The withdrawal is kept in the record.`);
+              onClick={async () => {
+                const why = await confirmReasonText(`Withdraw ${s.signerName}'s sign-off? The withdrawal is kept in the record.`);
                 if (!why) return;
                 startTransition(async () => {
                   const res = await revokeSignoff(s.id, why);
