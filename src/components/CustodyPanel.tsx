@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { handOffSystem } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Dialog from "@/components/ui/Dialog";
 
 export type CustodyRow = {
   id: number; kind: string; fromName: string; toName: string; note: string; when: string; actor: string;
@@ -57,7 +58,56 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
       </div>
 
       {open && (
-        <div className="dash-form" style={{ marginBottom: 12 }}>
+        <Dialog open onClose={() => setOpen(false)} title={`Hand off ${externalId}`}
+          context={`Currently owned by ${ownerName}.`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>
+                {error || (!toOrgId ? "Pick the new owner to continue." : "")}
+              </span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button className="btn primary" disabled={pending || !toOrgId}
+                onClick={async () => {
+                  const ok = await confirmDialog({
+                    title: `Hand ${externalId} to ${target?.name}?`,
+                    body: (
+                      <>
+                        <b>What happens:</b>
+                        <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                          <li>{target?.name ?? "The new owner"} gets ownership and full edit access.</li>
+                          <li>{ownerName} keeps a frozen record of their period of ownership
+                            {keep ? " and read-only access." : " and loses live access."}</li>
+                          <li>
+                            {providers.length
+                              ? <>Access is unchanged for {providers.map((p) => p.name).join(", ")} — they keep working the system.</>
+                              : <>Nobody else currently has access.</>}
+                          </li>
+                          <li>Part costs and PO numbers recorded by {ownerName} stay hidden from the new owner.</li>
+                        </ul>
+                        <div className="mut" style={{ marginTop: 8 }}>Permanent, and recorded.</div>
+                      </>
+                    ),
+                    action: `Hand off to ${target?.name}`,
+                  });
+                  if (!ok) return;
+                  setError("");
+                  startTransition(async () => {
+                    try {
+                      const res = await handOffSystem(instrumentId, toOrgId, { note, keepPreviousAsViewer: keep });
+                      if (res?.error) { setError(res.error); return; }
+                      toast({ message: `Handed ${externalId} to ${target?.name}` });
+                      setOpen(false); setToOrgId(0); setNote(""); setKeep(false);
+                    } catch (e) {
+                      // A server action that throws used to reject into nothing,
+                      // which is indistinguishable from a dead button.
+                      setError(`The handoff didn't go through: ${(e as Error).message || "server error"}`);
+                    }
+                  });
+                }}>
+                {pending ? "Handing off..." : toOrgId ? `Hand off to ${target?.name}` : "Hand off"}
+              </button>
+            </>
+          }>
           <div style={{ marginBottom: 8 }}>
             <label>Hand {externalId} to</label>
             <select value={toOrgId} onChange={(e) => setToOrgId(parseInt(e.target.value))}>
@@ -75,54 +125,9 @@ export default function CustodyPanel({ instrumentId, externalId, events, ownerNa
             Keep {ownerName} on as a viewer — usual when they resold it and still want visibility.
           </label>
 
-          {/* The confirm dialog carries the consequence list; see the rationale
-              on confirmDialog for why it must not be a native confirm(). */}
-          {!toOrgId ? (
-            <div className="mut" style={{ fontSize: 12 }}>Pick the new owner above to continue.</div>
-          ) : (
-            <button className="btn sm primary" disabled={pending}
-              onClick={async () => {
-                const ok = await confirmDialog({
-                  title: `Hand ${externalId} to ${target?.name}?`,
-                  body: (
-                    <>
-                      <b>What happens:</b>
-                      <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-                        <li>{target?.name ?? "The new owner"} gets ownership and full edit access.</li>
-                        <li>{ownerName} keeps a frozen record of their period of ownership
-                          {keep ? " and read-only access." : " and loses live access."}</li>
-                        <li>
-                          {providers.length
-                            ? <>Access is unchanged for {providers.map((p) => p.name).join(", ")} — they keep working the system.</>
-                            : <>Nobody else currently has access.</>}
-                        </li>
-                        <li>Part costs and PO numbers recorded by {ownerName} stay hidden from the new owner.</li>
-                      </ul>
-                      <div className="mut" style={{ marginTop: 8 }}>Permanent, and recorded.</div>
-                    </>
-                  ),
-                  action: `Hand off to ${target?.name}`,
-                });
-                if (!ok) return;
-                setError("");
-                startTransition(async () => {
-                  try {
-                    const res = await handOffSystem(instrumentId, toOrgId, { note, keepPreviousAsViewer: keep });
-                    if (res?.error) { setError(res.error); return; }
-                    toast({ message: `Handed ${externalId} to ${target?.name}` });
-                    setOpen(false); setToOrgId(0); setNote(""); setKeep(false);
-                  } catch (e) {
-                    // A server action that throws used to reject into nothing,
-                    // which is indistinguishable from a dead button.
-                    setError(`The handoff didn't go through: ${(e as Error).message || "server error"}`);
-                  }
-                });
-              }}>
-              {pending ? "Handing off..." : `Hand off to ${target?.name}`}
-            </button>
-          )}
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+          {/* The confirm carries the consequence list; see the rationale on
+              confirmDialog for why it must not be a native confirm(). */}
+        </Dialog>
       )}
 
       {events.length === 0 && (
