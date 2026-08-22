@@ -7,6 +7,7 @@ import { ASSET_STATES, ASSET_TONE } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, setAssetServes, updateAsset } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Dialog from "@/components/ui/Dialog";
 import { serveCandidates, serversOf } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
 
@@ -187,7 +188,18 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
       )}
 
       {editing && (
-        <div className="dash-form" style={{ marginTop: 10 }}>
+        <Dialog open onClose={() => setEditing(false)} title="Edit unit"
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending}
+                onClick={() => run(async () => { const r = await updateAsset(asset.id, draft); if (!r?.error) setEditing(false); return r; },
+                  () => toast({ message: "Saved the unit" }))}>
+                {pending ? "Saving..." : "Save changes"}
+              </button>
+            </>
+          }>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
@@ -226,11 +238,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
             <textarea value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} rows={2}
               style={{ resize: "vertical" }} />
           </div>
-          <button className="btn sm accent" disabled={pending}
-            onClick={() => run(async () => { const r = await updateAsset(asset.id, draft); if (!r?.error) setEditing(false); return r; })}>
-            {pending ? "Saving..." : "Save changes"}
-          </button>
-        </div>
+        </Dialog>
       )}
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
     </>
