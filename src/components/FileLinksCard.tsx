@@ -101,8 +101,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
         const dead = l.revokedAt !== null || l.expiresOn < today;
         return (
           <div key={`${l.kind}${l.id}`} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)", opacity: dead ? 0.55 : 1 }}>
-            <span className="pill" style={l.kind === "drop"
-              ? { background: "#E8F3EC", color: "#2E6B2E" } : { background: "#E7F2FA", color: "#1D6396" }}>
+            <span className={`pill ${l.kind === "drop" ? "good" : "info"}`}>
               {l.kind === "drop" ? "⇩ receive" : "⇧ share"}
             </span>
             <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0 }}>{l.label || `Link until ${l.expiresOn}`}</span>
