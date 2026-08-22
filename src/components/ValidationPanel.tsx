@@ -117,10 +117,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
               onClick={(e) => e.stopPropagation()} style={{ fontSize: 11 }}>file</a>
           )}
           {d.reviewOn && (
-            <span className="pill" title={`Review by ${d.reviewOn}`} style={{
-              background: d.reviewOn < today ? "#FBE9E9" : "#EEF1F5",
-              color: d.reviewOn < today ? "#A32D2D" : "#475569",
-            }}>{d.reviewOn < today ? `review ${expiryLabel(d.reviewOn, today).replace("expired", "overdue")}` : `review ${d.reviewOn}`}</span>
+            <span className={`pill ${d.reviewOn < today ? "bad" : "neutral"}`} title={`Review by ${d.reviewOn}`}>{d.reviewOn < today ? `review ${expiryLabel(d.reviewOn, today).replace("expired", "overdue")}` : `review ${d.reviewOn}`}</span>
           )}
           {active.length > 0 && (
             <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>
