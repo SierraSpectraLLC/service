@@ -12,12 +12,12 @@ export default function EodDateNav({ date, today, dates }: { date: string; today
   };
   const go = (d: string) => router.push(d === today ? "/eod" : `/eod?date=${d}`);
   return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <div className="row-2">
       <button className="btn sm" onClick={() => go(shift(-1))} title="Previous day">‹</button>
-      <select
+      <select className="t-small"
         value={all.includes(date) ? date : ""}
         onChange={(e) => { if (e.target.value) go(e.target.value); }}
-        style={{ width: "auto", fontSize: 12 }}
+        style={{ width: "auto" }}
       >
         {!all.includes(date) && <option value="">{date}</option>}
         {all.map((d) => <option key={d} value={d}>{d}{d === today ? " · today" : ""}</option>)}
