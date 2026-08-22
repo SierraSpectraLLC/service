@@ -208,7 +208,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
                    it stops the navigation and unfolds the sheet below. */
                 <span role="button" tabIndex={0} aria-expanded={specsOpen.includes(a.id)}
                   aria-label={`Specs for ${a.model || a.kind}`}
-                  className="pill" style={{ background: "#E7F2FA", color: "#1D6396", cursor: "pointer" }}
+                  className="pill info" style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.preventDefault(); e.stopPropagation();
                     setSpecsOpen((o) => (o.includes(a.id) ? o.filter((x) => x !== a.id) : [...o, a.id]));
