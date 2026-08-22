@@ -8,6 +8,8 @@ import {
 } from "@/app/actions";
 import { formatCents, centsToInput } from "@/lib/money";
 import { PO_LABEL, PO_TONE, lineOutstanding, lineTotalCents, poEditable, poReceivable, poTotals } from "@/lib/po";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 export type PoRow = {
   id: number; number: string; vendor: string; status: string; reference: string; note: string;
@@ -56,9 +58,13 @@ export default function PoPanel({ po, lines, canManage, makers }: {
               <>
                 <button className="btn sm" onClick={() => setEditing(!editing)}>{editing ? "Cancel" : "Edit"}</button>
                 <button className="btn sm accent" disabled={pending || !lines.length}
-                  onClick={() => {
-                    if (!confirm(`Send ${po.number} to ${po.vendor}? Lines lock after this.`)) return;
-                    run(() => sendPurchaseOrder(po.id));
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Send ${po.number} to ${po.vendor}?`,
+                      body: "Lines lock after this.",
+                      action: `Send ${po.number}`,
+                    }))) return;
+                    run(() => sendPurchaseOrder(po.id), () => toast({ message: `Sent ${po.number} to ${po.vendor}` }));
                   }}>Send to vendor</button>
               </>
             )}
