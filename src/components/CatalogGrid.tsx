@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addVocabTerms } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { toCsv } from "@/lib/csv";
 
 type Row = { assetType: string; name: string; manufacturer: string; categories: string };
@@ -78,6 +79,7 @@ export default function CatalogGrid({ assetTypes, categoryNames, knownMakers, de
       if (res?.error) { setError(res.error); return; }
       setFailures(res.failures ?? []);
       setSaved(`${res.created} model${res.created === 1 ? "" : "s"} added`);
+      if (res.created) toast({ message: `Added ${res.created} model${res.created === 1 ? "" : "s"} to the catalog` });
       const bad = new Set((res.failures ?? []).map((f) => f.row));
       setRows(bad.size ? usable.filter((_, i) => bad.has(i + 1)) : [seed(), seed(), seed()]);
       if (!bad.size) onDone?.();
@@ -139,7 +141,7 @@ export default function CatalogGrid({ assetTypes, categoryNames, knownMakers, de
                 </td>
                 <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                   {rows.length > 1 && (
-                    <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "#A32D2D", fontSize: 12 }}
+                    <button className="btn link t-small" aria-label={`Remove row ${i + 1}`} style={{ color: "var(--t-bad-fg)" }}
                       onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}>×</button>
                   )}
                 </td>
@@ -153,28 +155,28 @@ export default function CatalogGrid({ assetTypes, categoryNames, knownMakers, de
           harmless and keeps this component usable on its own. */}
       <datalist id="catalog-makers">{knownMakers.map((m) => <option key={m} value={m} />)}</datalist>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div className="row-2" style={{ marginTop: 8 }}>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, seed()])}>＋ Row</button>
         <button className="btn sm" onClick={() => setRows((rs) => [...rs, ...Array.from({ length: 5 }, seed)])}>＋ 5</button>
-        <a className="btn link" style={{ fontSize: 12 }}
+        <a className="btn link t-small"
           href={"data:text/csv;charset=utf-8," + encodeURIComponent(template())}
           download="catalog-template.csv">download template</a>
-        <span className="mut" style={{ fontSize: 11 }}>Paste a block from a spreadsheet into any cell.</span>
+        <span className="mut t-meta">Paste a block from a spreadsheet into any cell.</span>
         <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={save} disabled={pending || !usable.length}>
           {pending ? "Saving..." : `Save ${usable.length || ""} model${usable.length === 1 ? "" : "s"}`.replace("  ", " ")}
         </button>
       </div>
 
-      {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginTop: 8 }}>{saved} ✓</div>}
+      {saved && <div className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{saved} ✓</div>}
       {failures.length > 0 && (
-        <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>
+        <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>
           {failures.length} row{failures.length === 1 ? "" : "s"} still above:
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
             {failures.map((f) => <li key={f.row}>{f.name}: {f.error}</li>)}
           </ul>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }
