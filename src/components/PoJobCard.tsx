@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { setPoWorkOrder } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 
 export type JobOption = { id: number; number: string; title: string; place: string };
 
@@ -35,13 +36,14 @@ export default function PoJobCard({ poId, workOrder, options, canManage }: {
     startTransition(async () => {
       const res = await setPoWorkOrder(poId, value === "" ? null : parseInt(value));
       if (res?.error) { setError(res.error); return; }
+      toast({ message: value === "" ? "Filed the order as stock" : "Filed the order against the job" });
       setEditing(false);
     });
   };
 
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+      <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
         <div className="card-title">Bought for</div>
         {canManage && (
           <button className="btn sm" style={{ marginLeft: "auto" }}
@@ -54,19 +56,19 @@ export default function PoJobCard({ poId, workOrder, options, canManage }: {
       {workOrder ? (
         <>
           <Link href={`/work/${workOrder.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-            <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>
+            <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>
               {workOrder.number}
             </span>
-            <span style={{ fontSize: 13, marginLeft: 8 }}>{workOrder.title}</span>
+            <span className="t-body" style={{ marginLeft: 8 }}>{workOrder.title}</span>
           </Link>
-          <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{workOrder.place}</div>
-          <div className="mut" style={{ fontSize: 11.5, marginTop: 6 }}>
+          <div className="mut t-small" style={{ marginTop: 2 }}>{workOrder.place}</div>
+          <div className="mut t-small" style={{ marginTop: 6 }}>
             Receiving a line puts the part on that system as well as on the shelf, and the
             receipt filed here shows on the job.
           </div>
         </>
       ) : (
-        <div className="mut" style={{ fontSize: 12.5 }}>
+        <div className="mut t-small">
           Stock. Nothing on this order is against a particular job, so receiving it only
           puts it on the shelf.
         </div>
@@ -82,13 +84,13 @@ export default function PoJobCard({ poId, workOrder, options, canManage }: {
             ))}
           </select>
           {options.length === 0 && (
-            <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+            <div className="mut t-meta" style={{ marginTop: 4 }}>
               No open work orders you can reach.
             </div>
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
