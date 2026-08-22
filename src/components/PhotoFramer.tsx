@@ -101,7 +101,7 @@ export default function PhotoFramer({ src, framing, alt, save, onDone }: {
       onClick={(e) => { if (e.target === e.currentTarget) onDone(); }}>
       <div className="card" style={{ maxWidth: 420, width: "100%", margin: 0 }}>
         <div className="card-title" style={{ marginBottom: 6 }}>Frame this photo</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
+        <div className="mut t-small" style={{ marginBottom: 8 }}>
           Drag to move it, turn it upright, zoom in or out. Zoom out past the edges to see the whole
           photo. The file itself is unchanged.
         </div>
@@ -125,10 +125,10 @@ export default function PhotoFramer({ src, framing, alt, save, onDone }: {
             style={{ width: "100%", height: "100%", display: "block", ...frameStyle(frame, 4 / 3) }} />
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
+        <div className="row-2" style={{ marginTop: 10 }}>
           <button className="btn sm" onClick={() => setFrame((f) => turned(f))} disabled={pending}>Turn ¼</button>
           <button className="btn sm" onClick={fillTile} disabled={pending || !aspect}>Fill tile</button>
-          <label className="mut" style={{ fontSize: 12 }} htmlFor="photo-zoom">Zoom</label>
+          <label className="mut t-small" htmlFor="photo-zoom">Zoom</label>
           <input id="photo-zoom" type="range" min={ZOOM_MIN} max={ZOOM_MAX} step={0.01}
             value={frame.zoom} disabled={pending}
             onChange={(e) => setFrame((f) => ({ ...f, zoom: Number(e.target.value) }))}
@@ -137,9 +137,9 @@ export default function PhotoFramer({ src, framing, alt, save, onDone }: {
             onClick={() => setFrame({ ...NO_FRAME, aspect, zoom: coverZoom(aspect, BOX_ASPECT) })}>Reset</button>
         </div>
 
-        {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
-        <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+        <div className="row-2" style={{ marginTop: 12, justifyContent: "flex-end" }}>
           <button className="btn sm" onClick={onDone} disabled={pending}>Cancel</button>
           <button className="btn sm primary" onClick={commit} disabled={pending}>
             {pending ? "Saving..." : "Save framing"}
