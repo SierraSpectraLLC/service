@@ -14,6 +14,8 @@ import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
 import ProvenanceChip from "./ProvenanceChip";
 import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
 import type { Tone } from "@/lib/tones";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 export type ProcedureRow = {
   id: number; assetType: string; kind: string; name: string; notes: string; position: number;
@@ -533,9 +535,17 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               setSaved(""); setError("");
               return;
             }
-            if (window.confirm(`Remove "${i.name}"? Tasks and schedules already on units stay.`)) {
-              startTransition(async () => { await deleteProcedure(i.id); });
-            }
+            void (async () => {
+              if (!(await confirmDialog({
+                title: `Remove "${i.name}"?`,
+                body: "Tasks and schedules already on units stay.",
+                action: "Delete procedure", tone: "bad",
+              }))) return;
+              startTransition(async () => {
+                await deleteProcedure(i.id);
+                toast({ message: `Deleted "${i.name}"` });
+              });
+            })();
           }}
           style={{ fontSize: 14, padding: 4, color: "#A32D2D" }}>×</button>
       </div>
