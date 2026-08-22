@@ -2,14 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { pushInstrumentToSheet } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 /** Staff-only: add this system to the client's Google Sheet as a new row. */
 export default function PushToSheetButton({ instrumentId, externalId }: { instrumentId: number; externalId: string }) {
   const [msg, setMsg] = useState("");
   const [pending, startTransition] = useTransition();
 
-  const push = () => {
-    if (!window.confirm(`Add ${externalId} to the client's Google Sheet as a new row?`)) return;
+  const push = async () => {
+    if (!(await confirmDialog({
+      title: `Add ${externalId} to the client's Google Sheet?`,
+      body: "It lands as a new row.",
+      action: `Add ${externalId}`,
+    }))) return;
     setMsg("");
     startTransition(async () => {
       const res = await pushInstrumentToSheet(instrumentId);
