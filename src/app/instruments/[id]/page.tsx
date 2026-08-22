@@ -430,7 +430,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
             <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
               Sign-off packet
               {signRows.length > 0 && (
-                <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E", marginLeft: 6 }}>
+                <span className="pill good" style={{ marginLeft: 6 }}>
                   signed{signRows.length > 1 ? ` ×${signRows.length}` : ""}
                 </span>
               )}
