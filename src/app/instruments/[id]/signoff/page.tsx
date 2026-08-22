@@ -75,11 +75,19 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const resultRows = gateTaskIds.length
     ? await db.select().from(taskResults).where(inArray(taskResults.taskId, gateTaskIds))
     : [];
-  for (const r of resultRows) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+  const failedTasks = new Set<number>();
+  for (const r of resultRows) {
+    reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+    if (r.passed === false) failedTasks.add(r.taskId);
+  }
   const gate = signoffGate(
     gateTasks.map((t) => {
       const pr = gateProcs.find((x) => x.id === t.procedureId);
-      return { id: t.id, title: t.title, state: t.state, required: pr?.required ?? false, kind: pr?.kind ?? "task", needsReport: pr?.needsReport };
+      return {
+        id: t.id, title: t.title, state: t.state,
+        required: pr?.required ?? false, kind: pr?.kind ?? "task",
+        needsReport: pr?.needsReport, failed: failedTasks.has(t.id),
+      };
     }),
     reportsByTask,
   );

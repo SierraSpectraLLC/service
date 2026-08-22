@@ -19,9 +19,11 @@ export type GateTask = {
    * which is what required always meant for a test before the split.
    */
   needsReport?: boolean;
+  /** The recorded result's verdict was Fail. Only meaningful for tests. */
+  failed?: boolean;
 };
 
-export type Blocker = { kind: "open_work" | "missing_report"; text: string };
+export type Blocker = { kind: "open_work" | "missing_report" | "failed_test"; text: string };
 
 export type Gate = {
   ready: boolean;
@@ -66,6 +68,14 @@ export function signoffGate(tasks: GateTask[], reportsByTask: Map<number, number
   for (const t of requiredTests) {
     if (t.needsReport && t.reports === 0 && !open.some((o) => o.id === t.id)) {
       blockers.push({ kind: "missing_report", text: `"${t.title}" has no report on file` });
+    }
+  }
+  // A mandatory test that FAILED blocks release even though the task is done:
+  // a failed test is a finished test (the task may close), but signing the
+  // record over a Fail needs the reading re-run or the failure resolved first.
+  for (const t of tasks) {
+    if (t.required && t.kind === "test" && t.failed && !open.some((o) => o.id === t.id)) {
+      blockers.push({ kind: "failed_test", text: `"${t.title}" failed - re-run it or resolve the failure` });
     }
   }
   return {

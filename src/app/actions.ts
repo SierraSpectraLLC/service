@@ -4742,9 +4742,14 @@ async function gateFor(target: WorkTarget) {
   // A recorded reading is evidence too - see lib/signoff. Before there was
   // anywhere to put the number, a file was the closest thing available.
   const resultRows = taskIds.length
-    ? await db.select({ taskId: taskResults.taskId }).from(taskResults).where(inArray(taskResults.taskId, taskIds))
+    ? await db.select({ taskId: taskResults.taskId, passed: taskResults.passed })
+        .from(taskResults).where(inArray(taskResults.taskId, taskIds))
     : [];
-  for (const r of resultRows) reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+  const failedTasks = new Set<number>();
+  for (const r of resultRows) {
+    reportsByTask.set(r.taskId, (reportsByTask.get(r.taskId) ?? 0) + 1);
+    if (r.passed === false) failedTasks.add(r.taskId);
+  }
   return signoffGate(
     taskRows.map((t) => {
       const p = procRows.find((x) => x.id === t.procedureId);
@@ -4752,6 +4757,7 @@ async function gateFor(target: WorkTarget) {
         id: t.id, title: t.title, state: t.state,
         required: p?.required ?? false, kind: p?.kind ?? "task",
         needsReport: p?.needsReport,
+        failed: failedTasks.has(t.id),
       };
     }),
     reportsByTask,

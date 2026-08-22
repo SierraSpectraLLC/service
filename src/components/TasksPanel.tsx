@@ -13,7 +13,10 @@ import {
   recordTaskResult,
 } from "@/app/actions";
 import { RESULT_LABEL } from "@/lib/checkout";
-import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResult";
+import {
+  acceptanceUnits, criterionLabel, evaluateResult, parseAcceptance, parseEntries,
+  resultIsRecorded, toleranceBand,
+} from "@/lib/testResult";
 import { checklistProgress } from "@/lib/checklist";
 import MentionBox from "./MentionBox";
 import type { Candidate } from "@/lib/mentions";
@@ -23,7 +26,11 @@ import { toast } from "@/components/ui/Toast";
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; heading?: boolean; thread: Note[] };
 /** The catalog's spec, when the procedure behind this task is a test. */
-type TestSpec = { resultType: string; target: string | null; tolerancePct: string | null };
+type TestSpec = {
+  resultType: string; target: string | null; tolerancePct: string | null;
+  /** The structured spec (JSON, lib/testResult.Acceptance). Absent/"" = legacy prose. */
+  acceptance?: string;
+};
 type TaskResult = {
   value: string; passed: boolean | null; note: string; recordedBy: string; recordedAt: string;
 };
@@ -100,22 +107,55 @@ function TaskStateSelect({ task }: { task: Task }) {
  */
 function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const spec = task.test!;
+  const acc = parseAcceptance(spec.acceptance);
+  const units = acceptanceUnits(acc);
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(!task.result);
   const [value, setValue] = useState(task.result?.value ?? "");
+  // Measured with structured criteria: one input per distinct unit, joined
+  // back into the one stored value string ("0.12 %RSD; 8 nL").
+  const [readings, setReadings] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const e of parseEntries(task.result?.value ?? "")) {
+      const u = units.find((x) => x.toLowerCase() === e.unit.toLowerCase()) ?? (units.length === 1 ? units[0] : e.unit);
+      if (u) out[u] = String(e.got);
+    }
+    return out;
+  });
+  // Pass/fail with "attach a reading": the number rides in front of the note,
+  // because the verdict IS the value and the row has nowhere else to put it.
+  const [reading, setReading] = useState("");
   const [note, setNote] = useState(task.result?.note ?? "");
   const [error, setError] = useState("");
 
-  const band = toleranceBand(spec);
-  const live = evaluateResult(spec, value);
+  const multiUnit = spec.resultType === "measured" && units.length > 0;
+  const joined = multiUnit
+    ? units.map((u) => (readings[u]?.trim() ? `${readings[u].trim()} ${u}` : "")).filter(Boolean).join("; ")
+    : value;
+  // The limits as a sentence: structured criteria first, the legacy band else.
+  const band = acc.criteria?.length
+    ? acc.criteria.map(criterionLabel).join(" or ")
+    : toleranceBand(spec);
+  const live = evaluateResult(spec, joined);
   const r = task.result;
   const verdictTone = (p: boolean | null) =>
     p === true ? "good" : p === false ? "bad" : "neutral";
 
+  // Reading type: outside the typical range is an amber hint, never a fail.
+  const readingNum = spec.resultType === "reading" ? parseFloat(value) : NaN;
+  const outsideTypical = spec.resultType === "reading" && Number.isFinite(readingNum)
+    && ((acc.typicalLow !== undefined && readingNum < acc.typicalLow)
+      || (acc.typicalHigh !== undefined && readingNum > acc.typicalHigh));
+
   const save = () => {
     setError("");
+    const attach = spec.resultType === "pass_fail" && acc.attachReading && reading.trim()
+      ? `${reading.trim()}${acc.unit ? ` ${acc.unit}` : ""}` : "";
     startTransition(async () => {
-      const res = await recordTaskResult(task.id, { value, note });
+      const res = await recordTaskResult(task.id, {
+        value: joined,
+        note: attach ? [attach, note.trim()].filter(Boolean).join(" - ") : note,
+      });
       if (res?.error) { setError(res.error); return; }
       setEditing(false);
     });
@@ -127,10 +167,15 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
         <span className="eyebrow">Result</span>
         <span className="mut t-meta">
           {RESULT_LABEL[spec.resultType] ?? spec.resultType}
-          {spec.target ? ` · target ${spec.target}` : ""}
+          {acc.measuredWith ? ` · ${acc.measuredWith}` : spec.target && spec.resultType !== "note" ? ` · target ${spec.target}` : ""}
           {band ? ` · passes ${band}` : ""}
+          {spec.resultType === "reading" && acc.typicalLow !== undefined && acc.typicalHigh !== undefined
+            ? ` · typically ${acc.typicalLow} to ${acc.typicalHigh}` : ""}
         </span>
       </div>
+      {spec.resultType === "pass_fail" && acc.passHint && (
+        <div className="mut t-small" style={{ marginBottom: 6 }}>{acc.passHint}</div>
+      )}
 
       {/* Recorded: the reading, what it means, and who stands behind it. */}
       {r && !editing && (
@@ -156,22 +201,52 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
       {canEdit && editing && (
         <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
           {spec.resultType === "pass_fail" || spec.resultType === "inspect_replace" ? (
-            <div className="seg" role="group" aria-label="Result">
-              {(spec.resultType === "pass_fail" ? ["Pass", "Fail"] : ["Inspected", "Replaced"]).map((v) => (
-                <button key={v} type="button" aria-pressed={value === v} onClick={() => setValue(v)}>{v}</button>
-              ))}
-            </div>
+            <>
+              <div className="seg" role="group" aria-label="Result">
+                {(spec.resultType === "pass_fail" ? ["Pass", "Fail"] : ["Inspected", "Replaced"]).map((v) => (
+                  <button key={v} type="button" aria-pressed={value === v} onClick={() => setValue(v)}>{v}</button>
+                ))}
+              </div>
+              {spec.resultType === "pass_fail" && acc.attachReading && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <input value={reading} onChange={(e) => setReading(e.target.value)} inputMode="decimal"
+                    aria-label="Reading alongside the verdict" placeholder="reading"
+                    className="mono t-body" style={{ width: 96 }} />
+                  {acc.unit && <span className="mut t-small">{acc.unit}</span>}
+                </span>
+              )}
+            </>
+          ) : multiUnit ? (
+            // One input per distinct unit the criteria mention; the result
+            // passes if any criterion is met by the entry in its unit.
+            units.map((u) => (
+              <span key={u} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <input value={readings[u] ?? ""} inputMode="decimal" aria-label={`Reading in ${u}`}
+                  onChange={(e) => setReadings((s) => ({ ...s, [u]: e.target.value }))}
+                  className="mono t-body" style={{ width: 96 }} />
+                <span className="mut t-small">{u}</span>
+              </span>
+            ))
+          ) : spec.resultType === "note" ? (
+            <textarea value={value} onChange={(e) => setValue(e.target.value)} rows={2}
+              aria-label="What you found"
+              placeholder={acc.prompt || spec.target || "What you found"}
+              className="t-body" style={{ width: "auto", flex: "1 1 220px", resize: "vertical" }} />
           ) : (
-            <input value={value} onChange={(e) => setValue(e.target.value)} aria-label="What it read"
-              placeholder={spec.resultType === "note" ? "What you found" : spec.target ? `e.g. ${spec.target}` : "e.g. 5.2 mL/min"}
-              className="t-body" style={{ width: "auto", flex: "1 1 140px" }} />
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "1 1 140px" }}>
+              <input value={value} onChange={(e) => setValue(e.target.value)} aria-label="What it read"
+                placeholder={spec.target ? `e.g. ${spec.target}` : acc.unit ? `in ${acc.unit}` : "e.g. 5.2 mL/min"}
+                className="t-body" style={{ width: "auto", flex: 1 }} />
+              {spec.resultType === "reading" && acc.unit && <span className="mut t-small">{acc.unit}</span>}
+            </span>
           )}
           <input value={note} onChange={(e) => setNote(e.target.value)} aria-label="Conditions or anything odd"
             placeholder={spec.resultType === "inspect_replace"
               ? value === "Replaced" ? "What went in - part #, serial (optional)" : "What you found (optional)"
+              : acc.replicates ? "Raw replicates and conditions, e.g. 0.11, 0.13, 0.12 (optional)"
               : "Conditions, anything odd (optional)"}
             className="t-body" style={{ width: "auto", flex: "2 1 180px" }} />
-          <button className="btn sm accent" disabled={pending || !resultIsRecorded(spec.resultType, value)} onClick={save}>
+          <button className="btn sm accent" disabled={pending || !resultIsRecorded(spec.resultType, joined)} onClick={save}>
             {pending ? "Recording..." : "Record"}
           </button>
           {r && <button className="btn sm" onClick={() => { setEditing(false); setValue(r.value); setNote(r.note); setError(""); }}>Cancel</button>}
@@ -180,6 +255,11 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
           {live.why && live.passed !== null && (
             <span className={`pill ${verdictTone(live.passed)}`} style={{ flexShrink: 0 }}>
               {live.passed ? "in band" : "out of band"}
+            </span>
+          )}
+          {outsideTypical && (
+            <span className="t-small" style={{ color: "var(--t-warn-fg)", flexShrink: 0 }}>
+              outside the typical range - recorded, not judged
             </span>
           )}
         </div>
