@@ -146,12 +146,12 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
             <div className="eyebrow">{term.manufacturer}</div>
             <h1 style={{ margin: "2px 0 6px", fontSize: 27 }}>{term.name}</h1>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{term.assetType}</span>
+              <span className="pill neutral">{term.assetType}</span>
               {term.categories.map((c) => (
-                <span key={c} className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{c}</span>
+                <span key={c} className="pill info">{c}</span>
               ))}
               {term.gases.map((g) => (
-                <span key={g} className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{g}</span>
+                <span key={g} className="pill warn">{g}</span>
               ))}
             </div>
             <p style={{ fontSize: 14, lineHeight: 1.6, margin: 0 }}>{term.publicSummary}</p>
@@ -175,7 +175,7 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
           {upkeep.map((j) => (
             <div key={j.name} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>{j.name}</span>
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{j.every}</span>
+              <span className="pill good">{j.every}</span>
               {j.parts.length > 0 && (
                 <span className="mut" style={{ fontSize: 12 }}>takes {j.parts.join(", ")}</span>
               )}
@@ -192,7 +192,7 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
               <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                 <span className="mono" style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>{p.partNumber}</span>
                 <span style={{ fontSize: 13 }}>{p.name}</span>
-                {p.kind === "kit" && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3", fontSize: 10 }}>kit</span>}
+                {p.kind === "kit" && <span className="pill accent" style={{ fontSize: 10 }}>kit</span>}
                 {p.manufacturer && <span className="mut" style={{ fontSize: 12 }}>{p.manufacturer}{p.mfrPartNumber ? ` ${p.mfrPartNumber}` : ""}</span>}
               </div>
               {p.kind === "kit" && linesFor(p.id).length > 0 && (
