@@ -7,6 +7,7 @@ import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/li
 import {
   createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
 } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
 import PartNumberField from "./PartNumberField";
 import { formatCents, centsToInput } from "@/lib/money";
@@ -173,11 +174,26 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
       )}
 
       {form && (
-        <div className="dash-form">
+        <Dialog open onClose={close} size="lg" title={form.mode === "new" ? "New part" : "Edit part"}
+          footer={
+            <>
+              <span className="dialog-status" />
+              {form.mode === "edit" && isStaff && (
+                <button className="btn link danger"
+                  onClick={() => {
+                    const reason = promptReason(`Delete part record "${draft.name}"? This removes it from the record entirely.`);
+                    if (!reason) return;
+                    startTransition(async () => { await deletePart((form as { id: number }).id, reason); close(); });
+                  }}
+                >Remove</button>
+              )}
+              <button className="btn" onClick={close} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending}>
+                {pending ? "Saving..." : form.mode === "new" ? "Add part" : "Save changes"}
+              </button>
+            </>
+          }>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>
-              {form.mode === "new" ? "New" : "Edit"}
-            </div>
             <div style={{ display: "flex", gap: 4 }}>
               {[["part", "Part"], ["consumable", "Consumable"], ["kit", "Kit"]].map(([k, label]) => (
                 <button key={k} className="pill" onClick={() => setKind(k)}
@@ -369,23 +385,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               </button>
             )}
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn sm accent" onClick={save} disabled={pending}>
-              {pending ? "Saving..." : form.mode === "new" ? "Add part" : "Save changes"}
-            </button>
-            <button className="btn sm" onClick={close}>Cancel</button>
-            {form.mode === "edit" && isStaff && (
-              <button
-                className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
-                onClick={() => {
-                  const reason = promptReason(`Delete part record "${draft.name}"? This removes it from the record entirely.`);
-                  if (!reason) return;
-                  startTransition(async () => { await deletePart((form as { id: number }).id, reason); close(); });
-                }}
-              >Remove</button>
-            )}
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {parts.length === 0 && !form && <div className="mut" style={{ fontSize: 13 }}>No parts tracked for this system.</div>}
