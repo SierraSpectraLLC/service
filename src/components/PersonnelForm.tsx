@@ -6,6 +6,8 @@ import {
   updateSettings, addOrg,
   removeClientAccess, setClientAccessOrg,
 } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
@@ -138,10 +140,13 @@ export default function PersonnelForm(props: {
                 {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
               <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
-                onClick={() => {
-                  if (!window.confirm(`Remove ${r.entry}?`)) return;
+                onClick={async () => {
+                  if (!(await confirmDialog({ title: `Remove ${r.entry}?`, action: `Remove ${r.entry}`, tone: "bad" }))) return;
                   setError("");
-                  startTransition(() => removeClientAccess(r.id));
+                  startTransition(async () => {
+                    await removeClientAccess(r.id);
+                    toast({ message: `Removed ${r.entry}` });
+                  });
                 }}>remove</button>
             </div>
           ))}
