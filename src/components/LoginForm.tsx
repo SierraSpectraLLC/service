@@ -98,12 +98,12 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
           disabled={pending || !email.trim() || !password}>
           {pending ? "Signing in..." : "Sign in"}
         </button>
-        <div style={{ marginTop: 10, fontSize: 12 }}>
+        <div className="t-small" style={{ marginTop: 10 }}>
           <button type="button" className="btn link" onClick={() => { setStep("email"); setPassword(""); setError(""); }}>
             Email me a code instead
           </button>
         </div>
-        {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
       </form>
     );
   }
@@ -114,7 +114,7 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
         {/* "If it's approved" rather than "we sent it": an address that isn't on
             the list gets no email, and saying otherwise would be a lie - while
             saying which addresses exist would be a way to find out. */}
-        <p style={{ fontSize: 13, marginTop: 0 }} className="mut">
+        <p className="mut t-body" style={{ marginTop: 0 }}>
           If <b style={{ color: "var(--ink)" }}>{email.trim()}</b> is approved, a {CODE_DIGITS}-digit code is
           on its way{sentBy === "sms" ? " by text, or by email if there's no number on file" : ""}.
           It expires in {CODE_TTL_MINUTES} minutes.
@@ -132,7 +132,7 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
           disabled={!isCodeShaped(normalizeCode(code))}>
           Sign in
         </button>
-        <div style={{ display: "flex", gap: 10, marginTop: 10, fontSize: 12, flexWrap: "wrap" }}>
+        <div className="row-3 t-small" style={{ marginTop: 10 }}>
           <button type="button" className="btn link" disabled={pending} onClick={resend}>
             {pending ? "Sending..." : "Send another code"}
           </button>
@@ -144,8 +144,8 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
             No code? Use your password
           </button>
         </div>
-        {note && <div style={{ fontSize: 12, color: "#2E6B2E", marginTop: 8 }}>{note}</div>}
-        {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+        {note && <div className="t-small" style={{ color: "var(--t-good-fg)", marginTop: 8 }}>{note}</div>}
+        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
       </form>
     );
   }
@@ -168,12 +168,12 @@ export default function LoginForm({ send, withPassword, smsOffered = false }: {
           Text me a code instead
         </button>
       )}
-      <div style={{ marginTop: 10, fontSize: 12 }}>
+      <div className="t-small" style={{ marginTop: 10 }}>
         <button type="button" className="btn link" onClick={() => { setStep("password"); setError(""); }}>
           No magic link or code? Type your password
         </button>
       </div>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </form>
   );
 }
