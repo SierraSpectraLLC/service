@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { setForSale, setAssetForSale } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 /**
  * Resale controls for a system or a single asset, shown only to its owner (or
@@ -63,11 +65,16 @@ export default function SalePanel({ target = "system", targetId, forSale, saleNo
               }}>{pending ? "Saving..." : forSale ? "Update listing" : "Publish listing"}</button>
             {forSale ? (
               <button className="btn sm" disabled={pending}
-                onClick={() => {
-                  if (!window.confirm("End the listing? Its link stops working immediately.")) return;
+                onClick={async () => {
+                  if (!(await confirmDialog({
+                    title: "End the listing?",
+                    body: "Its link stops working immediately.",
+                    action: "End listing", tone: "bad",
+                  }))) return;
                   startTransition(async () => {
                     const res = await apply(targetId, false, note);
                     if (res?.error) setError(res.error);
+                    else toast({ message: "Ended the listing" });
                   });
                 }}>End listing</button>
             ) : (
