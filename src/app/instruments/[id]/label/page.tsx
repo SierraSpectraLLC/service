@@ -34,6 +34,7 @@ export default async function SystemLabelPage({ params }: { params: Promise<{ id
       headline={inst.externalId}
       lines={[systemLabel(inst, assetRows), inst.client]}
       brandName={brand.operatorName}
+      logoUrl={brand.operatorLogoUrl}
     />
   );
 }

@@ -6,6 +6,7 @@ import { instruments, assets, tasks, parts, attachments } from "@/db/schema";
 import { systemLabel } from "@/lib/systemLabel";
 import { getBrand } from "@/lib/brand";
 import { shopMonthDay } from "@/lib/shopday";
+import { PublicShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -60,8 +61,8 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
   // The root layout already draws the platform header (it renders for
   // anonymous viewers too), so this page starts straight at the listing.
   return (
-    <div className="container page">
-      <div className="mut" style={{ fontSize: 12, padding: "2px 2px 8px" }}>Instrument listing</div>
+    <PublicShell brandName={brand.name} tagline="History shown as recorded" width={860}
+      title="Instrument listing">
 
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
@@ -126,9 +127,6 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
         </div>
       )}
 
-      <div className="mut" style={{ fontSize: 11, padding: "0 2px 24px" }}>
-        Listed on {brand.name}. History shown as recorded.
-      </div>
-    </div>
+    </PublicShell>
   );
 }

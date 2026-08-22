@@ -11,6 +11,7 @@ import { parseModelSpecs } from "@/lib/modelSpecs";
 import { parseProcParts, partsForModel } from "@/lib/procedures";
 import { article, cadenceWords, metaDescription, pageTitle, productJsonLd, publicRefs } from "@/lib/publicCatalog";
 import { stockSrc } from "@/lib/photos";
+import { PublicShell } from "@/components/ui";
 import SpecTable from "@/components/SpecTable";
 
 export const dynamic = "force-dynamic";
@@ -127,7 +128,7 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
   );
 
   return (
-    <div className="container page" style={{ maxWidth: 860 }}>
+    <PublicShell brandName={brand.name} tagline={brand.tagline} width={860}>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
 
       <div className="crumb">
@@ -242,6 +243,6 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
         or endorsed by {term.manufacturer}. Specifications and intervals are recorded from our own service
         experience - always confirm against the manufacturer&apos;s current documentation.
       </div>
-    </div>
+    </PublicShell>
   );
 }

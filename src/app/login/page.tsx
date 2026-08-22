@@ -11,6 +11,7 @@ import { startSession } from "@/lib/sessionCookie";
 import { CODE_DIGITS } from "@/lib/loginCode";
 import { smsConfigured } from "@/lib/sms";
 import LoginForm from "@/components/LoginForm";
+import { PublicShell } from "@/components/ui";
 
 export default async function LoginPage({ searchParams }: {
   searchParams: Promise<{ sent?: string; locked?: string; error?: string }>;
@@ -88,10 +89,8 @@ export default async function LoginPage({ searchParams }: {
   }
 
   return (
-    <div className="container form" style={{ paddingTop: 60 }}>
+    <PublicShell brandName={brand.name} tagline={brand.tagline} title="Sign in" width={420}>
       <div className="card">
-        <div style={{ fontWeight: 700, fontSize: 16, color: "var(--navy)", marginBottom: 4 }}>Sign in to {brand.name}</div>
-
         {locked ? (
           <p style={{ fontSize: 13, color: "#A32D2D" }}>
             Too many sign-in attempts for that address. Try again in {locked} minute{locked === "1" ? "" : "s"}.
@@ -111,6 +110,6 @@ export default async function LoginPage({ searchParams }: {
           </>
         )}
       </div>
-    </div>
+    </PublicShell>
   );
 }

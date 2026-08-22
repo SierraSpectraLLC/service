@@ -26,6 +26,8 @@ export { CardGrid, EntityCard } from "@/components/ui/CardGrid";
 export { default as InlineEdit } from "@/components/ui/InlineEdit";
 export { default as SaveBar } from "@/components/ui/SaveBar";
 export { default as RecordHero } from "@/components/ui/RecordHero";
+export { default as PrintHeader } from "@/components/ui/PrintHeader";
+export { default as PublicShell } from "@/components/ui/PublicShell";
 export { default as HeroKebab } from "@/components/ui/HeroKebab";
 export type { HeroStat } from "@/components/ui/RecordHero";
 export type { HeroKebabItem } from "@/components/ui/HeroKebab";

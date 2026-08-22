@@ -33,6 +33,7 @@ export default async function AssetLabelPage({ params }: { params: Promise<{ id:
         asset.manufacturer,
       ]}
       brandName={brand.operatorName}
+      logoUrl={brand.operatorLogoUrl}
     />
   );
 }

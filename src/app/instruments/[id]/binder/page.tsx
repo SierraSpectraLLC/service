@@ -12,6 +12,7 @@ import { systemLabel } from "@/lib/systemLabel";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { brandForTenant } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
+import { PrintHeader } from "@/components/ui";
 import {
   DOC_STATE_TONE, QUALIFICATIONS, QUAL_LABEL, STANDING_TONE,
   expiryAttention, expiryLabel, packageComplete, packageForSystem, packageRows,
@@ -110,14 +111,8 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
       </div>
 
       <div className="card">
-        <div style={{ borderBottom: "3px solid var(--navy)", paddingBottom: 10, marginBottom: 12 }}>
-          {brand.operatorLogoUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={brand.operatorLogoUrl} alt="" style={{ height: 34, maxWidth: 160, objectFit: "contain", marginBottom: 4 }} />
-          )}
-          <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: 0.4, color: "var(--navy)" }}>{brand.operatorName.toUpperCase()}</div>
-          <div className="mut" style={{ fontSize: 13 }}>Validation binder</div>
-        </div>
+        <PrintHeader logoUrl={brand.operatorLogoUrl} operator={brand.operatorName}
+          title="Validation binder" date={shopMonthDay(new Date())} docId={inst.externalId} />
 
         <Row label="System ID" value={inst.externalId} />
         <Row label="System" value={systemLabel(inst, moduleRows)} />

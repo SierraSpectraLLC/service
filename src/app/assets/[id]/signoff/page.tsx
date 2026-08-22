@@ -8,6 +8,7 @@ import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
 import { brandForTenant } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
+import { PrintHeader } from "@/components/ui";
 import SignoffPanel, { type SignatureRow } from "@/components/SignoffPanel";
 import SignatureBlock from "@/components/SignatureBlock";
 import { signoffGate, signatureIsStale, type SignoffSnapshot } from "@/lib/signoff";
@@ -108,14 +109,9 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
       )}
 
       <div className="card">
-        <div style={{ borderBottom: "3px solid var(--navy)", paddingBottom: 10, marginBottom: 12 }}>
-          {brand.operatorLogoUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={brand.operatorLogoUrl} alt="" style={{ height: 34, maxWidth: 160, objectFit: "contain", marginBottom: 4 }} />
-          )}
-          <div style={{ fontWeight: 700, fontSize: 18, letterSpacing: 0.4, color: "var(--navy)" }}>{brand.operatorName.toUpperCase()}</div>
-          <div className="mut" style={{ fontSize: 13 }}>Asset delivery &amp; sign-off</div>
-        </div>
+        <PrintHeader logoUrl={brand.operatorLogoUrl} operator={brand.operatorName}
+          title="Asset delivery & sign-off" date={shopMonthDay(new Date())}
+          docId={asset.serial ? `SN ${asset.serial}` : undefined} />
 
         <Row label="Asset" value={`${asset.kind} — ${asset.model || "(no model)"}`} />
         <Row label="Serial #" value={asset.serial} />

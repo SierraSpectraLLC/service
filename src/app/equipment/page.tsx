@@ -9,6 +9,7 @@ import { appUrl } from "@/lib/appUrl";
 import { metaDescription } from "@/lib/publicCatalog";
 import { notFound } from "next/navigation";
 import { stockSrc } from "@/lib/photos";
+import { PublicShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -45,13 +46,11 @@ export default async function EquipmentIndexPage() {
   const makers = [...new Set(rows.map((r) => r.manufacturer).filter(Boolean))].sort();
 
   return (
-    <div className="container page" style={{ maxWidth: 860 }}>
-      <h1 style={{ fontSize: 26, marginBottom: 4 }}>Equipment library</h1>
-      <p className="mut" style={{ fontSize: 14, lineHeight: 1.6, marginTop: 0 }}>
-        Specifications, part numbers, PM kit contents and maintenance intervals for the laboratory
+    <PublicShell brandName={brand.name} tagline={brand.tagline} width={860}
+      title="Equipment library"
+      sub={<>Specifications, part numbers, PM kit contents and maintenance intervals for the laboratory
         instrument modules {brand.operatorName} services. Written from our own service experience,
-        not copied from anybody&apos;s manual.
-      </p>
+        not copied from anybody&apos;s manual.</>}>
 
       {rows.length === 0 && (
         <div className="card mut" style={{ fontSize: 13 }}>
@@ -82,6 +81,6 @@ export default async function EquipmentIndexPage() {
           </div>
         </div>
       ))}
-    </div>
+    </PublicShell>
   );
 }

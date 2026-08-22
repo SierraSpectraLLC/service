@@ -5,6 +5,7 @@ import { getBrand } from "@/lib/brand";
 import { linkState } from "@/lib/dropShare";
 import { fmtBytes } from "@/lib/storage";
 import { shopToday } from "@/lib/shopday";
+import { EmptyState, PublicShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,12 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   if (!link || state !== "active") {
     return (
-      <div className="container" style={{ maxWidth: 520, paddingTop: 60, textAlign: "center" }}>
-        <h1 style={{ fontSize: 20, marginBottom: 8 }}>
-          {state === "expired" ? "This link has expired" : "This link is no longer active"}
-        </h1>
-        <p className="mut" style={{ fontSize: 13 }}>Ask whoever sent it to you for a new one.</p>
-      </div>
+      <PublicShell brandName={brand.name} tagline={brand.tagline} width={520}>
+        <EmptyState
+          title={state === "expired" ? "This link has expired" : "This link is no longer active"}
+          body="Ask whoever sent it to you for a new one."
+        />
+      </PublicShell>
     );
   }
 
@@ -40,13 +41,10 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
     : [];
 
   return (
-    <div className="container" style={{ maxWidth: 560, paddingTop: 48 }}>
+    <PublicShell brandName={brand.name} tagline={brand.tagline}
+      title={link.label || "Files shared with you"}
+      sub={`${files.length} file${files.length === 1 ? "" : "s"} · available until ${link.expiresOn}`}>
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 4 }}>{brand.name}</div>
-        <h1 style={{ fontSize: 19, margin: "0 0 6px" }}>{link.label || "Files shared with you"}</h1>
-        <p className="mut" style={{ fontSize: 13, marginBottom: 12 }}>
-          {files.length} file{files.length === 1 ? "" : "s"} · available until {link.expiresOn}
-        </p>
         {files.map((f) => (
           <div key={f.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
             <a href={`/api/share/${token}/file/${f.id}`} style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
@@ -64,6 +62,6 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           </div>
         )}
       </div>
-    </div>
+    </PublicShell>
   );
 }

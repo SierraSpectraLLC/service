@@ -5,6 +5,7 @@ import { getBrand } from "@/lib/brand";
 import { linkState } from "@/lib/dropShare";
 import { shopToday } from "@/lib/shopday";
 import DropUploader from "@/components/DropUploader";
+import { EmptyState, PublicShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -27,14 +28,12 @@ export default async function DropPage({ params }: { params: Promise<{ token: st
 
   if (!link || state !== "active") {
     return (
-      <div className="container" style={{ maxWidth: 520, paddingTop: 60, textAlign: "center" }}>
-        <h1 style={{ fontSize: 20, marginBottom: 8 }}>
-          {state === "expired" ? "This link has expired" : "This link is no longer active"}
-        </h1>
-        <p className="mut" style={{ fontSize: 13 }}>
-          Ask whoever sent it to you for a new one.
-        </p>
-      </div>
+      <PublicShell brandName={brand.name} tagline={brand.tagline} width={520}>
+        <EmptyState
+          title={state === "expired" ? "This link has expired" : "This link is no longer active"}
+          body="Ask whoever sent it to you for a new one."
+        />
+      </PublicShell>
     );
   }
 
@@ -47,16 +46,13 @@ export default async function DropPage({ params }: { params: Promise<{ token: st
   const receiver = org?.name || brand.operatorName || brand.name;
 
   return (
-    <div className="container" style={{ maxWidth: 560, paddingTop: 48 }}>
+    <PublicShell brandName={brand.name} tagline={brand.tagline}
+      title={`Send files to ${receiver}`}
+      sub={<>Files go straight to {receiver}&apos;s storage{folder ? <> (into <b style={{ fontWeight: 700 }}>{folder.name}</b>)</> : ""} and
+        they are told when something arrives. This link works until {link.expiresOn}.</>}>
       <div className="card">
-        <div className="eyebrow" style={{ marginBottom: 4 }}>{brand.name}</div>
-        <h1 style={{ fontSize: 19, margin: "0 0 6px" }}>Send files to {receiver}</h1>
-        <p className="mut" style={{ fontSize: 13, marginBottom: 14 }}>
-          Files go straight to {receiver}&apos;s storage{folder ? <> (into <b style={{ fontWeight: 700 }}>{folder.name}</b>)</> : ""} and
-          they are told when something arrives. This link works until {link.expiresOn}.
-        </p>
         <DropUploader token={token} />
       </div>
-    </div>
+    </PublicShell>
   );
 }
