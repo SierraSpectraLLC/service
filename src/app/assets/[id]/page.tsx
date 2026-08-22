@@ -317,7 +317,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
                       {asset.kind} — {asset.model || "(no model)"}
                     </div>
-                    {asset.forSale && <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>}
+                    {asset.forSale && <span className="pill good">For sale</span>}
                   </div>
                   <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>
                     {[asset.serial && `SN ${asset.serial}`, asset.manufacturer, asset.owner && `for ${asset.owner}`,
@@ -507,7 +507,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                     // the event stays in the history, the system stays anonymous.
                     <span className="mut mono" style={{ fontSize: 11, flexShrink: 0 }}>another system</span>
                   ))}
-                  {KIND_LABEL[h.kind] && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[h.kind]}</span>}
+                  {KIND_LABEL[h.kind] && <span className="pill neutral">{KIND_LABEL[h.kind]}</span>}
                   <span style={{ flex: 1, minWidth: 160 }}>
                     {h.text}
                     {h.detail && <span className="mut" style={{ fontSize: 12 }}> — {h.detail}</span>}
