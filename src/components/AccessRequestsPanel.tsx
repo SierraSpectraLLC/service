@@ -31,8 +31,8 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               <b style={{ fontSize: 13 }}>{r.orgName}</b>
               {isClaim
-                ? <span className="pill" style={{ background: "#F2E0CC", color: "#8A5410" }}>claims ownership</span>
-                : r.orgKind === "provider" && <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>provider</span>}
+                ? <span className="pill warn">claims ownership</span>
+                : r.orgKind === "provider" && <span className="pill warn">provider</span>}
               <span className="mut" style={{ fontSize: 12 }}>{r.requestedBy} · {r.when}</span>
             </div>
             {r.message && <div className="mut" style={{ fontSize: 12, whiteSpace: "pre-wrap", marginTop: 2 }}>{r.message}</div>}
