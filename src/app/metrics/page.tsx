@@ -134,10 +134,10 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         ) : (
           <>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{pm.onTime} on time</span>
-              <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{pm.late} done late</span>
-              <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>{pm.openOverdue} overdue, open</span>
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{pm.openNotDue} due soon</span>
+              <span className="pill good">{pm.onTime} on time</span>
+              <span className="pill warn">{pm.late} done late</span>
+              <span className="pill bad">{pm.openOverdue} overdue, open</span>
+              <span className="pill neutral">{pm.openNotDue} due soon</span>
             </div>
             <div style={{ fontSize: 13 }}>
               <b>{Math.round((pm.onTime / Math.max(1, pm.onTime + pm.late + pm.openOverdue)) * 100)}%</b>
