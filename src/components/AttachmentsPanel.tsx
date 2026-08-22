@@ -371,8 +371,9 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
 
       {staged.length > 0 && (
         <div className="dash-form" style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 8 }}>
-            Ready to upload ({staged.length})
+          <div className="panel-head" style={{ marginBottom: 8 }}>
+            <span className="card-title" style={{ fontSize: 14 }}>Ready to upload</span>
+            <span className="pill neutral">{staged.length}</span>
           </div>
           {staged.map((s) => (
             <div key={s.key} style={{ marginBottom: 10, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
