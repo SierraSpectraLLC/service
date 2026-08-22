@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { kickToQueue } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 
 export type QueueLegRow = {
   id: number; fromName: string; toName: string; reason: string; actor: string; when: string;
@@ -88,7 +89,16 @@ export default function QueuePanel({
       )}
 
       {open && (
-        <div className="dash-form" style={{ marginTop: 8 }}>
+        <Dialog open onClose={() => setOpen(false)} title={`Move ${externalId} to another queue`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={send} disabled={pending}>
+                {pending ? "Moving..." : `Move to ${targetName || "their"} queue`}
+              </button>
+            </>
+          }>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>Into whose queue</label>
@@ -110,11 +120,7 @@ export default function QueuePanel({
             our board until it comes back. Access, ownership and history are untouched, and the
             days it spends there don&apos;t count against our turnaround.
           </div>
-          <button className="btn sm accent" onClick={send} disabled={pending}>
-            {pending ? "Moving..." : `Move to ${targetName || "their"} queue`}
-          </button>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+        </Dialog>
       )}
       {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
 
