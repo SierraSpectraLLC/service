@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { saveUiLayout, type PanelArrangement } from "@/app/actions";
+import { ARRANGE_EVENT } from "@/components/ui/HeroKebab";
 
 export type Panel = { key: string; label: string; node: React.ReactNode };
 
@@ -68,6 +69,13 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
     };
   });
   const [editing, setEditing] = useState(false);
+  // The toggle lives in the record hero's kebab now; the event is how it
+  // reaches this component without lifting the whole layout state up.
+  useEffect(() => {
+    const on = () => setEditing((v) => !v);
+    window.addEventListener(ARRANGE_EVENT, on);
+    return () => window.removeEventListener(ARRANGE_EVENT, on);
+  }, []);
   const [drag, setDrag] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
@@ -247,26 +255,25 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
 
   return (
     <>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
-        {/* Outside edit mode, the only hint that anything is hidden - otherwise
-            a panel someone hid months ago is just missing. */}
-        {!editing && hiddenKeys.length > 0 && (
-          <button className="btn link" style={{ fontSize: 11 }} onClick={() => setEditing(true)}>
-            {hiddenKeys.length} section{hiddenKeys.length === 1 ? "" : "s"} hidden
-          </button>
-        )}
-        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+      {/* Outside edit mode the layout controls live in the hero kebab
+          ("Rearrange panels"); the one standing hint is that something is
+          hidden - otherwise a panel someone hid months ago is just missing. */}
+      {(editing || hiddenKeys.length > 0) && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+          {!editing && hiddenKeys.length > 0 && (
+            <button className="btn link" style={{ fontSize: 11 }} onClick={() => setEditing(true)}>
+              {hiddenKeys.length} section{hiddenKeys.length === 1 ? "" : "s"} hidden
+            </button>
+          )}
           {editing && (
-            <>
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
               <span className="mut" style={{ fontSize: 11 }}>Drag a panel, or use its arrows. Saved to your account.</span>
               <button className="btn sm" onClick={reset}>Reset</button>
-            </>
+              <button className="btn sm" onClick={() => setEditing(false)}>Done</button>
+            </span>
           )}
-          <button className="btn sm" onClick={() => setEditing(!editing)}>
-            {editing ? "Done" : "Rearrange"}
-          </button>
-        </span>
-      </div>
+        </div>
+      )}
 
       {editing && hiddenKeys.length > 0 && (
         <div className="card" style={{ padding: "10px 12px" }}>

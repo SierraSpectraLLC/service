@@ -59,6 +59,7 @@ import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
+import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
@@ -381,63 +382,77 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // nobody else - see lib/mentionAudience.
   const mentionable = await mentionableOn(peopleRows, { instrumentId: instId, assetId: null });
 
+  // The hero's stats line: the record's open questions as numbers, before
+  // any panel. Only what needs an eye gets a tone.
+  const today = shopToday();
+  const openWos = woRows.filter((w) => woOpen(w.state));
+  const openTasks = taskRows.filter((t) => t.state !== "Done");
+  const overdueTasks = openTasks.filter((t) => t.dueDate && t.dueDate < today).length;
+  const pmDue = pmRows.filter((sc) => !sc.paused && sc.nextDue <= today).length;
+  const queueMine = queueView(user, inst) === "mine";
+  const queueDays = daysSince(inst.queueSince ?? inst.createdAt, new Date());
+  const heroStats: HeroStat[] = [
+    { value: openWos.length, label: `open WO${openWos.length === 1 ? "" : "s"}`, tone: openWos.length ? "warn" : undefined },
+    { value: openTasks.length, label: "open tasks", tone: overdueTasks ? "bad" : undefined },
+    ...(pmDue ? [{ value: pmDue, label: "PM due", tone: "warn" as const }] : []),
+    ...(!queueMine ? [{ value: `${queueDays}d`, label: `with ${partyName(inst.queueOrgId)}`, tone: "warn" as const }] : []),
+    ...(gxpStanding && gxpStanding.tone !== "ok"
+      ? [{ value: "docs", label: "need attention", tone: (gxpStanding.tone === "bad" ? "bad" : "warn") as HeroStat["tone"] }]
+      : []),
+  ];
+
   return (
     <div className="container split">
-      {/* Wraps: these are four or five buttons that cannot shrink (flexShrink 0
-          keeps their labels whole), so on a phone they have to go onto another
-          line rather than push the page wider than the screen. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <div className="crumb" style={{ margin: 0 }}>
-          <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
-        </div>
-        <span style={{ marginLeft: "auto" }} />
-
-        {/* Anybody who can see the system can ask for help with it - including a
-            read-only account watching an instrument fail, who should not have to
-            find somebody with more rights first. */}
-        {!inst.archived && (
-          <ClientRequest instrumentId={inst.id} externalId={inst.externalId}
-            nextPm={scheduleLine(pmRows, shopToday())} />
-        )}
-
-        {/* The instrument's own PC. Sits with the other actions on the system
-            rather than on a list somewhere else, because it is used in the
-            middle of reading this page, not instead of reading it. Last-seen is
-            shown rather than an online claim: the cache only refreshes when
-            somebody opens the machine list, so "offline" would often be a lie. */}
-        {pc && pcAbility?.see && (
-          pcAbility.connect ? (
-            <Link href={`/remote/${pc.id}`} className="btn sm"
-              title={`${pc.name || "The linked PC"} · ${pcOnline ? "online" : pc.lastSeenAt ? `last seen ${shopTime(pc.lastSeenAt)}` : "not seen yet"}`}
-              style={{ textDecoration: "none", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span aria-hidden style={{
-                width: 7, height: 7, borderRadius: 999,
-                background: pcOnline ? "#2E6B2E" : "#94A3B8",
-              }} />
-              {pcConsent?.mode === "consent" ? "Request session" : "Connect"}
-            </Link>
-          ) : pcAbility.refusal ? (
-            <span className="mut" style={{ fontSize: 11, flexShrink: 0 }}>{pcAbility.refusal}</span>
-          ) : null
-        )}
-
-        {isStaff && (
-          <>
-            {modules.sheetSync && <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />}
-            <Link href={`/instruments/${inst.id}/label`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
-              Label
-            </Link>
-            <Link href={`/instruments/${inst.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
-              Sign-off packet
-              {signRows.length > 0 && (
-                <span className="pill good" style={{ marginLeft: 6 }}>
-                  signed{signRows.length > 1 ? ` ×${signRows.length}` : ""}
-                </span>
-              )}
-            </Link>
-          </>
-        )}
+      <div className="crumb">
+        <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
       </div>
+
+      <RecordHero
+        image={coverSrc || undefined}
+        imageAlt={systemLabel(inst, assetRows)}
+        eyebrow={<>{inst.client}{inst.category ? <> · {inst.category}</> : null}{inst.archived ? " · archived" : ""}</>}
+        id={inst.externalId}
+        title={systemLabel(inst, assetRows) || "No assets listed yet"}
+        meta={[inst.location, inst.lead && `lead ${inst.lead}`, `P${inst.priority}`].filter(Boolean).join(" · ")}
+        stats={heroStats}
+        actions={
+          <>
+            {/* Anybody who can see the system can ask for help with it -
+                including a read-only account watching an instrument fail. */}
+            {!inst.archived && (
+              <ClientRequest instrumentId={inst.id} externalId={inst.externalId}
+                nextPm={scheduleLine(pmRows, shopToday())} />
+            )}
+            {/* The instrument's own PC, used in the middle of reading this
+                page. Last-seen rather than an online claim: the cache only
+                refreshes when somebody opens the machine list. */}
+            {pc && pcAbility?.see && (
+              pcAbility.connect ? (
+                <Link href={`/remote/${pc.id}`} className="btn sm"
+                  title={`${pc.name || "The linked PC"} · ${pcOnline ? "online" : pc.lastSeenAt ? `last seen ${shopTime(pc.lastSeenAt)}` : "not seen yet"}`}
+                  style={{ textDecoration: "none", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span aria-hidden style={{
+                    width: 7, height: 7, borderRadius: 999,
+                    background: pcOnline ? "#2E6B2E" : "#94A3B8",
+                  }} />
+                  {pcConsent?.mode === "consent" ? "Request session" : "Connect"}
+                </Link>
+              ) : pcAbility.refusal ? (
+                <span className="mut" style={{ fontSize: 11, flexShrink: 0 }}>{pcAbility.refusal}</span>
+              ) : null
+            )}
+            {isStaff && modules.sheetSync && <PushToSheetButton instrumentId={inst.id} externalId={inst.externalId} />}
+          </>
+        }
+        kebab={
+          <HeroKebab arrange menuLabel={`Actions for ${inst.externalId}`}
+            items={isStaff ? [
+              { label: `Sign-off packet${signRows.length ? ` (signed${signRows.length > 1 ? ` ×${signRows.length}` : ""})` : ""}`, href: `/instruments/${inst.id}/signoff` },
+              { label: "Label", href: `/instruments/${inst.id}/label` },
+              { label: "Binder", href: `/instruments/${inst.id}/binder` },
+            ] : []} />
+        }
+      />
 
       {/* One 760px column wasted a wide monitor and buried half the record
           below three screens of scroll. Two columns from 1200px up, arranged
@@ -453,19 +468,25 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         // three screens of scroll, so they group into working contexts. Badges
         // are each tab's reason to be visited now, so flipping is navigation
         // rather than hunting.
-        pinned={["system", "queue"]}
+        pinned={["queue"]}
+        // Six working contexts instead of four catch-alls: Now is whose move
+        // it is and who holds it; Work is the jobs; Configuration is what the
+        // system IS; Files and History split paper from log.
         groups={[
+          { key: "now", label: "Now", keys: ["queue", "custody"],
+            badge: !queueMine ? `${queueDays}d` : undefined, badgeTone: "warn" },
           { key: "work", label: "Work",
-            keys: ["workorders", "tasks", "maintenance", "parts"],
-            badge: taskRows.filter((t) => t.state !== "Done").length || undefined,
-            badgeTone: taskRows.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < shopToday()) ? "bad" : "info" },
-          { key: "equipment", label: "Equipment", keys: ["assets", "site", "custody"] },
-          { key: "documents", label: "Documents",
-            keys: ["validation", "files", "photos", "reference"],
+            keys: ["workorders", "tasks", "hours", "parts", "discussion"],
+            badge: openTasks.length || undefined,
+            badgeTone: overdueTasks ? "bad" : "info" },
+          { key: "maintenance", label: "Maintenance", keys: ["maintenance"],
+            badge: pmDue || undefined, badgeTone: "warn" },
+          { key: "config", label: "Configuration", keys: ["system", "assets", "site", "validation"],
             badge: gxpStanding && gxpStanding.tone !== "ok" ? "!" : undefined,
             badgeTone: gxpStanding?.tone === "bad" ? "bad" : "warn" },
-          { key: "log", label: "Log",
-            keys: ["hours", "update", "discussion", "activity"],
+          { key: "files", label: "Files", keys: ["files", "photos", "reference"] },
+          { key: "history", label: "History",
+            keys: ["activity", "update"],
             badge: (() => {
               const seen = readRows[0]?.lastSeenAt;
               return visiblePosts.filter((x) => x.authorEmail !== user.email && (!seen || x.createdAt > seen)).length || undefined;

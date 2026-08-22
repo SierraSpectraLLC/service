@@ -975,6 +975,36 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 /* A line of context under a panel's title, before its fields. */
 .panel-hint { font-size: 12px; color: var(--mut); margin: -2px 0 10px; }
 
+/* ── Record hero ────────────────────────────────────────────────────────────
+   The top of a record page: image, eyebrow, id + title, meta, a stats line
+   whose warn-toned numbers are the record's open questions, and the actions.
+   On a phone only the first action button and the kebab survive. */
+.rhero { display: flex; gap: 14px; align-items: flex-start; }
+.rhero-img {
+  width: 84px; height: 84px; border-radius: 10px; object-fit: cover;
+  border: 1px solid var(--line); flex-shrink: 0;
+}
+.rhero-main { flex: 1 1 auto; min-width: 0; }
+.rhero-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rhero-title h1 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.3px; color: var(--navy); line-height: 1.25; }
+.rhero-title .t-mono-id { font-size: 13px; }
+.rhero-meta { font-size: 12.5px; margin-top: 2px; }
+.rhero-stats { display: flex; gap: 4px 14px; flex-wrap: wrap; margin-top: 8px; }
+.rhero-stat { font-size: 12px; color: var(--mut); white-space: nowrap; }
+.rhero-stat b { font-size: 13px; color: var(--ink); font-weight: 700; }
+.rhero-stat.warn, .rhero-stat.warn b { color: var(--t-warn-fg); }
+.rhero-stat.bad, .rhero-stat.bad b { color: var(--t-bad-fg); }
+.rhero-stat.good, .rhero-stat.good b { color: var(--t-good-fg); }
+.rhero-acts { display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 639px) {
+  .rhero { flex-wrap: wrap; }
+  .rhero-img { width: 64px; height: 64px; }
+  /* Primary + kebab only: every later button waits in the menu. */
+  .rhero-acts { flex-basis: 100%; justify-content: flex-start; }
+  .rhero-acts > .btn:not(:first-child) { display: none; }
+  .rhero-acts > .kebab, .rhero-acts > details { display: inline-flex; }
+}
+
 /* ── Band shell ─────────────────────────────────────────────────────────────
    A grouped page's inner navigation: a sticky band list with counts on the
    left from 900px up (Procedures uses it; any 5+-group page can), collapsing
