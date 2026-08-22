@@ -102,7 +102,7 @@ export default async function PurchasingPage() {
       <div className="page-head">
         <h1 className="page-title">Purchasing</h1>
         {open.length > 0 && (
-          <span className="pill" style={{ background: "#E7EFF8", color: "#1D6396", fontWeight: 700 }}>
+          <span className="pill info">
             {open.length} open
           </span>
         )}
