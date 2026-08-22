@@ -6,7 +6,7 @@ import {
   addAgreement, fileAgreementPaper, listCatalogPartsForPicker, listLibraryFiles,
   removeAgreement, unfileAgreementPaper, updateAgreement, uploadAgreementPapers,
 } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import {
@@ -41,6 +41,55 @@ const emptyDraft = {
   instrumentIds: [] as number[],
   value: "", note: "",
 };
+
+type Draft = typeof emptyDraft;
+
+/** The dialog's step rail, in body order. */
+type StepKey = "terms" | "paper" | "included" | "coverage" | "note";
+const STEP_LABEL: Record<StepKey, string> = {
+  terms: "Terms", paper: "The paper", included: "What's included", coverage: "Coverage", note: "Note",
+};
+
+/** Filled with something that isn't a number. Blank is fine - blank means untracked. */
+const badNumber = (v: string) => v.trim() !== "" && !Number.isFinite(Number(v.trim()));
+
+/** The numeric fields, in the order the problem chain reports them. */
+const NUMERIC_FIELDS: { key: "partsAllowance" | "visitsIncluded" | "laborIncludedHours" | "hourlyRate" | "value" | "renewNoticeDays"; label: string; step: StepKey }[] = [
+  { key: "partsAllowance", label: "Parts allowance", step: "included" },
+  { key: "visitsIncluded", label: "Service visits", step: "included" },
+  { key: "laborIncludedHours", label: "Labour hours included", step: "included" },
+  { key: "hourlyRate", label: "Hourly rate", step: "included" },
+  { key: "value", label: "Contract value", step: "included" },
+  { key: "renewNoticeDays", label: "Renewal notice days", step: "terms" },
+];
+
+/**
+ * The first reason this draft can't save, or null. One sentence at a time, in
+ * the order the form reads, so the footer names the next thing to fix rather
+ * than a pile of everything wrong at once.
+ */
+function firstProblem(d: Draft): string | null {
+  if (!d.number.trim()) return "give it a number";
+  if (!d.title.trim()) return "say what it covers";
+  if (d.startsOn && d.endsOn && d.endsOn < d.startsOn) return "the end date is before the start";
+  for (const f of NUMERIC_FIELDS) if (badNumber(d[f.key])) return `${f.label} must be a number`;
+  if (d.partsAllowance.trim() !== "" && d.partsUnlimited) return "parts are marked unlimited and capped at once";
+  return null;
+}
+
+/** The same checks, scoped to one step, for the rail's warn marks. */
+function stepProblem(step: StepKey, d: Draft): boolean {
+  if (step === "terms") {
+    return !d.number.trim() || !d.title.trim()
+      || !!(d.startsOn && d.endsOn && d.endsOn < d.startsOn)
+      || badNumber(d.renewNoticeDays);
+  }
+  if (step === "included") {
+    return NUMERIC_FIELDS.some((f) => f.step === "included" && badNumber(d[f.key]))
+      || (d.partsAllowance.trim() !== "" && d.partsUnlimited);
+  }
+  return false; // paper, coverage and note have nothing to get wrong
+}
 
 /**
  * A bar for one entitlement, or nothing at all.
@@ -184,6 +233,15 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   const [heldLib, setHeldLib] = useState<LibFile[]>([]);
   const [busy, setBusy] = useState("");
   const [pending, startTransition] = useTransition();
+  // The step rail: which section the rail highlights, which steps have been
+  // touched (so an untouched optional section doesn't claim to be done), and
+  // where each section starts, for the click-to-scroll.
+  const [activeStep, setActiveStep] = useState<StepKey>("terms");
+  const [touched, setTouched] = useState<Set<StepKey>>(new Set());
+  const sectionRefs = useRef<Partial<Record<StepKey, HTMLDivElement | null>>>({});
+
+  const touch = (s: StepKey) =>
+    setTouched((prev) => (prev.has(s) ? prev : new Set(prev).add(s)));
 
   const loadLib = () => {
     if (lib !== null) return;
@@ -236,8 +294,9 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
     });
   };
   const clearHeld = () => { setHeldFiles([]); setHeldLib([]); };
+  const resetSteps = () => { setActiveStep("terms"); setTouched(new Set()); };
   const openAdd = (orgId: number) => {
-    setDraft(emptyDraft); setError(""); clearHeld(); setSheet({ orgId }); loadBook(); loadLib();
+    setDraft(emptyDraft); setError(""); clearHeld(); resetSteps(); setSheet({ orgId }); loadBook(); loadLib();
   };
   const openEdit = (r: AgreementRow) => {
     setDraft({
@@ -254,7 +313,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       value: r.valueCents != null ? (r.valueCents / 100).toFixed(2) : "",
       note: r.note,
     });
-    setError(""); clearHeld(); setSheet({ id: r.id, orgId: r.orgId }); loadBook(); loadLib();
+    setError(""); clearHeld(); resetSteps(); setSheet({ id: r.id, orgId: r.orgId }); loadBook(); loadLib();
   };
 
   const save = () => {
@@ -438,206 +497,261 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
         </div>
       )}
 
-      {sheet && (
-        <Dialog open onClose={() => setSheet(null)} title={sheet.id ? "Edit agreement" : "New agreement"}
-          footer={
-            <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
-              <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn accent" onClick={save} disabled={pending}>
-                {busy ? busy : pending ? "Saving..." : "Save agreement"}
-              </button>
-            </>
-          }>
+      {sheet && (() => {
+        const orgName = orgs.find((o) => o.id === sheet.orgId)?.name
+          ?? rows.find((r) => r.id === sheet.id)?.orgName ?? "";
+        const problem = firstProblem(draft);
+        // done = the step's fields are valid AND somebody touched it or it
+        // already holds something; warn = it has a live problem right now.
+        const hasPaper = heldFiles.length > 0 || heldLib.length > 0
+          || (sheet.id != null && papers.some((p) => p.agreementId === sheet.id));
+        const filled: Record<StepKey, boolean> = {
+          terms: draft.number.trim() !== "" && draft.title.trim() !== "",
+          paper: hasPaper,
+          included: draft.includedKits.length > 0
+            || draft.partsUnlimited || draft.visitsUnlimited || draft.pmPartsIncluded
+            || [draft.partsAllowance, draft.laborIncludedHours, draft.hourlyRate, draft.value]
+              .some((v) => v.trim() !== "")
+            || !["", "0"].includes(draft.visitsIncluded.trim()),
+          coverage: draft.instrumentIds.length > 0,
+          note: draft.note.trim() !== "",
+        };
+        const steps = (Object.keys(STEP_LABEL) as StepKey[]).map((k) => {
+          const warn = stepProblem(k, draft);
+          return { key: k, label: STEP_LABEL[k], warn, done: !warn && (touched.has(k) || filled[k]) };
+        });
+        // The ok line: the renewal summary when there is a term to summarize,
+        // else the coverage, else who the paper is for.
+        const covered = draft.instrumentIds.length;
+        const ok = draft.endsOn
+          ? renewalLine({
+              endsOn: draft.endsOn, status: draft.status,
+              renewNoticeDays: parseInt(draft.renewNoticeDays, 10) || 0,
+            }, today)
+          : covered > 0 ? `Covers ${covered} system${covered === 1 ? "" : "s"}.`
+            : orgName ? `For ${orgName}.` : "Ready to save.";
+        const up = (step: StepKey, p: Partial<Draft>) => { touch(step); setDraft({ ...draft, ...p }); };
+        const section = (k: StepKey) => (el: HTMLDivElement | null) => { sectionRefs.current[k] = el; };
+        const theirs = systems.filter((s2) => s2.ownerOrgId === sheet.orgId);
+        return (
+          <Dialog open onClose={() => setSheet(null)} size="lg"
+            title={sheet.id ? "Edit agreement" : "New agreement"}
+            context={[orgName, draft.number.trim()].filter(Boolean).join(" · ") || undefined}
+            steps={steps} activeStep={activeStep}
+            onStepSelect={(k) => {
+              setActiveStep(k as StepKey);
+              sectionRefs.current[k as StepKey]?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+            footer={
+              <>
+                <DialogStatus error={error} problem={problem} ok={ok} />
+                <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
+                <button className="btn accent" onClick={save} disabled={pending || !!problem}>
+                  {busy ? busy : pending ? "Saving..."
+                    : draft.number.trim() ? `Save ${draft.number.trim()}` : "Save agreement"}
+                </button>
+              </>
+            }>
 
-            <div className="seg" role="group" aria-label="Kind" style={{ marginBottom: 8 }}>
-              {AGREEMENT_KINDS.map((k) => (
-                <button key={k} type="button" aria-pressed={draft.kind === k}
-                  onClick={() => setDraft({ ...draft, kind: k })}>{KIND_LABEL[k]}</button>
-              ))}
-            </div>
-
-            <div className="pf2" style={{ marginBottom: 8 }}>
-              <div>
-                <label>Number</label>
-                <input className="mono" value={draft.number} placeholder="PO-4417"
-                  onChange={(e) => setDraft({ ...draft, number: e.target.value })} />
+            <div ref={section("terms")}>
+              <div className="dialog-section">Terms</div>
+              <div className="seg" role="group" aria-label="Kind" style={{ marginBottom: 8 }}>
+                {AGREEMENT_KINDS.map((k) => (
+                  <button key={k} type="button" aria-pressed={draft.kind === k}
+                    onClick={() => up("terms", { kind: k })}>{KIND_LABEL[k]}</button>
+                ))}
               </div>
-              <div>
-                <label>Status</label>
-                <select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
-                  <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-            </div>
 
-            <label>What it covers</label>
-            <input value={draft.title} placeholder="Annual service contract - 4 systems"
-              onChange={(e) => setDraft({ ...draft, title: e.target.value })} style={{ marginBottom: 8 }} />
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Number</label>
+                  <input className="mono" value={draft.number} placeholder="PO-4417"
+                    onChange={(e) => up("terms", { number: e.target.value })} />
+                </div>
+                <div>
+                  <label>Status</label>
+                  <select value={draft.status} onChange={(e) => up("terms", { status: e.target.value })}>
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              <label>What it covers</label>
+              <input value={draft.title} placeholder="Annual service contract - 4 systems"
+                onChange={(e) => up("terms", { title: e.target.value })} style={{ marginBottom: 8 }} />
+
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Starts</label>
+                  <input type="date" value={draft.startsOn}
+                    onChange={(e) => up("terms", { startsOn: e.target.value })} />
+                </div>
+                <div>
+                  <label>Ends</label>
+                  <input type="date" value={draft.endsOn}
+                    onChange={(e) => up("terms", { endsOn: e.target.value })} />
+                </div>
+              </div>
+
+              <label>Tell me this many days before it ends</label>
+              <input type="number" min={0} max={3650} value={draft.renewNoticeDays} style={{ marginBottom: 8 }}
+                onChange={(e) => up("terms", { renewNoticeDays: e.target.value })} />
+            </div>
 
             {/* The paper the terms above were read off. Asked for here because
                 here is where somebody has it open - sending them to Files to
                 upload it first is how a contract ends up with no contract. */}
-            <label>The signed agreement <span className="mut" style={{ fontWeight: 400 }}>(optional)</span></label>
-            <div style={{ marginBottom: 8 }}>
-              {(heldFiles.length > 0 || heldLib.length > 0) && (
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
-                  {heldFiles.map((f, idx) => (
-                    <span key={`f${idx}`} className="pill mono" style={{ background: "#E7F2FA", color: "var(--t-info-fg)" }}>
-                      {f.name}
-                      <button type="button" aria-label={`Don't attach ${f.name}`} className="btn link"
-                        style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
-                        onClick={() => setHeldFiles(heldFiles.filter((_, i) => i !== idx))}>×</button>
-                    </span>
-                  ))}
-                  {heldLib.map((f) => (
-                    <span key={`l${f.id}`} className="pill mono" style={{ background: "#EEF1F5", color: "#475569" }}>
-                      {f.fileName}
-                      <button type="button" aria-label={`Don't attach ${f.fileName}`} className="btn link"
-                        style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
-                        onClick={() => setHeldLib(heldLib.filter((x) => x.id !== f.id))}>×</button>
-                    </span>
-                  ))}
+            <div ref={section("paper")}>
+              <div className="dialog-section">The paper</div>
+              <label>The signed agreement <span className="mut" style={{ fontWeight: 400 }}>(optional)</span></label>
+              <div style={{ marginBottom: 8 }}>
+                {(heldFiles.length > 0 || heldLib.length > 0) && (
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
+                    {heldFiles.map((f, idx) => (
+                      <span key={`f${idx}`} className="pill mono" style={{ background: "#E7F2FA", color: "var(--t-info-fg)" }}>
+                        {f.name}
+                        <button type="button" aria-label={`Don't attach ${f.name}`} className="btn link"
+                          style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
+                          onClick={() => setHeldFiles(heldFiles.filter((_, i) => i !== idx))}>×</button>
+                      </span>
+                    ))}
+                    {heldLib.map((f) => (
+                      <span key={`l${f.id}`} className="pill mono" style={{ background: "#EEF1F5", color: "#475569" }}>
+                        {f.fileName}
+                        <button type="button" aria-label={`Don't attach ${f.fileName}`} className="btn link"
+                          style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
+                          onClick={() => setHeldLib(heldLib.filter((x) => x.id !== f.id))}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <PaperPicker
+                  lib={lib === null ? null : lib.filter((f) =>
+                    !papers.some((p) => p.id === f.id) && !heldLib.some((h) => h.id === f.id))}
+                  disabled={pending || !!busy} note={busy}
+                  onPick={(f) => { touch("paper"); setHeldLib([...heldLib, f]); }}
+                  onFiles={(files) => { touch("paper"); setHeldFiles([...heldFiles, ...files]); }} />
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  Uploaded when you save, and filed on both this agreement and your document shelf.
                 </div>
-              )}
-              <PaperPicker
-                lib={lib === null ? null : lib.filter((f) =>
-                  !papers.some((p) => p.id === f.id) && !heldLib.some((h) => h.id === f.id))}
-                disabled={pending || !!busy} note={busy}
-                onPick={(f) => setHeldLib([...heldLib, f])}
-                onFiles={(files) => setHeldFiles([...heldFiles, ...files])} />
-              <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
-                Uploaded when you save, and filed on both this agreement and your document shelf.
               </div>
             </div>
 
-            <div className="pf2" style={{ marginBottom: 8 }}>
-              <div>
-                <label>Starts</label>
-                <input type="date" value={draft.startsOn}
-                  onChange={(e) => setDraft({ ...draft, startsOn: e.target.value })} />
+            <div ref={section("included")}>
+              <div className="dialog-section">What&apos;s included</div>
+              <div className="mut t-meta" style={{ marginBottom: 6 }}>
+                Leave one blank when it is not part of this agreement. Blank means untracked,
+                not zero - an unlimited contract and a nothing-included one are different things.
               </div>
-              <div>
-                <label>Ends</label>
-                <input type="date" value={draft.endsOn}
-                  onChange={(e) => setDraft({ ...draft, endsOn: e.target.value })} />
-              </div>
-            </div>
-
-            <label>Tell me this many days before it ends</label>
-            <input type="number" min={0} max={3650} value={draft.renewNoticeDays} style={{ marginBottom: 8 }}
-              onChange={(e) => setDraft({ ...draft, renewNoticeDays: e.target.value })} />
-
-            <div className="t-small" style={{ fontWeight: 700, marginBottom: 2 }}>What it includes</div>
-            <div className="mut t-meta" style={{ marginBottom: 6 }}>
-              Leave one blank when it is not part of this agreement. Blank means untracked,
-              not zero - an unlimited contract and a nothing-included one are different things.
-            </div>
-            <div className="pf2" style={{ marginBottom: 8 }}>
-              <div>
-                <label>Parts allowance ($)</label>
-                <input value={draft.partsAllowance} placeholder="5000" disabled={draft.partsUnlimited}
-                  onChange={(e) => setDraft({ ...draft, partsAllowance: e.target.value })} />
-                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
-                  <input type="checkbox" checked={draft.partsUnlimited} style={{ width: 15, height: 15 }}
-                    onChange={(e) => setDraft({ ...draft, partsUnlimited: e.target.checked })} />
-                  Unlimited - parts are covered, spend isn&apos;t tracked against a cap
-                </label>
-                {/* The PM's own parts are part of the PM. Without this, an
-                    included PM's kit gets billed twice - once in the PM, once
-                    out of the allowance. */}
-                <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
-                  <input type="checkbox" checked={draft.pmPartsIncluded} style={{ width: 15, height: 15, marginTop: 2 }}
-                    onChange={(e) => setDraft({ ...draft, pmPartsIncluded: e.target.checked })} />
-                  <span>
-                    PM parts are included
-                    <span className="mut" style={{ display: "block", fontSize: 10.5 }}>
-                      Parts fitted on an included PM are reported but never drawn from this allowance.
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Parts allowance ($)</label>
+                  <input value={draft.partsAllowance} placeholder="5000" disabled={draft.partsUnlimited}
+                    onChange={(e) => up("included", { partsAllowance: e.target.value })} />
+                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={draft.partsUnlimited} style={{ width: 15, height: 15 }}
+                      onChange={(e) => up("included", { partsUnlimited: e.target.checked })} />
+                    Unlimited - parts are covered, spend isn&apos;t tracked against a cap
+                  </label>
+                  {/* The PM's own parts are part of the PM. Without this, an
+                      included PM's kit gets billed twice - once in the PM, once
+                      out of the allowance. */}
+                  <label className="t-small" style={{ display: "flex", alignItems: "flex-start", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={draft.pmPartsIncluded} style={{ width: 15, height: 15, marginTop: 2 }}
+                      onChange={(e) => up("included", { pmPartsIncluded: e.target.checked })} />
+                    <span>
+                      PM parts are included
+                      <span className="mut" style={{ display: "block", fontSize: 10.5 }}>
+                        Parts fitted on an included PM are reported but never drawn from this allowance.
+                      </span>
                     </span>
-                  </span>
-                </label>
-              </div>
-              <div>
-                <label>Service visits</label>
-                <input type="number" min={0} value={draft.visitsIncluded} disabled={draft.visitsUnlimited}
-                  onChange={(e) => setDraft({ ...draft, visitsIncluded: e.target.value })} />
-                <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
-                  <input type="checkbox" checked={draft.visitsUnlimited} style={{ width: 15, height: 15 }}
-                    onChange={(e) => setDraft({ ...draft, visitsUnlimited: e.target.checked })} />
-                  Unlimited visits
-                </label>
-              </div>
-            </div>
-            {/* What the paper includes IN KIND. A PM contract is sold as
-                "two PMs, each with its kit", so this is the entitlement -
-                counted, not costed, and not a dollar figure that goes stale
-                when a kit's price moves. */}
-            <label>PM kits included</label>
-            <div style={{ marginBottom: 8 }}>
-              {draft.includedKits.map((k, idx) => (
-                <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
-                  <input type="number" min={1} value={k.qty} aria-label="How many"
-                    onChange={(e) => setDraft({ ...draft, includedKits: draft.includedKits.map((x, i) =>
-                      (i === idx ? { ...x, qty: parseInt(e.target.value) || 1 } : x)) })}
-                    className="t-small" style={{ width: 62 }} />
-                  <span className="mono t-small" style={{ fontWeight: 700 }}>{k.partNumber}</span>
-                  <span className="mut t-meta" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
-                  <button className="btn link" aria-label={`Remove ${k.partNumber}`} style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 13 }}
-                    onClick={() => setDraft({ ...draft, includedKits: draft.includedKits.filter((_, i) => i !== idx) })}>×</button>
+                  </label>
                 </div>
-              ))}
-              <select value="" aria-label="Add an included kit"
-                onChange={(e) => {
-                  const hit = (book ?? []).find((b) => b.partNumber === e.target.value);
-                  if (!hit) return;
-                  if (draft.includedKits.some((k) => k.partNumber.toLowerCase() === hit.partNumber.toLowerCase())) return;
-                  setDraft({ ...draft, includedKits: [...draft.includedKits, { partNumber: hit.partNumber, name: hit.name, qty: 1 }] });
-                }}
-                className="t-small">
-                <option value="">＋ Add a kit from the parts book...</option>
-                {(book ?? []).map((b) => (
-                  <option key={b.partNumber} value={b.partNumber}>
-                    {b.kind === "kit" ? "▣ " : ""}{b.partNumber}{b.name ? ` - ${b.name}` : ""}
-                  </option>
+                <div>
+                  <label>Service visits</label>
+                  <input type="number" min={0} value={draft.visitsIncluded} disabled={draft.visitsUnlimited}
+                    onChange={(e) => up("included", { visitsIncluded: e.target.value })} />
+                  <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 0", fontWeight: 400, color: "var(--ink)" }}>
+                    <input type="checkbox" checked={draft.visitsUnlimited} style={{ width: 15, height: 15 }}
+                      onChange={(e) => up("included", { visitsUnlimited: e.target.checked })} />
+                    Unlimited visits
+                  </label>
+                </div>
+              </div>
+              {/* What the paper includes IN KIND. A PM contract is sold as
+                  "two PMs, each with its kit", so this is the entitlement -
+                  counted, not costed, and not a dollar figure that goes stale
+                  when a kit's price moves. */}
+              <label>PM kits included</label>
+              <div style={{ marginBottom: 8 }}>
+                {draft.includedKits.map((k, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                    <input type="number" min={1} value={k.qty} aria-label="How many"
+                      onChange={(e) => up("included", { includedKits: draft.includedKits.map((x, i) =>
+                        (i === idx ? { ...x, qty: parseInt(e.target.value) || 1 } : x)) })}
+                      className="t-small" style={{ width: 62 }} />
+                    <span className="mono t-small" style={{ fontWeight: 700 }}>{k.partNumber}</span>
+                    <span className="mut t-meta" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
+                    <button className="btn link" aria-label={`Remove ${k.partNumber}`} style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 13 }}
+                      onClick={() => up("included", { includedKits: draft.includedKits.filter((_, i) => i !== idx) })}>×</button>
+                  </div>
                 ))}
-              </select>
-              <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
-                Fitting one of these draws down its count instead of the money above. Past the
-                included quantity, extras bill as ordinary parts.
+                <select value="" aria-label="Add an included kit"
+                  onChange={(e) => {
+                    const hit = (book ?? []).find((b) => b.partNumber === e.target.value);
+                    if (!hit) return;
+                    if (draft.includedKits.some((k) => k.partNumber.toLowerCase() === hit.partNumber.toLowerCase())) return;
+                    up("included", { includedKits: [...draft.includedKits, { partNumber: hit.partNumber, name: hit.name, qty: 1 }] });
+                  }}
+                  className="t-small">
+                  <option value="">＋ Add a kit from the parts book...</option>
+                  {(book ?? []).map((b) => (
+                    <option key={b.partNumber} value={b.partNumber}>
+                      {b.kind === "kit" ? "▣ " : ""}{b.partNumber}{b.name ? ` - ${b.name}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  Fitting one of these draws down its count instead of the money above. Past the
+                  included quantity, extras bill as ordinary parts.
+                </div>
               </div>
-            </div>
 
-            <div className="pf2" style={{ marginBottom: 8 }}>
-              <div>
-                <label>Labour hours included</label>
-                <input value={draft.laborIncludedHours} placeholder="40"
-                  onChange={(e) => setDraft({ ...draft, laborIncludedHours: e.target.value })} />
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
-                  Hours of work the contract includes; logged time draws it down.
+              <div className="pf2" style={{ marginBottom: 8 }}>
+                <div>
+                  <label>Labour hours included</label>
+                  <input value={draft.laborIncludedHours} placeholder="40"
+                    onChange={(e) => up("included", { laborIncludedHours: e.target.value })} />
+                  <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                    Hours of work the contract includes; logged time draws it down.
+                  </div>
+                </div>
+                <div>
+                  <label>Hourly rate ($/hr)</label>
+                  <input value={draft.hourlyRate} placeholder="150"
+                    onChange={(e) => up("included", { hourlyRate: e.target.value })} />
+                  <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                    What an hour beyond the included ones bills at.
+                  </div>
                 </div>
               </div>
-              <div>
-                <label>Hourly rate ($/hr)</label>
-                <input value={draft.hourlyRate} placeholder="150"
-                  onChange={(e) => setDraft({ ...draft, hourlyRate: e.target.value })} />
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
-                  What an hour beyond the included ones bills at.
-                </div>
-              </div>
+              <label>Contract value ($)</label>
+              <input value={draft.value} placeholder="18000" style={{ marginBottom: 8 }}
+                onChange={(e) => up("included", { value: e.target.value })} />
             </div>
-            <label>Contract value ($)</label>
-            <input value={draft.value} placeholder="18000" style={{ marginBottom: 8 }}
-              onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
 
             {/* Which systems this paper covers. The client with a full-service
                 contract on the TOC and a PM-only one on the UV-Vis assigns each
                 system to its contract; none selected = the whole fleet. */}
-            {(() => {
-              const theirs = systems.filter((s2) => s2.ownerOrgId === sheet.orgId);
-              if (theirs.length === 0) return null;
-              return (
+            <div ref={section("coverage")}>
+              <div className="dialog-section">Coverage</div>
+              {theirs.length === 0 ? (
+                <div className="mut t-meta" style={{ marginBottom: 8 }}>
+                  No systems on file for this client yet - the agreement covers whatever they have.
+                </div>
+              ) : (
                 <div style={{ marginBottom: 8 }}>
                   <label>Systems it covers <span className="mut" style={{ fontWeight: 400 }}>(none = all of theirs)</span></label>
                   <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -646,8 +760,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                       return (
                         <button key={s2.id} type="button" className={on ? "btn sm primary" : "btn sm"}
                           style={{ fontSize: 11 }} title={s2.label}
-                          onClick={() => setDraft({
-                            ...draft,
+                          onClick={() => up("coverage", {
                             instrumentIds: on ? draft.instrumentIds.filter((x) => x !== s2.id) : [...draft.instrumentIds, s2.id],
                           })}>
                           {s2.externalId}
@@ -656,15 +769,18 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                     })}
                   </div>
                 </div>
-              );
-            })()}
+              )}
+            </div>
 
-            <label>Note</label>
-            <textarea value={draft.note} rows={3} style={{ width: "100%", marginBottom: 8 }}
-              onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
+            <div ref={section("note")}>
+              <div className="dialog-section">Note</div>
+              <textarea value={draft.note} rows={3} style={{ width: "100%", marginBottom: 8 }}
+                onChange={(e) => up("note", { note: e.target.value })} />
+            </div>
 
-        </Dialog>
-      )}
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }
