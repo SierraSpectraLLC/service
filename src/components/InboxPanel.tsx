@@ -26,7 +26,7 @@ export default function InboxPanel({ items, prefs }: {
         <h1 className="page-title">Inbox</h1>
         {unread > 0 && (
           <>
-            <span className="pill" style={{ background: "#FDECEC", color: "#A32D2D" }}>{unread} unread</span>
+            <span className="pill bad">{unread} unread</span>
             <span className="page-actions">
               <button className="btn sm" disabled={pending}
                 onClick={() => startTransition(async () => { await markAllNotificationsRead(); })}>
