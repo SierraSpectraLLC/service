@@ -96,7 +96,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
       )}
       <div className="page-head">
         <h1 className="page-title">{org.name}</h1>
-        <span className="pill" style={{ background: org.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: org.kind === "provider" ? "#8A5410" : "#1D6396" }}>
+        <span className={`pill ${org.kind === "provider" ? "warn" : "info"}`}>
           {org.kind}
         </span>
         <p className="page-sub">
