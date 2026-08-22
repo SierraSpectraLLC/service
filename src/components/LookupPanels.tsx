@@ -28,7 +28,7 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
       <div style={{ fontSize: 14, fontWeight: 700, color: "var(--navy)" }}>{assetDesc}</div>
       {state === "sent" ? (
         <div style={{ marginTop: 8 }}>
-          <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>Requested</span>
+          <span className="pill warn">Requested</span>
           <span className="mut" style={{ fontSize: 12, marginLeft: 6 }}>Under review.</span>
         </div>
       ) : (
