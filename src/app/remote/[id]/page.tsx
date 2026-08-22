@@ -62,7 +62,7 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
         <h1 style={{ fontSize: 18, margin: 0 }}>{label}</h1>
         {host && <span className="mono mut" style={{ fontSize: 11 }}>{host}</span>}
         {row.orgName && (
-          <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{row.orgName}</span>
+          <span className="pill info">{row.orgName}</span>
         )}
         {system?.externalId && (
           <Link href={`/instruments/${device.instrumentId}`} className="mut" style={{ fontSize: 12 }}>
