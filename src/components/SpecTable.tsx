@@ -11,12 +11,12 @@ export default function SpecTable({ specs, compact = false }: { specs: Spec[]; c
       <tbody>
         {specs.map((s) => (
           <tr key={s.name}>
-            <td className="mut" style={{
-              fontSize: compact ? 11 : 12, padding: compact ? "3px 12px 3px 0" : "5px 14px 5px 0",
+            <td className={`mut ${compact ? "t-meta" : "t-small"}`} style={{
+              padding: compact ? "3px 12px 3px 0" : "5px 14px 5px 0",
               borderTop: "1px solid var(--line)", whiteSpace: "nowrap", verticalAlign: "top",
             }}>{s.name}</td>
-            <td style={{
-              fontSize: compact ? 12 : 13, fontWeight: 600,
+            <td className={compact ? "t-small" : "t-body"} style={{
+              fontWeight: 600,
               padding: compact ? "3px 0" : "5px 0", borderTop: "1px solid var(--line)",
             }}>{s.value}</td>
           </tr>

@@ -113,6 +113,9 @@ const FIXTURE = `
     ('model', 'Pump', '1290 Quat Pump', '{"LC-MS"}'),
     ('model', 'Autosampler', 'TriPlus RSH', '{"GC-MS"}')
     ON CONFLICT DO NOTHING;
+  UPDATE vocab_terms SET manufacturer = 'Agilent',
+    specs = '[{"name":"Mass range","value":"5-1400 m/z"},{"name":"Scan speed","value":"5000 Da/s"},{"name":"Polarity switching","value":"20 ms"}]'
+    WHERE kind = 'model' AND name = '6495C';
 
   INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope) VALUES
     ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}'),
