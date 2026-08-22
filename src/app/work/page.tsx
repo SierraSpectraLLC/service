@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { desc, eq, inArray, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { desc, inArray, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, orgs, tasks, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
@@ -9,7 +8,9 @@ import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
-import { sortWorkOrders, woLine, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
+import { ageDays, sortWorkOrders, woLate, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
+import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
+import type { DataRow } from "@/components/ui/DataTable";
 
 export const dynamic = "force-dynamic";
 
@@ -25,14 +26,15 @@ export const dynamic = "force-dynamic";
  * order on a system shared in from another operator appears here for the people
  * doing the work - which is the whole reason the sharing exists.
  */
-export default async function WorkPage({ searchParams }: { searchParams: Promise<{ who?: string }> }) {
+export default async function WorkPage({ searchParams }: { searchParams: Promise<{ who?: string; q?: string; done?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const today = shopToday();
   // ?who=Name is an engineer's queue - bookmarkable, shareable, and the page
   // the dispatch notification can stand behind. "-" means the triage pile:
-  // jobs nobody has taken yet.
-  const { who } = await searchParams;
+  // jobs nobody has taken yet. ?q= searches, ?done=1 folds the finished
+  // orders in; all of it lives in the URL so a filtered view can be shared.
+  const { who, q, done } = await searchParams;
 
   const [sysIds, unitIds] = await Promise.all([visibleSystemIds(user), visibleAssetIds(user)]);
   const scoped = (col: AnyColumn, ids: number[] | null): SQL | undefined =>
@@ -79,14 +81,25 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   };
 
   const sorted = sortWorkOrders(rows, today);
+  const orgOf = (w: typeof rows[number]) =>
+    w.orgId === null ? brand.operatorName : orgName.get(w.orgId) ?? "an organization";
   const wanted = (w: typeof rows[number]) =>
     !who ? true
     : who === "-" ? !w.assignee.trim()
     : w.assignee.trim().toLowerCase() === who.trim().toLowerCase();
-  const live = sorted.filter((w) => (woOpen(w.state) || w.state === "resolved") && wanted(w));
-  const filed = sorted.filter((w) => !(woOpen(w.state) || w.state === "resolved") && wanted(w));
+  const needle = (q ?? "").trim().toLowerCase();
+  const hit = (w: typeof rows[number]) =>
+    !needle
+    || w.number.toLowerCase().includes(needle)
+    || w.title.toLowerCase().includes(needle)
+    || placeOf(w).toLowerCase().includes(needle)
+    || w.assignee.toLowerCase().includes(needle)
+    || orgOf(w).toLowerCase().includes(needle);
+  const live = sorted.filter((w) => (woOpen(w.state) || w.state === "resolved") && wanted(w) && hit(w));
+  const filed = sorted.filter((w) => !(woOpen(w.state) || w.state === "resolved") && wanted(w) && hit(w));
+  const showDone = done === "1";
 
-  // The queue chips: everyone with open work, plus the viewer even when their
+  // The queue facets: everyone with open work, plus the viewer even when their
   // plate is clean - "my queue is empty" is an answer worth being able to get.
   const staff = isHouse(user.role);
   const names = [...new Set([
@@ -96,70 +109,100 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   const openFor = (name: string) =>
     sorted.filter((w) => woOpen(w.state) && w.assignee.trim().toLowerCase() === name.toLowerCase()).length;
   const unassignedOpen = sorted.filter((w) => woOpen(w.state) && !w.assignee.trim()).length;
-  const chip = (href: string, label: string, active: boolean, count?: number) => (
-    <Link key={href} href={href} className="pill" style={{
-      textDecoration: "none",
-      background: active ? "var(--navy)" : "#EEF1F5",
-      color: active ? "#fff" : "#475569",
-    }}>
-      {label}{count !== undefined && count > 0 ? ` · ${count}` : ""}
-    </Link>
-  );
 
-  const row = (w: typeof rows[number]) => {
+  const href = (params: { who?: string; done?: boolean }) => {
+    const p = new URLSearchParams();
+    const w = "who" in params ? params.who : who;
+    if (w) p.set("who", w);
+    if (needle) p.set("q", needle);
+    if (params.done ?? showDone) p.set("done", "1");
+    const s = p.toString();
+    return s ? `/work?${s}` : "/work";
+  };
+
+  const toRow = (w: typeof rows[number]): DataRow => {
     const tone = WO_TONE[w.state] ?? WO_TONE.open;
-    return (
-      <Link key={w.id} href={`/work/${w.id}`} className="row-hover"
-        style={{
-          display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
-          padding: "8px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit",
-        }}>
-        <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{w.number}</span>
-        <span style={{ fontSize: 13, flex: "1 1 180px" }}>{w.title}</span>
-        <span className={`pill ${tone}`}>{WO_LABEL[w.state] ?? w.state}</span>
-        <span className="mut" style={{ fontSize: 11, width: "100%" }}>
-          {placeOf(w)} · {woLine(w, today, counts(w.id))}
-          {` · ${w.orgId === null ? brand.operatorName : orgName.get(w.orgId) ?? "an organization"}`}
-        </span>
-      </Link>
-    );
+    const days = ageDays(w.openedOn, today);
+    const c = counts(w.id);
+    return {
+      key: w.id,
+      href: `/work/${w.id}`,
+      cells: {
+        dot: <Dot tone={tone} />,
+        wo: <Id>{w.number}</Id>,
+        title: <b style={{ fontWeight: 600 }}>{w.title}</b>,
+        place: <span className="mut">{placeOf(w)} · {orgOf(w)}</span>,
+        who: <span className="mut">{woOpen(w.state) ? (w.assignee.trim() || "unassigned") : ""}</span>,
+        state: (
+          <Pill tone={tone}>
+            {(WO_LABEL[w.state] ?? w.state) + (woLate(w, today) ? " · late" : "")}
+          </Pill>
+        ),
+        age: woOpen(w.state)
+          ? <span className="mut">{days === 0 ? "today" : `${days} d`}{c.tasks > 0 ? ` · ${c.done}/${c.tasks}` : ""}</span>
+          : null,
+      },
+    };
   };
 
   return (
-    <div className="container page">
-      <div className="page-head">
-        <h1 className="page-title">Work orders</h1>
-      </div>
-      {/* Whose queue you're looking at. Staff only - a client's list is already
-          just their own jobs, and the shop's roster is not their furniture. */}
-      {staff && (names.length > 0 || unassignedOpen > 0) && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-          {chip("/work", "Everyone", !who)}
-          {names.map((n) => chip(`/work?who=${encodeURIComponent(n)}`,
-            n === user.name ? `Mine (${n})` : n,
-            who?.trim().toLowerCase() === n.toLowerCase(), openFor(n)))}
-          {chip("/work?who=-", "Unassigned", who === "-", unassignedOpen)}
-        </div>
-      )}
-      <div className="card">
-        {live.map(row)}
-        {live.length === 0 && (
-          <div className="empty">
-            <b>{who ? (who === "-" ? "Nothing waiting for an owner" : `Nothing on ${who}'s plate`) : "Nothing outstanding"}</b>
-            {who
-              ? "Open jobs land here the moment one is dispatched."
-              : "A work order opens when somebody asks for service on a system, or from the Work orders panel on the system itself."}
-          </div>
-        )}
-        {filed.length > 0 && (
-          <details style={{ borderTop: "1px solid var(--line)" }}>
-            <summary style={{ cursor: "pointer", padding: "8px 4px", fontSize: 12.5 }}>
-              <b>Finished</b> <span className="mut">· {filed.length}</span>
-            </summary>
-            {filed.map(row)}
-          </details>
-        )}
-      </div>
+    <div className="container wide">
+      <PageHead title="Work orders" />
+      <Toolbar
+        search={
+          <form action="/work">
+            {who && <input type="hidden" name="who" value={who} />}
+            {showDone && <input type="hidden" name="done" value="1" />}
+            <input name="q" defaultValue={needle} placeholder="Number, title, system or client"
+              aria-label="Search work orders" />
+          </form>
+        }
+        facets={
+          <>
+            {/* Whose queue you're looking at. Staff only - a client's list is
+                already just their own jobs. */}
+            {staff && (names.length > 0 || unassignedOpen > 0) && (
+              <FacetStrip facets={[
+                { key: "all", label: "Everyone", on: !who, href: href({ who: undefined }) },
+                ...names.map((n) => ({
+                  key: n,
+                  label: n === user.name ? "Mine" : n,
+                  count: openFor(n) || undefined,
+                  on: who?.trim().toLowerCase() === n.toLowerCase(),
+                  href: href({ who: n }),
+                })),
+                { key: "unassigned", label: "Unassigned", count: unassignedOpen || undefined, on: who === "-", href: href({ who: "-" }) },
+              ]} />
+            )}
+            <FacetStrip facets={[
+              { key: "done", label: "Finished", count: filed.length, on: showDone, href: href({ done: !showDone }) },
+            ]} />
+          </>
+        }
+      />
+      <DataTable
+        cols={[
+          { key: "dot", label: "", width: "12px" },
+          { key: "wo", label: "WO", width: "84px" },
+          { key: "title", label: "Job", width: "minmax(170px, 1.6fr)" },
+          { key: "place", label: "System", width: "minmax(160px, 1.3fr)", hideMobile: true },
+          { key: "who", label: "Assignee", width: "100px", hideMobile: true },
+          { key: "state", label: "State", width: "120px" },
+          { key: "age", label: "Age", width: "84px", hideMobile: true },
+        ]}
+        rows={[
+          ...live.map(toRow),
+          ...(showDone ? filed.map((w) => ({ ...toRow(w), group: "Finished" })) : []),
+        ]}
+        empty={who ? (who === "-" ? "Nothing waiting for an owner" : `Nothing on ${who}'s plate`) : "Nothing outstanding"}
+      />
+      <Legend items={[
+        { tone: "neutral", label: "open" },
+        { tone: "info", label: "in progress" },
+        { tone: "warn", label: "waiting on someone" },
+        { tone: "good", label: "resolved" },
+        { tone: "faint", label: "cancelled" },
+      ]} />
     </div>
   );
 }
