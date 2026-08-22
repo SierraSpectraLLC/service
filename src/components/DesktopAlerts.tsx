@@ -36,20 +36,20 @@ export default function DesktopAlerts() {
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 4 }}>Desktop alerts</div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="mut t-small" style={{ marginBottom: 10 }}>
         Pops up on this computer when something lands here while you&apos;re in another tab.
         Set per browser, so turning it on at the bench doesn&apos;t follow you home.
       </div>
-      {state === "unsupported" && <div className="mut" style={{ fontSize: 13 }}>This browser can&apos;t show desktop alerts.</div>}
+      {state === "unsupported" && <div className="mut t-body">This browser can&apos;t show desktop alerts.</div>}
       {state === "blocked" && (
-        <div style={{ fontSize: 13 }}>
+        <div className="t-body">
           This browser is blocking alerts for the site. Allow notifications for it in the
           browser&apos;s own site settings, then come back.
         </div>
       )}
       {state === "on" && (
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, color: "#2E6B2E", fontWeight: 700 }}>On for this browser ✓</span>
+        <div className="row-3">
+          <span className="t-body" style={{ color: "var(--t-good-fg)", fontWeight: 700 }}>On for this browser ✓</span>
           <button className="btn sm" onClick={disable}>Turn off</button>
         </div>
       )}
