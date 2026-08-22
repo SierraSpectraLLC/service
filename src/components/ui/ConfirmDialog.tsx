@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import Dialog from "@/components/ui/Dialog";
 
 /**
- * window.confirm(), minus the ways window.confirm() fails: it is our dialog
- * (so a browser's "suppress additional dialogs" checkbox can never make it
- * silently return false - the failure CustodyPanel's comment documents), it
- * can say what is about to happen, and its action button names the act.
+ * window.confirm(), minus the ways window.confirm() fails. The decisive one
+ * (learned in CustodyPanel, which shipped an armed two-click button instead):
+ * browsers offer to suppress repeat dialogs from a page, and once that box is
+ * ticked every native confirm() returns false - so a native dialog makes the
+ * button silently do nothing. This is our own dialog, immune to that; it can
+ * also say what is about to happen, and its action button names the act.
  *
  *   if (!(await confirmDialog({ title: "Decommission #33?", body: "...",
  *     action: "Decommission", tone: "bad" }))) return;
