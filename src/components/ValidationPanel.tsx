@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { fmtWhen } from "@/lib/when";
 import {
   addValidationDoc, signValidationDoc, revokeValidationSignature,
@@ -87,6 +88,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
         reviewOn: draft.reviewOn, note: draft.note, supersedesId: draft.supersedesId,
       });
       if (res?.error) { setError(res.error); return; }
+      toast({ message: draft.supersedesId !== null ? "Filed the revision" : "Filed the document" });
       setAdding(false);
     });
   };
@@ -96,6 +98,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
     startTransition(async () => {
       const res = await signValidationDoc(docId, sigDraft);
       if (res?.error) { setError(res.error); return; }
+      toast({ message: "Signed the document" });
       setSigning(null);
       setSigDraft({ role: "Approved", signerName: "", signerTitle: "", note: "" });
     });
@@ -148,6 +151,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                     startTransition(async () => {
                       const res = await revokeValidationSignature(x.id, reason);
                       if (res?.error) setError(res.error);
+                      else toast({ message: "Withdrew the signature" });
                     });
                   }}>withdraw</button>
                 )}
@@ -181,6 +185,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                         onClick={() => startTransition(async () => {
                           const res = await markValidationDocExecuted(d.id);
                           if (res?.error) setError(res.error);
+                          else toast({ message: "Marked the protocol executed" });
                         })}>Mark executed</button>
                     )}
                     <button className="btn sm" onClick={() => openAdd("", d)}
@@ -196,6 +201,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                         startTransition(async () => {
                           const res = await deleteValidationDoc(d.id, reason);
                           if (res?.error) setError(res.error);
+                          else toast({ message: "Removed the draft" });
                         });
                       }}>Remove</button>
                     )}

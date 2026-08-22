@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { addOrgSite, archiveOrgSite, setOrgBillingAddress, updateOrgSite } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { addressLine, siteLabel } from "@/lib/sites";
 
 export type SiteRow = {
@@ -57,6 +58,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
     startTransition(async () => {
       const res = sheet?.id ? await updateOrgSite(sheet.id, draft) : await addOrgSite(orgId, draft);
       if (res?.error) { setError(res.error); return; }
+      toast({ message: sheet?.id ? "Saved the site" : "Added the site" });
       setSheet(null);
     });
   };
@@ -78,7 +80,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
             <button className="btn link" style={{ fontSize: 11 }} onClick={() => openEdit(s)}>edit</button>
             <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-              onClick={() => startTransition(async () => { await archiveOrgSite(s.id, !s.archived); })}>
+              onClick={() => startTransition(async () => { await archiveOrgSite(s.id, !s.archived); toast({ message: s.archived ? "Reopened the site" : "Closed the site" }); })}>
               {s.archived ? "reopen" : "close"}
             </button>
           </span>

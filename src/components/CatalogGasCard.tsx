@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setCatalogGases } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { GASES, GAS_SYMBOL } from "@/lib/stages";
 
 export type GasEntry = {
@@ -48,6 +49,7 @@ export default function CatalogGasCard({ entries }: { entries: GasEntry[] }) {
     startTransition(async () => {
       const res = await setCatalogGases(e.id, next);
       if (res?.error) { setError(res.error); return; }
+      toast({ message: `Saved the gas list for ${e.name}` });
       router.refresh();
     });
   };

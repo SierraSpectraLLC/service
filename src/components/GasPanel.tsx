@@ -3,6 +3,7 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { GAS_STATES, GAS_TONE } from "@/lib/stages";
 import PickOrAdd from "./PickOrAdd";
+import { toast } from "@/components/ui/Toast";
 import { addInstrumentGas, setGasStatus, updateGasNote, removeInstrumentGas, type WorkTarget } from "@/app/actions";
 
 export type GasRow = { id: number; gas: string; status: string; note: string };
@@ -40,14 +41,14 @@ export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }
     startTransition(async () => {
       const res = await addInstrumentGas(target, name);
       if (res?.error) setError(res.error);
-      else { setPick(""); setAdding(false); }
+      else { setPick(""); setAdding(false); toast({ message: `Added ${name}` }); }
     });
   };
 
   const saveNote = (g: GasRow) => {
     const draft = noteDrafts[g.id];
     if (draft === undefined || draft.trim() === g.note) return;
-    startTransition(() => updateGasNote(g.id, draft));
+    startTransition(async () => { await updateGasNote(g.id, draft); toast({ message: "Saved the note" }); });
   };
 
   if (!canEdit && gases.length === 0) return null;
@@ -78,7 +79,7 @@ export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }
             )}
             {isStaff && (
               <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }}
-                onClick={() => startTransition(() => removeInstrumentGas(g.id))}>remove</button>
+                onClick={() => startTransition(async () => { await removeInstrumentGas(g.id); toast({ message: `Removed ${g.gas}` }); })}>remove</button>
             )}
           </div>
         ))}

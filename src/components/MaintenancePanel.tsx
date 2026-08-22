@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
@@ -96,7 +97,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
     startTransition(async () => {
       const res = await addPmSchedule(target, draft);
       if (res?.error) setError(res.error);
-      else { setDraft({ title: "", body: "", assignee: "", everyDays: draft.everyDays, firstDue: today, partName: "", partNumber: "" }); setOpen(false); }
+      else { setDraft({ title: "", body: "", assignee: "", everyDays: draft.everyDays, firstDue: today, partName: "", partNumber: "" }); setOpen(false); toast({ message: "Added the schedule" }); }
     });
   };
 
@@ -107,7 +108,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
     startTransition(async () => {
       const res = await updatePmSchedule(id, e);
       if (res?.error) setError(res.error);
-      else setEditing((m) => { const n = { ...m }; delete n[id]; return n; });
+      else { setEditing((m) => { const n = { ...m }; delete n[id]; return n; }); toast({ message: "Saved the schedule" }); }
     });
   };
 
@@ -159,6 +160,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                     startTransition(async () => {
                       const res = await runPmNow(s.id);
                       setError(res?.error ?? "");
+                      if (!res?.error) toast({ message: "Created the task" });
                     });
                   }}>{!advisory && (overdue || dueToday) ? "Start" : "Do it now"}</button>
               )}
@@ -173,6 +175,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   onClick={() => startTransition(async () => {
                     const res = await undoRunPmNow(s.id);
                     if (res?.error) setError(res.error);
+                    else toast({ message: "Removed the task" });
                   })}>undo start</button>
               )}
               {canEdit && (
@@ -191,6 +194,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 onClick={() => startTransition(async () => {
                   const res = await setPmPaused(s.id, !s.paused);
                   if (res?.error) setError(res.error);
+                  else toast({ message: s.paused ? "Resumed the schedule" : "Paused the schedule" });
                 })}>{s.paused ? "resume" : "pause"}</button>
               <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
                 onClick={async () => {
@@ -203,6 +207,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   startTransition(async () => {
                     const res = await removePmSchedule(s.id, reason);
                     if (res?.error) setError(res.error);
+                    else toast({ message: "Removed the schedule" });
                   });
                 }}>remove</button>
             </span>
@@ -232,6 +237,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 const res = await logPastPm(s.id, logDraft);
                 if (res?.error) { setError(res.error); return; }
                 setLogging(null);
+                toast({ message: "Logged the maintenance" });
               })}>File</button>
           </div>
         )}
@@ -353,6 +359,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 const res = await alignMaintenance(target, alignDraft);
                 if (res?.error) { setError(res.error); return; }
                 setAligning(false);
+                toast({ message: `Aligned ${schedules.length} schedule${schedules.length === 1 ? "" : "s"}` });
               })}>
               {pending ? "Aligning..." : `Apply to ${schedules.length} schedule${schedules.length === 1 ? "" : "s"}`}
             </button>
@@ -387,6 +394,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                 onClick={() => startTransition(async () => {
                   const res = await setPmPosture(posture.instrumentId!, advisory ? "scheduled" : "advisory");
                   if (res?.error) setError(res.error);
+                  else toast({ message: advisory ? "Put maintenance on a schedule" : "Made maintenance reference only" });
                 })}>{advisory ? "put on a schedule" : "make reference only"}</button>
               {!postureIsDefault(posture.stored) && (
                 <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
@@ -394,6 +402,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   onClick={() => startTransition(async () => {
                     const res = await setPmPosture(posture.instrumentId!, "");
                     if (res?.error) setError(res.error);
+                    else toast({ message: "Restored the owner default" });
                   })}>use owner default</button>
               )}
             </span>
@@ -410,6 +419,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
             onClick={() => startTransition(async () => {
               const res = await setPmPosture(posture.instrumentId!, "advisory");
               if (res?.error) setError(res.error);
+              else toast({ message: "Made maintenance reference only" });
             })}>Make reference only</button>
         </div>
       )}

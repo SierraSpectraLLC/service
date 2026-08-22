@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { kickToQueue } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 
 export type QueueLegRow = {
   id: number; fromName: string; toName: string; reason: string; actor: string; when: string;
@@ -49,7 +50,7 @@ export default function QueuePanel({
     startTransition(async () => {
       const res = await kickToQueue(instrumentId, target, why);
       if (res?.error) setError(res.error);
-      else { setOpen(false); setToOrgId(""); setWhy(""); }
+      else { setOpen(false); setToOrgId(""); setWhy(""); toast({ message: `Moved ${externalId} to ${targetName || "their"} queue` }); }
     });
   };
 

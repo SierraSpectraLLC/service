@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setCatalogDocTypes } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { DOC_TYPES } from "@/lib/gxp";
 
 export type PackageEntry = {
@@ -46,6 +47,7 @@ export default function CatalogPackageCard({ entries }: { entries: PackageEntry[
     startTransition(async () => {
       const res = await setCatalogDocTypes(e.id, next);
       if (res?.error) { setError(res.error); return; }
+      toast({ message: `Saved the package for ${e.name}` });
       router.refresh();
     });
   };

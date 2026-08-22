@@ -8,6 +8,7 @@ import {
   createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
 import PartNumberField from "./PartNumberField";
 import { formatCents, centsToInput } from "@/lib/money";
@@ -134,6 +135,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
     startTransition(async () => {
       await nameServiceVisit(target, d, t);
       setNaming(null);
+      toast({ message: t ? "Named the visit" : "Cleared the visit name" });
     });
   };
 
@@ -146,11 +148,13 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         // Allowance heads-up rides the save; the record always lands. A kit
         // says how many parts came in with it, because that is the surprising
         // part of what just happened.
-        setFlag([
+        const flagMsg = [
           res?.expanded ? `${res.expanded} part${res.expanded === 1 ? "" : "s"} from the kit recorded underneath it.` : "",
           res?.flag ?? "",
-        ].filter(Boolean).join(" "));
-      } else await updatePart(form.id, payload);
+        ].filter(Boolean).join(" ");
+        setFlag(flagMsg);
+        if (!flagMsg) toast({ message: "Added the part" });
+      } else { await updatePart(form.id, payload); toast({ message: "Saved the part" }); }
       close();
     });
   };
@@ -187,7 +191,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                       action: "Delete", tone: "bad",
                     });
                     if (!reason) return;
-                    startTransition(async () => { await deletePart((form as { id: number }).id, reason); close(); });
+                    startTransition(async () => { await deletePart((form as { id: number }).id, reason); close(); toast({ message: "Removed the part" }); });
                   }}
                 >Remove</button>
               )}

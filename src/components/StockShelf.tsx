@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { issueStock, receiveStock, recountStock, transferStock } from "@/app/actions";
 import { needsReorder, shortBy } from "@/lib/stock";
 import { formatCents } from "@/lib/money";
@@ -67,7 +68,11 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
         res = await transferStock(item.id, toRoom, n, note);
       }
       if (res?.error) setError(res.error);
-      else close();
+      else {
+        const verb = open?.mode === "issue" ? "Issued" : open?.mode === "receive" ? "Received" : "Moved";
+        toast({ message: `${verb} ${n} ${item.partNumber}` });
+        close();
+      }
     });
   };
 
@@ -115,7 +120,10 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                 {canManage && (
                   <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
                     onClick={async () => {
-                      const counted = prompt(`Counted how many ${i.partNumber} on the shelf?`, String(i.qty));
+                      const counted = await inputDialog({
+                        title: `Recount ${i.partNumber}`, action: "Next",
+                        label: "Counted how many on the shelf?", initial: String(i.qty),
+                      });
                       if (counted === null) return;
                       const n = parseInt(counted, 10);
                       if (!Number.isInteger(n) || n < 0) { setError("Count must be a whole number, zero or more"); return; }
@@ -129,6 +137,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
                       startTransition(async () => {
                         const res = await recountStock(i.id, n, why);
                         if (res?.error) setError(res.error);
+                        else toast({ message: "Posted the correction" });
                       });
                     }}>recount</button>
                 )}

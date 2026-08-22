@@ -7,6 +7,7 @@ import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { daysUntil, expiryLabel } from "@/lib/gxp";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, attachLibraryFile, listLibraryFiles, type WorkTarget } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
 import StorageMeter from "@/components/StorageMeter";
@@ -299,6 +300,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       const doneNames = new Set(done.map((d) => d.fileName));
       startTransition(async () => {
         await recordAttachments(target, done);
+        toast({ message: `Uploaded ${done.length} file${done.length === 1 ? "" : "s"}` });
         // Keep only failed rows staged so they can be retried.
         setStaged((s) => s.filter((x) => !(x.state === "done" && doneNames.has(x.file.name))));
         setUploading(false);
@@ -359,7 +361,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                 onClick={() => startTransition(async () => {
                   const res = await attachLibraryFile(target, f.id);
                   setLibraryError(res?.error ?? "");
-                  if (!res?.error) setLibrary(null);
+                  if (!res?.error) { setLibrary(null); toast({ message: `Filed ${f.fileName}` }); }
                 })}>+ file it here</button>
               <span className="mono" style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={f.description || f.fileName}>{f.fileName}</span>
@@ -464,7 +466,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn sm accent" disabled={!editDraft.fileName.trim()}
-                  onClick={() => startTransition(async () => { await updateAttachment(a.id, editDraft); setEditing(null); })}>
+                  onClick={() => startTransition(async () => { await updateAttachment(a.id, editDraft); setEditing(null); toast({ message: "Saved the attachment" }); })}>
                   Save
                 </button>
                 <button className="btn sm" onClick={() => setEditing(null)}>Cancel</button>
@@ -508,7 +510,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <select value={a.taskId ?? ""} aria-label={`Evidence for, ${a.fileName}`}
                 onChange={(e) => {
                   const v = e.target.value ? parseInt(e.target.value) : null;
-                  startTransition(async () => { await setAttachmentTask(a.id, v); });
+                  startTransition(async () => { await setAttachmentTask(a.id, v); toast({ message: v ? "Filed as evidence" : "Unlinked from the task" }); });
                 }}
                 style={{ width: "auto", minWidth: 0, maxWidth: 150, fontSize: 11, padding: "1px 4px", flexShrink: 0 }}>
                 <option value="">not evidence</option>
@@ -521,7 +523,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <label style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontSize: 11, fontWeight: 400, color: a.showOnListing ? "#2E6B2E" : "var(--mut)", flexShrink: 0, textTransform: "none", letterSpacing: 0 }}
                 title="Public buyers see this file on the listing page">
                 <input type="checkbox" checked={a.showOnListing} style={{ width: 14, height: 14 }}
-                  onChange={(e) => startTransition(async () => { await setAttachmentListed(a.id, e.target.checked); })} />
+                  onChange={(e) => { const on = e.target.checked; startTransition(async () => { await setAttachmentListed(a.id, on); toast({ message: on ? "Added to the listing" : "Removed from the listing" }); }); }} />
                 on listing
               </label>
             )}
@@ -541,7 +543,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                     action: "Remove", tone: "bad",
                   });
                   if (!reason) return;
-                  startTransition(async () => { await deleteAttachment(a.id, reason); });
+                  startTransition(async () => { await deleteAttachment(a.id, reason); toast({ message: `Removed ${a.fileName}` }); });
                 }}
               >remove</button>
             )}

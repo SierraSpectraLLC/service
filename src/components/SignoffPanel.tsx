@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { signOffTarget, revokeSignoff, type WorkTarget } from "@/app/actions";
 import type { Blocker } from "@/lib/signoff";
 
@@ -43,7 +44,7 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
     startTransition(async () => {
       const res = await signOffTarget(target, draft);
       if (res?.error) setError(res.error);
-      else { setOpen(false); setDraft({ ...draft, signerName: "", note: "" }); }
+      else { toast({ message: "Recorded the sign-off" }); setOpen(false); setDraft({ ...draft, signerName: "", note: "" }); }
     });
   };
 
@@ -91,6 +92,7 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
                 startTransition(async () => {
                   const res = await revokeSignoff(s.id, why);
                   if (res?.error) setError(res.error);
+                  else toast({ message: "Withdrew the sign-off" });
                 });
               }}>withdraw</button>
           )}

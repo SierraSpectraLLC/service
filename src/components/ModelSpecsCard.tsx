@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setModelSpecs } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { MAX_SPECS, mergeModelSpecs, type Spec } from "@/lib/modelSpecs";
 import SpecTable from "./SpecTable";
 
@@ -48,6 +49,7 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
       const res = await setModelSpecs(termId, rows);
       if (res?.error) { setError(res.error); return; }
       setEditing(false);
+      toast({ message: "Saved the specs" });
       router.refresh();
     });
   };

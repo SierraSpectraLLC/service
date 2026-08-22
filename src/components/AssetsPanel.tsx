@@ -4,6 +4,7 @@ import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { ASSET_TONE } from "@/lib/stages";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { createAsset, attachAssets } from "@/app/actions";
 import { servesLine } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
@@ -63,7 +64,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
     startTransition(async () => {
       const res = await createAsset(instrumentId, draft);
       if (res?.error) setError(res.error);
-      else { setDraft(empty); setOpen(false); }
+      else { setDraft(empty); setOpen(false); toast({ message: `Added ${draft.kind} ${draft.model || draft.serial}` }); }
     });
   };
 
@@ -73,7 +74,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
     startTransition(async () => {
       const res = await attachAssets(checked, instrumentId);
       if (res?.error) setError(res.error);
-      if (res?.attached) { setChecked([]); setPicking(false); }
+      if (res?.attached) { setChecked([]); setPicking(false); toast({ message: `Added ${checked.length} asset${checked.length === 1 ? "" : "s"}` }); }
     });
   };
 

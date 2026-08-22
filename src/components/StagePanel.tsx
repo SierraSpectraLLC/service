@@ -4,6 +4,7 @@ import { useOptimistic, useState, useTransition } from "react";
 import { setBlockedReason, toggleStage } from "@/app/actions";
 import { BLOCKED_STAGE } from "@/lib/stages";
 import { inputDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 /**
  * Why a system is being blocked, asked at the moment of blocking.
@@ -39,7 +40,8 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
   // the optimistic flip, so cancelling leaves the pill exactly as it was.
   const toggle = async (s: string) => {
     let reason = "";
-    if (s === BLOCKED_STAGE && !optimisticStages.includes(s)) {
+    const blocking = s === BLOCKED_STAGE && !optimisticStages.includes(s);
+    if (blocking) {
       const answer = await askBlockReason("Block system");
       if (answer === null) return;
       reason = answer;
@@ -49,6 +51,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
       applyToggle(s);
       const res = await toggleStage(instrumentId, s, reason);
       if (res?.error) setError(res.error);
+      else if (blocking) toast({ message: "Blocked the system" });
     });
   };
 
@@ -59,6 +62,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
       setError("");
       const res = await setBlockedReason(instrumentId, answer);
       if (res?.error) setError(res.error);
+      else toast({ message: "Saved the reason" });
     });
   };
   const color = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { shareSystem, unshareSystem, setSystemOwner, shareAsset, unshareAsset, setAssetOwnerOrg } from "@/app/actions";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { orgNamed } from "@/lib/owner";
 
 export type ShareEntry = { orgId: number; name: string; kind: string; access: string };
@@ -57,7 +58,12 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
       const results = await Promise.all(picked.map((orgId) => doShare(targetId, orgId, canManageAll ? level : "edit")));
       const errors = results.map((r) => r?.error).filter(Boolean);
       if (errors.length) setError([...new Set(errors)].join(" · "));
-      else { setPicked([]); setAdding(false); }
+      else {
+        toast({ message: picked.length === 1
+          ? `Shared with ${orgOptions.find((o) => o.id === picked[0])?.name ?? "1 organization"}`
+          : `Shared with ${picked.length} organizations` });
+        setPicked([]); setAdding(false);
+      }
     });
   };
 
@@ -80,6 +86,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
     startTransition(async () => {
       const res = await doUnshare(targetId, s.orgId);
       if (res?.error) setError(res.error);
+      else toast({ message: `Removed ${s.name}'s access` });
     });
   };
 
@@ -103,6 +110,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
                   onChange={(e) => startTransition(async () => {
                     const res = await doShare(targetId, s.orgId, e.target.value);
                     if (res?.error) setError(res.error);
+                    else toast({ message: `Updated ${s.name}'s access` });
                   })}
                   aria-label={`Access level for ${s.name}`}
                   style={{ width: "auto", fontSize: 10, padding: "0 2px", border: "none", background: "transparent", color: "inherit", fontWeight: 700, cursor: "pointer" }}>
@@ -167,6 +175,9 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
               startTransition(async () => {
                 const res = await doSetOwner(targetId, v ? parseInt(v) : null, "");
                 if (res?.error) setError(res.error);
+                else toast({ message: v
+                  ? `Set the owner to ${orgOptions.find((o) => o.id === parseInt(v))?.name ?? "the organization"}`
+                  : "Cleared the owner" });
               });
             }}
             style={{ width: "auto", fontSize: 12 }}>
@@ -192,6 +203,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
               onClick={() => startTransition(async () => {
                 const res = await doSetOwner(targetId, match.id, "");
                 if (res?.error) setError(res.error);
+                else toast({ message: `Linked to ${match.name}` });
               })}>
               Link to {match.name}
             </button>
@@ -210,6 +222,7 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
                 onClick={() => startTransition(async () => {
                   const res = await doSetOwner(targetId, null, typed);
                   if (res?.error) setError(res.error);
+                  else toast({ message: "Saved the owner name" });
                 })}>Save</button>
               <span className="mut" style={{ fontSize: 11 }}>
                 A name only - nobody gains access from this.

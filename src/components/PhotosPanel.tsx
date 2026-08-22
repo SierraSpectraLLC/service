@@ -102,6 +102,7 @@ export default function PhotosPanel({
       }
       const res = await addPhotos(target, done);
       if (res?.error) throw new Error(res.error);
+      toast({ message: `Added ${done.length} photo${done.length === 1 ? "" : "s"}` });
       router.refresh();
     } catch (e) {
       // Name the file that failed. A silent stop here looks like it worked.
@@ -111,8 +112,12 @@ export default function PhotosPanel({
     }
   };
 
-  const act = (fn: () => Promise<{ error?: string } | void>) =>
-    startTransition(async () => { setError(((await fn()) as { error?: string })?.error ?? ""); });
+  const act = (fn: () => Promise<{ error?: string } | void>, message?: string) =>
+    startTransition(async () => {
+      const err = ((await fn()) as { error?: string })?.error ?? "";
+      setError(err);
+      if (!err && message) toast({ message });
+    });
 
   const remove = async (p: { id: number; fileName: string }) => {
     const why = await confirmReason({
@@ -121,7 +126,7 @@ export default function PhotosPanel({
       action: "Remove", tone: "bad",
     });
     if (!why) return;
-    act(() => deleteAttachment(p.id, why));
+    act(() => deleteAttachment(p.id, why), "Removed the photo");
   };
 
   const toggle = (id: number) => setPicked((s) => {
@@ -145,7 +150,7 @@ export default function PhotosPanel({
     startTransition(async () => {
       const res = await removePhotos(target, ids, why);
       setError(res?.error ?? "");
-      if (!res?.error) stopSelecting();
+      if (!res?.error) { stopSelecting(); toast({ message: `Removed ${n} photo${n === 1 ? "" : "s"}` }); }
     });
   };
 
@@ -260,10 +265,10 @@ export default function PhotosPanel({
                 {chosen ? (
                   <button className="btn sm" disabled={pending}
                     title="Show the catalog's picture of this model again"
-                    onClick={() => act(() => clearCoverPhoto(target))}>Use default</button>
+                    onClick={() => act(() => clearCoverPhoto(target), "Cleared the cover photo")}>Use default</button>
                 ) : (
                   <button className="btn sm" disabled={pending}
-                    onClick={() => act(() => setCoverPhoto(target, lead.id))}>Make cover</button>
+                    onClick={() => act(() => setCoverPhoto(target, lead.id), "Set the cover photo")}>Make cover</button>
                 )}
                 <button className="btn sm" disabled={pending} onClick={() => setFraming(lead)}>Frame</button>
                 {catalogScopes.length > 0 && (
@@ -286,7 +291,7 @@ export default function PhotosPanel({
                   {canEdit && !selecting && (
                     <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
                       <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-                        onClick={() => act(() => setCoverPhoto(target, p.id))}>Cover</button>
+                        onClick={() => act(() => setCoverPhoto(target, p.id), "Set the cover photo")}>Cover</button>
                       <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                         onClick={() => setFraming(p)}>Frame</button>
                       {catalogScopes.length > 0 && (
