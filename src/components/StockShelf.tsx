@@ -90,10 +90,8 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
               <span className="mono" style={{ fontSize: 13, fontWeight: 700 }}>{i.partNumber}</span>
               {i.name && <span style={{ fontSize: 13 }}>{i.name}</span>}
-              {i.bin && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>bin {i.bin}</span>}
-              <span className="pill" style={{
-                background: short ? "#FDECEC" : "#E8F3EC", color: short ? "#A32D2D" : "#2E6B2E", fontWeight: 700,
-              }}>
+              {i.bin && <span className="pill neutral">bin {i.bin}</span>}
+              <span className={`pill ${short ? "bad" : "good"}`}>
                 {i.qty} on hand
               </span>
               {short && (
