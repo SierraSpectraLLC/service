@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { startThread } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 
 /**
  * Start a conversation.
@@ -48,12 +49,16 @@ export default function NewMessageButton({ people }: {
       <button className="btn sm primary" onClick={() => { setOpen(!open); setError(""); }}>
         {open ? "Cancel" : "New message"}
       </button>
-      {open && (
-        <>
-          <div className="scrim" onClick={() => setOpen(false)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="New message">
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>New message</div>
-
+      <Dialog open={open} onClose={() => setOpen(false)} title="New message"
+        footer={
+          <>
+            <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+            <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn accent" disabled={pending || !picked.length || !body.trim()} onClick={send}>
+              {pending ? "Sending..." : "Send message"}
+            </button>
+          </>
+        }>
             <label>To *</label>
             <input value={filter} onChange={(e) => setFilter(e.target.value)}
               placeholder="Type to filter people..." style={{ marginBottom: 6 }} />
@@ -81,16 +86,7 @@ export default function NewMessageButton({ people }: {
             <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4}
               placeholder="What do you want to say?" style={{ width: "100%", marginBottom: 8, resize: "vertical" }} />
 
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setOpen(false)}>Cancel</button>
-              <button className="btn sm accent" disabled={pending || !picked.length || !body.trim()} onClick={send}>
-                {pending ? "Sending..." : "Send"}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+      </Dialog>
     </>
   );
 }
