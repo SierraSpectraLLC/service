@@ -130,7 +130,7 @@ export default function EodPanel({
         <span style={{ fontSize: 13, fontWeight: 700 }}>
           {num > 0 ? `${e.kind === "system" ? "System" : "Unit"} ${num}: ` : ""}<span className="mono">{e.label}</span>
         </span>
-        {e.kind === "asset" && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>unit</span>}
+        {e.kind === "asset" && <span className="pill neutral">unit</span>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
           <span className="mut" style={{ fontSize: 11 }}>{saveLabel(status[keyOf(e)])}</span>
           {canAutofill(e) && (
@@ -214,7 +214,7 @@ export default function EodPanel({
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
           <span className="mut" style={{ fontSize: 11 }}>Skipped:</span>
           {skipped.map((e) => (
-            <span key={keyOf(e)} className="pill" style={{ background: "#EEF1F5", color: "#64748B", display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <span key={keyOf(e)} className="pill neutral" style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
               {e.externalId}
               {!readOnly && (
                 <button className="btn link" style={{ fontSize: 10 }} disabled={pending}
