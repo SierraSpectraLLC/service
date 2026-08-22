@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createAsset } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import CatalogSelect from "./CatalogSelect";
 import PickOrAdd from "./PickOrAdd";
 
@@ -47,10 +48,19 @@ export default function NewAssetForm({ owners, kinds, models }: {
       </div>
 
       {open && (
-        <div className="dash-form" style={{ flexBasis: "100%", marginBottom: 0 }}>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-            Goes onto the shelf as a spare - no system needed. Attach it to one whenever it&apos;s used.
-          </div>
+        <Dialog open onClose={() => { setOpen(false); setDraft(empty); }} title="New asset"
+          context="Goes onto the shelf as a spare - no system needed. Attach it to one whenever it's used."
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : saved ? " ok" : ""}`}>
+                {error || (saved ? `${saved} ✓` : "Type, owner and location stay put so a shipment goes in fast.")}
+              </span>
+              <button className="btn" onClick={() => { setOpen(false); setDraft(empty); }} disabled={pending}>Done</button>
+              <button className="btn accent" onClick={submit} disabled={pending || (!draft.model.trim() && !draft.serial.trim())}>
+                {pending ? "Saving..." : "Add to stock"}
+              </button>
+            </>
+          }>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
@@ -85,15 +95,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
             <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
               placeholder='e.g. "bought Aug 7, PO SS-1102, still boxed"' />
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn sm accent" onClick={submit} disabled={pending || (!draft.model.trim() && !draft.serial.trim())}>
-              {pending ? "Saving..." : "Add to stock"}
-            </button>
-            <button className="btn sm" onClick={() => { setOpen(false); setDraft(empty); }} disabled={pending}>Done</button>
-            <span className="mut" style={{ fontSize: 11 }}>Type, owner and location stay put so a shipment goes in fast.</span>
-          </div>
-        </div>
+        </Dialog>
       )}
     </>
   );
