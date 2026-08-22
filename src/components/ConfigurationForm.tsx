@@ -6,6 +6,8 @@ import {
   setBranding, setOperatorOrg, setModule, setDigestHour, sendDigestNow,
   setPlatformAppearance,
 } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import {
   DEFAULT_HEADER, DEFAULT_SPECTRUM_HEIGHT, DEFAULT_STOPS, MAX_SPECTRUM_HEIGHT, MAX_STOPS,
   gradientCss, type Stop,
@@ -82,8 +84,12 @@ export default function ConfigurationForm(props: {
       if (res?.error) { setDigestErr(true); setDigestMsg(res.error); }
     });
   };
-  const sendDigest = () => {
-    if (!confirm(`Email the internal digest now to ${props.digestTo.join(", ") || "nobody"}?`)) return;
+  const sendDigest = async () => {
+    if (!(await confirmDialog({
+      title: "Email the internal digest now?",
+      body: `Goes to ${props.digestTo.join(", ") || "nobody"}.`,
+      action: "Send digest",
+    }))) return;
     setDigestMsg(""); setDigestErr(false);
     startTransition(async () => {
       const res = await sendDigestNow(null);
@@ -187,12 +193,17 @@ export default function ConfigurationForm(props: {
       if (res?.error) setStageError(res.error);
     });
   };
-  const doDelete = (s: StageRow) => {
-    if (!window.confirm(`Delete stage "${s.name}"? It will be removed from any system that has it.`)) return;
+  const doDelete = async (s: StageRow) => {
+    if (!(await confirmDialog({
+      title: `Delete stage "${s.name}"?`,
+      body: "It will be removed from any system that has it.",
+      action: `Delete ${s.name}`, tone: "bad",
+    }))) return;
     setStageError("");
     startTransition(async () => {
       const res = await deleteStage(s.id);
       if (res?.error) setStageError(res.error);
+      else toast({ message: `Deleted the ${s.name} stage` });
     });
   };
 
