@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addInstrumentNote, type WorkTarget } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 
 export default function ActivityNoteForm({ target }: { target: WorkTarget }) {
   const [text, setText] = useState("");
@@ -13,14 +14,15 @@ export default function ActivityNoteForm({ target }: { target: WorkTarget }) {
     startTransition(async () => {
       await addInstrumentNote(target, t);
       setText("");
+      toast({ message: "Logged the note" });
     });
   };
 
   return (
-    <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-      <input value={text} onChange={(e) => setText(e.target.value)}
+    <div className="row-2" style={{ marginBottom: 12 }}>
+      <input className="t-small" value={text} onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") post(); }}
-        placeholder='Log a note... e.g. "No Helium - ordered a refill"' style={{ flex: 1, fontSize: 12, padding: "5px 9px" }} />
+        placeholder='Log a note... e.g. "No Helium - ordered a refill"' style={{ flex: 1, padding: "5px 9px" }} />
       <button className="btn sm" onClick={post} disabled={pending}>{pending ? "Posting..." : "Post"}</button>
     </div>
   );
