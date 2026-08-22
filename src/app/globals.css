@@ -731,6 +731,24 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .facet.on { background: var(--navy); color: #fff; border-color: var(--navy); }
 .facet.on b { color: #fff; }
 .facet:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+
+/* Checkboxes size here, not inline, so the touch block below wins. */
+.reg input[type="checkbox"], input.check[type="checkbox"] { width: 15px; height: 15px; }
+
+/* ── Touch targets ──────────────────────────────────────────────────────────
+   On a coarse pointer (and any phone-width screen) the small controls grow to
+   a finger-sized hit area: measured at 375px, facets ran 24-27px, small
+   buttons 26-29px, inline link-buttons 12-16px, checkboxes 15px. Density is
+   a virtue on a desktop and a misclick on a phone. */
+@media (hover: none), (max-width: 639px) {
+  .facet { padding: 9px 14px; font-size: 12.5px; }
+  .btn.sm { min-height: 36px; padding: 7px 12px; }
+  .btn.link { min-height: 32px; display: inline-flex; align-items: center; padding: 4px 6px; }
+  .kebab { min-height: 36px; min-width: 36px; }
+  .toolbar-search input { min-height: 40px; }
+  .dt input[type="checkbox"], .reg input[type="checkbox"], input.check[type="checkbox"] { width: 20px; height: 20px; }
+  .seg button { padding: 9px 14px; }
+}
 @media (max-width: 640px) {
   .facets { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
 }

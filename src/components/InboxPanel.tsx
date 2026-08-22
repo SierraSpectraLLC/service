@@ -98,7 +98,7 @@ export default function InboxPanel({ items, prefs, filter }: {
         hint="Everything always lands in this inbox; these only control which kinds also email you.">
         {NOTIFY_KINDS.map((k) => (
           <label key={k.kind} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13, cursor: "pointer" }}>
-            <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} style={{ width: 15, height: 15 }}
+            <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} className="check"
               onChange={(e) => {
                 const on = e.target.checked;
                 startTransition(async () => {

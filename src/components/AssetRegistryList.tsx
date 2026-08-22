@@ -159,7 +159,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
               {canSelect && (
                 <input type="checkbox" checked={allPicked} onChange={() => toggleGroup(list)} disabled={pending}
                   aria-label={`Select all ${list.length} ${kind}`}
-                  style={{ width: 15, height: 15, flexShrink: 0 }} />
+                  style={{ flexShrink: 0 }} />
               )}
               <span className="reg-group-name">{kind}</span>
               <span className="reg-group-count">{list.length}</span>
@@ -184,8 +184,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
                   }}>
                   {canSelect && (
                     <input type="checkbox" checked={on} onChange={() => toggle(a.id)} disabled={pending}
-                      aria-label={`Select ${a.kind} ${a.model}${a.serial ? ` SN ${a.serial}` : ""}`}
-                      style={{ width: 15, height: 15 }} />
+                      aria-label={`Select ${a.kind} ${a.model}${a.serial ? ` SN ${a.serial}` : ""}`} />
                   )}
                   <span title={a.status}><Dot tone={a.statusTone} /></span>
                   <span className="reg-cell">
