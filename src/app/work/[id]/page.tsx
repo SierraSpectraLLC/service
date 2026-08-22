@@ -14,12 +14,12 @@ import { canSeeCosts, redactParts } from "@/lib/redact";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
-import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
+import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import { systemLabel } from "@/lib/systemLabel";
 import {
-  moverOf, severityOf, targetDay, woAcceptsWork, woLate, WO_COLOR, WO_LABEL,
+  moverOf, severityOf, targetDay, woAcceptsWork, woLate, WO_LABEL, WO_TONE,
 } from "@/lib/workOrders";
 import ActivityFeed from "@/components/ActivityFeed";
 import AttachmentsPanel from "@/components/AttachmentsPanel";
@@ -160,7 +160,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
 
   const today = shopToday();
   const sev = severityOf(wo.severity);
-  const color = WO_COLOR[wo.state] ?? WO_COLOR.open;
+  const tone = WO_TONE[wo.state] ?? WO_TONE.open;
   const askedBy = wo.orgId === null ? brand.operatorName : askedByRows[0]?.name ?? "an organization";
   const minutes = timeRows.reduce((n, t) => n + t.minutes, 0);
   const place = inst
@@ -228,7 +228,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <span className="mono" style={{ fontWeight: 700, fontSize: 13, color: "var(--navy)" }}>{wo.number}</span>
           <span style={{ fontSize: 16, fontWeight: 700 }}>{wo.title}</span>
-          <span className="pill" style={{ background: color.bg, color: color.fg }}>{WO_LABEL[wo.state] ?? wo.state}</span>
+          <span className={`pill ${tone}`}>{WO_LABEL[wo.state] ?? wo.state}</span>
           <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{sev.label}</span>
           {woLate(wo, today) && (
             <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>
@@ -338,7 +338,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
                   {p.number}
                 </Link>
                 <span style={{ fontSize: 13 }}>{p.vendor}</span>
-                <span className="pill" style={{ background: PO_COLOR[p.status]?.bg, color: PO_COLOR[p.status]?.fg }}>
+                <span className={`pill ${PO_TONE[p.status] ?? "neutral"}`}>
                   {PO_LABEL[p.status] ?? p.status}
                 </span>
                 <span className="mut" style={{ fontSize: 11 }}>

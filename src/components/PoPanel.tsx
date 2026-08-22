@@ -7,7 +7,7 @@ import {
   addPoLine, cancelPurchaseOrder, deletePoLine, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
 } from "@/app/actions";
 import { formatCents, centsToInput } from "@/lib/money";
-import { PO_COLOR, PO_LABEL, lineOutstanding, lineTotalCents, poEditable, poReceivable, poTotals } from "@/lib/po";
+import { PO_LABEL, PO_TONE, lineOutstanding, lineTotalCents, poEditable, poReceivable, poTotals } from "@/lib/po";
 
 export type PoRow = {
   id: number; number: string; vendor: string; status: string; reference: string; note: string;
@@ -46,7 +46,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
           <div className="card-title">{po.number}</div>
-          <span className="pill" style={{ background: PO_COLOR[po.status]?.bg, color: PO_COLOR[po.status]?.fg, fontWeight: 700 }}>
+          <span className={`pill ${PO_TONE[po.status] ?? "neutral"}`}>
             {PO_LABEL[po.status] ?? po.status}
           </span>
           <span className="mut" style={{ fontSize: 13 }}>{po.vendor}</span>

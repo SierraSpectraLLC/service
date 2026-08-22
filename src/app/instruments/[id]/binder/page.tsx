@@ -13,7 +13,7 @@ import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { brandForTenant } from "@/lib/brand";
 import PrintButton from "@/components/PrintButton";
 import {
-  DOC_STATE_COLOR, QUALIFICATIONS, QUAL_LABEL, STANDING_COLOR,
+  DOC_STATE_TONE, QUALIFICATIONS, QUAL_LABEL, STANDING_TONE,
   expiryAttention, expiryLabel, packageComplete, packageForSystem, packageRows,
   qualsOf, qualStanding,
 } from "@/lib/gxp";
@@ -125,7 +125,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
         <Row label="Location" value={inst.location} />
         <div style={{ display: "flex", gap: 8, fontSize: 13, padding: "3px 0", alignItems: "center" }}>
           <span className="mut" style={{ width: 90, flexShrink: 0 }}>Standing</span>
-          <span className="pill" style={{ background: STANDING_COLOR[standing.tone].bg, color: STANDING_COLOR[standing.tone].fg }}>
+          <span className={`pill ${STANDING_TONE[standing.tone]}`}>
             {standing.label}
           </span>
           {standing.reasons.length > 0 && <span className="mut" style={{ fontSize: 12 }}>{standing.reasons.join("; ")}</span>}
@@ -151,7 +151,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
               {!r.required && <span className="mut" style={{ fontWeight: 400, fontSize: 11 }}>beyond the declared package</span>}
             </div>
             {r.docs.map((d) => {
-              const st = DOC_STATE_COLOR[d.state] ?? DOC_STATE_COLOR.Draft;
+              const st = DOC_STATE_TONE[d.state] ?? DOC_STATE_TONE.Draft;
               // Every superseded revision prints under its successor - the
               // binder is the record, and the record includes what v1 said.
               const chain = [];
@@ -164,7 +164,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
               }
               return (
                 <div key={d.id} style={{ fontSize: 12, marginLeft: 12, padding: "2px 0" }}>
-                  <span className="pill" style={{ background: st.bg, color: st.fg, marginRight: 6 }}>{d.state}</span>
+                  <span className={`pill ${st}`} style={{ marginRight: 6 }}>{d.state}</span>
                   <b>{d.title}</b> v{d.version}
                   {d.reviewOn && <span className="mut"> · review by {d.reviewOn}</span>}
                   <div className="mut" style={{ marginLeft: 2 }}>{sigLine(d.id)}</div>

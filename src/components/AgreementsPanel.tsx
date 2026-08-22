@@ -8,7 +8,7 @@ import {
 } from "@/app/actions";
 import { promptReason } from "@/lib/reason";
 import {
-  AGREEMENT_KINDS, KIND_LABEL, STANDING_COLOR, STANDING_LABEL, allowance, kitStates, parseKits,
+  AGREEMENT_KINDS, KIND_LABEL, STANDING_LABEL, STANDING_TONE, allowance, kitStates, parseKits,
   renewalLine, standing, type IncludedKit, type Standing,
 } from "@/lib/agreements";
 import { formatCents } from "@/lib/money";
@@ -39,8 +39,6 @@ const emptyDraft = {
   instrumentIds: [] as number[],
   value: "", note: "",
 };
-
-const pill = (c: { bg: string; fg: string }) => ({ background: c.bg, color: c.fg });
 
 /**
  * A bar for one entitlement, or nothing at all.
@@ -302,7 +300,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               <span style={{ fontSize: 13, fontWeight: 700 }}>
                 {[r.number, r.title].filter(Boolean).join(" ") || KIND_LABEL[r.kind]}
               </span>
-              <span className="pill" style={pill(STANDING_COLOR[s])}>{STANDING_LABEL[s]}</span>
+              <span className={`pill ${STANDING_TONE[s]}`}>{STANDING_LABEL[s]}</span>
               <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[r.kind]}</span>
               {orgs.length !== 1 && <span className="mut" style={{ fontSize: 12 }}>{r.orgName}</span>}
               {r.valueCents != null && (

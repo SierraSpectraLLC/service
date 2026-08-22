@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { setProvenance } from "@/app/actions";
 import {
-  cleanProvenance, PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, PROVENANCE_STYLE,
+  cleanProvenance, PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, PROVENANCE_TONE,
   type Provenance,
 } from "@/lib/provenance";
 
@@ -32,7 +32,7 @@ export default function ProvenanceChip({ what, id, value, canEdit }: {
   useEffect(() => { setOptimistic(null); }, [current]);
   const shown = optimistic ?? current;
   const [pending, startTransition] = useTransition();
-  const style = PROVENANCE_STYLE[shown];
+  const tone = PROVENANCE_TONE[shown];
 
   const pick = (next: Provenance) => {
     setOpen(false);
@@ -45,9 +45,9 @@ export default function ProvenanceChip({ what, id, value, canEdit }: {
   };
 
   const chip = (
-    <span className="pill" title={PROVENANCE_BLURB[shown]}
+    <span className={`pill ${tone}`} title={PROVENANCE_BLURB[shown]}
       style={{
-        background: style.bg, color: style.fg, fontSize: 10, whiteSpace: "nowrap",
+        fontSize: 10, whiteSpace: "nowrap",
         opacity: pending ? 0.6 : 1, cursor: canEdit ? "pointer" : "default",
         border: shown === "" ? "1px dashed #C7D2E0" : "none",
       }}>
@@ -79,7 +79,7 @@ export default function ProvenanceChip({ what, id, value, canEdit }: {
                   display: "block", width: "100%", textAlign: "left", border: "none", background: "none",
                   padding: "5px 6px", cursor: "pointer", borderRadius: 6,
                 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: PROVENANCE_STYLE[c].fg }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: `var(--t-${PROVENANCE_TONE[c]}-fg)` }}>
                   {PROVENANCE_LABEL[c]}{c === shown ? " ✓" : ""}
                 </span>
                 <span className="mut" style={{ display: "block", fontSize: 10, lineHeight: 1.4 }}>

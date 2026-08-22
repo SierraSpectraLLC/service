@@ -17,6 +17,7 @@
 // Pure. Callers hand in the sums; the rules and the arithmetic live here.
 
 import { addDays } from "@/lib/pm";
+import type { Tone } from "@/lib/tones";
 
 export const AGREEMENT_KINDS = ["contract", "po", "quote", "invoice"] as const;
 export type AgreementKind = (typeof AGREEMENT_KINDS)[number];
@@ -55,12 +56,12 @@ export const STANDING_LABEL: Record<Standing, string> = {
   active: "Active",
 };
 
-export const STANDING_COLOR: Record<Standing, { bg: string; fg: string }> = {
-  draft: { bg: "#EEF1F5", fg: "#475569" },
-  cancelled: { bg: "#F4F6F9", fg: "#94A3B8" },
-  expired: { bg: "#FBE9E9", fg: "#A32D2D" },
-  expiring: { bg: "#FAF0DC", fg: "#8A5410" },
-  active: { bg: "#E8F3EC", fg: "#2E6B2E" },
+export const STANDING_TONE: Record<Standing, Tone> = {
+  draft: "neutral",
+  cancelled: "faint",
+  expired: "bad",
+  expiring: "warn",
+  active: "good",
 };
 
 /**

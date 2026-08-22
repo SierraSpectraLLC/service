@@ -2,6 +2,7 @@
 // rows, tests hand in literals.
 import { normalizePn, rankPrices, type PriceEntry } from "@/lib/priceBook";
 import { needsReorder, shortBy, type StockLine } from "@/lib/stock";
+import type { Tone } from "@/lib/tones";
 
 export const PO_STATES = ["draft", "sent", "partial", "received", "cancelled"] as const;
 
@@ -13,12 +14,12 @@ export const PO_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-export const PO_COLOR: Record<string, { bg: string; fg: string }> = {
-  draft: { bg: "#EEF1F5", fg: "#475569" },
-  sent: { bg: "#E7EFF8", fg: "#1D6396" },
-  partial: { bg: "#FAF0DC", fg: "#8A5410" },
-  received: { bg: "#E8F3EC", fg: "#2E6B2E" },
-  cancelled: { bg: "#F4F6F9", fg: "#94A3B8" },
+export const PO_TONE: Record<string, Tone> = {
+  draft: "neutral",
+  sent: "info",
+  partial: "warn",
+  received: "good",
+  cancelled: "faint",
 };
 
 /** A PO stops accepting edits once it's been sent to the vendor. */

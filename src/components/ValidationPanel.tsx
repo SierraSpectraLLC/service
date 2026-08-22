@@ -9,7 +9,7 @@ import {
   markValidationDocExecuted, deleteValidationDoc,
 } from "@/app/actions";
 import {
-  DOC_TYPES, DOC_STATE_COLOR, SIG_ROLES, STANDING_COLOR,
+  DOC_TYPES, DOC_STATE_TONE, SIG_ROLES, STANDING_TONE,
   canApprove, canDelete, canExecute, expiryLabel, isProtocol, packageRows,
   type Standing,
 } from "@/lib/gxp";
@@ -104,12 +104,12 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
   const renderDoc = (d: ValidationDocRow, indent = false) => {
     const open = openDoc === d.id;
     const active = d.signatures.filter((x) => x.revokedAt === null);
-    const st = DOC_STATE_COLOR[d.state] ?? DOC_STATE_COLOR.Draft;
+    const st = DOC_STATE_TONE[d.state] ?? DOC_STATE_TONE.Draft;
     return (
       <div key={d.id} style={{ marginLeft: indent ? 18 : 0, borderTop: "1px solid var(--line)", padding: "6px 0", opacity: d.state === "Superseded" ? 0.65 : 1 }}>
         <div className="row-hover" onClick={() => setOpenDoc(open ? null : d.id)}
           style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", cursor: "pointer" }}>
-          <span className="pill" style={{ background: st.bg, color: st.fg }}>{d.state}</span>
+          <span className={`pill ${st}`}>{d.state}</span>
           <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0 }}>{d.title}</span>
           <span className="mut" style={{ fontSize: 11 }}>v{d.version}</span>
           {d.attachmentId !== null && (
@@ -211,8 +211,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
         <div className="card-title">Validation</div>
         {standing && (
-          <span className="pill" title={standing.reasons.join("; ")}
-            style={{ background: STANDING_COLOR[standing.tone].bg, color: STANDING_COLOR[standing.tone].fg }}>
+          <span className={`pill ${STANDING_TONE[standing.tone]}`} title={standing.reasons.join("; ")}>
             {standing.label}
           </span>
         )}

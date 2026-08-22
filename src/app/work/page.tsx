@@ -9,7 +9,7 @@ import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
-import { sortWorkOrders, woLine, woOpen, WO_COLOR, WO_LABEL } from "@/lib/workOrders";
+import { sortWorkOrders, woLine, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +107,7 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   );
 
   const row = (w: typeof rows[number]) => {
-    const color = WO_COLOR[w.state] ?? WO_COLOR.open;
+    const tone = WO_TONE[w.state] ?? WO_TONE.open;
     return (
       <Link key={w.id} href={`/work/${w.id}`} className="row-hover"
         style={{
@@ -116,7 +116,7 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
         }}>
         <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{w.number}</span>
         <span style={{ fontSize: 13, flex: "1 1 180px" }}>{w.title}</span>
-        <span className="pill" style={{ background: color.bg, color: color.fg }}>{WO_LABEL[w.state] ?? w.state}</span>
+        <span className={`pill ${tone}`}>{WO_LABEL[w.state] ?? w.state}</span>
         <span className="mut" style={{ fontSize: 11, width: "100%" }}>
           {placeOf(w)} · {woLine(w, today, counts(w.id))}
           {` · ${w.orgId === null ? brand.operatorName : orgName.get(w.orgId) ?? "an organization"}`}

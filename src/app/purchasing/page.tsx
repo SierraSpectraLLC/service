@@ -6,7 +6,7 @@ import { instruments, orgs, parts, poLines, purchaseOrders, stockrooms, stockroo
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
-import { PO_COLOR, PO_LABEL, poTotals } from "@/lib/po";
+import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { formatCents } from "@/lib/money";
 import { canSeeCosts } from "@/lib/redact";
 import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
@@ -78,7 +78,7 @@ export default async function PurchasingPage() {
         <Link href={`/purchasing/${p.id}`} className="mono" style={{ fontSize: 13, fontWeight: 700, textDecoration: "none" }}>
           {p.number}
         </Link>
-        <span className="pill" style={{ background: PO_COLOR[p.status]?.bg, color: PO_COLOR[p.status]?.fg, fontWeight: 700 }}>
+        <span className={`pill ${PO_TONE[p.status] ?? "neutral"}`}>
           {PO_LABEL[p.status] ?? p.status}
         </span>
         <span style={{ fontSize: 13 }}>{p.vendor}</span>

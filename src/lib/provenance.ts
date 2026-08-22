@@ -20,6 +20,8 @@
  * nobody has classified is material nobody has checked, and the safe reading of
  * unchecked is "not ours to sell" - the expensive mistake runs the other way.
  */
+import type { Tone } from "@/lib/tones";
+
 export const PROVENANCE = ["", "original", "facts", "oem"] as const;
 export type Provenance = (typeof PROVENANCE)[number];
 
@@ -38,12 +40,13 @@ export const PROVENANCE_BLURB: Record<Provenance, string> = {
   oem: "The manufacturer's own words or figures. Useful in the shop, never licensed out.",
 };
 
-/** Chip colors, in the palette the panels already use. */
-export const PROVENANCE_STYLE: Record<Provenance, { bg: string; fg: string }> = {
-  "": { bg: "#EEF1F5", fg: "#64748B" },
-  original: { bg: "#E3F1E3", fg: "#2E6B2E" },
-  facts: { bg: "#E7F2FA", fg: "#1D6396" },
-  oem: { bg: "#FAF0DC", fg: "#8A5410" },
+/** Chip tones. Unstated is a fact with no judgement; original is ours (good);
+    facts travel (info); OEM material is the one to watch before licensing. */
+export const PROVENANCE_TONE: Record<Provenance, Tone> = {
+  "": "neutral",
+  original: "good",
+  facts: "info",
+  oem: "warn",
 };
 
 /** Unknown strings become '' rather than throwing - see the default above. */

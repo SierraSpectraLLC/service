@@ -14,6 +14,7 @@
 // Pure. Pages hand in rows; this decides what they mean.
 
 import { gasesForSystemWithUnits } from "@/lib/catalogGas";
+import type { Tone } from "@/lib/tones";
 
 /** The order they run in, which is also the order the binder prints them. */
 export const QUALIFICATIONS = ["IQ", "OQ", "PQ"] as const;
@@ -137,10 +138,10 @@ export function qualsOf(tasks: { qualification: string; state: string }[]): Stan
   });
 }
 
-export const STANDING_COLOR: Record<Standing["tone"], { bg: string; fg: string }> = {
-  ok: { bg: "#E5F3E5", fg: "#2E6B2E" },
-  warn: { bg: "#FAF0DC", fg: "#8A5410" },
-  bad: { bg: "#FBE9E9", fg: "#A32D2D" },
+export const STANDING_TONE: Record<Standing["tone"], Tone> = {
+  ok: "good",
+  warn: "warn",
+  bad: "bad",
 };
 
 // ---------------------------------------------------------------------------
@@ -164,11 +165,11 @@ export const isProtocol = (docType: string) => /protocol$/i.test(docType.trim())
 
 export const DOC_STATES = ["Draft", "Approved", "Executed", "Superseded"] as const;
 
-export const DOC_STATE_COLOR: Record<string, { bg: string; fg: string }> = {
-  Draft: { bg: "#EEF1F5", fg: "#475569" },
-  Approved: { bg: "#E5F3E5", fg: "#2E6B2E" },
-  Executed: { bg: "#E7F2FA", fg: "#1D6396" },
-  Superseded: { bg: "#F1F4F8", fg: "#94A3B8" },
+export const DOC_STATE_TONE: Record<string, Tone> = {
+  Draft: "neutral",
+  Approved: "good",
+  Executed: "info",
+  Superseded: "faint",
 };
 
 /** In signing order. The Approved signature is what moves a Draft forward. */

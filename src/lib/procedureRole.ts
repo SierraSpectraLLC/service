@@ -20,6 +20,7 @@
 // which is exactly what the ones already defined meant.
 
 import { scopeMatches } from "@/lib/checkout";
+import type { Tone } from "@/lib/tones";
 
 export type Timing = { runsAtIntake: boolean; intervalDays: number | null };
 
@@ -50,11 +51,11 @@ export const ROLE_LABEL: Record<Role, string> = {
   none: "Never runs",
 };
 
-export const ROLE_COLOR: Record<Role, { bg: string; fg: string }> = {
-  checkout: { bg: "#E7F2FA", fg: "#1D6396" },
-  maintenance: { bg: "#E5F3E5", fg: "#2E6B2E" },
-  both: { bg: "#EDEBFA", fg: "#4F45A3" },
-  none: { bg: "#FBE9E9", fg: "#A32D2D" },
+export const ROLE_TONE: Record<Role, Tone> = {
+  checkout: "info",
+  maintenance: "good",
+  both: "accent",
+  none: "bad",
 };
 
 /**

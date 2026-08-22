@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { logPastWorkOrder, openWorkOrder } from "@/app/actions";
-import { WO_COLOR, WO_LABEL, WO_SEVERITIES, woLine, woOpen } from "@/lib/workOrders";
+import { WO_LABEL, WO_SEVERITIES, WO_TONE, woLine, woOpen } from "@/lib/workOrders";
 
 export type WorkOrderRow = {
   id: number;
@@ -69,7 +69,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
   };
 
   const row = (o: WorkOrderRow) => {
-    const color = WO_COLOR[o.state] ?? WO_COLOR.open;
+    const tone = WO_TONE[o.state] ?? WO_TONE.open;
     return (
       <Link key={o.id} href={`/work/${o.id}`} className="row-hover"
         style={{
@@ -79,7 +79,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
         }}>
         <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{o.number}</span>
         <span style={{ fontSize: 13, flex: "1 1 160px" }}>{o.title}</span>
-        <span className="pill" style={{ background: color.bg, color: color.fg }}>{WO_LABEL[o.state] ?? o.state}</span>
+        <span className={`pill ${tone}`}>{WO_LABEL[o.state] ?? o.state}</span>
         <span className="mut" style={{ fontSize: 11, width: "100%" }}>
           {woLine(o, today, { tasks: o.tasks, done: o.done })}
           {o.askedBy ? ` · asked by ${o.askedBy}` : ""}

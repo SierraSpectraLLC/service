@@ -11,7 +11,7 @@ import PhotoThumb from "./PhotoThumb";
 import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPanel";
 import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
-import { STANDING_COLOR } from "@/lib/gxp";
+import { STANDING_TONE } from "@/lib/gxp";
 
 type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
@@ -141,8 +141,8 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                     not, with the reasons on hover. Unregulated systems show
                     nothing - the flag gates every compliance surface. */}
                 {instrument.gxp && gxpStanding && (
-                  <span className="pill" title={gxpStanding.reasons.join("; ") || "All qualification work complete, nothing expiring"}
-                    style={{ background: STANDING_COLOR[gxpStanding.tone].bg, color: STANDING_COLOR[gxpStanding.tone].fg }}>
+                  <span className={`pill ${STANDING_TONE[gxpStanding.tone]}`}
+                    title={gxpStanding.reasons.join("; ") || "All qualification work complete, nothing expiring"}>
                     GxP · {gxpStanding.label}
                   </span>
                 )}

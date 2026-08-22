@@ -17,6 +17,7 @@
 // action - is how a client ends up able to close their own unfinished job.
 
 import { addDays } from "@/lib/pm";
+import type { Tone } from "@/lib/tones";
 
 export const WO_STATES = ["open", "active", "waiting", "resolved", "closed", "cancelled"] as const;
 export type WoState = (typeof WO_STATES)[number];
@@ -32,13 +33,15 @@ export const WO_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-export const WO_COLOR: Record<string, { bg: string; fg: string }> = {
-  open: { bg: "#FAF0DC", fg: "#8A5410" },
-  active: { bg: "#E7EFF8", fg: "#1D6396" },
-  waiting: { bg: "#F4F6F9", fg: "#64748B" },
-  resolved: { bg: "#E8F3EC", fg: "#2E6B2E" },
-  closed: { bg: "#EEF1F5", fg: "#475569" },
-  cancelled: { bg: "#F4F6F9", fg: "#94A3B8" },
+/* Waiting is neutral rather than faint on purpose: it is a live state (the
+   ball is just in someone else's court), where cancelled is out of play. */
+export const WO_TONE: Record<string, Tone> = {
+  open: "warn",
+  active: "info",
+  waiting: "neutral",
+  resolved: "good",
+  closed: "neutral",
+  cancelled: "faint",
 };
 
 export const isWoState = (s: string): s is WoState => (WO_STATES as readonly string[]).includes(s);
