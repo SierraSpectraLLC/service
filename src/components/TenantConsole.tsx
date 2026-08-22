@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { createOperator } from "@/app/actions";
+import { DataTable, PageHead, Pill } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
 
 export type TenantRow = {
   id: number; name: string;
@@ -27,30 +29,27 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
-  const [done, setDone] = useState("");
   const [pending, startTransition] = useTransition();
 
   const submit = () => {
-    setError(""); setDone("");
+    setError("");
     startTransition(async () => {
       const res = await createOperator(name, email);
       if (res?.error) { setError(res.error); return; }
-      setDone(`${name.trim()} can sign in as ${email.trim().toLowerCase()}`);
+      toast({ message: `Opened ${name.trim()} - ${email.trim().toLowerCase()} can sign in` });
       setName(""); setEmail(""); setOpen(false);
     });
   };
 
-  const cell = { padding: "7px 8px", fontSize: 12.5, textAlign: "right" as const, whiteSpace: "nowrap" as const };
-  const head = { ...cell, fontSize: 11, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase" as const, letterSpacing: 0.4 };
-
   return (
-    <div className="card">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-        <div className="card-title">Service companies</div>
-        <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={() => setOpen((v) => !v)}>
-          {open ? "Cancel" : "+ Open a workspace"}
-        </button>
-      </div>
+    <div>
+      <PageHead title="Service companies"
+        sub="The numbers a price is built from - seats, clients, systems, machines - so an invoice is read here rather than reconstructed later."
+        actions={
+          <button className="btn sm accent" onClick={() => setOpen((v) => !v)}>
+            {open ? "Cancel" : "+ Open a workspace"}
+          </button>
+        } />
 
       {open && (
         <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px", margin: "8px 0" }}>
@@ -72,52 +71,43 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
           {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
         </div>
       )}
-      {done && <div style={{ fontSize: 12.5, color: "#2E6B2E", fontWeight: 700, margin: "6px 0" }}>Opened ✓ {done}</div>}
-
       {unassigned.length > 0 && (
         <div style={{ fontSize: 12.5, color: "#8A5410", background: "#FAF0DC", borderRadius: 8, padding: "7px 10px", margin: "8px 0" }}>
           No company set for {unassigned.join(", ")} — they see nothing until one is.
         </div>
       )}
 
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
-          <thead>
-            <tr>
-              <th style={{ ...head, textAlign: "left" }}>Company</th>
-              <th style={head}>Seats</th>
-              <th style={head}>Clients</th>
-              <th style={head}>Client logins</th>
-              <th style={head}>Systems</th>
-              <th style={head}>Machines</th>
-              <th style={head}>Invited onto</th>
-              <th style={{ ...head, textAlign: "left" }}>Since</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} style={{ borderTop: "1px solid var(--line)" }}>
-                <td style={{ ...cell, textAlign: "left", fontWeight: 700 }}>
-                  {r.name}
-                  {r.id === rootOrgId && (
-                    <span className="pill info" style={{ marginLeft: 6 }}>runs the platform</span>
-                  )}
-                </td>
-                <td style={cell}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</td>
-                <td style={cell}>{r.clients}</td>
-                <td style={cell}>{r.clientLogins}</td>
-                <td style={cell}>
-                  {r.live}{r.systems !== r.live && <span className="mut"> of {r.systems}</span>}
-                </td>
-                <td style={cell}>{r.machines}</td>
-                <td style={cell}>{r.invitedOnto || <span className="mut">—</span>}</td>
-                <td style={{ ...cell, textAlign: "left" }} className="mut">{r.since}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {rows.length === 0 && <div className="mut" style={{ fontSize: 12.5 }}>No workspaces yet.</div>}
+      <DataTable
+        cols={[
+          { key: "name", label: "Company", width: "minmax(160px, 1.6fr)" },
+          { key: "seats", label: "Seats", width: "90px", align: "right" },
+          { key: "clients", label: "Clients", width: "70px", align: "right", hideMobile: true },
+          { key: "logins", label: "Client logins", width: "100px", align: "right", hideMobile: true },
+          { key: "systems", label: "Systems", width: "90px", align: "right" },
+          { key: "machines", label: "Machines", width: "80px", align: "right", hideMobile: true },
+          { key: "invited", label: "Invited onto", width: "95px", align: "right", hideMobile: true },
+          { key: "since", label: "Since", width: "90px", hideMobile: true },
+        ]}
+        rows={rows.map((r) => ({
+          key: r.id,
+          cells: {
+            name: (
+              <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <b style={{ fontSize: 13 }}>{r.name}</b>
+                {r.id === rootOrgId && <Pill tone="info">runs the platform</Pill>}
+              </span>
+            ),
+            seats: <span style={{ fontSize: 12.5 }}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</span>,
+            clients: <span style={{ fontSize: 12.5 }}>{r.clients}</span>,
+            logins: <span style={{ fontSize: 12.5 }}>{r.clientLogins}</span>,
+            systems: <span style={{ fontSize: 12.5 }}>{r.live}{r.systems !== r.live && <span className="mut"> of {r.systems}</span>}</span>,
+            machines: <span style={{ fontSize: 12.5 }}>{r.machines}</span>,
+            invited: <span style={{ fontSize: 12.5 }}>{r.invitedOnto || <span className="mut">-</span>}</span>,
+            since: <span className="mut" style={{ fontSize: 12 }}>{r.since}</span>,
+          },
+        }))}
+        empty="No workspaces yet"
+      />
     </div>
   );
 }
