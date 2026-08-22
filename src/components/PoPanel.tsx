@@ -6,6 +6,7 @@ import PartNumberField from "./PartNumberField";
 import {
   addPoLine, cancelPurchaseOrder, deletePoLine, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
 } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { formatCents, centsToInput } from "@/lib/money";
 import { PO_LABEL, PO_TONE, lineOutstanding, lineTotalCents, poEditable, poReceivable, poTotals } from "@/lib/po";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -85,7 +86,17 @@ export default function PoPanel({ po, lines, canManage, makers }: {
         )}
 
         {editing && (
-          <div className="dash-form" style={{ marginBottom: 10 }}>
+          <Dialog open onClose={() => setEditing(false)} title={`Edit ${po.number}`}
+            footer={
+              <>
+                <span className="dialog-status" />
+                <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+                <button className="btn accent" disabled={pending || !head.vendor.trim()}
+                  onClick={() => run(() => updatePurchaseOrder(po.id, head), () => { setEditing(false); toast({ message: `Saved ${po.number}` }); })}>
+                  {pending ? "Saving..." : "Save PO"}
+                </button>
+              </>
+            }>
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div><label>Vendor *</label><input value={head.vendor} list="maker-book" onChange={(e) => setHead({ ...head, vendor: e.target.value })} />
                 <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
@@ -96,11 +107,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
               <label>Note</label>
               <input value={head.note} onChange={(e) => setHead({ ...head, note: e.target.value })} />
             </div>
-            <button className="btn sm accent" disabled={pending || !head.vendor.trim()}
-              onClick={() => run(() => updatePurchaseOrder(po.id, head), () => setEditing(false))}>
-              {pending ? "Saving..." : "Save"}
-            </button>
-          </div>
+          </Dialog>
         )}
 
         {lines.map((l) => {
@@ -179,7 +186,20 @@ export default function PoPanel({ po, lines, canManage, makers }: {
         {lines.length === 0 && <div className="mut" style={{ fontSize: 13 }}>Nothing on this order yet.</div>}
 
         {editable && (adding ? (
-          <div className="dash-form" style={{ marginTop: 10 }}>
+          <Dialog open onClose={() => setAdding(false)} title={`Add a line to ${po.number}`}
+            footer={
+              <>
+                <span className="dialog-status" />
+                <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
+                <button className="btn accent" disabled={pending || !newLine.partNumber.trim()}
+                  onClick={() => run(() => addPoLine(po.id, newLine), () => {
+                    setAdding(false); setNewLine({ partNumber: "", name: "", qty: "1", price: "" });
+                    toast({ message: `Added ${newLine.partNumber.trim()} to ${po.number}` });
+                  })}>
+                  {pending ? "Adding..." : `Add to ${po.number}`}
+                </button>
+              </>
+            }>
             <div className="pf2" style={{ marginBottom: 8 }}>
               <div>
                 <label>Part number *</label>
@@ -209,11 +229,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
               <div><label>Qty</label><input value={newLine.qty} inputMode="numeric" onChange={(e) => setNewLine({ ...newLine, qty: e.target.value })} /></div>
               <div><label>Unit $</label><input value={newLine.price} onChange={(e) => setNewLine({ ...newLine, price: e.target.value })} placeholder="129.95" /></div>
             </div>
-            <button className="btn sm accent" disabled={pending || !newLine.partNumber.trim()}
-              onClick={() => run(() => addPoLine(po.id, newLine), () => { setAdding(false); setNewLine({ partNumber: "", name: "", qty: "1", price: "" }); })}>
-              {pending ? "Adding..." : "Add line"}
-            </button>
-          </div>
+          </Dialog>
         ) : (
           <button className="btn link" style={{ fontSize: 12, marginTop: 8 }} onClick={() => setAdding(true)}>+ add a line</button>
         ))}
