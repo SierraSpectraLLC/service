@@ -9,6 +9,7 @@ import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { listGroupDevices, NOT_CONFIGURED, reconcileOrgDevices, remoteConfigured } from "@/lib/remote";
 import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import RemoteDevicesPanel from "@/components/RemoteDevicesPanel";
+import { PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -114,14 +115,12 @@ export default async function RemotePage() {
 
   return (
     <div className="container page">
-      <div className="crumb">Operations › <b>Remote support</b></div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>Remote support</h1>
-        <span className="mut" style={{ fontSize: 12 }}>
-          {devices.length === 0 ? "no machines enrolled"
-            : `${devices.length} machine${devices.length === 1 ? "" : "s"}`}
-        </span>
-      </div>
+      <PageHead
+        crumb={<>Operations › <b>Remote support</b></>}
+        title="Remote support"
+        sub={devices.length === 0 ? "No machines enrolled yet."
+          : `${devices.length} machine${devices.length === 1 ? "" : "s"} enrolled.`}
+      />
 
       {!configured && (
         <div className="card" style={{ borderLeft: "4px solid #8A5410" }}>
