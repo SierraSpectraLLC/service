@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import { revokeHouseMember, setHouseMember } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 
 export type HouseRow = {
   email: string; role: string; name: string; fromEnv: boolean; isRoot: boolean; locked: boolean;
@@ -56,7 +58,19 @@ export default function HouseMembersPanel({ members, myEmail }: {
       </div>
 
       {adding && (
-        <div className="dash-form" style={{ marginBottom: 12 }}>
+        <Dialog open onClose={() => setAdding(false)} title="Add a house member"
+          context="Exact address only - no @domain wildcards. They sign in with a magic link; no password to share."
+          footer={
+            <>
+              <span className="dialog-status" />
+              <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !draft.email.trim()}
+                onClick={() => run(
+                  () => setHouseMember(draft.email, draft.role, draft.name),
+                  () => { setAdding(false); setDraft({ email: "", name: "", role: "staff" }); toast({ message: `Added ${draft.email.trim()}` }); },
+                )}>{pending ? "Saving..." : "Add member"}</button>
+            </>
+          }>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Email *</label>
@@ -75,16 +89,7 @@ export default function HouseMembersPanel({ members, myEmail }: {
               </select>
             </div>
           </div>
-          <div className="mut" style={{ fontSize: 11, marginBottom: 10 }}>
-            Exact address only - no @domain wildcards. They sign in with a magic link to
-            that address; no password to share.
-          </div>
-          <button className="btn sm accent" disabled={pending || !draft.email.trim()}
-            onClick={() => run(
-              () => setHouseMember(draft.email, draft.role, draft.name),
-              () => { setAdding(false); setDraft({ email: "", name: "", role: "staff" }); },
-            )}>{pending ? "Saving..." : "Add"}</button>
-        </div>
+        </Dialog>
       )}
 
       {members.map((m) => (
