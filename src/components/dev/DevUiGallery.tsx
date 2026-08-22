@@ -248,6 +248,9 @@ export default function DevUiGallery() {
 
       <SectionHead label="Navigation" />
       <style>{NAV_FRAME_CSS}</style>
+      <div className="mut t-small" style={{ margin: "0 0 4px 2px" }}>
+        MobileNav: mobile variant, forced visible at every width. The real header hides all of this from 640px up.
+      </div>
       <div className="navframe" id="nav-mobile">
         <div className="navframe-bar">
           <MobileNav
@@ -276,6 +279,10 @@ export default function DevUiGallery() {
         </div>
       </div>
 
+      <div className="mut t-small" style={{ margin: "0 0 4px 2px" }}>
+        SettingsNav: the sidebar is the desktop variant; the drilldown beneath the panel is the
+        mobile variant, forced visible. The real page shows one or the other, split at 900px.
+      </div>
       <div className="navframe" id="nav-settings">
         <div className="settings-shell">
           <SettingsNav isOwner isPlatform={false} />
