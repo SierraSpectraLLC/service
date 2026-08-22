@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import { archiveStockroom, removeStockroomShare, setStockroomShare, updateStockroom } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 
 export type RoomShare = { orgId: number; name: string; kind: string; access: string };
 
@@ -43,7 +45,28 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
       </div>
 
       {editing ? (
-        <div className="dash-form" style={{ marginBottom: 12 }}>
+        <Dialog open onClose={() => setEditing(false)} title={`Edit ${room.name}`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn link danger"
+                onClick={() => {
+                  const why = promptReason(`Archive "${room.name}"? Its ledger stays - the room just stops appearing.`);
+                  if (!why) return;
+                  startTransition(async () => {
+                    const res = await archiveStockroom(room.id, why);
+                    if (res?.error) setError(res.error);
+                  });
+                }}>Archive</button>
+              <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !draft.name.trim()}
+                onClick={() => startTransition(async () => {
+                  const res = await updateStockroom(room.id, draft);
+                  if (res?.error) setError(res.error);
+                  else { setEditing(false); toast({ message: `Saved ${draft.name.trim()}` }); }
+                })}>{pending ? "Saving..." : "Save stockroom"}</button>
+            </>
+          }>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div><label>Name *</label><input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
             {room.kind === "mobile" && (
@@ -55,24 +78,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
             <label>Note</label>
             <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn sm accent" disabled={pending || !draft.name.trim()}
-              onClick={() => startTransition(async () => {
-                const res = await updateStockroom(room.id, draft);
-                if (res?.error) setError(res.error);
-                else setEditing(false);
-              })}>{pending ? "Saving..." : "Save"}</button>
-            <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
-              onClick={() => {
-                const why = promptReason(`Archive "${room.name}"? Its ledger stays - the room just stops appearing.`);
-                if (!why) return;
-                startTransition(async () => {
-                  const res = await archiveStockroom(room.id, why);
-                  if (res?.error) setError(res.error);
-                });
-              }}>Archive</button>
-          </div>
-        </div>
+        </Dialog>
       ) : (
         <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
           Belongs to <b style={{ color: "var(--ink)" }}>{ownerName}</b>
