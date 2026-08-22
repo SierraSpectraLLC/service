@@ -124,29 +124,26 @@ export default function MaintenancePanel({ target, schedules, people, today, can
       <div key={s.id} style={{ padding: "7px 0", borderTop: "1px solid var(--line)", opacity: s.paused ? 0.6 : 1 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 700 }}>{s.title}</span>
-          <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{cadenceLabel(s.everyDays)}</span>
+          <span className="pill accent">{cadenceLabel(s.everyDays)}</span>
           {s.paused ? (
-            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
+            <span className="pill neutral">paused</span>
           ) : s.openTaskId !== null ? (
-            <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
+            <span className="pill info">task open</span>
           ) : (
             /* Advisory: the same date without the siren. A passed date on a
                reseller's bench is information ("a cycle has elapsed"), not a
                failure, so it never goes red and never says "overdue". */
             advisory ? (
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>
+              <span className="pill neutral">
                 {overdue || dueToday ? `cycle elapsed ${mdy(s.nextDue)}` : `next cycle ${mdy(s.nextDue)}`}
               </span>
             ) : (
-            <span className="pill" style={{
-              background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
-              color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
-            }}>
+            <span className={`pill ${overdue ? "bad" : dueToday ? "warn" : "neutral"}`}>
               {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
             </span>
             )
           )}
-          {s.onAsset && !inGroup && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s.onAsset}</span>}
+          {s.onAsset && !inGroup && <span className="pill neutral">{s.onAsset}</span>}
           {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
           {s.lastDone && <span className="mut" style={{ fontSize: 11 }}>last done {mdy(s.lastDone)}</span>}
           {canEdit && (
@@ -305,13 +302,11 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         {!panelOpen && schedules.length > 0 && (
           <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             {active.length > 0 ? (
-              <span className="pill" style={advisory
-                ? { background: "#EEF1F5", color: "#475569" }
-                : { background: "#FBE9E9", color: "#A32D2D" }}>
+              <span className={`pill ${advisory ? "neutral" : "bad"}`}>
                 {active.length} {advisory ? "cycled" : "due now"}
               </span>
             ) : next ? (
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>
+              <span className="pill good">
                 {advisory ? `next cycle ${next.label}` : `next due ${next.label}`}
               </span>
             ) : null}
@@ -378,7 +373,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           always, the obligation only on a scheduled system. lib/pmPosture. */}
       {posture && (advisory || !postureIsDefault(posture.stored)) && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8, padding: "7px 10px", borderRadius: 8, background: advisory ? "#F5F7FA" : "#E7F2FA" }}>
-          <span className="pill" style={{ background: advisory ? "#EEF1F5" : "#E7F2FA", color: advisory ? "#475569" : "#1D6396" }}>
+          <span className={`pill ${advisory ? "neutral" : "info"}`}>
             {advisory ? "reference only" : "on a schedule"}
           </span>
           <span className="mut" style={{ fontSize: 11.5, flex: "1 1 200px" }}>{posture.note}</span>
@@ -483,13 +478,13 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         const subheads = units.length > 1;
         const owedPill = f.owed > 0 ? (
           advisory ? (
-            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{f.owed} cycled</span>
+            <span className="pill neutral">{f.owed} cycled</span>
           ) : f.state === "overdue" ? (
-            <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>{f.owed} overdue</span>
+            <span className="pill bad">{f.owed} overdue</span>
           ) : f.state === "due" ? (
-            <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{f.owed} due</span>
+            <span className="pill warn">{f.owed} due</span>
           ) : (
-            <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{f.owed} in flight</span>
+            <span className="pill info">{f.owed} in flight</span>
           )
         ) : null;
         return (
