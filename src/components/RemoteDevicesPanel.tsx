@@ -88,11 +88,11 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
               {deviceSubLabel(d.nickname, d.name) && (
                 <span className="mono mut" style={{ fontSize: 11 }}>{deviceSubLabel(d.nickname, d.name)}</span>
               )}
-              {d.orgName && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{d.orgName}</span>}
-              {!d.orgName && <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>unassigned</span>}
+              {d.orgName && <span className="pill info">{d.orgName}</span>}
+              {!d.orgName && <span className="pill warn">unassigned</span>}
               {/* Said up front, with the reason - never discovered after a click. */}
               {d.consentMode === "consent" && (
-                <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}
+                <span className="pill warn"
                   title={`Someone must approve at the machine: ${d.consentWhy}`}>
                   asks first · {d.consentWhy}
                 </span>
