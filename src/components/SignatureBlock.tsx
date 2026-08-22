@@ -25,21 +25,21 @@ export default function SignatureBlock({ signatures, operatorName, clientName }:
           }}>
             {s.signerName}
           </div>
-          <div style={{ fontSize: 11, marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="row-2 t-meta" style={{ marginTop: 4 }}>
             <b>{operatorName}</b>
             {s.signerTitle && <span>{s.signerTitle}</span>}
             <span className="mono">{s.signedBy}</span>
             <span style={{ marginLeft: "auto" }}>{s.when}</span>
           </div>
-          <div style={{ fontSize: 11, marginTop: 2 }}>
+          <div className="t-meta" style={{ marginTop: 2 }}>
             {s.meaning} — {s.snapshot.tasksDone} of {s.snapshot.tasksTotal} tasks complete
             {s.snapshot.requiredTests.length > 0 && (
               <>, mandatory tests evidenced: {s.snapshot.requiredTests.map((t) => t.title).join(", ")}</>
             )}
           </div>
-          {s.note && <div style={{ fontSize: 11, marginTop: 2, fontStyle: "italic" }}>{s.note}</div>}
+          {s.note && <div className="t-meta" style={{ marginTop: 2, fontStyle: "italic" }}>{s.note}</div>}
           {s.stale && (
-            <div style={{ fontSize: 10, marginTop: 2, color: "#8A5410" }}>
+            <div style={{ fontSize: 10, marginTop: 2, color: "var(--t-warn-fg)" }}>
               Record amended after signing; this signature covers the packet as it stood on {s.when}.
             </div>
           )}
