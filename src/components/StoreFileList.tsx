@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { promptReason } from "@/lib/reason";
+import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import {
   attachLibraryFile, createFolder, createShareLink, deleteAttachment, deleteFolder,
   moveFilesToFolder, moveFolder, renameFolder, saveFileColumns, updateAttachment,
@@ -11,6 +11,7 @@ import {
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
+
 import { addDaysIso, DEFAULT_LINK_DAYS } from "@/lib/dropShare";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { canMoveFolder, childrenOf, descendantIds, folderPath, type FolderLike } from "@/lib/folders";
@@ -50,13 +51,6 @@ const COL_BOUNDS: Record<keyof FileColumnWidths, [number, number]> = {
 const oneLine: React.CSSProperties = {
   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
 };
-
-/**
- * The column seams, faint but real. With user-sized columns the eye needs to
- * see where one ends - a hair fainter than the row rule, so the verticals read
- * as structure and the horizontals still read as rows.
- */
-const colLine: React.CSSProperties = { borderLeft: "1px solid #EFF3F8", paddingLeft: 8 };
 
 const onShelf = (f: StoreFile) => f.places.some((p) => p.kind === "shelf");
 const glyph = (f: StoreFile) => ATTACH_META[f.kind] ?? ATTACH_META.Other;
@@ -247,6 +241,7 @@ export default function StoreFileList({
     startTransition(async () => {
       const res = await moveFilesToFolder(ids, folderId);
       if (res?.error) { setError(res.error); return; }
+      toast({ message: `Moved ${ids.length} file${ids.length === 1 ? "" : "s"}` });
       setPicked(new Set()); setError("");
     });
   };
@@ -416,12 +411,14 @@ export default function StoreFileList({
           )}
           {sweepable.length > 0 && (
             <button className="btn sm" disabled={pending} style={{ marginLeft: "auto", color: "#A32D2D" }}
-              onClick={() => {
-                const why = promptReason(
-                  `Delete ${sweepable.length} file${sweepable.length === 1 ? "" : "s"} from your files?`
-                  + (sweepable.length < picked.size
-                    ? ` The other ${picked.size - sweepable.length} are filed on records and stay.` : ""),
-                );
+              onClick={async () => {
+                const why = await confirmReason({
+                  title: `Delete ${sweepable.length} file${sweepable.length === 1 ? "" : "s"} from your files?`,
+                  body: sweepable.length < picked.size
+                    ? `The other ${picked.size - sweepable.length} in the selection are filed on records and stay.`
+                    : "They are permanently removed from storage.",
+                  action: `Delete ${sweepable.length} file${sweepable.length === 1 ? "" : "s"}`, tone: "bad",
+                });
                 if (!why) return;
                 startTransition(async () => {
                   for (const f of sweepable) {
@@ -430,6 +427,7 @@ export default function StoreFileList({
                     const res = await deleteAttachment(shelf.attachmentId, why);
                     if (res?.error) { setError(res.error); return; }
                   }
+                  toast({ message: `Deleted ${sweepable.length} file${sweepable.length === 1 ? "" : "s"}` });
                   setPicked(new Set());
                 });
               }}>
@@ -439,17 +437,23 @@ export default function StoreFileList({
         </div>
       )}
 
+      {/* The browser proper, in the DataTable chrome: the same .dt/.reg grid
+          the list pages use, with this table's one extra - draggable column
+          widths feeding the grid tracks. Name takes the slack. */}
       {view === "list" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "0 4px 6px", borderBottom: "1px solid var(--line)" }}>
-          <input type="checkbox" aria-label="Select all"
-            checked={shown.length > 0 && shown.every((f) => picked.has(f.url))}
-            onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((f) => f.url)) : new Set())}
-            style={{ width: 15, height: 15, flexShrink: 0 }} />
-          <span style={{ flex: "1 1 200px", minWidth: 0 }}>{head("name", "Name")}</span>
-          {/* Each fixed column drags at its right edge; Name takes the slack. */}
+        <div className="dt reg"
+          style={{ ["--reg-cols" as string]: `18px minmax(160px, 1fr) ${cols.where}px ${cols.size}px ${cols.when}px` }}>
+        <div className="reg-head">
+          <span className="reg-cell" style={{ overflow: "visible" }}>
+            <input type="checkbox" aria-label="Select all"
+              checked={shown.length > 0 && shown.every((f) => picked.has(f.url))}
+              onChange={(e) => setPicked(e.target.checked ? new Set(shown.map((f) => f.url)) : new Set())} />
+          </span>
+          <span className="reg-cell">{head("name", "Name")}</span>
+          {/* Each fixed column drags at its right edge. */}
           {([["where", "Where", {}], ["size", "Size", { textAlign: "right" }], ["when", "Modified", { textAlign: "right" }]] as const)
             .map(([key, label, extra]) => (
-              <span key={key} style={{ width: cols[key], flexShrink: 0, position: "relative", ...colLine, ...extra }}>
+              <span key={key} className="reg-cell" style={{ position: "relative", overflow: "visible", ...extra }}>
                 {head(key, label)}
                 <span role="separator" aria-orientation="vertical" aria-label={`Resize the ${label} column`}
                   title="Drag to resize · double-click to reset"
@@ -468,29 +472,29 @@ export default function StoreFileList({
               </span>
             ))}
         </div>
-      )}
 
       {/* Folders first, the way every file list has done it since 1984. Hidden
           while searching, because a search is about files. */}
-      {view === "list" && !searching && here.map((d) => (
-        <div key={`d${d.id}`} className="row-hover file-row"
+      {!searching && here.map((d) => (
+        <div key={`d${d.id}`} className="reg-row dt-row row-hover file-row"
           onDragOver={(e) => { if (acceptsFileDrag(e)) { e.preventDefault(); setDragOver(d.id); } }}
           onDragLeave={() => setDragOver((v) => (v === d.id ? null : v))}
           onDrop={dropInto(d.id)}
           style={{
-            display: "flex", gap: 8, alignItems: "center", padding: "7px 4px",
-            borderBottom: "1px solid var(--line)",
             background: dragOver === d.id ? "#EEF4FB" : undefined,
             outline: dragOver === d.id ? "1.5px dashed var(--navy)" : undefined, outlineOffset: -2,
           }}>
-          <span style={{ width: 15, flexShrink: 0 }} />
-          <button className="btn link" onClick={() => { setAt(d.id); setPicked(new Set()); }}
-            style={{ flex: "1 1 200px", textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0 }}
-            title={d.name}>
-            <span aria-hidden style={{ color: "#8A5410", flexShrink: 0 }}>▮</span>
-            <span style={{ fontSize: 13, fontWeight: 700, minWidth: 0, ...oneLine }}>{d.name}</span>
-          </button>
-          <span style={{ width: cols.where, flexShrink: 0, ...colLine, ...oneLine }}>
+          <span className="dt-main">
+          <span className="reg-cell" />
+          <span className="reg-cell" style={{ overflow: "visible" }}>
+            <button className="btn link" onClick={() => { setAt(d.id); setPicked(new Set()); }}
+              style={{ textAlign: "left", display: "flex", gap: 7, alignItems: "baseline", minWidth: 0, maxWidth: "100%" }}
+              title={d.name}>
+              <span aria-hidden style={{ color: "var(--t-warn-fg)", flexShrink: 0 }}>▮</span>
+              <span style={{ fontSize: 13, fontWeight: 700, minWidth: 0, ...oneLine }}>{d.name}</span>
+            </button>
+          </span>
+          <span className="reg-cell">
             {(() => {
               // Everything at any depth, so a folder's line means the same
               // thing whether somebody nested things inside it or not.
@@ -506,8 +510,8 @@ export default function StoreFileList({
               );
             })()}
           </span>
-          <span style={{ width: cols.size, flexShrink: 0, ...colLine, alignSelf: "stretch" }} />
-          <span style={{ width: cols.when, flexShrink: 0, textAlign: "right", ...colLine, ...oneLine }}>
+          <span className="reg-cell" />
+          <span className="reg-cell" style={{ textAlign: "right", overflow: "visible" }}>
             {canOrganise && (
               <>
                 <button className="btn link row-act" style={{ fontSize: 10.5 }} disabled={pending}
@@ -522,17 +526,26 @@ export default function StoreFileList({
                 <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }} disabled={pending}
                   onClick={() => { setFolderMove(folderMove === d.id ? null : d.id); setError(""); }}>move</button>
                 <button className="btn link row-act" style={{ fontSize: 10.5, color: "#A32D2D", marginLeft: 6 }} disabled={pending}
-                  onClick={() => startTransition(async () => {
-                    const res = await deleteFolder(d.id);
-                    setError(res?.error ?? "");
-                  })}>delete</button>
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Delete the "${d.name}" folder?`,
+                      body: "Only an empty folder can go - its files must be moved out first.",
+                      action: `Delete ${d.name}`, tone: "bad",
+                    }))) return;
+                    startTransition(async () => {
+                      const res = await deleteFolder(d.id);
+                      setError(res?.error ?? "");
+                      if (!res?.error) toast({ message: `Deleted the ${d.name} folder` });
+                    });
+                  }}>delete</button>
               </>
             )}
+          </span>
           </span>
         </div>
       ))}
 
-      {view === "list" && !searching && folderMove !== null && (
+      {!searching && folderMove !== null && (
         <div style={{ padding: "7px 10px", background: "#F8FAFD", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 6 }}>
           <div className="mut" style={{ fontSize: 11, marginBottom: 4 }}>
             Move &ldquo;{folders.find((f) => f.id === folderMove)?.name}&rdquo; into:
@@ -557,8 +570,8 @@ export default function StoreFileList({
         </div>
       )}
 
-      {view === "list" && shown.map((f) => (
-        <div key={f.url} className="row-hover file-row"
+      {shown.map((f, i) => (
+        <div key={f.url} className={`reg-row dt-row row-hover file-row${i % 2 === 1 ? " alt" : ""}`}
           draggable={canOrganise && onShelf(f)}
           onDragStart={(e) => {
             // The drag never carries the browser's "Files" type, so the page's
@@ -566,13 +579,16 @@ export default function StoreFileList({
             e.dataTransfer.setData("application/x-store-file", dragIds(f).join(","));
             e.dataTransfer.effectAllowed = "move";
           }}
-          style={{ display: "flex", gap: 8, alignItems: "center", padding: "7px 4px", borderBottom: "1px solid var(--line)", cursor: canOrganise && onShelf(f) ? "grab" : undefined }}>
-          <input type="checkbox" checked={picked.has(f.url)} onChange={() => toggle(f.url)}
-            aria-label={`Select ${f.fileName}`} style={{ width: 15, height: 15, flexShrink: 0 }} />
+          style={{ cursor: canOrganise && onShelf(f) ? "grab" : undefined }}>
+          <span className="dt-main">
+          <span className="reg-cell" style={{ overflow: "visible" }}>
+            <input type="checkbox" checked={picked.has(f.url)} onChange={() => toggle(f.url)}
+              aria-label={`Select ${f.fileName}`} />
+          </span>
           {/* One line, whatever the name's length. The full name and the
               description ride on the hover title, so truncating costs a squint
               and never the information. */}
-          <span style={{ flex: "1 1 200px", minWidth: 0, display: "flex", gap: 7, alignItems: "baseline" }}
+          <span className="reg-cell" style={{ display: "flex", gap: 7, alignItems: "baseline" }}
             title={f.description ? `${f.fileName} - ${f.description}` : f.fileName}>
             <span aria-hidden style={{ color: `var(--t-${glyph(f).tone}-fg)`, flexShrink: 0 }}>{glyph(f).glyph}</span>
             <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
@@ -585,7 +601,7 @@ export default function StoreFileList({
               </span>
             )}
           </span>
-          <span style={{ width: cols.where, flexShrink: 0, display: "flex", gap: 4, alignItems: "baseline", overflow: "hidden", whiteSpace: "nowrap", ...colLine }}>
+          <span className="reg-cell" style={{ display: "flex", gap: 4, alignItems: "baseline" }}>
             {/* Found by search: say which folder it lives in, and make the
                 answer a door. "Does it exist" without "where did I put it" is
                 half of what somebody searching wanted. */}
@@ -600,7 +616,7 @@ export default function StoreFileList({
             <WhereChips file={f} removable={removable} pending={pending}
               onRemoved={(err) => setError(err)} startTransition={startTransition} />
           </span>
-          <span style={{ width: cols.size, flexShrink: 0, textAlign: "right", whiteSpace: "nowrap", ...colLine }}>
+          <span className="reg-cell" style={{ textAlign: "right", overflow: "visible" }}>
             <span className="mut" style={{ fontSize: 12 }}>{fmtBytes(f.size)}</span>
             {canOrganise && (
               <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }}
@@ -614,12 +630,15 @@ export default function StoreFileList({
           </span>
           {/* One line; widen the column when you want the uploader too - the
               hover title always carries both. */}
-          <span className="mut" title={`${f.when} · ${f.uploadedBy}`}
-            style={{ width: cols.when, flexShrink: 0, fontSize: 11, textAlign: "right", ...colLine, ...oneLine }}>
+          <span className="reg-cell mut" title={`${f.when} · ${f.uploadedBy}`}
+            style={{ fontSize: 11, textAlign: "right" }}>
             {f.when} · {f.uploadedBy}
+          </span>
           </span>
         </div>
       ))}
+      </div>
+      )}
 
       {view === "grid" && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
@@ -794,12 +813,17 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
           {removable(shelf) && (
             <button className="btn link row-act" style={{ fontSize: 10, color: "#A32D2D", marginLeft: 4 }} disabled={pending}
               aria-label={`Delete ${file.fileName}`}
-              onClick={() => {
-                const why = promptReason(`Delete "${file.fileName}"? It is permanently removed from storage.`);
+              onClick={async () => {
+                const why = await confirmReason({
+                  title: `Delete "${file.fileName}"?`,
+                  body: "It is permanently removed from storage.",
+                  action: "Delete file", tone: "bad",
+                });
                 if (!why) return;
                 startTransition(async () => {
                   const res = await deleteAttachment(shelf.attachmentId, why);
                   onRemoved(res?.error ?? "");
+                  if (!res?.error) toast({ message: `Deleted ${file.fileName}` });
                 });
               }}>×</button>
           )}
@@ -812,15 +836,20 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
           {removable(p) && (
             <button className="btn link row-act" style={{ fontSize: 10, color: "#A32D2D" }} disabled={pending}
               aria-label={`Remove ${file.fileName} from ${p.label}`}
-              onClick={() => {
+              onClick={async () => {
                 const scope = file.places.length > 1
-                  ? ` It stays on the ${file.places.length - 1} other place${file.places.length === 2 ? "" : "s"} it is filed.`
-                  : " The file is permanently deleted from storage.";
-                const why = promptReason(`Remove "${file.fileName}" from ${p.label}?${scope}`);
+                  ? `It stays on the ${file.places.length - 1} other place${file.places.length === 2 ? "" : "s"} it is filed.`
+                  : "The file is permanently deleted from storage.";
+                const why = await confirmReason({
+                  title: `Remove "${file.fileName}" from ${p.label}?`,
+                  body: scope,
+                  action: "Remove file", tone: "bad",
+                });
                 if (!why) return;
                 startTransition(async () => {
                   const res = await deleteAttachment(p.attachmentId, why);
                   onRemoved(res?.error ?? "");
+                  if (!res?.error) toast({ message: `Removed ${file.fileName} from ${p.label}` });
                 });
               }}>×</button>
           )}

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import { recordLibraryFiles } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { fmtBytes } from "@/lib/storage";
 import { isFileDrag } from "@/lib/dropFiles";
 
@@ -14,6 +16,9 @@ import { isFileDrag } from "@/lib/dropFiles";
  * not to upload at all: that a file landing here touches none of their systems,
  * and that dropping one anywhere on the page works. The first was true and
  * unsaid; the second was not true and is now.
+ *
+ * The button opens a small Dialog that says where files land before any are
+ * chosen; a drop anywhere on the page skips the dialog and just uploads.
  *
  * Uploads go browser-to-Blob; the server only mints the token and records the
  * row. Both ends check the storage quota, and the token mint refuses first so a
@@ -27,17 +32,17 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
 }) {
   const router = useRouter();
   const ref = useRef<HTMLInputElement>(null);
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState("");
   const [done, setDone] = useState(0);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
-  const [note, setNote] = useState("");
   const [over, setOver] = useState(false);
 
   const send = async (list: FileList | File[] | null) => {
     const files = Array.from(list ?? []);
     if (!files.length || full) return;
-    setError(""); setNote(""); setDone(0); setTotal(files.length);
+    setError(""); setDone(0); setTotal(files.length);
     // Refused here rather than by the token mint, so the message names the file
     // and the ceiling instead of arriving as a transfer that dies at 99%.
     const big = files.find((f) => f.size > maxBytes);
@@ -56,7 +61,8 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
       }
       const res = await recordLibraryFiles(filed, folderId);
       if (res?.error) throw new Error(res.error);
-      setNote(`${filed.length} file${filed.length === 1 ? "" : "s"} uploaded`);
+      toast({ message: `Uploaded ${filed.length} file${filed.length === 1 ? "" : "s"}${folderName ? ` into ${folderName}` : ""}` });
+      setOpen(false);
       router.refresh();
     } catch (e) {
       // Whatever failed, say which file and why - a silent stop here looks like
@@ -91,25 +97,45 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
 
   return (
     <>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="btn sm primary" disabled={!!busy || full} onClick={() => ref.current?.click()}>
+      <div className="row" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn sm primary" disabled={!!busy || full} onClick={() => { setOpen(true); setError(""); }}>
           {busy ? `Uploading ${done + 1}/${total}...` : "⇧ Upload files"}
         </button>
-        <input ref={ref} type="file" multiple style={{ display: "none" }}
-          onChange={(e) => { void send(e.target.files); e.target.value = ""; }} />
         <span className="mut" style={{ fontSize: 11.5 }}>
-          {/* Naming the open folder here, not just on the drop overlay: this is
-              the line somebody reads BEFORE they drag, and "which folder does
-              this land in" is the question they are asking at that moment. */}
           or drop them anywhere on this page
           {folderName ? <> · into <b style={{ fontWeight: 700 }}>{folderName}</b></> : ""}
-          {" "}· up to {fmtBytes(maxBytes)} each
         </span>
-        {busy && <span className="mut" style={{ fontSize: 12 }}>{busy}</span>}
-        {note && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{note} ✓</span>}
         {full && <span style={{ fontSize: 12, color: "#A32D2D" }}>Storage is full - delete something or raise the limit.</span>}
       </div>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+
+      <input ref={ref} type="file" multiple style={{ display: "none" }}
+        onChange={(e) => { void send(e.target.files); e.target.value = ""; }} />
+
+      {open && (
+        <Dialog open size="sm" title="Upload files" onClose={() => { if (!busy) setOpen(false); }}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>
+                {error || (busy ? `Uploading ${done + 1} of ${total} · ${busy}` : "")}
+              </span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={!!busy}>Cancel</button>
+              <button className="btn accent" disabled={!!busy || full} onClick={() => ref.current?.click()}>
+                {busy ? "Uploading..." : "Choose files"}
+              </button>
+            </>
+          }>
+          <div className="t-body">
+            {/* The sentence that unlocked this store for a hesitant client:
+                nothing uploaded here touches a system. */}
+            Files land in {folderName ? <b>{folderName}</b> : "your storage"} and are attached to no
+            system, no unit and no job. Up to {fmtBytes(maxBytes)} each.
+          </div>
+          <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
+            You can also drop files anywhere on the page - no dialog needed.
+          </div>
+        </Dialog>
+      )}
 
       {/* Only while something is actually being dragged over the window. */}
       {over && (

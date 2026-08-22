@@ -29,7 +29,12 @@ export type ConfirmOptions = {
   cancel?: string;
 };
 
-type Pending = { opts: ConfirmOptions; resolve: (ok: boolean) => void };
+type Pending = {
+  opts: ConfirmOptions;
+  /** Set for confirmReason: the confirm also collects an audit reason. */
+  withReason?: boolean;
+  resolve: (answer: boolean | string | null) => void;
+};
 
 let current: Pending | null = null;
 let notify: (() => void) | null = null;
@@ -39,45 +44,77 @@ export function confirmDialog(opts: ConfirmOptions): Promise<boolean> {
   // with false and show the newer one, which is what the user last did.
   current?.resolve(false);
   return new Promise<boolean>((resolve) => {
-    current = { opts, resolve };
+    current = { opts, resolve: resolve as Pending["resolve"] };
+    notify?.();
+  });
+}
+
+/**
+ * The 21 CFR Part 11 flavour: confirm AND collect the reason in one dialog,
+ * for actions the audit trail records. Resolves the trimmed reason, or null
+ * on Cancel/Escape/scrim. The server enforces the reason too - this is the
+ * front door, not the lock.
+ */
+export function confirmReason(opts: ConfirmOptions): Promise<string | null> {
+  current?.resolve(null);
+  return new Promise<string | null>((resolve) => {
+    current = { opts, withReason: true, resolve: resolve as Pending["resolve"] };
     notify?.();
   });
 }
 
 export function ConfirmHost() {
   const [pending, setPending] = useState<Pending | null>(null);
+  const [reason, setReason] = useState("");
 
   useEffect(() => {
-    notify = () => setPending(current);
+    notify = () => { setPending(current); setReason(""); };
     // A call made before hydration finished still shows.
     if (current) setPending(current);
     return () => { notify = null; };
   }, []);
 
   if (!pending) return null;
-  const { opts } = pending;
-  const settle = (ok: boolean) => {
-    pending.resolve(ok);
+  const { opts, withReason } = pending;
+  const settle = (answer: boolean | string | null) => {
+    pending.resolve(answer);
     if (current === pending) current = null;
     setPending(null);
+    setReason("");
+  };
+  const cancelValue = withReason ? null : false;
+  const ready = !withReason || reason.trim().length >= 3;
+  const confirm = () => {
+    if (!ready) return;
+    settle(withReason ? reason.trim() : true);
   };
 
   return (
-    <Dialog open size="sm" title={opts.title} onClose={() => settle(false)}
+    <Dialog open size="sm" title={opts.title} onClose={() => settle(cancelValue)}
       footer={
         <>
           <span className="dialog-status" />
-          <button type="button" className="btn" onClick={() => settle(false)}>
+          <button type="button" className="btn" onClick={() => settle(cancelValue)}>
             {opts.cancel ?? "Cancel"}
           </button>
-          <button type="button" autoFocus
+          <button type="button" autoFocus={!withReason} disabled={!ready}
             className={`btn ${opts.tone === "bad" ? "danger" : "primary"}`}
-            onClick={() => settle(true)}>
+            onClick={confirm}>
             {opts.action}
           </button>
         </>
       }>
       {opts.body != null && <div className="t-body">{opts.body}</div>}
+      {withReason && (
+        <div className="field" style={{ marginTop: opts.body != null ? 10 : 0 }}>
+          <label htmlFor="confirm-reason">Reason</label>
+          <input id="confirm-reason" value={reason} autoFocus maxLength={300}
+            placeholder="Recorded in the audit trail"
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") confirm(); }} />
+          <div className="field-hint">A few words, kept with the record of this action.</div>
+        </div>
+      )}
     </Dialog>
   );
 }

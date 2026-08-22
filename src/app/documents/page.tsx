@@ -11,11 +11,10 @@ import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
 import { visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
-import StorePicker from "@/components/StorePicker";
 import FileLinksCard, { type StoreLink } from "@/components/FileLinksCard";
 import LibraryUpload from "@/components/LibraryUpload";
-import StorageMeter from "@/components/StorageMeter";
 import CloudLibraryCard from "@/components/CloudLibraryCard";
+import { FacetStrip } from "@/components/ui";
 import { getFileColumns, myCloudConnection } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -136,27 +135,54 @@ export default async function DocumentsPage(
   const shown = totalBytes(files);
   const truncated = rows.length >= CAP;
 
+  const quotaTone = quota.state === "full" ? "bad" : quota.state === "warn" ? "warn" : quota.state === "ok" ? "good" : "neutral";
+
   return (
     <div className="container fluid">
       <div className="crumb">Library › <b>Files</b></div>
       <div className="page-head">
         <h1 className="page-title">Files</h1>
-        <span className="mut" style={{ fontSize: 12 }}>
-          {files.length === 0 ? "empty"
-            : `${files.length} file${files.length === 1 ? "" : "s"} · ${fmtBytes(shown)}${truncated ? ` (newest ${CAP})` : ""}`}
-        </span>
         <span className="page-actions">
-          {/* The meter used to be a card of its own at the top, which made a
-              file store open on a gauge. It is a number now, and it moves out
-              of the way. */}
-          {orgRows.length > 0 && (
-            <StorePicker viewing={viewing}
-              options={[{ id: null, name: `${brand.operatorName || brand.name} (own work)` },
-                ...orgRows.map((o) => ({ id: o.id, name: o.name }))]} />
-          )}
-          <StorageMeter quota={quota} name={quota.storeName} compact />
           <Link href="/pdf" className="btn sm" style={{ textDecoration: "none" }}>PDF studio</Link>
         </span>
+      </div>
+
+      {/* Whose store is on screen. Staff only - everybody else has exactly
+          one store and sees no strip. */}
+      {orgRows.length > 0 && (
+        <FacetStrip facets={[
+          { key: "own", label: `${brand.operatorName || brand.name} (own work)`, on: viewing === null, href: "/documents" },
+          ...orgRows.map((o) => ({
+            key: String(o.id), label: o.name, on: viewing === o.id, href: `/documents?store=${o.id}`,
+          })),
+        ]} />
+      )}
+
+      {/* The store at a glance. The meter used to be a gauge card, then a
+          header line; it is a metric tile now, alongside the counts. */}
+      <div className="metric-grid" style={{ margin: "10px 0 12px" }}>
+        {([
+          ["Files", files.length === 0 ? "0" : `${files.length}${truncated ? `+` : ""}`, undefined],
+          ["Stored", fmtBytes(shown), undefined],
+          ["Storage",
+            quota.limitBytes === null
+              ? "No limit"
+              : `${fmtBytes(quota.usedBytes)} of ${fmtBytes(quota.limitBytes)}`
+                + (quota.state === "full" ? " · full" : quota.state === "warn" ? " · low" : ""),
+            quotaTone === "good" || quotaTone === "neutral" ? undefined : quotaTone],
+          ["Folders", String(folderRows.length), undefined],
+        ] as [string, string, string | undefined][]).map(([label, n, tone]) => (
+          <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
+            <div style={{ fontSize: 12 }} className="mut">{label}</div>
+            <div className="t-page" style={{ fontSize: 22, fontWeight: 700, color: tone ? `var(--t-${tone}-fg)` : "var(--navy)" }}>{n}</div>
+            {label === "Storage" && quota.limitBytes !== null && (
+              <div style={{ height: 5, borderRadius: 999, background: "#E2E8F0", overflow: "hidden", marginTop: 6 }}
+                role="img" aria-label={`${quota.pct}% of file storage used`}>
+                <div style={{ width: `${Math.max(quota.pct, quota.usedBytes > 0 ? 3 : 0)}%`, height: "100%", background: `var(--t-${quotaTone}-fg)` }} />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
       {/* The sentence a client needed and did not get: they declined to upload
           anything here because the page looked like filing something would

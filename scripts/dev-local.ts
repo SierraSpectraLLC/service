@@ -136,6 +136,13 @@ const FIXTURE = `
     (1, 'rita@labzen.test', 'Rita Alvarez', 'Could we do Thursday morning for the sign-off?'),
     (1, '${OWNER}', 'Dev Owner', 'Thursday 9am works. I will bring the packet.');
 
+  INSERT INTO folders (org_id, name) VALUES (NULL, 'Manuals');
+  INSERT INTO attachments (org_id, instrument_id, asset_id, folder_id, file_name, kind, description, url, size, uploaded_by) VALUES
+    (NULL, NULL, NULL, NULL, 'Site prep checklist.pdf', 'Reference', 'What a lab needs ready before install day', 'https://blob.local/site-prep.pdf', 482133, '${OWNER}'),
+    (NULL, NULL, NULL, 1, '6495C site guide.pdf', 'Manual', '', 'https://blob.local/6495c-guide.pdf', 2831554, '${OWNER}'),
+    (NULL, 1, NULL, NULL, 'Reserpine tune report.pdf', 'Report', 'Post-PM verification', 'https://blob.local/tune-report.pdf', 194227, 'rita@labzen.test'),
+    (NULL, 2, NULL, NULL, 'Turbo swap photos.zip', 'Other', '', 'https://blob.local/turbo-photos.zip', 8112003, '${OWNER}');
+
   INSERT INTO engagement_records (instrument_id, org_id, kind, external_id, label, revoked_by, revoked_at, data) VALUES
     (NULL, 1, 'revoked', 'LZ-000', 'GC-MS - 8890 GC', '${OWNER}', now() - interval '30 days', '${JSON.stringify({
       version: 1,
