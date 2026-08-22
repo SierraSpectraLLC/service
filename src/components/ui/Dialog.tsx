@@ -20,6 +20,25 @@ import { createPortal } from "react-dom";
  */
 export type DialogStep = { key: string; label: string; done?: boolean; warn?: boolean };
 
+/**
+ * The live footer status every form dialog shares: a failed save's message
+ * when there is one (loudest - the user just acted), otherwise the first
+ * reason the form can't save yet, otherwise a muted line saying what Save
+ * will do. Pair it with a Save button whose `disabled` mirrors `problem`,
+ * so the sentence and the disabled state can never drift apart.
+ */
+export function DialogStatus({ error, problem, ok }: {
+  error?: string;
+  /** The first unmet requirement, e.g. "name the vendor". */
+  problem?: string | null;
+  /** What a valid save covers or does, e.g. "Covers 4 models". */
+  ok?: React.ReactNode;
+}) {
+  if (error) return <span className="dialog-status err">{error}</span>;
+  if (problem) return <span className="dialog-status err">Can&apos;t save yet - {problem}</span>;
+  return <span className="dialog-status">{ok}</span>;
+}
+
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 

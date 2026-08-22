@@ -21,6 +21,8 @@ import Dialog from "@/components/ui/Dialog";
  */
 export type ConfirmOptions = {
   title: string;
+  /** The muted line under the title: what this acts on ("LC-12 · LabZen"). */
+  context?: React.ReactNode;
   /** What happens - a sentence, or a node with a consequence list. */
   body?: React.ReactNode;
   /** The verb on the button: "Remove", "Decommission", "Delete 3 files". */
@@ -139,7 +141,7 @@ export function ConfirmHost() {
   };
 
   return (
-    <Dialog open size="sm" title={opts.title} onClose={() => settle(cancelValue)}
+    <Dialog open size="sm" title={opts.title} context={opts.context} onClose={() => settle(cancelValue)}
       footer={
         <>
           <span className="dialog-status" />

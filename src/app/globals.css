@@ -853,6 +853,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .dialog-status.err { color: var(--t-bad-fg); }
 .dialog-status.ok { color: var(--t-good-fg); }
 
+/* A section heading inside a dialog body: card-title weight at form scale,
+   so a long form reads as titled groups rather than one column of labels. */
+.dialog-section {
+  font-size: 13px; font-weight: 800; color: var(--navy);
+  letter-spacing: -0.1px; margin: 16px 0 8px;
+}
+.dialog-section:first-child { margin-top: 0; }
+
 /* Stepped dialogs: a left step rail on a desktop, a thin progress bar on a
    phone. The rail marks each step done (filled check) or needing attention
    (amber bang) from live validation; the body is the caller's. */
