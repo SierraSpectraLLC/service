@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { saveEodUpdate, setEodSkip, sendEodEmail } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
 
 /** One line on a client's report: a system, or a standalone asset. */
 export type EodLine = {
@@ -111,8 +112,12 @@ export default function EodPanel({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const send = () => {
-    if (!window.confirm(`Email today's report to ${clientName}'s ${recipientCount} recipient${recipientCount === 1 ? "" : "s"}?${sentInfo ? `\n\n(Already ${sentInfo.toLowerCase()} - this sends it again.)` : ""}`)) return;
+  const send = async () => {
+    if (!(await confirmDialog({
+      title: `Email today's report to ${clientName}'s ${recipientCount} recipient${recipientCount === 1 ? "" : "s"}?`,
+      body: sentInfo ? `Already ${sentInfo.toLowerCase()} - this sends it again.` : undefined,
+      action: "Send report",
+    }))) return;
     setSendMsg("");
     startTransition(async () => {
       const res = await sendEodEmail(orgId);
