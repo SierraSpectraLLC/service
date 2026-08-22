@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { promptReason } from "@/lib/reason";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { logTime, deleteTimeEntry, type WorkTarget } from "@/app/actions";
 import { formatHours } from "@/lib/hours";
 
@@ -43,30 +44,33 @@ export default function HoursPanel({ target, entries, people, defaultPerson, tod
     startTransition(async () => {
       const res = await logTime(target, draft);
       if (res?.error) setError(res.error);
-      else setDraft({ ...draft, hours: "", note: "" });
+      else {
+        toast({ message: `Logged ${draft.hours.trim()} for ${draft.person || "the work"}` });
+        setDraft({ ...draft, hours: "", note: "" });
+      }
     });
   };
 
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+      <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
         <div className="card-title">Hours</div>
-        {total > 0 && <span className="mut" style={{ fontSize: 12 }}>{formatHours(total)} logged</span>}
+        {total > 0 && <span className="mut t-small">{formatHours(total)} logged</span>}
       </div>
       {canEdit && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: entries.length ? 10 : 0 }}>
-          <input value={draft.hours} onChange={(e) => setDraft({ ...draft, hours: e.target.value })}
+        <div className="row-2" style={{ marginBottom: entries.length ? 10 : 0 }}>
+          <input className="t-body" value={draft.hours} onChange={(e) => setDraft({ ...draft, hours: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             placeholder="1.5, 1:30 or 45m" inputMode="decimal"
-            aria-label="Hours worked" style={{ flex: "0 1 120px", fontSize: 13 }} />
-          <input value={draft.person} list="hours-people" onChange={(e) => setDraft({ ...draft, person: e.target.value })}
-            placeholder="Who" aria-label="Who did the work" style={{ flex: "0 1 130px", fontSize: 13 }} />
+            aria-label="Hours worked" style={{ flex: "0 1 120px" }} />
+          <input className="t-body" value={draft.person} list="hours-people" onChange={(e) => setDraft({ ...draft, person: e.target.value })}
+            placeholder="Who" aria-label="Who did the work" style={{ flex: "0 1 130px" }} />
           <datalist id="hours-people">{people.map((p) => <option key={p} value={p} />)}</datalist>
-          <input type="date" value={draft.date} max={today} onChange={(e) => setDraft({ ...draft, date: e.target.value })}
-            aria-label="Date worked" style={{ width: "auto", fontSize: 13 }} />
-          <input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
+          <input className="t-body" type="date" value={draft.date} max={today} onChange={(e) => setDraft({ ...draft, date: e.target.value })}
+            aria-label="Date worked" style={{ width: "auto" }} />
+          <input className="t-body" value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
-            placeholder="What was done (optional)" style={{ flex: "1 1 160px", fontSize: 13 }} />
+            placeholder="What was done (optional)" style={{ flex: "1 1 160px" }} />
           <button className="btn sm accent" onClick={submit} disabled={pending || !draft.hours.trim()}>
             {pending ? "Logging..." : "Log"}
           </button>
@@ -74,25 +78,30 @@ export default function HoursPanel({ target, entries, people, defaultPerson, tod
       )}
 
       {entries.map((e) => (
-        <div key={e.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 700, width: 52 }}>{formatHours(e.minutes)}</span>
-          <span style={{ fontSize: 13 }}>{e.person}</span>
-          <span className="mut" style={{ fontSize: 12 }}>{mdy(e.date)}</span>
-          {e.note && <span className="mut" style={{ fontSize: 12 }}>- {e.note}</span>}
+        <div key={e.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+          <span className="t-body" style={{ fontWeight: 700, width: 52 }}>{formatHours(e.minutes)}</span>
+          <span className="t-body">{e.person}</span>
+          <span className="mut t-small">{mdy(e.date)}</span>
+          {e.note && <span className="mut t-small">- {e.note}</span>}
           {isStaff && (
-            <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
-              onClick={() => {
-                const why = promptReason(`Remove this ${formatHours(e.minutes)} entry? It stays in the audit history.`);
+            <button className="btn link t-meta" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
+              onClick={async () => {
+                const why = await confirmReason({
+                  title: `Remove this ${formatHours(e.minutes)} entry?`,
+                  body: "It stays in the audit history.",
+                  action: "Remove entry", tone: "bad",
+                });
                 if (!why) return;
                 startTransition(async () => {
                   const res = await deleteTimeEntry(e.id, why);
                   if (res?.error) setError(res.error);
+                  else toast({ message: `Removed the ${formatHours(e.minutes)} entry` });
                 });
               }}>remove</button>
           )}
         </div>
       ))}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
