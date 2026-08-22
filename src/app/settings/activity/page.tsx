@@ -23,7 +23,8 @@ const WINDOW_DAYS = 120;
  * the portal they pay for is being opened. See lib/loginLog for why sign-ins
  * and "last seen" are two separate columns rather than one number.
  */
-export default async function ActivitySettingsPage() {
+export default async function ActivitySettingsPage({ searchParams }: { searchParams: Promise<{ q?: string; f?: string; feed?: string }> }) {
+  const filterParams = await searchParams;
   const user = await currentUser();
   if (!user) redirect("/login");
   // Owner only: this is everybody's movements, which is not a staff privilege.
@@ -100,6 +101,7 @@ export default async function ActivitySettingsPage() {
           at: e.createdAt.toISOString(),
         }))}
         windowDays={WINDOW_DAYS}
+        filter={{ q: filterParams.q ?? "", f: filterParams.f ?? "", feed: filterParams.feed ?? "" }}
       />
     </div>
   );
