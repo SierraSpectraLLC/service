@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addToThread, deleteMessage, leaveThread, markMessagesRead, sendMessage } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { groupMessages, type Msg } from "@/lib/messages";
 import { fmtWhen } from "@/lib/when";
 
@@ -71,11 +73,16 @@ export default function ThreadPanel({ threadId, title, named, me, members, messa
             </button>
           )}
           <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
-            onClick={() => {
-              if (!window.confirm("Leave this conversation? What was said stays for the others.")) return;
+            onClick={async () => {
+              if (!(await confirmDialog({
+                title: "Leave this conversation?",
+                body: "What was said stays for the others.",
+                action: "Leave conversation", tone: "bad",
+              }))) return;
               startTransition(async () => {
                 const res = await leaveThread(threadId);
                 if (res?.error) { setError(res.error); return; }
+                toast({ message: "Left the conversation" });
                 router.push("/messages");
               });
             }}>leave</button>
