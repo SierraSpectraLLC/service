@@ -45,7 +45,7 @@ export default function PhotoThumb({
       style={{
         display: "block", width, flexShrink: 0, overflow: "hidden",
         ...(height === undefined ? { aspectRatio: String(shape) } : { height }),
-        borderRadius: radius, border: "1px solid var(--line)", background: "#EEF1F5", ...style,
+        borderRadius: radius, border: "1px solid var(--line)", background: "var(--t-neutral-bg)", ...style,
       }}>
       {/* objectFit comes from the frame: a photo somebody framed is drawn whole
           and scaled, so every part of it was reachable in the editor. See
