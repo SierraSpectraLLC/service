@@ -26,10 +26,10 @@ export default function TrackAsSystem({ assetId, suggestion }: { assetId: number
   }
 
   return (
-    <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+    <span className="row-2" style={{ display: "inline-flex" }}>
       <input value={tag} onChange={(e) => { setTag(e.target.value); setError(""); }}
         aria-label="System tag" placeholder="U-014" autoFocus
-        style={{ width: 110, fontSize: 12 }} />
+        className="t-small" style={{ width: 110 }} />
       <button className="btn sm accent" disabled={pending || !tag.trim()}
         onClick={() => {
           setError("");
@@ -39,9 +39,9 @@ export default function TrackAsSystem({ assetId, suggestion }: { assetId: number
             if (res?.instrumentId) router.push(`/instruments/${res.instrumentId}`);
           });
         }}>{pending ? "Creating..." : "Create"}</button>
-      <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
+      <button className="btn link t-meta" disabled={pending}
         onClick={() => { setOpen(false); setError(""); }}>cancel</button>
-      {error && <span style={{ fontSize: 11, color: "#A32D2D" }}>{error}</span>}
+      {error && <span className="t-meta" style={{ color: "var(--t-bad-fg)" }}>{error}</span>}
     </span>
   );
 }
