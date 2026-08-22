@@ -6,6 +6,7 @@ import {
   addAgreement, fileAgreementPaper, listCatalogPartsForPicker, listLibraryFiles,
   removeAgreement, unfileAgreementPaper, updateAgreement, uploadAgreementPapers,
 } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { promptReason } from "@/lib/reason";
 import {
   AGREEMENT_KINDS, KIND_LABEL, STANDING_LABEL, STANDING_TONE, allowance, kitStates, parseKits,
@@ -431,12 +432,16 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       )}
 
       {sheet && (
-        <>
-          <div className="scrim" onClick={() => setSheet(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="Agreement">
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>
-              {sheet.id ? "Edit" : "New"} agreement
-            </div>
+        <Dialog open onClose={() => setSheet(null)} title={sheet.id ? "Edit agreement" : "New agreement"}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending}>
+                {busy ? busy : pending ? "Saving..." : "Save agreement"}
+              </button>
+            </>
+          }>
 
             <div className="seg" role="group" aria-label="Kind" style={{ marginBottom: 8 }}>
               {AGREEMENT_KINDS.map((k) => (
@@ -651,15 +656,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
             <textarea value={draft.note} rows={3} style={{ width: "100%", marginBottom: 8 }}
               onChange={(e) => setDraft({ ...draft, note: e.target.value })} />
 
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 4 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" onClick={save} disabled={pending}>
-                {busy ? busy : pending ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
     </div>
   );
