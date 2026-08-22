@@ -68,10 +68,10 @@ export default function WhatsNew({ cards }: { cards: WhatsNewCard[] }) {
       style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(23,42,74,.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()}
         style={{ background: "#fff", borderRadius: 14, width: "min(560px, 94vw)", boxShadow: "0 18px 60px rgba(23,42,74,.35)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
-          <span style={{ fontWeight: 800, fontSize: 14, color: "var(--navy)" }}>What&apos;s new in Baseline</span>
+        <div className="row-2" style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)" }}>
+          <span className="t-lead" style={{ fontWeight: 800, color: "var(--navy)" }}>What&apos;s new in Baseline</span>
           {cards.length > 1 && (
-            <span className="mut" style={{ fontSize: 12 }}>{page + 1} of {cards.length}</span>
+            <span className="mut t-small">{page + 1} of {cards.length}</span>
           )}
           <button className="btn sm" style={{ marginLeft: "auto" }} onClick={dismiss}>Dismiss</button>
         </div>
@@ -88,24 +88,24 @@ export default function WhatsNew({ cards }: { cards: WhatsNewCard[] }) {
                 /* A fixed-height window onto the screenshot: cards stay the
                    same size however the pictures are shaped, so the strip
                    never jumps height mid-swipe. */
-                <div style={{ height: 240, background: "#F5F7FA", borderBottom: "1px solid var(--line)", overflow: "hidden", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+                <div style={{ height: 240, background: "var(--t-faint-bg)", borderBottom: "1px solid var(--line)", overflow: "hidden", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={c.image} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center" }} />
                 </div>
               )}
               <div style={{ padding: "14px 18px 6px" }}>
-                <div className="mut" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>{mdY(c.date)}</div>
+                <div className="mut t-meta" style={{ textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>{mdY(c.date)}</div>
                 <div style={{ fontWeight: 800, fontSize: 15.5, color: "var(--navy)", marginBottom: 6 }}>{c.title}</div>
-                <p style={{ fontSize: 13, lineHeight: 1.55, margin: 0 }}>{c.body}</p>
+                <p className="t-body" style={{ lineHeight: 1.55, margin: 0 }}>{c.body}</p>
                 {c.href && (
-                  <a href={c.href} className="btn link" style={{ fontSize: 12, paddingLeft: 0 }}>Take a look →</a>
+                  <a href={c.href} className="btn link t-small" style={{ paddingLeft: 0 }}>Take a look →</a>
                 )}
               </div>
             </div>
           ))}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px 14px" }}>
+        <div className="row-3" style={{ padding: "10px 16px 14px" }}>
           {cards.length > 1 && (
             <>
               <button className="btn sm" aria-label="Previous card" onClick={() => go(-1)} disabled={page === 0}>‹</button>
