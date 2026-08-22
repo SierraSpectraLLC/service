@@ -68,11 +68,11 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, fontWeight: 700 }}>{siteLabel(s)}</span>
         {s.systems > 0 && (
-          <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>
+          <span className="pill info">
             {s.systems} system{s.systems === 1 ? "" : "s"}
           </span>
         )}
-        {s.archived && <span className="pill" style={{ background: "#F4F6F9", color: "#94A3B8" }}>closed</span>}
+        {s.archived && <span className="pill faint">closed</span>}
         {canEdit && (
           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
             <button className="btn link" style={{ fontSize: 11 }} onClick={() => openEdit(s)}>edit</button>
