@@ -11,6 +11,7 @@ import { groupStoredFiles } from "@/lib/storeGroup";
 import { isPhotoFile } from "@/lib/photos";
 import { visibleOrgs } from "@/lib/tenancy";
 import GalleryGrid from "@/components/GalleryGrid";
+import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -63,28 +64,21 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="container page">
-      <div className="crumb">Library › <b>Gallery</b></div>
-      <div className="page-head">
-        <h1 className="page-title">Gallery</h1>
-        <span className="mut" style={{ fontSize: 12 }}>
-          {photos.length === 0 ? "no photos yet"
-            : `${photos.length} photo${photos.length === 1 ? "" : "s"}${rows.length >= CAP ? ` (newest ${CAP} files)` : ""}`}
-        </span>
-        <span className="page-actions">
-          <Link href="/documents" className="btn sm" style={{ textDecoration: "none" }}>All files</Link>
-        </span>
-      </div>
+      <PageHead
+        crumb={<>Library › <b>Gallery</b></>}
+        title="Gallery"
+        sub={photos.length === 0 ? "No photos yet."
+          : `${photos.length} photo${photos.length === 1 ? "" : "s"}${rows.length >= CAP ? ` (newest ${CAP} files)` : ""}`}
+        actions={<Link href="/documents" className="btn sm" style={{ textDecoration: "none" }}>All files</Link>}
+      />
       {orgRows.length > 0 && (
-        <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span className="mut" style={{ fontSize: 12, marginRight: 4 }}>Store</span>
-          {[{ id: null as number | null, name: `${brand.operatorName || brand.name} (own work)` },
-            ...orgRows.map((o) => ({ id: o.id as number | null, name: o.name }))].map((s) => (
-            <Link key={s.id ?? "own"} href={s.id === null ? "/gallery" : `/gallery?store=${s.id}`}
-              className={`btn sm${viewing === s.id ? " primary" : ""}`} style={{ textDecoration: "none" }}>
-              {s.name}
-            </Link>
-          ))}
-        </div>
+        <Toolbar facets={
+          <FacetStrip facets={[{ id: null as number | null, name: `${brand.operatorName || brand.name} (own work)` },
+            ...orgRows.map((o) => ({ id: o.id as number | null, name: o.name }))].map((s) => ({
+              key: String(s.id ?? "own"), label: s.name, on: viewing === s.id,
+              href: s.id === null ? "/gallery" : `/gallery?store=${s.id}`,
+            }))} />
+        } />
       )}
 
       <div className="card">

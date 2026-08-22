@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import PhotoThumb from "./PhotoThumb";
+import { FacetStrip, Toolbar } from "@/components/ui";
 import { fileSrc } from "@/lib/photos";
 import type { Place } from "@/lib/storeGroup";
 
@@ -57,18 +58,21 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
   return (
     <>
       {photos.length > 6 && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-          <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by name, record or who took it"
-            style={{ flex: "1 1 200px", fontSize: 12 }} />
-          <span className="seg">
-            {(["all", "covers"] as const).map((w) => (
-              <button key={w} aria-pressed={only === w} onClick={() => setOnly(w)}>
-                {w === "all" ? "All" : "Covers only"}
-              </button>
-            ))}
-          </span>
-        </div>
+        <Toolbar
+          search={
+            <input value={filter} onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by name, record or who took it" aria-label="Filter photos" />
+          }
+          facets={
+            <FacetStrip
+              facets={[
+                { key: "all", label: "All", count: photos.length, on: only === "all" },
+                { key: "covers", label: "Covers only", count: photos.filter((p) => p.isCover).length || undefined, on: only === "covers" },
+              ]}
+              onToggle={(k) => setOnly(k === "covers" ? "covers" : "all")}
+            />
+          }
+        />
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 }}>
@@ -82,13 +86,14 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
               <PhotoThumb src={fileSrc(p.attachmentId)} framing={p.framing} alt={p.description || p.fileName}
                 width="100%" aspect={4 / 3} />
             </a>
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
+            {/* One pill per tile: cover. Where it is filed reads as quiet links. */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4, fontSize: 11 }}>
               {p.isCover && <span className="pill info">cover</span>}
               {p.places.map((q) => (
-                <span key={q.attachmentId} className="pill neutral">
+                <span key={q.attachmentId} className="mut">
                   {q.kind === "shelf" ? "shelf"
-                    : q.kind === "system" ? <Link href={`/instruments/${q.id}`} style={{ textDecoration: "none" }}>{q.label}</Link>
-                      : <Link href={`/assets/${q.id}`} style={{ textDecoration: "none" }}>{q.label}</Link>}
+                    : q.kind === "system" ? <Link href={`/instruments/${q.id}`} style={{ color: "var(--navy)", textDecoration: "none" }}>{q.label}</Link>
+                      : <Link href={`/assets/${q.id}`} style={{ color: "var(--navy)", textDecoration: "none" }}>{q.label}</Link>}
                 </span>
               ))}
             </div>
