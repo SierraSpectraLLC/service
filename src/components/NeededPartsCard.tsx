@@ -67,7 +67,7 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
         <div className="card-title">Needed on systems</div>
-        <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{parts.length}</span>
+        <span className="pill warn">{parts.length}</span>
         {picked.size > 0 && <span className="mut" style={{ fontSize: 11 }}>{picked.size} selected</span>}
       </div>
       <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
@@ -83,17 +83,17 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
           <span style={{ fontSize: 13, flex: "1 1 150px", minWidth: 0 }}>{p.name}</span>
           {p.partNumber && <span className="mono mut" style={{ fontSize: 11 }}>{p.partNumber}</span>}
           {p.qty && p.qty !== "1" && <span className="mut" style={{ fontSize: 11 }}>x{p.qty}</span>}
-          {p.vendor && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{p.vendor}</span>}
+          {p.vendor && <span className="pill neutral">{p.vendor}</span>}
           {p.externalId && p.instrumentId !== null && (
             <Link href={`/instruments/${p.instrumentId}`} onClick={(e) => e.stopPropagation()}
-              className="pill" style={{ background: "#E7F2FA", color: "#1D6396", textDecoration: "none" }}>
+              className="pill info" style={{ textDecoration: "none" }}>
               {p.externalId}
             </Link>
           )}
           {/* Whose move it is. Without this, a part somebody already asked the
               client to buy looks exactly like one nobody has touched. */}
           {p.requestedAt && (
-            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}
+            <span className="pill good"
               title={`Asked ${p.requestedOrgName} on ${fmtWhen(p.requestedAt)}`}>
               asked {p.requestedOrgName}
             </span>
