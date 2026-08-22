@@ -17,6 +17,7 @@ import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResul
 import { checklistProgress } from "@/lib/checklist";
 import MentionBox from "./MentionBox";
 import type { Candidate } from "@/lib/mentions";
+import Dialog from "@/components/ui/Dialog";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 
@@ -416,23 +417,29 @@ export default function TasksPanel({
 
         {open && (
           <div style={{ borderTop: "1px solid var(--line)", padding: 12, background: "#FAFBFD" }}>
-            {editing === t.id ? (
-              <div className="dash-form" style={{ marginBottom: 12 }}>
+            {editing === t.id && (
+              <Dialog open onClose={() => setEditing(null)} title="Edit task"
+                footer={
+                  <>
+                    <span className="dialog-status" />
+                    <button className="btn" onClick={() => setEditing(null)} disabled={pending}>Cancel</button>
+                    <button className="btn accent" disabled={pending || !editDraft.title.trim()}
+                      onClick={() => startTransition(async () => {
+                        await updateTask(t.id, editDraft);
+                        setEditing(null);
+                        toast({ message: "Saved the task" });
+                      })}>
+                      {pending ? "Saving..." : "Save task"}
+                    </button>
+                  </>
+                }>
                 <label>Title *</label>
                 <input value={editDraft.title} onChange={(e) => setEditDraft({ ...editDraft, title: e.target.value })} style={{ marginBottom: 8 }} />
                 <label>Body</label>
                 <textarea value={editDraft.body} onChange={(e) => setEditDraft({ ...editDraft, body: e.target.value })} rows={2} style={{ marginBottom: 8, resize: "vertical" }} />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button className="btn sm accent" disabled={pending || !editDraft.title.trim()}
-                    onClick={() => startTransition(async () => { await updateTask(t.id, editDraft); setEditing(null); })}>
-                    {pending ? "Saving..." : "Save"}
-                  </button>
-                  <button className="btn sm" onClick={() => setEditing(null)}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              t.body && <div style={{ fontSize: 13, marginBottom: 10 }}>{t.body}</div>
+              </Dialog>
             )}
+            {editing !== t.id && t.body && <div style={{ fontSize: 13, marginBottom: 10 }}>{t.body}</div>}
             {t.test && <TestResultBlock task={t} canEdit={canEdit} />}
             {canEdit && editing !== t.id && (
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
@@ -636,7 +643,16 @@ export default function TasksPanel({
       )}
 
       {showNew && (
-        <div className="dash-form">
+        <Dialog open onClose={() => setShowNew(false)} title="New task"
+          footer={
+            <>
+              <span className="dialog-status" />
+              <button className="btn" onClick={() => setShowNew(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={submitNew} disabled={pending}>
+                {pending ? "Creating..." : "Create task"}
+              </button>
+            </>
+          }>
           {procedureChoices.length > 0 && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <label style={{ margin: 0 }}>Start from</label>
@@ -714,11 +730,8 @@ export default function TasksPanel({
               </select>
             </span>
             )}
-            <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={submitNew} disabled={pending}>
-              {pending ? "Creating..." : "Create task"}
-            </button>
           </div>
-        </div>
+        </Dialog>
       )}
 
       {checkout.length > 0 && (
