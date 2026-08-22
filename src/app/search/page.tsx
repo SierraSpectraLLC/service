@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { and, desc, ilike, or, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -14,6 +13,7 @@ import { MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { alnum, searchTerms } from "@/lib/search";
 import SearchBox from "@/components/SearchBox";
 import { RequestAccessCard, CreateSystemForm } from "@/components/LookupPanels";
+import { DataTable, FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +27,10 @@ type Hit = { id: number; group: string; title: string; sub: string; href: string
  * workspace also surfaces here, as a request-access / claim / listing card -
  * there is one place to type a serial, not two.
  */
-export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string; in?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  const { q: raw } = await searchParams;
+  const { q: raw, in: inGroup = "" } = await searchParams;
   const q = (raw ?? "").trim();
   const terms = searchTerms(q);
   /**
@@ -193,34 +193,51 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   }
   const createCategories = catalogTerms.filter((v) => v.kind === "category").map((v) => v.name);
 
+  const wanted = groups.includes(inGroup) ? inGroup : "";
+  const shown = hits.filter((h) => !wanted || h.group === wanted);
+  const groupHref = (g: string) => {
+    const p = new URLSearchParams();
+    if (q) p.set("q", q);
+    if (g && g !== wanted) p.set("in", g);
+    return `/search${p.size ? `?${p}` : ""}`;
+  };
+
   return (
     <div className="container page">
-      <div className="page-head">
-        <h1 className="page-title">Search</h1>
-      </div>
-      <div className="card">
-        <SearchBox initial={q} />
-        {q.length >= 2 && (
-          <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
-            {hits.length} match{hits.length === 1 ? "" : "es"} for &ldquo;{q}&rdquo;
-          </div>
-        )}
-      </div>
-
-      {groups.map((g) => (
-        <div key={g} className="card">
-          <div className="eyebrow" style={{ marginBottom: 6 }}>{g}</div>
-          {hits.filter((h) => h.group === g).map((h) => (
-            <Link key={`${g}-${h.id}`} href={h.href} className="row-hover"
-              style={{ display: "block", padding: "7px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
-              <div style={{ fontSize: 13 }}>{h.title}</div>
-              <div className="mut" style={{ fontSize: 11 }}>
-                {h.where}{h.sub ? ` · ${h.sub}` : ""}
-              </div>
-            </Link>
-          ))}
+      <PageHead title="Search" />
+      <Toolbar
+        search={<SearchBox initial={q} />}
+        facets={groups.length > 1 ? (
+          <FacetStrip facets={groups.map((g) => ({
+            key: g, label: g,
+            count: hits.filter((h) => h.group === g).length,
+            on: wanted === g, href: groupHref(g),
+          }))} />
+        ) : undefined}
+      />
+      {q.length >= 2 && (
+        <div className="mut" style={{ fontSize: 12, margin: "0 0 8px" }}>
+          {hits.length} match{hits.length === 1 ? "" : "es"} for &ldquo;{q}&rdquo;
         </div>
-      ))}
+      )}
+
+      {shown.length > 0 && (
+        <DataTable
+          cols={[
+            { key: "title", label: "Match", width: "minmax(200px, 2fr)" },
+            { key: "where", label: "Where", width: "minmax(140px, 1.4fr)", hideMobile: true },
+          ]}
+          rows={shown.map((h) => ({
+            key: `${h.group}-${h.id}`,
+            href: h.href,
+            group: h.group,
+            cells: {
+              title: <span style={{ fontSize: 13 }}>{h.title}</span>,
+              where: <span className="mut" style={{ fontSize: 11 }}>{h.where}{h.sub ? ` · ${h.sub}` : ""}</span>,
+            },
+          }))}
+        />
+      )}
 
       {outside.length > 0 && (
         <div className="card">
