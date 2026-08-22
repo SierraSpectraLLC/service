@@ -1,0 +1,383 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ridgeline — archetypes prototype</title><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet"><style>
+/* ── tokens: Ridgeline's own, plus the tones ───────────────────────────── */
+:root{--navy:#172A4A;--navy-2:#21395F;--coral:#E8613C;--sky:#5BA8D9;--bg:#F5F6F9;--card:#fff;--line:#E4E8EF;--ink:#1E293B;--mut:#64748B;--link:#1D6396;
+--t-neutral-bg:#EEF1F5;--t-neutral-fg:#475569;--t-faint-fg:#94A3B8;--t-info-bg:#E7F2FA;--t-info-fg:#1D6396;--t-good-bg:#E5F3E5;--t-good-fg:#2E6B2E;--t-warn-bg:#FAF0DC;--t-warn-fg:#8A5410;--t-accent-bg:#EDEBFA;--t-accent-fg:#4F45A3;--t-bad-bg:#FBE9E9;--t-bad-fg:#A32D2D;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;--r:10px}
+*{box-sizing:border-box}body{margin:0;background:#D9DDE5;font-family:var(--sans);color:var(--ink);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+/* ── prototype chrome ── */
+.proto{max-width:1500px;margin:0 auto;padding:22px 20px 50px}
+.proto h1{font-size:20px;margin:0 0 2px}.proto .sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+.pbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.pbar button{font:inherit;font-size:12.5px;font-weight:600;padding:7px 12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;color:var(--mut)}
+.pbar button[aria-selected=true]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.pbar .sp{flex:1}.pbar .vp{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pbar .vp button{border:0;border-radius:0}
+.frame{margin:0 auto;background:var(--bg);border:1px solid #c5cad4;border-radius:12px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.2);height:860px;transition:width .2s}
+.frame.dk{width:100%}.frame.ph{width:390px;border:10px solid #1a1d24;border-radius:38px}
+.scr{height:100%;overflow:auto;position:relative}
+.pg{display:none}.pg[data-on]{display:block}
+/* ── app header ── */
+.hdr{background:var(--navy);color:#fff;position:sticky;top:0;z-index:30}
+.hdr .spectrum{height:3px;background:linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%)}
+.hdr .row{display:flex;align-items:center;gap:14px;padding:8px 18px}
+.brand{font-weight:800;letter-spacing:.04em;font-size:14px}.brand small{display:block;font-weight:400;font-size:11px;opacity:.7;letter-spacing:0}
+.nav{margin-left:auto;display:flex;gap:2px}
+.nav a{padding:6px 11px;border-radius:999px;font-size:13px;font-weight:600;color:#fff;opacity:.85;cursor:pointer}
+.nav a[data-on]{background:rgba(255,255,255,.92);color:var(--navy);opacity:1;font-weight:700}
+.util{display:flex;gap:2px;align-items:center;padding-left:10px;border-left:1px solid rgba(255,255,255,.25)}
+.util span{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;position:relative;font-size:14px}
+.util .badge{position:absolute;top:2px;right:0;background:var(--coral);font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:999px;line-height:16px;text-align:center;padding:0 4px}
+.util .av{border:1.5px solid #fff;width:26px;height:26px;font-size:11px;font-weight:800}
+.ph .nav{display:none}.ph .hdr .row{padding:8px 14px}.ph .util{margin-left:auto;border:0}
+.ph .burger{width:18px;height:2px;background:#fff;box-shadow:0 5px 0 #fff,0 -5px 0 #fff;margin-right:4px}.dk .burger{display:none}
+.tabbar{display:none}.ph .tabbar{display:flex;position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);z-index:30;padding:6px 4px 10px}
+.tabbar a{flex:1;text-align:center;font-size:10.5px;font-weight:600;color:var(--mut)}.tabbar a i{display:block;font-style:normal;font-size:17px;margin-bottom:1px}.tabbar a[data-on]{color:var(--navy)}
+/* ── page shell ── */
+.container{width:100%;max-width:1080px;margin:0 auto;padding:16px 18px}.container.wide{max-width:1240px}.container.split{max-width:1200px}
+.ph .container{padding:12px 14px}
+.crumb{font-size:12px;color:var(--mut);margin-bottom:4px}.crumb b{color:var(--ink);font-weight:500}
+.page-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 12px}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.4px;color:var(--navy);margin:0;line-height:1.2}
+.page-sub{font-size:12.5px;color:var(--mut)}
+.page-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ph .page-actions{margin-left:0;width:100%}
+.toolbar{display:flex;gap:8px;align-items:center;padding:8px 0;position:sticky;top:52px;background:var(--bg);z-index:20;border-bottom:1px solid var(--line);margin-bottom:10px}
+.search{flex:1;max-width:360px;display:flex;gap:8px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--mut);font-size:12.5px}
+.facets{display:flex;gap:6px;flex-wrap:wrap}.ph .facets{flex-wrap:nowrap;overflow:auto;padding-bottom:2px}
+.f{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--mut);white-space:nowrap}.f b{color:var(--ink);margin-left:3px}.f[data-on]{background:var(--navy);color:#fff;border-color:var(--navy)}.f[data-on] b{color:#fff}
+.btn{font:inherit;font-size:13px;font-weight:700;padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--navy);white-space:nowrap;cursor:pointer}
+.btn.p{background:var(--navy);color:#fff;border-color:var(--navy)}.btn.a{background:var(--coral);border-color:var(--coral);color:#fff}.btn.sm{font-size:12px;padding:4px 9px}.btn.l{border:0;background:none;color:var(--link);padding:0;font-size:12px}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;line-height:1.5}
+.pill.neutral{background:var(--t-neutral-bg);color:var(--t-neutral-fg)}.pill.faint{background:var(--t-neutral-bg);color:var(--t-faint-fg)}.pill.info{background:var(--t-info-bg);color:var(--t-info-fg)}.pill.good{background:var(--t-good-bg);color:var(--t-good-fg)}.pill.warn{background:var(--t-warn-bg);color:var(--t-warn-fg)}.pill.accent{background:var(--t-accent-bg);color:var(--t-accent-fg)}.pill.bad{background:var(--t-bad-bg);color:var(--t-bad-fg)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}.dot.good{background:#2E8B3E}.dot.info{background:#1D6396}.dot.warn{background:#E0A100}.dot.bad{background:#C23A3A}.dot.accent{background:#6A5ACD}.dot.neutral{background:#B7BFCC}
+.id{font-family:var(--mono);font-size:12.5px;font-weight:600;letter-spacing:-.01em}.id.dim{color:var(--mut);font-weight:500}
+.mut{color:var(--mut)}.meta{font-size:11.5px;color:var(--mut)}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(23,42,74,.05)}
+.card-title{font-weight:800;font-size:15px;letter-spacing:-.2px;color:var(--navy);display:flex;align-items:center;gap:8px;margin:0 0 8px}.card-title .sp{flex:1}
+.eyebrow{font-size:11px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.sec{display:flex;align-items:center;gap:8px;padding:14px 0 6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.sec .n{font-weight:700;letter-spacing:0;background:var(--t-neutral-bg);border-radius:999px;padding:0 7px;font-size:11px}.sec .sp{flex:1}.sec a{font-weight:600;letter-spacing:0;text-transform:none;color:var(--link);font-size:12px}
+.empty{border:1.5px dashed var(--line);border-radius:var(--r);padding:22px 18px;text-align:center;color:var(--mut);font-size:12.5px}.empty b{color:var(--ink);display:block;font-size:13.5px;margin-bottom:3px}
+/* table */
+.tbl{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.tr{display:grid;grid-template-columns:var(--cols);gap:12px;align-items:center;padding:9px 14px;border-top:1px solid var(--line);min-width:0}
+.tr.h{border-top:0;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);background:#FAFBFD;padding:8px 14px}
+.tr.alt{background:#F9FAFC}.tr:hover:not(.h){background:#EDF3FA}
+.tr>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr .acts{text-align:right;white-space:nowrap}.tr .acts .btn.l{opacity:0;margin-left:10px}.tr:hover .acts .btn.l{opacity:1}
+.tr .grp{display:flex;align-items:baseline;gap:8px;font-weight:800;color:var(--navy);font-size:14px;background:#fff;padding:14px 14px 6px;border-bottom:2px solid var(--navy);grid-column:1/-1}
+.ph .tr.h{display:none}.ph .tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 12px}.ph .tr>*{white-space:normal}.ph .tr .hide-m{display:none}.ph .tr .acts .btn.l{display:none}
+.kebab{width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--mut);font-weight:700;letter-spacing:1px}
+.two{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;align-items:start}.ph .two{grid-template-columns:1fr}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}.ph .metric-grid{grid-template-columns:repeat(2,1fr)}
+.metric{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.metric .v{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--navy);line-height:1.1}.metric .l{font-size:11px;color:var(--mut);font-weight:600;margin-top:2px}.metric .d{margin-top:6px}
+.list{display:flex;flex-direction:column}
+.li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:9px 0;border-top:1px solid var(--line);align-items:center}.li:first-child{border-top:0}
+.li .t{font-weight:500;display:flex;gap:8px;align-items:center;min-width:0}.li .t span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.li .m{grid-column:1}.li .r{grid-row:1/3;display:flex;gap:6px;align-items:center}.li .r .btn.l{opacity:0}.li:hover .r .btn.l{opacity:1}.ph .li .r .btn.l{display:none}
+.legend{display:flex;gap:14px;font-size:11.5px;color:var(--mut);flex-wrap:wrap;margin:0 0 8px}.legend span{display:inline-flex;gap:5px;align-items:center}
+.hero{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:72px 1fr auto;gap:2px 14px;align-items:start;margin-bottom:12px}
+.ph .hero{grid-template-columns:56px 1fr auto}
+.hero .img{width:72px;height:72px;border-radius:10px;background:linear-gradient(135deg,#E6EBF3,#D3DAE6);grid-row:1/5}.ph .hero .img{width:56px;height:56px}
+.hero .title{font-size:22px;font-weight:800;letter-spacing:-.4px;color:var(--navy);line-height:1.15}.hero .title .id{font-size:22px}
+.hero .acts{grid-column:3;grid-row:1/5;display:flex;gap:6px}.ph .hero .acts .btn:not(.kb){display:none}
+.hero .stats{grid-column:2/4;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-top:6px}.hero .stats b{color:var(--ink)}.hero .stats .w b{color:var(--t-warn-fg)}
+.jump{position:sticky;top:52px;z-index:20;display:flex;gap:4px;background:var(--bg);padding:8px 0;margin-bottom:4px;overflow:auto;box-shadow:0 6px 8px -8px rgba(23,42,74,.28)}
+.jump a{padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;color:var(--mut);border:1px solid var(--line);background:#fff;white-space:nowrap}.jump a[data-on]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.band{display:flex;align-items:center;gap:10px;margin:12px 0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.band:after{content:"";flex:1;height:1px;background:var(--line)}
+.cols{columns:2;column-gap:14px}.ph .cols{columns:1}.cols .card{break-inside:avoid}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12.5px}.kv dt{color:var(--mut)}.kv dd{margin:0}
+.stage{display:flex;gap:0;margin:8px 0}.stage span{flex:1;height:6px;background:var(--line)}.stage span:first-child{border-radius:3px 0 0 3px}.stage span:last-child{border-radius:0 3px 3px 0}.stage span.on{background:var(--navy)}.stage span.cur{background:var(--coral)}
+.stg{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mut)}
+.note{padding:8px 0;border-top:1px solid var(--line);font-size:12.5px}.note:first-child{border-top:0}.note .who{font-weight:600;font-size:12px}.note .when{color:var(--mut);font-size:11px;margin-left:6px}
+/* settings split */
+.sp-layout{display:grid;grid-template-columns:240px 1fr;gap:0;min-height:calc(100% - 55px)}.ph .sp-layout{grid-template-columns:1fr}
+.side{background:#fff;border-right:1px solid var(--line);padding:10px 0 20px}.ph .side{display:none}
+.side .g{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:12px 16px 4px}
+.side a{display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:13px;color:var(--ink);border-left:3px solid transparent;cursor:pointer}
+.side a .car{width:7px;height:7px;border-right:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);transform:rotate(-45deg);margin:0 3px;flex:none}.side a[data-open] .car{transform:rotate(45deg)}
+.side a .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.side a .n{font-size:11px;color:var(--mut);background:var(--t-neutral-bg);border-radius:999px;padding:0 6px}
+.side a.l1{font-weight:600}.side a.l2{padding-left:28px}.side a.l3{padding-left:46px}.side a.l3 .lbl{font-family:var(--mono);font-weight:500;font-size:12px}.side a.l3 .mf{font-family:var(--sans);color:var(--mut);font-size:11px;font-weight:400;margin-left:4px}
+.side a[data-on]{background:var(--t-info-bg);border-left-color:var(--navy);color:var(--navy)}.side a[data-on] .lbl{font-weight:600}.side a[data-on] .n{background:#fff}
+.side a.add{color:var(--link);font-weight:600;font-size:12px}
+.main{padding:16px 18px;min-width:0}.ph .main{padding:12px 14px}
+.acc{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.acc .h{display:flex;align-items:center;gap:10px;padding:10px 14px;font-weight:700;font-size:13px;background:#FAFBFD;border-bottom:1px solid var(--line)}.acc .h .sp{flex:1}.acc .h .sub{font-weight:400;color:var(--mut);font-size:11.5px}
+.acc .li{padding:9px 14px}.acc .li:first-child{border-top:0}
+.acc.inh .h .t:before{content:"↑ ";color:var(--mut)}
+.stabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:12px;overflow:auto}.stabs span{padding:8px 12px;font-size:13px;font-weight:600;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}.stabs span[data-on]{color:var(--navy);font-weight:700;border-bottom-color:var(--coral)}.stabs span i{font-style:normal;font-size:11px;color:var(--mut);margin-left:4px}.stabs span i.w{color:var(--t-warn-fg)}
+.mobcats{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px}.mobcats a{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-top:1px solid var(--line);font-size:13.5px;font-weight:500}.mobcats a:first-child{border-top:0}.mobcats a .r{color:var(--mut);font-size:12px;font-weight:400;display:flex;gap:8px;align-items:center}.mobcats a .r:after{content:"›";font-size:16px;color:#B7BFCC}
+.dk .mobonly{display:none}
+.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.ph .cardgrid{grid-template-columns:1fr}
+.eq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:52px 1fr auto;gap:3px 12px;align-items:start}.eq .im{width:52px;height:52px;border-radius:8px;background:linear-gradient(135deg,#E6EBF3,#D3DAE6);grid-row:1/4}.eq .im.no{background:var(--t-warn-bg)}.eq .md{font-family:var(--mono);font-weight:600;font-size:14px}.eq .kb{grid-column:3;grid-row:1/4}.eq .tg{grid-column:2/4;display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+</style></head><body>
+<style>.ph .dk-only{display:none}.dk .mobonly{display:none}.dk .drawer{display:none}.ph .drawer[data-open]{display:block}</style><style>
+/* additions for this file */
+.frame.dk .sp-layout{min-height:100%}
+.dlgwrap{position:absolute;inset:0;background:rgba(23,42,74,.38);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px}
+.ph .dlgwrap{align-items:flex-end;padding:0}
+.dlg{background:#fff;border-radius:14px;width:100%;max-width:640px;max-height:92%;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden;box-shadow:0 24px 60px rgba(23,42,74,.3)}
+.dlg.lg{max-width:860px}.dlg.sm{max-width:440px}
+.ph .dlg{border-radius:16px 16px 0 0;max-height:94%;max-width:none}
+.dh{display:flex;align-items:flex-start;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.dh h3{margin:0;font-size:15px;font-weight:800;color:var(--navy)}.dh .ctx{font-size:12px;color:var(--mut);margin-top:1px}.dh .x{margin-left:auto;color:var(--mut);font-size:16px;cursor:pointer}
+.db{overflow:auto;padding:4px 18px 16px}
+.db.steps{display:grid;grid-template-columns:160px 1fr;padding:0}.ph .db.steps{display:block;padding:4px 16px 16px}
+.stepnav{background:#FAFBFD;border-right:1px solid var(--line);padding:12px 0}.ph .stepnav{display:none}
+.stepnav a{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:12.5px;color:var(--mut);font-weight:500;border-left:3px solid transparent}
+.stepnav a i{width:15px;height:15px;border-radius:50%;border:1.5px solid #C9D1DE;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-style:normal;flex:none}
+.stepnav a[data-done] i{background:#2E6B2E;border-color:#2E6B2E;color:#fff}.stepnav a[data-warn] i{border-color:#E0A100;background:var(--t-warn-bg);color:var(--t-warn-fg);font-weight:700}
+.stepnav a[data-on]{color:var(--ink);font-weight:600;border-left-color:var(--navy);background:#fff}
+.db .body{padding:4px 18px 16px;overflow:auto}
+.dsec{padding-top:14px}.dsec h4{margin:0 0 6px;font-size:13px;font-weight:800;color:var(--navy)}
+.df{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--line);background:#fff}.df .st{flex:1;font-size:12px;color:var(--mut)}.df .st.err{color:var(--t-bad-fg)}.df .st.ok{color:var(--t-good-fg)}
+.ph .df{position:sticky;bottom:0}
+.progress{display:none}.ph .progress{display:flex;gap:4px;padding:10px 16px 0}.ph .progress span{flex:1;height:3px;border-radius:2px;background:var(--line)}.ph .progress span[data-on]{background:var(--navy)}.ph .progress span[data-done]{background:#2E6B2E}
+.stepttl{display:none}.ph .stepttl{display:block;padding:8px 16px 0;font-size:11.5px;color:var(--mut)}
+.fld{margin-bottom:10px}.fld label{display:block;font-size:11px;font-weight:700;color:var(--mut);margin-bottom:4px;text-transform:none}.fld label .req{color:var(--t-bad-fg)}.fld label .opt{font-weight:400}
+.fld .in{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--mut);background:#fff}.fld .in.ink{color:var(--ink)}.fld .in.ta{min-height:58px}.fld .in.mono{font-family:var(--mono);color:var(--ink);font-weight:600}
+.fld .hint{font-size:11.5px;color:var(--mut);margin-top:4px}.fld .err{font-size:11.5px;color:var(--t-bad-fg);margin-top:4px}
+.fld .in.bad{border-color:#C23A3A;box-shadow:0 0 0 3px rgba(194,58,58,.12)}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}.ph .f2{grid-template-columns:1fr}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg span{padding:6px 12px;font-size:12px;font-weight:700;color:var(--mut);border-right:1px solid var(--line)}.seg span:last-child{border-right:0}.seg span[data-on]{background:var(--navy);color:#fff}
+.ph .seg{width:100%}.ph .seg span{flex:1;text-align:center}
+.chk{display:flex;gap:10px;align-items:flex-start;padding:5px 0;font-size:13px}.chk i{width:16px;height:16px;border:1.5px solid #C9D1DE;border-radius:4px;flex:none;margin-top:1px}.chk[data-on] i{background:var(--link);border-color:var(--link)}.chk small{display:block;color:var(--mut);font-size:11.5px}
+.conseq{background:var(--t-bad-bg);border-radius:8px;padding:10px 12px;font-size:12.5px;color:var(--t-bad-fg);margin-top:10px}.conseq ul{margin:4px 0 0;padding-left:18px}
+.toast{position:absolute;right:18px;bottom:18px;background:var(--navy);color:#fff;padding:10px 14px;border-radius:10px;font-size:12.5px;display:flex;gap:14px;align-items:center;box-shadow:0 10px 30px rgba(23,42,74,.3);z-index:60}.toast b{font-weight:700}.toast .u{color:#9CC9EA;font-weight:700;cursor:pointer}
+.ph .toast{left:14px;right:14px;bottom:70px}
+.inline-edit{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--link);border-radius:6px;padding:3px 6px;background:#fff;font-size:13px}.inline-edit .in{border:0;padding:0;font-size:13px;color:var(--ink);min-width:160px}.inline-edit kbd{font-size:10px;color:var(--mut);font-family:var(--sans)}
+.pencil{color:var(--mut);font-size:11px;margin-left:6px;opacity:0}.li:hover .pencil{opacity:1}
+.savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 18px;display:flex;align-items:center;gap:8px;z-index:20}.savebar .st{flex:1;font-size:12px;color:var(--mut)}
+.pub .hdr{background:#fff;color:var(--navy);border-bottom:1px solid var(--line)}.pub .hdr .util,.pub .nav,.pub .burger{display:none}.pub .hdr .brand{color:var(--navy)}
+.pub .foot{text-align:center;font-size:11px;color:var(--mut);padding:20px}
+.bars .b{display:grid;grid-template-columns:120px 1fr 50px;gap:10px;align-items:center;font-size:12px;padding:5px 0}.bars .b .bar{height:8px;border-radius:4px;background:var(--t-info-bg);overflow:hidden}.bars .b .bar i{display:block;height:100%;background:var(--t-info-fg)}
+.thumbgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}.thumbgrid div{aspect-ratio:1;border-radius:8px;background:linear-gradient(135deg,#E6EBF3,#D3DAE6);position:relative}.thumbgrid div span{position:absolute;left:6px;bottom:6px;font-size:10px;background:rgba(23,42,74,.75);color:#fff;padding:1px 6px;border-radius:999px}
+.threads{display:grid;grid-template-columns:300px 1fr;min-height:100%}.ph .threads{grid-template-columns:1fr}
+.tlist{background:#fff;border-right:1px solid var(--line)}.tlist .t{padding:10px 14px;border-bottom:1px solid var(--line);cursor:pointer}.tlist .t[data-on]{background:var(--t-info-bg)}.tlist .t .who{font-weight:600;font-size:13px;display:flex;justify-content:space-between}.tlist .t .who small{color:var(--mut);font-weight:400;font-size:11px}.tlist .t .pv{font-size:12px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph .tlist{display:none}
+.msgs{padding:14px 18px;display:flex;flex-direction:column;gap:10px}.msg{max-width:72%;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:13px}.msg.me{align-self:flex-end;background:var(--t-info-bg);border-color:transparent}.msg .w{font-size:10.5px;color:var(--mut);margin-top:3px}
+.composer{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 14px;display:flex;gap:8px}.composer .in{flex:1;border:1px solid var(--line);border-radius:20px;padding:8px 14px;color:var(--mut)}
+.drawer{position:absolute;inset:0;z-index:55;display:none}.ph .drawer[data-open]{display:block}.drawer .scrim{position:absolute;inset:0;background:rgba(23,42,74,.4)}.drawer .pane{position:absolute;left:0;top:0;bottom:0;width:280px;background:#fff;padding:14px 0;overflow:auto}
+.drawer .g{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:12px 18px 4px}.drawer a{display:block;padding:9px 18px;font-size:14px;font-weight:500;color:var(--ink)}.drawer a[data-on]{background:var(--t-info-bg);color:var(--navy);font-weight:600}
+.drawer .id-block{padding:6px 18px 12px;border-bottom:1px solid var(--line)}
+.stepper{display:flex;gap:0;margin-bottom:14px}.stepper span{flex:1;padding:8px 10px;font-size:12px;font-weight:600;color:var(--mut);border-bottom:3px solid var(--line)}.stepper span[data-done]{border-color:#2E6B2E;color:#2E6B2E}.stepper span[data-on]{border-color:var(--navy);color:var(--navy)}
+.print{background:#fff;padding:28px 32px;font-size:12.5px;border:1px solid var(--line);margin:16px auto;max-width:760px}.print .ph2{display:flex;justify-content:space-between;border-bottom:2px solid var(--navy);padding-bottom:10px;margin-bottom:14px}.print .ph2 b{font-size:16px;color:var(--navy)}.print .sig{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:24px}.print .sig div{border-top:1px solid var(--ink);padding-top:4px;font-size:11px;color:var(--mut)}
+</style>
+</head><body><div class="proto">
+ <h1>Ridgeline — every remaining archetype</h1>
+ <p class="sub">Companion to the site prototype. This one covers what's shared by everything: dialogs (simple and stepped), confirm, toast, inline edit, settings forms, list and record pages not shown before, the utilities, the public/print surfaces, and mobile navigation. Switch screens and viewport below.</p>
+ <div class="pbar" role="tablist">
+  <button aria-selected="true" data-p="dialog">Dialog</button><button data-p="confirm">Confirm + toast</button><button data-p="inline">Inline edit</button><button data-p="settings">Settings form</button><button data-p="org">Org record</button><button data-p="purch">Purchasing</button><button data-p="stock">Stockroom</button><button data-p="maint">Maintenance</button><button data-p="msgs">Messages</button><button data-p="docs">Files</button><button data-p="import">Import</button><button data-p="metrics">Metrics</button><button data-p="login">Login / public</button><button data-p="print">Sign-off packet</button><button data-p="mnav">Mobile nav</button>
+  <span class="sp"></span><span class="vp"><button data-v="dk" aria-selected="true">Desktop</button><button data-v="ph">Mobile</button></span>
+ </div>
+ <div class="frame dk" id="frame"><div class="scr">
+  <div class="hdr" id="hdr"><div class="spectrum"></div><div class="row"><span class="burger" id="burger"></span><div class="brand">RIDGELINE<small>Sierra Spectra</small></div><nav class="nav"><a>Dashboard</a><a>Work orders</a><a>Assets</a><a>Inventory</a><a>Operations ▾</a><a>Library ▾</a></nav><div class="util"><span>⌕</span><span>✉<span class="badge">3</span></span><span>🔔</span><span class="av">J</span></div></div></div>
+
+  <!-- DIALOG (stepped) -->
+  <section class="pg" data-p="dialog" data-on>
+   <div class="container wide">
+    <div class="page-head"><h2 class="page-title">Work orders</h2><span class="page-sub">14 open</span><div class="page-actions"><button class="btn p">+ Work order</button></div></div>
+    <div class="tbl" style="--cols:90px 1fr 110px 100px"><div class="tr h"><span>WO</span><span>System</span><span>Stage</span><span>Updated</span></div><div class="tr"><span class="id">WO-0412</span><span><b>Agilent 6495C</b></span><span><span class="pill bad">Blocked</span></span><span class="meta">2 h</span></div><div class="tr alt"><span class="id">WO-0411</span><span><b>Thermo ISQ 7000</b></span><span><span class="pill warn">Their move</span></span><span class="meta">1 d</span></div><div class="tr"><span class="id">WO-0409</span><span><b>PerkinElmer Optima 8300</b></span><span><span class="pill info">Quoted</span></span><span class="meta">2 d</span></div></div>
+   </div>
+   <div class="dlgwrap"><div class="dlg lg">
+    <div class="dh"><div><h3>New work order</h3><div class="ctx">Lab Zen · launched from #58 Agilent 6495C</div></div><span class="x">✕</span></div>
+    <div class="progress"><span data-done></span><span data-on></span><span></span><span></span></div><div class="stepttl">Step 2 of 4 · Work</div>
+    <div class="db steps">
+     <nav class="stepnav"><a data-done><i>✓</i>System</a><a data-on data-done><i>✓</i>Work</a><a data-warn><i>!</i>Parts &amp; time</a><a><i></i>Client</a></nav>
+     <div class="body">
+      <div class="dsec"><h4>System</h4><div class="f2"><div class="fld"><label>Asset</label><div class="in ink"><span class="id">#58</span> · Agilent 6495C · <span class="id dim">US24051113</span></div></div><div class="fld"><label>Organization</label><div class="in ink">Lab Zen</div></div></div></div>
+      <div class="dsec"><h4>Work</h4>
+       <div class="f2"><div class="fld"><label>Type <span class="req">*</span></label><div class="seg"><span>PM</span><span data-on>Repair</span><span>Install</span><span>Checkout</span><span>Other</span></div></div><div class="fld"><label>Assigned to</label><div class="in ink">Bill Harner</div></div></div>
+       <div class="fld"><label>Title <span class="req">*</span></label><div class="in ink">Ion source clean, rotor seal</div></div>
+       <div class="fld"><label>Description <span class="opt">optional</span></label><div class="in ta">What was reported, what you expect to find</div></div>
+       <div class="fld"><label>Start from procedures</label><div class="chk" data-on><i></i><div>Include the 6495C's intake checklist<small>7 tasks from the catalog; 2 required for sign-off.</small></div></div><div class="chk"><i></i><div>Include maintenance due within 30 days<small>Replace rotor seal (Aug 25), Source clean (Sep 3).</small></div></div></div>
+      </div>
+      <div class="dsec"><h4>Parts &amp; time</h4><div class="f2"><div class="fld"><label>Estimated hours <span class="req">*</span></label><div class="in bad mono">&nbsp;</div><div class="err">Needed to quote.</div></div><div class="fld"><label>Parts needed</label><div class="in">Add from the parts book…</div></div></div></div>
+     </div>
+    </div>
+    <div class="df"><span class="st err">Can't create yet — add estimated hours.</span><button class="btn">Cancel</button><button class="btn p" disabled style="opacity:.5">Create WO-0413</button></div>
+   </div></div>
+  </section>
+
+  <!-- CONFIRM + TOAST -->
+  <section class="pg" data-p="confirm">
+   <div class="container split">
+    <div class="crumb">Assets › Lab Zen › <b>#33</b></div>
+    <div class="hero"><div class="img"></div><div class="eyebrow">GC-MS · Lab Zen</div><div class="title"><span class="id">#33</span> · Shimadzu GC-2010 / QP2020</div><div class="meta"><span class="id dim">C12345</span> · Stored · Bldg 2 basement</div><div class="stats"><span><b>Stored</b> 9 d</span><span><b>0</b> open WO</span><span class="w"><b>2</b> PM overdue</span></div><div class="acts"><button class="btn">Label</button><button class="btn p">+ Work order</button><button class="btn kb">⋯</button></div></div>
+    <div class="card"><div class="card-title">Custody <span class="pill faint">Stored</span></div><div class="kv"><dt>Since</dt><dd>Aug 12</dd><dt>Agreement</dt><dd>Lab Zen escrow · refurb queue</dd></div></div>
+   </div>
+   <div class="dlgwrap"><div class="dlg sm">
+    <div class="dh"><div><h3>Decommission #33?</h3><div class="ctx">Shimadzu GC-2010 / QP2020 · <span class="id dim">C12345</span></div></div></div>
+    <div class="db" style="padding-top:12px"><div style="font-size:13px">Its history stays. It leaves the active pool and stops generating maintenance.</div>
+     <div class="conseq">This will also<ul><li>cancel 2 overdue PM tasks</li><li>remove it from the Lab Zen escrow count</li></ul></div></div>
+    <div class="df"><span class="st"></span><button class="btn">Keep it</button><button class="btn" style="background:var(--t-bad-fg);border-color:var(--t-bad-fg);color:#fff">Decommission</button></div>
+   </div></div>
+   <div class="toast"><span><b>Decommissioned #33.</b> Removed from the active pool.</span><span class="u">Undo</span></div>
+  </section>
+
+  <!-- INLINE EDIT -->
+  <section class="pg" data-p="inline"><div class="container split">
+   <div class="crumb">Work orders › <b>WO-0412</b></div>
+   <div class="card"><div class="card-title">Other tasks <span class="pill neutral">3</span><span class="sp"></span><button class="btn l">+ Task</button></div>
+    <div class="legend"><span class="mut">Click a title to edit it in place · Enter saves · Esc cancels. Anything bigger than one field opens a dialog.</span></div>
+    <div class="list">
+     <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Clean sample tray and waste lines</span><span class="pencil">✎</span></div><div class="m">Done · Bill · Aug 13</div><div class="r"><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot neutral"></span><span class="inline-edit"><span class="in">Photograph source before reassembly</span><kbd>↵</kbd></span></div><div class="m">Not started</div><div class="r"><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot neutral"></span><span class="txt">Bag and label removed parts</span><span class="pencil">✎</span></div><div class="m">Not started</div><div class="r"><span class="kebab">⋯</span></div></div>
+    </div></div>
+   <div class="card"><div class="card-title">Parts <span class="pill info">2 on order</span><span class="sp"></span><button class="btn l">+ Part</button></div>
+    <div class="list"><div class="li"><div class="t"><span class="id">G1960-80039</span><span class="txt mut">Oil exhaust mist filter</span></div><div class="m">Qty <span class="inline-edit" style="padding:1px 6px"><span class="in" style="min-width:24px;font-family:var(--mono)">2</span></span> · PO-118 · <span class="pill warn">no tracking</span></div><div class="r"><span class="kebab">⋯</span></div></div></div></div>
+  </div></section>
+
+  <!-- SETTINGS FORM -->
+  <section class="pg" data-p="settings"><div class="sp-layout">
+   <aside class="side"><div class="g">Settings</div><a class="l1" data-on><span class="lbl">Workspace</span></a><a class="l2" data-on><span class="lbl">Configuration</span></a><a class="l2"><span class="lbl">Appearance</span></a><a class="l2"><span class="lbl">Modules</span></a><a class="l1"><span class="lbl">Catalog</span></a><a class="l1"><span class="lbl">Organizations</span></a><a class="l1"><span class="lbl">Access</span></a></aside>
+   <div class="main" style="padding-bottom:0">
+    <div class="crumb">Settings › Workspace › <b>Configuration</b></div>
+    <div class="page-head"><h2 class="page-title">Configuration</h2><span class="page-sub">The instance itself: name, stages, what's switched on.</span></div>
+    <div class="card"><div class="card-title">Identity</div>
+     <div class="f2"><div class="fld"><label>Platform name</label><div class="in ink">Ridgeline</div><div class="hint">Page titles and the wordmark. Reports carry the operator's name, never this.</div></div><div class="fld"><label>Operator</label><div class="in ink">Sierra Spectra LLC</div><div class="hint">Signs service reports, packets, labels and digests.</div></div></div>
+     <div class="f2"><div class="fld"><label>Time zone</label><div class="in ink">America/Los_Angeles</div></div><div class="fld"><label>Shop day starts</label><div class="in ink mono">07:00</div></div></div></div>
+    <div class="card"><div class="card-title">Stages <span class="pill neutral">5</span><span class="sp"></span><button class="btn l">Reorder</button></div>
+     <div class="list"><div class="li"><div class="t"><span class="dot info"></span><span class="txt">Intake</span></div><div class="m">Generates the checkout procedures</div><div class="r"><button class="btn l">Edit</button></div></div><div class="li"><div class="t"><span class="dot good"></span><span class="txt">Diagnose</span></div><div class="m"></div><div class="r"><button class="btn l">Edit</button></div></div><div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Parts</span></div><div class="m">Blocks on supplier by default</div><div class="r"><button class="btn l">Edit</button></div></div><div class="li"><div class="t"><span class="dot good"></span><span class="txt">Repair</span></div><div class="m"></div><div class="r"><button class="btn l">Edit</button></div></div><div class="li"><div class="t"><span class="dot accent"></span><span class="txt">Sign-off</span></div><div class="m">Requires every required procedure done</div><div class="r"><button class="btn l">Edit</button></div></div></div></div>
+    <div class="card"><div class="card-title">Modules</div>
+     <div class="f2"><div class="chk" data-on><i></i><div>EOD update<small>Daily digest per engagement.</small></div></div><div class="chk" data-on><i></i><div>Sheet parity<small>Hourly check against the Lab Zen Google Sheet.</small></div></div><div class="chk"><i></i><div>Remote support<small>Device enrollment and sessions.</small></div></div><div class="chk" data-on><i></i><div>Inventory<small>Stockrooms and purchase orders.</small></div></div></div></div>
+    <div class="savebar"><span class="st">Unsaved changes · 2 fields</span><button class="btn">Discard</button><button class="btn p">Save configuration</button></div>
+   </div>
+  </div></section>
+
+  <!-- ORG RECORD -->
+  <section class="pg" data-p="org"><div class="sp-layout">
+   <aside class="side"><div class="g">Settings</div><a class="l1"><span class="lbl">Workspace</span></a><a class="l1"><span class="lbl">Catalog</span></a><a class="l1" data-on><span class="lbl">Organizations</span><span class="n">3</span></a><a class="l2" data-on><span class="lbl">Lab Zen</span></a><a class="l2"><span class="lbl">Coastal Analytical</span></a><a class="l2"><span class="lbl">ILS</span></a><a class="l1"><span class="lbl">Access</span></a></aside>
+   <div class="main">
+    <div class="crumb">Settings › Organizations › <b>Lab Zen</b></div>
+    <div class="hero"><div class="img"></div><div class="eyebrow">Client · since 2024</div><div class="title">Lab Zen</div><div class="meta">Adam Floyd · Pradeep · 2 sites · Retainer through Sep 30, 2026</div><div class="stats"><span><b>31</b> assets</span><span><b>11</b> in work</span><span class="w"><b>1</b> access request</span><span><b>$1.48M</b> escrow</span></div><div class="acts"><button class="btn">Daily digest</button><button class="btn kb">⋯</button></div></div>
+    <div class="stabs"><span data-on>Profile</span><span>Sites <i>2</i></span><span>People <i>4</i></span><span>Agreements <i>1</i></span><span>Access <i class="w">1</i></span></div>
+    <div class="two">
+     <div class="card"><div class="card-title">Profile</div><div class="f2"><div class="fld"><label>Legal name</label><div class="in ink">Lab Zen, Inc.</div></div><div class="fld"><label>Short name</label><div class="in ink">Lab Zen</div></div><div class="fld"><label>Primary contact</label><div class="in ink">Adam Floyd</div></div><div class="fld"><label>Billing email</label><div class="in ink">ap@labzen.com</div></div></div></div>
+     <div class="card"><div class="card-title">Header branding</div><div class="fld"><label>Header color</label><div class="in ink"><span class="dot" style="background:#1B5E20;width:12px;height:12px;vertical-align:middle"></span> #1B5E20</div><div class="hint">Their reports and share pages carry this; your utility icons stay readable on it.</div></div><div class="fld"><label>Logo</label><div class="in">labzen-logo.png · replace</div></div></div>
+    </div>
+    <div class="savebar"><span class="st">Saved 2 min ago</span><button class="btn p" disabled style="opacity:.5">Save</button></div>
+   </div>
+  </div></section>
+
+  <!-- PURCHASING -->
+  <section class="pg" data-p="purch"><div class="container wide">
+   <div class="page-head"><h2 class="page-title">Purchasing</h2><span class="page-sub">5 open POs · 3 parts needed with no PO</span><div class="page-actions"><button class="btn p">+ Purchase order</button></div></div>
+   <div class="card"><div class="card-title">Needed, not ordered <span class="pill warn">3</span></div>
+    <div class="list"><div class="li"><div class="t"><span class="id">5068-0198</span><span class="txt mut">Rotor seal</span></div><div class="m">WO-0412 · Agilent · qty 1</div><div class="r"><button class="btn l">Add to PO-118</button><button class="btn l">New PO</button></div></div><div class="li"><div class="t"><span class="id">RMSN-2</span><span class="txt mut">N₂ filter, collision cell</span></div><div class="m">PM · #58 · qty 1</div><div class="r"><button class="btn l">Add to PO-118</button><button class="btn l">New PO</button></div></div></div></div>
+   <div class="toolbar"><div class="search">⌕ PO, vendor, part</div><div class="facets"><span class="f" data-on>Open <b>5</b></span><span class="f">No tracking <b>1</b></span><span class="f">Received</span><span class="f">All</span></div></div>
+   <div class="tbl" style="--cols:80px minmax(120px,1fr) minmax(140px,1.4fr) 90px 120px 100px 70px"><div class="tr h"><span>PO</span><span>Vendor</span><span>For</span><span>Lines</span><span>Status</span><span>Total</span><span></span></div>
+    <div class="tr"><span class="id">PO-118</span><span>Agilent</span><span class="hide-m">WO-0412 · #58</span><span class="hide-m">2</span><span><span class="pill warn">No tracking · 6 d</span></span><span class="id">$412.80</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="id">PO-117</span><span>Scintech</span><span class="hide-m">Stock · UV bulbs</span><span class="hide-m">1</span><span><span class="pill info">Shipped</span></span><span class="id">$65.97</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="id">PO-116</span><span>Shimadzu</span><span class="hide-m">WO-0408 · #41</span><span class="hide-m">3</span><span><span class="pill good">Received</span></span><span class="id">$1,240.00</span><span class="acts"><button class="btn l">Open</button></span></div></div>
+  </div></section>
+
+  <!-- STOCKROOM -->
+  <section class="pg" data-p="stock"><div class="container wide">
+   <div class="crumb">Inventory › <b>Van 1</b></div>
+   <div class="hero"><div class="img"></div><div class="eyebrow">Stockroom · mobile</div><div class="title">Van 1</div><div class="meta">Bill's truck · 48 SKUs · counted Aug 14</div><div class="stats"><span><b>48</b> items</span><span class="w"><b>4</b> below minimum</span><span><b>$3,120</b> on hand</span></div><div class="acts"><button class="btn">Count</button><button class="btn p">+ Stock</button><button class="btn kb">⋯</button></div></div>
+   <div class="toolbar"><div class="search">⌕ Part number or name</div><div class="facets"><span class="f" data-on>All <b>48</b></span><span class="f">Below min <b>4</b></span><span class="f">Consumables</span><span class="f">Kits</span></div></div>
+   <div class="tbl" style="--cols:12px 130px minmax(160px,1.4fr) 70px 70px 100px 90px"><div class="tr h"><span></span><span>Part</span><span>Name</span><span>Qty</span><span>Min</span><span>Bin</span><span></span></div>
+    <div class="tr"><span class="dot bad"></span><span class="id">5188-5365</span><span>Septa, 11 mm, 50/pk</span><span class="id">0</span><span class="id dim hide-m">2</span><span class="hide-m">A-3</span><span class="acts"><button class="btn l">Reorder</button><button class="btn l">Adjust</button></span></div>
+    <div class="tr alt"><span class="dot warn"></span><span class="id">G1960-80039</span><span>Oil exhaust mist filter</span><span class="id">1</span><span class="id dim hide-m">2</span><span class="hide-m">B-1</span><span class="acts"><button class="btn l">Reorder</button><button class="btn l">Adjust</button></span></div>
+    <div class="tr"><span class="dot good"></span><span class="id">062-65005-00</span><span>Tungsten/halogen UV bulb</span><span class="id">3</span><span class="id dim hide-m">1</span><span class="hide-m">C-2</span><span class="acts"><button class="btn l">Move</button><button class="btn l">Adjust</button></span></div>
+    <div class="tr alt"><span class="dot good"></span><span class="id">5068-0198</span><span>Rotor seal</span><span class="id">2</span><span class="id dim hide-m">1</span><span class="hide-m">A-1</span><span class="acts"><button class="btn l">Move</button><button class="btn l">Adjust</button></span></div></div>
+  </div></section>
+
+  <!-- MAINTENANCE -->
+  <section class="pg" data-p="maint"><div class="container wide">
+   <div class="page-head"><h2 class="page-title">Maintenance</h2><span class="page-sub">38 scheduled · 2 overdue · 3 due within 14 days</span><div class="page-actions"><button class="btn">Generate this month</button></div></div>
+   <div class="toolbar"><div class="search">⌕ System, procedure</div><div class="facets"><span class="f" data-on>Due ≤ 30 d <b>7</b></span><span class="f">Overdue <b>2</b></span><span class="f">Lab Zen</span><span class="f">All <b>38</b></span></div></div>
+   <div class="legend"><span><span class="dot bad"></span>overdue</span><span><span class="dot warn"></span>due ≤ 14 d</span><span><span class="dot good"></span>scheduled</span></div>
+   <div class="tbl" style="--cols:12px minmax(170px,1.5fr) minmax(140px,1.2fr) 90px 110px 80px"><div class="tr"><span class="grp">Overdue <span class="pill bad">2</span></span></div><div class="tr h"><span></span><span>Procedure</span><span>System</span><span>Every</span><span>Due</span><span></span></div>
+    <div class="tr"><span class="dot bad"></span><span>Roughing pump oil</span><span><b>#33</b> GC-2010/QP2020</span><span class="hide-m">6 mo</span><span>Jul 30 · 22 d</span><span class="acts"><button class="btn l">Create WO</button></span></div>
+    <div class="tr alt"><span class="dot bad"></span><span>Inlet liner &amp; septum</span><span><b>#33</b> GC-2010/QP2020</span><span class="hide-m">3 mo</span><span>Aug 9 · 12 d</span><span class="acts"><button class="btn l">Create WO</button></span></div>
+    <div class="tr"><span class="grp">Next 14 days <span class="pill warn">3</span></span></div>
+    <div class="tr"><span class="dot warn"></span><span>Replace rotor seal</span><span><b>#58</b> Agilent 6495C</span><span class="hide-m">12 mo</span><span>Aug 25</span><span class="acts"><button class="btn l">Add to WO-0412</button></span></div>
+    <div class="tr alt"><span class="dot warn"></span><span>Source clean</span><span><b>#49</b> ISQ 7000</span><span class="hide-m">6 mo</span><span>Sep 2</span><span class="acts"><button class="btn l">Create WO</button></span></div></div>
+  </div></section>
+
+  <!-- MESSAGES -->
+  <section class="pg" data-p="msgs"><div class="threads">
+   <div class="tlist"><div style="padding:12px 14px;display:flex;gap:8px;align-items:center"><b style="font-size:15px;color:var(--navy)">Messages</b><span class="pill neutral">3 unread</span><button class="btn sm p" style="margin-left:auto">+ New</button></div>
+    <div class="t" data-on><div class="who">Adam Floyd <small>9:40</small></div><div class="pv">Fine with Monday — just need the ship date for #58 by Wed</div></div><div class="t"><div class="who">Bill Harner <small>Yesterday</small></div><div class="pv">Vacuum came up clean, photos in the WO</div></div><div class="t"><div class="who">ILS · Marcus <small>Tue</small></div><div class="pv">Re: overflow GC-MS work in Sacramento</div></div></div>
+   <div style="display:flex;flex-direction:column;min-height:100%"><div class="crumb mobonly" style="padding:10px 14px 0">‹ Messages</div>
+    <div style="padding:12px 18px;border-bottom:1px solid var(--line);background:#fff;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>Adam Floyd</b><span class="pill neutral">Lab Zen</span><span class="meta">about <span class="id">#58</span> · WO-0412</span><span class="kebab" style="margin-left:auto">⋯</span></div>
+    <div class="msgs"><div class="msg me">We're gated on Agilent for the mist filter and septa. They've got it backordered with no ETA — I'll chase Monday.<div class="w">Joe · Tue 4:12 pm</div></div><div class="msg">Fine with Monday — just need the ship date for #58 by Wed for the escrow report.<div class="w">Adam · 9:40 am</div></div></div>
+    <div class="composer" style="margin-top:auto"><div class="in">Reply to Adam…</div><button class="btn p">Send</button></div></div>
+  </div></section>
+
+  <!-- FILES -->
+  <section class="pg" data-p="docs"><div class="container" style="max-width:1440px">
+   <div class="page-head"><h2 class="page-title">Files</h2><span class="page-sub">Sierra Spectra store · 1,204 files · 18.2 GB of 50</span><div class="page-actions"><button class="btn">New folder</button><button class="btn p">Upload</button></div></div>
+   <div class="toolbar"><div class="search">⌕ File name, system, tag</div><div class="facets"><span class="f" data-on>Sierra Spectra</span><span class="f">Lab Zen share</span><span class="f">Google Drive</span><span class="f">Dropbox</span></div></div>
+   <div class="crumb">Store › Lab Zen › <b>#58 Agilent 6495C</b></div>
+   <div class="tbl" style="--cols:18px minmax(200px,2fr) 100px 90px 130px 80px"><div class="tr h"><span></span><span>Name</span><span>Type</span><span>Size</span><span>Modified</span><span></span></div>
+    <div class="tr"><span>▢</span><span>📁 Tune reports</span><span class="hide-m">Folder</span><span class="hide-m">12 files</span><span class="meta hide-m">Aug 14</span><span class="acts"><button class="btn l">Share</button></span></div>
+    <div class="tr alt"><span>▢</span><span>6495C_autotune_2026-08-14.pdf</span><span class="hide-m">PDF</span><span class="id dim hide-m">1.2 MB</span><span class="meta hide-m">Aug 14 · Bill</span><span class="acts"><button class="btn l">Open</button><button class="btn l">Share</button><span class="kebab">⋯</span></span></div>
+    <div class="tr"><span>▢</span><span>source_before.jpg</span><span class="hide-m">Image</span><span class="id dim hide-m">3.4 MB</span><span class="meta hide-m">Aug 13</span><span class="acts"><button class="btn l">Open</button><button class="btn l">Share</button><span class="kebab">⋯</span></span></div>
+    <div class="tr alt"><span>▢</span><span>WO-0412_service_report.pdf</span><span class="hide-m">PDF</span><span class="id dim hide-m">310 KB</span><span class="meta hide-m">Aug 12</span><span class="acts"><button class="btn l">Open</button><button class="btn l">Share</button><span class="kebab">⋯</span></span></div></div>
+  </div></section>
+
+  <!-- IMPORT -->
+  <section class="pg" data-p="import"><div class="container">
+   <div class="page-head"><h2 class="page-title">Import spreadsheet</h2><span class="page-sub">Bring assets in from a sheet. Nothing is written until the last step.</span></div>
+   <div class="stepper"><span data-done>1 · Upload</span><span data-on>2 · Map columns</span><span>3 · Preview</span><span>4 · Import</span></div>
+   <div class="card"><div class="card-title">Map columns <span class="pill neutral">lab_zen_instruments.xlsx · 31 rows</span></div>
+    <div class="f2"><div class="fld"><label>Serial <span class="req">*</span></label><div class="in ink">Serial Number</div></div><div class="fld"><label>Model <span class="req">*</span></label><div class="in ink">Instrument</div></div><div class="fld"><label>Tag</label><div class="in ink">Asset #</div></div><div class="fld"><label>Location</label><div class="in ink">Bldg / Room</div></div><div class="fld"><label>Status</label><div class="in">Not mapped</div><div class="hint">Unmapped rows default to "In service".</div></div><div class="fld"><label>Organization</label><div class="in ink">Lab Zen <span class="mut">(for every row)</span></div></div></div></div>
+   <div class="card" style="border-color:#E0A100;background:#FFFDF7"><div class="card-title">3 rows need attention</div><div class="list"><div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Row 12 · model "Agilent 6495 C" isn't in the catalog</span></div><div class="m">Closest: <span class="id">G6495C</span></div><div class="r"><button class="btn l">Use G6495C</button><button class="btn l">Skip row</button></div></div><div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Rows 18, 19 · duplicate serial <span class="id">JH49203</span></span></div><div class="m"></div><div class="r"><button class="btn l">Keep first</button></div></div></div></div>
+   <div class="savebar" style="border-radius:12px;border:1px solid var(--line)"><span class="st">28 of 31 rows ready</span><button class="btn">‹ Back</button><button class="btn p">Next: preview</button></div>
+  </div></section>
+
+  <!-- METRICS -->
+  <section class="pg" data-p="metrics"><div class="container wide">
+   <div class="page-head"><h2 class="page-title">Metrics</h2><span class="page-sub">Last 90 days · Lab Zen retainer</span><div class="page-actions"><span class="seg"><span>30 d</span><span data-on>90 d</span><span>YTD</span></span></div></div>
+   <div class="metric-grid"><div class="metric"><div class="v">38</div><div class="l">WOs closed</div><div class="d"><span class="pill good">↑ 12 vs prior</span></div></div><div class="metric"><div class="v">6.4 d</div><div class="l">Median time in work</div><div class="d"><span class="pill good">↓ 1.1 d</span></div></div><div class="metric"><div class="v">41%</div><div class="l">Days blocked on parts</div><div class="d"><span class="pill warn">↑ 8 pts</span></div></div><div class="metric"><div class="v">212 h</div><div class="l">Hours logged</div><div class="d"><span class="pill neutral">Bill 164 · Joe 48</span></div></div><div class="metric"><div class="v">$1.48M</div><div class="l">Escrow remaining</div><div class="d"><span class="pill good">↓ $310k</span></div></div></div>
+   <div class="two"><div class="card"><div class="card-title">Time in stage</div><div class="bars"><div class="b"><span>Intake</span><div class="bar"><i style="width:12%"></i></div><span class="id">0.8 d</span></div><div class="b"><span>Diagnose</span><div class="bar"><i style="width:28%"></i></div><span class="id">1.8 d</span></div><div class="b"><span>Parts</span><div class="bar"><i style="width:62%;background:#8A5410"></i></div><span class="id">4.1 d</span></div><div class="b"><span>Repair</span><div class="bar"><i style="width:35%"></i></div><span class="id">2.3 d</span></div><div class="b"><span>Sign-off</span><div class="bar"><i style="width:15%"></i></div><span class="id">1.0 d</span></div></div></div>
+    <div class="card"><div class="card-title">Blocked days by cause</div><div class="bars"><div class="b"><span>Supplier</span><div class="bar"><i style="width:70%;background:#8A5410"></i></div><span class="id">61</span></div><div class="b"><span>Client</span><div class="bar"><i style="width:25%"></i></div><span class="id">22</span></div><div class="b"><span>Us</span><div class="bar"><i style="width:8%"></i></div><span class="id">7</span></div></div></div></div>
+  </div></section>
+
+  <!-- LOGIN / PUBLIC -->
+  <section class="pg pub" data-p="login">
+   <div class="container" style="max-width:480px;padding-top:40px"><div class="card" style="padding:24px">
+    <div class="eyebrow" style="margin-bottom:6px">Sierra Spectra</div><h2 class="page-title" style="margin-bottom:4px">Sign in</h2><p class="mut" style="margin:0 0 16px;font-size:13px">We'll email you a link. No password.</p>
+    <div class="fld"><label>Email</label><div class="in">you@labzen.com</div></div><button class="btn p" style="width:100%;padding:10px">Email me a link</button>
+    <div class="empty" style="margin-top:16px;padding:12px"><b>Looking for a share link?</b>Open the link you were sent — no sign-in needed.</div></div>
+    <div class="foot">Powered by Ridgeline</div>
+    <div class="sec">Public listing · /listing/[token]</div>
+    <div class="card"><div class="eyebrow">Sierra Spectra · refurbished · for sale</div><div style="font-size:18px;font-weight:800;color:var(--navy)">Shimadzu GC-2010 Plus / GCMS-QP2020</div><div class="meta"><span class="id dim">C12345</span> · 2017 · Sacramento, CA</div><div class="thumbgrid" style="margin:10px 0"><div><span>1/6</span></div><div></div><div></div></div><div class="kv"><dt>Condition</dt><dd>Verified — vacuum, MS, GC subsystems · report attached</dd><dt>Includes</dt><dd>AOC-20i autosampler, Edwards RV5, 2 columns</dd><dt>Price</dt><dd><span class="id">$24,500</span></dd></div><button class="btn a" style="margin-top:12px">Ask about this system</button></div>
+    <div class="foot">Powered by Ridgeline</div>
+   </div>
+  </section>
+
+  <!-- PRINT -->
+  <section class="pg" data-p="print"><div class="container">
+   <div class="page-head"><h2 class="page-title">Sign-off packet</h2><span class="page-sub">WO-0405 · Thermo UltiMate 3000 · what the browser prints</span><div class="page-actions"><button class="btn">Print</button><button class="btn p">Save PDF</button></div></div>
+   <div class="print"><div class="ph2"><div><b>Sierra Spectra LLC</b><div class="mut">Instrument service · Rocklin, CA</div></div><div style="text-align:right"><b>Installation &amp; OQ sign-off</b><div class="mut"><span class="id">WO-0405</span> · Aug 21, 2026</div></div></div>
+    <div class="kv" style="margin-bottom:14px"><dt>System</dt><dd>Thermo Dionex UltiMate 3000 · <span class="id">8042178</span> · Lab Zen #61</dd><dt>Performed by</dt><dd>Joe, Sierra Spectra</dd><dt>Scope</dt><dd>Install, system suitability, OQ</dd></div>
+    <div class="eyebrow" style="margin-bottom:6px">Required procedures</div>
+    <div class="tbl" style="--cols:1fr 110px 90px 100px;margin-bottom:14px"><div class="tr h"><span>Procedure</span><span>Result</span><span>Limit</span><span>Done</span></div><div class="tr"><span>Pump pressure ripple</span><span><span class="pill good">Pass</span> <span class="id">0.8%</span></span><span class="id dim">&lt; 2%</span><span class="meta">Aug 20 · Joe</span></div><div class="tr alt"><span>Injection precision, 6× caffeine</span><span><span class="pill good">Pass</span> <span class="id">0.11% RSD</span></span><span class="id dim">&lt; 0.15%</span><span class="meta">Aug 20 · Joe</span></div><div class="tr"><span>Wavelength accuracy</span><span><span class="pill good">Pass</span></span><span class="id dim">± 1 nm</span><span class="meta">Aug 20 · Joe</span></div></div>
+    <div class="sig"><div>Sierra Spectra · Joe · Aug 21, 2026</div><div>Lab Zen · ________________ · date</div></div></div>
+  </div></section>
+
+  <!-- MOBILE NAV -->
+  <section class="pg" data-p="mnav"><div class="container">
+   <div class="dk-only card"><div class="card-title">Mobile navigation</div><p class="mut" style="margin:0;font-size:13px">Switch to Mobile to see it: the header never wraps; a bottom tab bar carries the five daily destinations; the hamburger opens a drawer with every group. The drawer is open below; tap the dimmed area to close it and the ☰ to reopen.</p></div>
+   <div class="page-head"><h2 class="page-title">Friday, Aug 21</h2><span class="page-sub">11 systems in work · 2 blocked</span></div>
+   <div class="metric-grid"><div class="metric"><div class="v">11</div><div class="l">In work</div></div><div class="metric"><div class="v">2</div><div class="l">Blocked</div><div class="d"><span class="pill bad">their move · 1</span></div></div></div>
+   <div class="tbl" style="--cols:12px 1fr auto"><div class="tr"><span class="dot bad"></span><span><b>Agilent 6495C</b><br><span class="meta"><span class="id dim">US24051113</span> · Blocked · 2 h</span></span><span class="kebab">⋯</span></div><div class="tr alt"><span class="dot warn"></span><span><b>Thermo ISQ 7000</b><br><span class="meta"><span class="id dim">JH49203</span> · Their move · 1 d</span></span><span class="kebab">⋯</span></div></div>
+  </div>
+  <div class="drawer" id="drawer" data-open><div class="scrim"></div><div class="pane"><div class="id-block"><b>Joe</b><div class="meta">Sierra Spectra · owner</div></div><div class="g">Work</div><a data-on>Dashboard</a><a>Work orders</a><a>Assets</a><a>Inventory</a><div class="g">Operations</div><a>EOD update</a><a>Maintenance</a><a>Purchasing</a><a>Remote support</a><a>Metrics</a><a>Sheet parity <span class="pill warn" style="margin-left:6px">2</span></a><a>Archived</a><div class="g">Library</div><a>Equipment catalog</a><a>Procedures</a><a>Parts book</a><a>Files</a><a>Gallery</a><a>PDF studio</a><a>Import spreadsheet</a><div class="g">Account</div><a>Settings</a><a>Sign out</a></div></div>
+  </section>
+
+  <div class="tabbar"><a data-on><i>◧</i>Today</a><a><i>☰</i>Work</a><a><i>▣</i>Assets</a><a><i>✉</i>Inbox</a><a><i>⚙</i>Library</a></div>
+ </div></div>
+</div>
+<script>
+const frame=document.getElementById('frame'),pages=[...document.querySelectorAll('.pg')],pb=[...document.querySelectorAll('.pbar [data-p]')];
+function go(p){pages.forEach(x=>x.dataset.p===p?x.setAttribute('data-on',''):x.removeAttribute('data-on'));pb.forEach(b=>b.setAttribute('aria-selected',b.dataset.p===p));document.getElementById('hdr').style.display=p==='login'?'none':'';frame.querySelector('.scr').scrollTop=0;document.getElementById('drawer').toggleAttribute('data-open',p==='mnav')}
+pb.forEach(b=>b.addEventListener('click',()=>go(b.dataset.p)));
+document.querySelectorAll('.pbar [data-v]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.pbar [data-v]').forEach(x=>x.setAttribute('aria-selected',x===b));frame.className='frame '+b.dataset.v}));
+document.getElementById('burger').addEventListener('click',()=>document.getElementById('drawer').toggleAttribute('data-open'));
+document.querySelector('#drawer .scrim').addEventListener('click',()=>document.getElementById('drawer').removeAttribute('data-open'));
+</script>
+</body></html>

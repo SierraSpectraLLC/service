@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ridgeline — Settings redesign options</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#1B2A4A; --navy-2:#24365E; --paper:#F4F6F9; --card:#fff; --ink:#1B2230; --ink-2:#5B667A; --line:#E3E7EE;
+  --blue:#2F6FED; --blue-bg:#E8F0FF; --green:#1E7F4F; --green-bg:#E4F4EA; --amber:#9A5B00; --amber-bg:#FFF1D6; --red:#B42318; --red-bg:#FDE8E6; --violet:#5B3FBF; --violet-bg:#EEE9FB;
+  --sans:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#E6E9EF;font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1480px;margin:0 auto;padding:28px 20px 60px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{color:var(--ink-2);font-size:14px;margin:0 0 18px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tabs button{font:inherit;font-weight:600;font-size:13px;padding:9px 14px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;color:var(--ink-2)}
+.tabs button[aria-selected=true]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.tabs button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.panel{display:none}.panel[data-active]{display:block}
+.brief{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px;font-size:14px;line-height:1.5;display:grid;grid-template-columns:1fr 1fr;gap:6px 28px}
+.brief b{display:block;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);margin-bottom:2px}
+.brief div{min-width:0}
+.stage{display:grid;grid-template-columns:390px 1fr;gap:24px;align-items:start}
+@media(max-width:1000px){.stage{grid-template-columns:1fr}.brief{grid-template-columns:1fr}}
+.frame-label{font-size:12px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px}
+.phone{width:390px;height:760px;border:10px solid #1a1d24;border-radius:38px;overflow:hidden;background:var(--paper);box-shadow:0 20px 50px rgba(0,0,0,.25)}
+.phone .scr{height:100%;overflow:auto;font-size:13px}
+.desk{border:1px solid #c9ced8;border-radius:10px;overflow:hidden;background:var(--paper);box-shadow:0 20px 50px rgba(0,0,0,.15);height:760px}
+.desk .scr{height:100%;overflow:auto;font-size:13px}
+
+/* ---------- shared app chrome ---------- */
+.top{background:var(--navy);color:#fff;padding:10px 14px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:5}
+.top .logo{font-weight:700;letter-spacing:.02em;font-size:14px}
+.top nav{display:flex;gap:12px;font-size:12.5px;opacity:.9}
+.top .sp{flex:1}
+.top .ico{width:26px;height:26px;border-radius:50%;background:#fff2;display:inline-block}
+.ph .top nav{display:none}
+.ph .top .menu{display:inline-block;width:18px;height:2px;background:#fff;box-shadow:0 5px 0 #fff,0 -5px 0 #fff}
+.dk .top .menu{display:none}
+.pagehead{padding:14px 16px 0}
+.pagehead h2{margin:0 0 10px;font-size:20px}
+.crumb{font-size:12px;color:var(--ink-2);margin-bottom:4px}
+.crumb b{color:var(--ink);font-weight:500}
+.seg{display:flex;gap:2px;background:#E7EBF2;padding:3px;border-radius:9px;width:max-content;max-width:100%;overflow:auto}
+.seg span{padding:6px 11px;border-radius:7px;font-size:12.5px;font-weight:500;color:var(--ink-2);white-space:nowrap}
+.seg span[data-on]{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.toolbar{display:flex;gap:8px;align-items:center;padding:10px 16px;position:sticky;top:46px;background:var(--paper);z-index:4;border-bottom:1px solid var(--line)}
+.search{flex:1;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--ink-2);font-size:12.5px}
+.search i{width:12px;height:12px;border:2px solid currentColor;border-radius:50%;display:inline-block;position:relative}
+.search i:after{content:"";position:absolute;width:6px;height:2px;background:currentColor;right:-5px;bottom:-3px;transform:rotate(45deg)}
+.btn{font:inherit;font-size:12.5px;font-weight:600;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--ink);white-space:nowrap}
+.btn.p{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.g{background:transparent;border-color:transparent;color:var(--ink-2)}
+.kebab{width:28px;height:28px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--ink-2);font-weight:700;letter-spacing:1px;border:1px solid transparent}
+.kebab:hover{border-color:var(--line);background:#fff}
+.pn{font-family:var(--mono);font-size:12.5px;font-weight:600;letter-spacing:-.01em}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px;line-height:1.4}
+.chip.blue{background:var(--blue-bg);color:var(--blue)}.chip.green{background:var(--green-bg);color:var(--green)}.chip.amber{background:var(--amber-bg);color:var(--amber)}.chip.red{background:var(--red-bg);color:var(--red)}.chip.violet{background:var(--violet-bg);color:var(--violet)}.chip.gray{background:#EEF1F5;color:var(--ink-2)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot.g{background:var(--green)}.dot.a{background:#E0A100}.dot.b{background:var(--blue)}.dot.v{background:var(--violet)}
+.muted{color:var(--ink-2)}
+.count{font-weight:500;color:var(--ink-2);font-size:12px}
+.sec{display:flex;align-items:center;gap:8px;padding:12px 16px 6px;font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);position:sticky;top:88px;background:var(--paper);z-index:3}
+.sec .n{font-weight:500;letter-spacing:0;text-transform:none;background:#E7EBF2;border-radius:999px;padding:0 7px;font-size:11px}
+.sec .sp{flex:1}
+.sec .lnk{font-weight:600;letter-spacing:0;text-transform:none;color:var(--blue);font-size:12px}
+.foot{padding:14px 16px;font-size:11px;color:var(--ink-2)}
+.empty{margin:12px 16px;padding:18px;border:1px dashed #C9D1DE;border-radius:10px;text-align:center;color:var(--ink-2);font-size:12.5px}
+.empty b{display:block;color:var(--ink);margin-bottom:3px}
+
+/* ---------- Option A: Ledger ---------- */
+.ledger{margin:0 16px 16px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.ledger table{width:100%;border-collapse:collapse}
+.ledger th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);background:#FAFBFD;font-weight:600}
+.ledger td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ledger tr:last-child td{border-bottom:0}
+.ledger tr:hover td{background:#F7F9FC}
+.ledger .name{font-weight:500}
+.ledger .used{font-size:11.5px;color:var(--ink-2)}
+.ledger .acts{text-align:right;white-space:nowrap}
+.ledger .acts .btn{opacity:0}.ledger tr:hover .acts .btn{opacity:1}
+.ledger .thumb{width:26px;height:26px;border-radius:5px;background:#EEF1F5;display:inline-block;vertical-align:middle;margin-right:8px}
+.ledger .pn.dim{color:var(--ink-2);font-weight:500}
+.rowcard{background:#fff;border:1px solid var(--line);border-radius:10px;margin:0 16px 8px;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:start}
+.rowcard .name{font-weight:500;grid-column:1}
+.rowcard .meta{display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--ink-2);grid-column:1}
+.rowcard .kebab{grid-column:2;grid-row:1/4}
+.rowcard.undesc{border-style:dashed;background:#FBFCFE}
+.rowcard .pn{display:block}
+.rowcard .fix{grid-column:1;font-size:12px;color:var(--blue);font-weight:600}
+
+/* ---------- Option B: Split ---------- */
+.split{display:grid;grid-template-columns:230px 1fr;height:calc(100% - 46px)}
+.side{border-right:1px solid var(--line);background:#fff;overflow:auto;padding:8px 0}
+.side .g{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);font-weight:700;padding:12px 16px 4px}
+.side a{display:flex;justify-content:space-between;align-items:center;padding:7px 16px;font-size:13px;color:var(--ink);text-decoration:none;border-left:3px solid transparent}
+.side a span.n{font-size:11px;color:var(--ink-2);background:#EEF1F5;border-radius:999px;padding:0 6px}
+.side a[data-on]{background:var(--blue-bg);border-left-color:var(--blue);font-weight:600;color:var(--blue)}
+.side a[data-on] span.n{background:#fff}
+.main{overflow:auto;position:relative}
+.main .pagehead{padding-top:18px}
+.acc{margin:0 16px 10px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.acc .h{display:flex;align-items:center;gap:10px;padding:11px 14px;font-weight:600;font-size:13.5px;cursor:pointer}
+.acc .h .car{width:8px;height:8px;border-right:2px solid var(--ink-2);border-bottom:2px solid var(--ink-2);transform:rotate(45deg);margin-right:2px}
+.acc[data-closed] .h .car{transform:rotate(-45deg)}
+.acc[data-closed] .body{display:none}
+.acc .h .sp{flex:1}
+.acc .h .sum{display:flex;gap:5px}
+.acc .body{border-top:1px solid var(--line)}
+.proc{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:10px 14px;border-bottom:1px solid var(--line);align-items:center}
+.proc:last-child{border-bottom:0}
+.proc .t{font-weight:500;display:flex;gap:8px;align-items:center}
+.proc .t .dot{flex:none}
+.proc .d{font-size:11.5px;color:var(--ink-2);grid-column:1}
+.proc .d .pn{font-weight:500;color:var(--ink-2);font-size:11.5px}
+.proc .acts{grid-row:1/3;display:flex;gap:2px}
+.proc .acts .btn.g{padding:4px 7px;font-size:11.5px;opacity:0}
+.proc:hover .acts .btn.g{opacity:1}
+.legend{display:flex;gap:14px;padding:0 16px 10px;font-size:11.5px;color:var(--ink-2);align-items:center;flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.addrow{padding:9px 14px;font-size:12.5px;color:var(--blue);font-weight:600;border-top:1px solid var(--line);background:#FAFBFD}
+.mobcats{margin:0 16px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mobcats a{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;font-size:13.5px;font-weight:500}
+.mobcats a:last-child{border-bottom:0}
+.mobcats a .r{display:flex;gap:8px;align-items:center;color:var(--ink-2);font-size:12px;font-weight:400}
+.mobcats a .r:after{content:"›";font-size:16px;color:#B7BFCC}
+
+/* ---------- Option C: Cards ---------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;padding:0 16px 16px}
+.ph .grid{grid-template-columns:1fr}
+.eq{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px;display:grid;grid-template-columns:54px 1fr auto;gap:4px 12px;align-items:start}
+.eq .img{width:54px;height:54px;border-radius:7px;background:linear-gradient(135deg,#E6EBF3,#D3DAE6);grid-row:1/4}
+.eq .mfr{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);font-weight:600}
+.eq .mdl{font-weight:600;font-size:14px}
+.eq .typ{font-size:12px;color:var(--ink-2)}
+.eq .kebab{grid-column:3;grid-row:1/4}
+.eq .tags{grid-column:2/4;display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+.facets{display:flex;gap:6px;padding:8px 16px 12px;flex-wrap:wrap}
+.facets .f{font-size:12px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--ink-2);display:inline-flex;gap:6px;align-items:center}
+.facets .f b{color:var(--ink)}
+.facets .f[data-on]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.facets .f[data-on] b{color:#fff}
+.ph .facets{flex-wrap:nowrap;overflow:auto;padding-bottom:10px}
+.ph .facets .f{white-space:nowrap}
+.tile{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center}
+.tile .t{font-weight:600}
+.tile .s{font-size:11.5px;color:var(--ink-2)}
+.statrow{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:0 16px 12px}
+.ph .statrow{grid-template-columns:repeat(2,1fr)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.18);padding:10px 16px 18px;z-index:9}
+.sheet .bar{width:38px;height:4px;background:#D7DCE5;border-radius:2px;margin:0 auto 12px}
+.sheet .opt{padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;font-weight:500}
+.sheet .opt:last-child{border-bottom:0;color:var(--red)}
+.phone{position:relative}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Ridgeline · Settings › Catalog — three layout directions</h1>
+  <p class="sub">Same content from your screenshots (parts book, procedures &amp; maintenance, equipment catalog), reflowed three ways. Each option shows a phone and a desktop frame; scroll inside the frames.</p>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-t="a">A · Ledger — dense table that collapses to rows</button>
+    <button role="tab" aria-selected="false" data-t="b">B · Split — sidebar categories + accordion detail</button>
+    <button role="tab" aria-selected="false" data-t="c">C · Cards — responsive grid with facet filters</button>
+  </div>
+
+  <!-- ================= OPTION A ================= -->
+  <section class="panel" data-t="a" data-active>
+    <div class="brief">
+      <div><b>Idea</b>Treat the parts book as what it is: a ledger. One row per part number, monospaced PN column, name, where it's used, status. Desktop gets a real table with sticky headers; mobile gets the same rows as compact two-line cards.</div>
+      <div><b>What it fixes</b>Kills the 4–7 wrapping badges per row (status becomes one column, "used in" becomes a count with a hover/tap list), hides row actions behind a kebab, and makes "used but not described" a filtered view of the same list instead of a second 37-item list below.</div>
+      <div><b>Best for</b>Parts book, price book, any page where you scan by identifier.</div>
+      <div><b>Risk</b>Tables on phones need discipline — the mobile variant must never horizontally scroll.</div>
+    </div>
+    <div class="stage">
+      <div>
+        <p class="frame-label">Mobile · 390px</p>
+        <div class="phone ph"><div class="scr">
+          <div class="top"><span class="menu"></span><span class="logo">RIDGELINE</span><span class="sp"></span><span class="ico"></span></div>
+          <div class="pagehead"><div class="crumb">Settings › Catalog › <b>Parts book</b></div>
+            <div class="seg"><span>Equipment</span><span>Procedures</span><span data-on>Parts</span><span>Prices</span></div></div>
+          <div class="toolbar"><div class="search"><i></i>Part number, name or maker</div><button class="btn p">+ Part</button></div>
+          <div class="facets"><span class="f" data-on>All <b>47</b></span><span class="f">Needs description <b>37</b></span><span class="f">Consumable <b>4</b></span><span class="f">Kit <b>2</b></span><span class="f">Has price <b>3</b></span></div>
+
+          <div class="sec">Described <span class="n">10</span><span class="sp"></span></div>
+          <div class="rowcard"><span class="pn">062-65005-00</span><div class="name">Tungsten/Halogen UV bulb</div><div class="meta"><span class="chip amber">Consumable</span><span>UV-Vis</span><span>·</span><span>from $21.99</span></div><span class="kebab">⋯</span></div>
+          <div class="rowcard"><span class="pn">225-10681-91</span><div class="name">AOC-20S attachment kit for GCMS</div><div class="meta"><span class="chip gray">Part</span><span>Autosampler</span><span>·</span><span>$225</span></div><span class="kebab">⋯</span></div>
+          <div class="rowcard"><span class="pn">5067-5712</span><div class="name">Power switch assembly, Infinity II</div><div class="meta"><span class="chip gray">Part</span><span>G7116A</span><span>·</span><span>$69.03</span></div><span class="kebab">⋯</span></div>
+          <div class="rowcard"><span class="pn">AGI-6495-PMK</span><div class="name">Agilent 6495 PM kit</div><div class="meta"><span class="chip violet">Kit</span><span>LC-MS</span></div><span class="kebab">⋯</span></div>
+          <div class="rowcard"><span class="pn">G1960-80039</span><div class="name">Oil exhaust mist filter</div><div class="meta"><span class="chip amber">Consumable</span><span>Roughing pump · MS40+</span></div><span class="kebab">⋯</span></div>
+
+          <div class="sec">Used, not yet described <span class="n">37</span><span class="sp"></span><span class="lnk">Describe all</span></div>
+          <div class="rowcard undesc"><span class="pn">01018-22707</span><div class="name">PTFE purge valve frit for analytical LC pumps</div><div class="meta"><span class="chip violet">in 1 kit</span><span>3 work orders</span></div><span class="fix">Describe →</span></div>
+          <div class="rowcard undesc"><span class="pn">042-00405-11</span><div class="name">Rinse pump head</div><div class="meta"><span class="chip green">maintenance</span><span>ASI-L, ASI-V</span></div><span class="fix">Describe →</span></div>
+          <div class="rowcard undesc"><span class="pn">13423</span><div class="name muted">Unnamed</div><div class="meta"><span>1 work order</span></div><span class="fix">Describe →</span></div>
+          <div class="rowcard undesc"><span class="pn">638-41472-01</span><div class="name">Sample needle, ASI</div><div class="meta"><span class="chip green">maintenance</span><span>ASI-V, ASI-L</span></div><span class="fix">Describe →</span></div>
+          <div class="foot">Showing 9 of 47 · build 6813ba1</div>
+        </div></div>
+      </div>
+      <div>
+        <p class="frame-label">Desktop · ≥1024px</p>
+        <div class="desk dk"><div class="scr">
+          <div class="top"><span class="logo">RIDGELINE</span><nav><span>Dashboard</span><span>Work orders</span><span>Assets</span><span>Inventory</span><span>Operations</span><span style="font-weight:600">Library</span></nav><span class="sp"></span><span class="ico"></span></div>
+          <div class="pagehead"><div class="crumb">Settings › Catalog › <b>Parts book</b></div>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px"><h2 style="margin:0">Parts book</h2><span class="count">47 part numbers · 37 need a description</span></div>
+            <div class="seg"><span>Equipment</span><span>Procedures &amp; maintenance</span><span data-on>Parts book</span><span>Price book</span></div></div>
+          <div class="toolbar"><div class="search" style="max-width:380px"><i></i>Search part number, name or maker</div>
+            <span class="facets" style="padding:0;margin-left:6px"><span class="f" data-on>All <b>47</b></span><span class="f">Needs description <b>37</b></span><span class="f">Consumable</span><span class="f">Kit</span><span class="f">Has price</span></span>
+            <span class="sp" style="flex:1"></span><button class="btn">Import CSV</button><button class="btn p">+ Part number</button></div>
+          <div class="ledger"><table>
+            <thead><tr><th style="width:160px">Part number</th><th>Name</th><th style="width:110px">Type</th><th style="width:220px">Used in</th><th style="width:120px">Best price</th><th style="width:140px"></th></tr></thead>
+            <tbody>
+              <tr><td><span class="thumb"></span><span class="pn">062-65005-00</span></td><td class="name">Tungsten/Halogen UV bulb</td><td><span class="chip amber">Consumable</span></td><td class="used">UV-Vis · 2 procedures</td><td>$21.99 <span class="muted">Scintech</span></td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+              <tr><td><span class="thumb"></span><span class="pn">225-10681-91</span></td><td class="name">AOC-20S attachment kit for GCMS</td><td><span class="chip gray">Part</span></td><td class="used">Autosampler · AOC-20S</td><td>$225 <span class="muted">Shimadzu OEM</span></td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+              <tr><td><span class="pn">5067-5712</span></td><td class="name">Power switch assembly, Infinity II HDI 1260 &amp; 1290</td><td><span class="chip gray">Part</span></td><td class="used">G7116A</td><td>$69.03 <span class="muted">Agilent OEM</span></td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+              <tr><td><span class="pn">AGI-6495-PMK</span></td><td class="name">Agilent 6495 PM kit</td><td><span class="chip violet">Kit · 6</span></td><td class="used">LC-MS · 6495</td><td class="muted">—</td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+              <tr><td><span class="pn">AGI-7120-LPMK</span></td><td class="name">PM kit, 1290 Infinity II &amp; III high-speed pumps w/ long-life pump head</td><td><span class="chip violet">Kit · 9</span></td><td class="used">LC System · 1290</td><td class="muted">—</td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+              <tr><td><span class="thumb"></span><span class="pn">G1960-80039</span></td><td class="name">Oil exhaust mist filter</td><td><span class="chip amber">Consumable</span></td><td class="used">Roughing pump · MS40+</td><td class="muted">—</td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+              <tr><td><span class="thumb"></span><span class="pn">G4267-87012</span></td><td class="name">Needle seat</td><td><span class="chip gray">Part</span></td><td class="used">Autosampler · G7167B</td><td class="muted">—</td><td class="acts"><button class="btn g">Edit</button><button class="btn g">Retire</button><span class="kebab">⋯</span></td></tr>
+            </tbody></table></div>
+
+          <div class="sec" style="top:88px">Used, not yet described <span class="n">37</span><span class="sp"></span><span class="lnk">Describe all →</span></div>
+          <div class="ledger"><table>
+            <thead><tr><th style="width:160px">Part number</th><th>Name (from work orders)</th><th style="width:110px">Tagged</th><th style="width:220px">Seen on</th><th style="width:120px">Mentions</th><th style="width:140px"></th></tr></thead>
+            <tbody>
+              <tr><td><span class="pn dim">01018-22707</span></td><td>PTFE purge valve frit for analytical LC pumps</td><td><span class="chip violet">in kit</span></td><td class="used">1260, 1290 · G7120A</td><td class="used">3 WOs</td><td class="acts"><button class="btn p" style="opacity:1">Describe</button></td></tr>
+              <tr><td><span class="pn dim">042-00405-11</span></td><td>Rinse pump head</td><td><span class="chip green">maintenance</span></td><td class="used">ASI-L, ASI-V</td><td class="used">2 procedures</td><td class="acts"><button class="btn p" style="opacity:1">Describe</button></td></tr>
+              <tr><td><span class="pn dim">0905-1175</span></td><td>Seal wash PTFE for 1260/1290/1220/1200/1100 pumps, 1/pk</td><td><span class="chip violet">in kit</span></td><td class="used">LC System</td><td class="used">1 kit</td><td class="acts"><button class="btn p" style="opacity:1">Describe</button></td></tr>
+              <tr><td><span class="pn dim">13423</span></td><td class="muted">Unnamed</td><td>—</td><td class="used">—</td><td class="used">1 WO</td><td class="acts"><button class="btn p" style="opacity:1">Describe</button></td></tr>
+              <tr><td><span class="pn dim">630-00999-00</span></td><td>CO₂ absorber w/ soda lime</td><td><span class="chip green">maintenance</span></td><td class="used">TOC-Lc, TOC-Vc, TOC-Vw</td><td class="used">3 procedures</td><td class="acts"><button class="btn p" style="opacity:1">Describe</button></td></tr>
+              <tr><td><span class="pn dim">RMSN-2</span></td><td>N2 filter for collision cell gas supply</td><td><span class="chip green">maintenance</span></td><td class="used">G6495C</td><td class="used">1 procedure</td><td class="acts"><button class="btn p" style="opacity:1">Describe</button></td></tr>
+            </tbody></table></div>
+          <div class="foot">Showing 13 of 47 · Load more</div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= OPTION B ================= -->
+  <section class="panel" data-t="b">
+    <div class="brief">
+      <div><b>Idea</b>Procedures are already grouped by module (Autosampler, Column Compartment, Pump, Mass Spec…). Make that grouping the navigation: a left sidebar with counts on desktop, a category list you drill into on mobile. Each group is an accordion; each procedure is a single line with a frequency dot, applicable models, and the parts it logs.</div>
+      <div><b>What it fixes</b>Your screenshot is 53 procedure cards in one 8-screen-tall column. Sidebar + collapsed accordions let you jump straight to "Mass Spec" and see 8 procedures in one screen. "Unreviewed / maintenance / yearly" badges become a dot, a column, and a legend.</div>
+      <div><b>Best for</b>Procedures &amp; maintenance, equipment catalog grouped by manufacturer, any page with 5+ natural groups.</div>
+      <div><b>Risk</b>Two-level navigation on mobile; make sure the back affordance is obvious and state survives refresh (URL-driven).</div>
+    </div>
+    <div class="stage">
+      <div>
+        <p class="frame-label">Mobile · category list → drilldown</p>
+        <div class="phone ph"><div class="scr">
+          <div class="top"><span class="menu"></span><span class="logo">RIDGELINE</span><span class="sp"></span><span class="ico"></span></div>
+          <div class="pagehead"><div class="crumb">Settings › Catalog › <b>Procedures</b></div>
+            <div class="seg"><span>Equipment</span><span data-on>Procedures</span><span>Parts</span><span>Prices</span></div></div>
+          <div class="toolbar"><div class="search"><i></i>Search 53 procedures</div><button class="btn p">+ New</button></div>
+          <div class="sec">By module</div>
+          <div class="mobcats">
+            <a>System-wide <span class="r">1</span></a>
+            <a>Autosampler <span class="r"><span class="dot a"></span>6</span></a>
+            <a>Column compartment <span class="r">3</span></a>
+            <a>Detector <span class="r">1</span></a>
+            <a>LC system <span class="r">2</span></a>
+            <a>Mass spec <span class="r"><span class="dot a"></span>8</span></a>
+            <a>Pump <span class="r">6</span></a>
+            <a>Roughing pump <span class="r">3</span></a>
+          </div>
+          <div class="sec">By instrument type</div>
+          <div class="mobcats">
+            <a>GC-MS <span class="r">no procedures · 5 types</span></a>
+            <a>LC-MS <span class="r">27 · 11 types</span></a>
+            <a>TOC <span class="r">19 · 3 types</span></a>
+            <a>UV-Vis <span class="r">5 · 2 types</span></a>
+            <a>Not tied to a category <span class="r"><span class="dot a"></span>2</span></a>
+          </div>
+          <div class="legend"><span><span class="dot a"></span>has unreviewed</span></div>
+
+          <div class="sec" style="margin-top:6px">↑ Tapping "Mass spec" opens</div>
+          <div class="pagehead" style="padding-top:4px"><div class="crumb">‹ Procedures › <b>Mass spec</b> · 8</div></div>
+          <div class="acc"><div class="body">
+            <div class="proc"><div class="t"><span class="dot a"></span>Remove spray shield; inspect</div><div class="d">yearly · G6495C · logs 1 part</div><div class="acts"><span class="kebab">⋯</span></div></div>
+            <div class="proc"><div class="t"><span class="dot g"></span>Remove &amp; sonicate funnel assemblies</div><div class="d">yearly · G6495C</div><div class="acts"><span class="kebab">⋯</span></div></div>
+            <div class="proc"><div class="t"><span class="dot a"></span>Inspect &amp; clean octopole ion guide</div><div class="d">yearly · G6495C</div><div class="acts"><span class="kebab">⋯</span></div></div>
+            <div class="proc"><div class="t"><span class="dot a"></span>Inspect capillary</div><div class="d">yearly · G6495C · logs 2 parts</div><div class="acts"><span class="kebab">⋯</span></div></div>
+            <div class="proc"><div class="t"><span class="dot g"></span>Replace gas filters</div><div class="d">yearly · G6495C · logs 2 parts</div><div class="acts"><span class="kebab">⋯</span></div></div>
+            <div class="proc"><div class="t"><span class="dot b"></span>Post-PM · verify vacuum reached operating pressure</div><div class="d">pass/fail · yearly</div><div class="acts"><span class="kebab">⋯</span></div></div>
+            <div class="addrow">+ Procedure in Mass spec</div>
+          </div></div>
+          <div class="legend"><span><span class="dot g"></span>maintenance</span><span><span class="dot b"></span>checkout</span><span><span class="dot a"></span>unreviewed</span></div>
+        </div></div>
+      </div>
+      <div>
+        <p class="frame-label">Desktop · sidebar + accordions</p>
+        <div class="desk dk"><div class="scr" style="overflow:hidden">
+          <div class="top"><span class="logo">RIDGELINE</span><nav><span>Dashboard</span><span>Work orders</span><span>Assets</span><span>Inventory</span><span>Operations</span><span style="font-weight:600">Library</span></nav><span class="sp"></span><span class="ico"></span></div>
+          <div class="split">
+            <aside class="side">
+              <div class="g">Catalog</div>
+              <a>Equipment <span class="n">90</span></a><a data-on>Procedures &amp; maintenance <span class="n">53</span></a><a>Parts book <span class="n">47</span></a><a>Price book <span class="n">3</span></a>
+              <div class="g">Module</div>
+              <a>All <span class="n">53</span></a><a>System-wide <span class="n">1</span></a><a>Autosampler <span class="n">6</span></a><a>Column compartment <span class="n">3</span></a><a>Detector <span class="n">1</span></a><a>LC system <span class="n">2</span></a><a data-on>Mass spec <span class="n">8</span></a><a>Pump <span class="n">6</span></a><a>Roughing pump <span class="n">3</span></a><a style="color:var(--ink-2)">Column oven, Degasser, Solvent tray <span class="n">0</span></a>
+              <div class="g">Instrument type</div>
+              <a>GC-MS <span class="n">0</span></a><a>LC-MS <span class="n">27</span></a><a>TOC <span class="n">19</span></a><a>UV-Vis <span class="n">5</span></a><a>Uncategorized <span class="n">2</span></a>
+            </aside>
+            <div class="main">
+              <div class="pagehead"><div class="crumb">Settings › Catalog › Procedures › <b>Mass spec</b></div>
+                <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px"><h2 style="margin:0">Mass spec</h2><span class="count">8 procedures · 5 unreviewed</span><span class="sp" style="flex:1"></span><button class="btn">Review all</button><button class="btn p">+ Procedure</button></div></div>
+              <div class="legend"><span><span class="dot g"></span>maintenance</span><span><span class="dot b"></span>checkout</span><span><span class="dot v"></span>required</span><span><span class="dot a"></span>unreviewed</span><span class="muted" style="margin-left:auto">Hover a row for duplicate / copy / delete</span></div>
+
+              <div class="acc"><div class="h"><span class="car"></span>Source &amp; ion optics<span class="sp"></span><span class="sum"><span class="chip gray">yearly</span><span class="chip gray">G6495C</span></span></div><div class="body">
+                <div class="proc"><div class="t"><span class="dot a"></span>Remove spray shield; inspect</div><div class="d">Clean or replace as needed · logs <span class="pn">G4267-87012</span></div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+                <div class="proc"><div class="t"><span class="dot g"></span>Remove &amp; sonicate funnel assemblies</div><div class="d">Records inspected / replaced</div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+                <div class="proc"><div class="t"><span class="dot a"></span>Inspect &amp; clean octopole ion guide</div><div class="d">Records inspected / replaced</div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+                <div class="proc"><div class="t"><span class="dot a"></span>Inspect capillary</div><div class="d">Clean or replace if needed · logs <span class="pn">G1946-28659</span>, <span class="pn">G1946-28669</span></div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+              </div></div>
+              <div class="acc"><div class="h"><span class="car"></span>Gas &amp; vacuum<span class="sp"></span><span class="sum"><span class="chip gray">yearly</span><span class="chip gray">G6495C</span></span></div><div class="body">
+                <div class="proc"><div class="t"><span class="dot g"></span>Replace gas filters</div><div class="d">logs <span class="pn">RMSN-2</span>, <span class="pn">RMSN-4</span></div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+                <div class="proc"><div class="t"><span class="dot b"></span>Post-PM · verify vacuum reached operating pressure</div><div class="d">Pass / fail</div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+                <div class="proc"><div class="t"><span class="dot b"></span>Run &amp; evaluate autotune report</div><div class="d">Pass / fail · attach report</div><div class="acts"><button class="btn g">Duplicate</button><button class="btn g">Copy to…</button><button class="btn g" style="color:var(--red)">Delete</button></div></div>
+              </div></div>
+              <div class="acc" data-closed><div class="h"><span class="car"></span>Pump<span class="sp"></span><span class="sum"><span class="chip gray">6</span><span class="chip gray">G7120A</span></span></div><div class="body"></div></div>
+              <div class="acc" data-closed><div class="h"><span class="car"></span>Roughing pump<span class="sp"></span><span class="sum"><span class="chip gray">3</span><span class="chip gray">MS120 · MS40+</span></span></div><div class="body"></div></div>
+              <div class="empty"><b>Column oven has no procedures yet</b>Add one, or copy the Column compartment set as a starting point.</div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= OPTION C ================= -->
+  <section class="panel" data-t="c">
+    <div class="brief">
+      <div><b>Idea</b>Keep cards — they work for the equipment catalog where a photo matters — but give every card the same anatomy (image · manufacturer eyebrow · model · type · tags · one kebab) and lay them in a responsive grid that goes 1 → 2 → 3 → 4 columns. Filters become counted facet pills at the top instead of separate "instrument types / module types / manufacturers" lists you scroll past.</div>
+      <div><b>What it fixes</b>Image 3 is a wall of 90 tiny uneven tiles with a missing photo placeholder every other one. A fixed card anatomy plus a grid turns that into something scannable, and facets replace three full-width reference lists with one sticky row.</div>
+      <div><b>Best for</b>Equipment catalog; also works for the parts book if you want thumbnails to matter.</div>
+      <div><b>Risk</b>Card grids are slower to scan than tables when you know the exact model — pair with a fast search.</div>
+    </div>
+    <div class="stage">
+      <div>
+        <p class="frame-label">Mobile · 1-column cards, facet strip, action sheet</p>
+        <div class="phone ph"><div class="scr">
+          <div class="top"><span class="menu"></span><span class="logo">RIDGELINE</span><span class="sp"></span><span class="ico"></span></div>
+          <div class="pagehead"><div class="crumb">Settings › Catalog › <b>Equipment</b></div>
+            <div class="seg"><span data-on>Equipment</span><span>Procedures</span><span>Parts</span><span>Prices</span></div></div>
+          <div class="toolbar"><div class="search"><i></i>Model or manufacturer</div><button class="btn p">+ Model</button></div>
+          <div class="facets"><span class="f" data-on>All <b>90</b></span><span class="f">Agilent <b>41</b></span><span class="f">Shimadzu <b>30</b></span><span class="f">Thermo <b>9</b></span><span class="f">LC-MS</span><span class="f">GC-MS</span><span class="f">TOC</span><span class="f">Missing photo <b>34</b></span></div>
+          <div class="grid">
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G6495C Triple quad</div><div class="typ">Mass spec · LC-MS</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">8 procedures</span><span class="chip gray">4 parts</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G7120A 1290 Infinity II high-speed pump</div><div class="typ">Pump · LC system</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">6 procedures</span><span class="chip violet">PM kit</span></div></div>
+            <div class="eq"><div class="img" style="background:#FFF1D6"></div><div class="mfr">Shimadzu</div><div class="mdl">TOC-Lc</div><div class="typ">Analyzer · TOC</div><span class="kebab">⋯</span><div class="tags"><span class="chip amber">No photo</span><span class="chip gray">7 procedures</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Thermo</div><div class="mdl">ISQ 7000</div><div class="typ">Mass spec · GC-MS</div><span class="kebab">⋯</span><div class="tags"><span class="chip red">0 procedures</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G7167B 1290 multisampler</div><div class="typ">Autosampler · LC system</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">5 procedures</span><span class="chip gray">3 parts</span></div></div>
+          </div>
+          <div class="sheet"><div class="bar"></div><div style="font-size:12px;color:var(--ink-2);margin-bottom:4px">G6495C Triple quad</div><div class="opt">Edit model</div><div class="opt">Add photo</div><div class="opt">View 8 procedures</div><div class="opt">Duplicate</div><div class="opt">Retire</div></div>
+        </div></div>
+      </div>
+      <div>
+        <p class="frame-label">Desktop · 3–4 column grid, sticky facets</p>
+        <div class="desk dk"><div class="scr">
+          <div class="top"><span class="logo">RIDGELINE</span><nav><span>Dashboard</span><span>Work orders</span><span>Assets</span><span>Inventory</span><span>Operations</span><span style="font-weight:600">Library</span></nav><span class="sp"></span><span class="ico"></span></div>
+          <div class="pagehead"><div class="crumb">Settings › Catalog › <b>Equipment</b></div>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px"><h2 style="margin:0">Equipment catalog</h2><span class="count">90 models · 13 manufacturers</span></div>
+            <div class="seg"><span data-on>Equipment</span><span>Procedures &amp; maintenance</span><span>Parts book</span><span>Price book</span></div></div>
+          <div class="toolbar"><div class="search" style="max-width:360px"><i></i>Search model or manufacturer</div><span class="sp" style="flex:1"></span><button class="btn">Manage types</button><button class="btn">Manufacturers</button><button class="btn p">+ Model</button></div>
+          <div class="statrow">
+            <div class="tile"><div><div class="t">Instrument types</div><div class="s">GC-MS, LC-MS, TOC, UV-Vis + 9 more</div></div><span class="kebab">›</span></div>
+            <div class="tile"><div><div class="t">Module types</div><div class="s">Autosampler, Pump, Detector + 11</div></div><span class="kebab">›</span></div>
+            <div class="tile"><div><div class="t">Manufacturers &amp; vendors</div><div class="s">13 makers · 3 vendors</div></div><span class="kebab">›</span></div>
+            <div class="tile"><div><div class="t">Needs attention</div><div class="s" style="color:var(--amber)">34 missing photo · 6 no procedures</div></div><span class="kebab">›</span></div>
+          </div>
+          <div class="facets" style="position:sticky;top:88px;background:var(--paper);z-index:3"><span class="f" data-on>All <b>90</b></span><span class="f">Agilent <b>41</b></span><span class="f">Shimadzu <b>30</b></span><span class="f">Thermo <b>9</b></span><span class="f">Waters <b>4</b></span><span class="f" style="margin-left:8px">LC-MS</span><span class="f">GC-MS</span><span class="f">TOC</span><span class="f">UV-Vis</span><span class="f" style="margin-left:auto">Missing photo <b>34</b></span></div>
+          <div class="grid">
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G6495C</div><div class="typ">Triple quad · LC-MS</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">8 procedures</span><span class="chip gray">4 parts</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G7120A 1290 pump</div><div class="typ">Pump · LC system</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">6 procedures</span><span class="chip violet">PM kit</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G7167B multisampler</div><div class="typ">Autosampler · LC system</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">5 procedures</span></div></div>
+            <div class="eq"><div class="img" style="background:#FFF1D6"></div><div class="mfr">Shimadzu</div><div class="mdl">TOC-Lc</div><div class="typ">Analyzer · TOC</div><span class="kebab">⋯</span><div class="tags"><span class="chip amber">No photo</span><span class="chip gray">7 procedures</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Shimadzu</div><div class="mdl">LCMS-8060</div><div class="typ">Triple quad · LC-MS</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">3 procedures</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Thermo</div><div class="mdl">ISQ 7000</div><div class="typ">Single quad · GC-MS</div><span class="kebab">⋯</span><div class="tags"><span class="chip red">0 procedures</span></div></div>
+            <div class="eq"><div class="img" style="background:#FFF1D6"></div><div class="mfr">Shimadzu</div><div class="mdl">GCMS-QP2020</div><div class="typ">Single quad · GC-MS</div><span class="kebab">⋯</span><div class="tags"><span class="chip amber">No photo</span><span class="chip red">0 procedures</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Agilent</div><div class="mdl">G7116A MCT</div><div class="typ">Column compartment</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">3 procedures</span><span class="chip gray">1 part</span></div></div>
+            <div class="eq"><div class="img"></div><div class="mfr">Shimadzu</div><div class="mdl">UV-1900i</div><div class="typ">Spectrophotometer · UV-Vis</div><span class="kebab">⋯</span><div class="tags"><span class="chip gray">5 procedures</span></div></div>
+          </div>
+          <div class="foot">Showing 9 of 90 · Load more</div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+</div>
+<script>
+const tabs=[...document.querySelectorAll('.tabs button')],panels=[...document.querySelectorAll('.panel')];
+tabs.forEach(b=>b.addEventListener('click',()=>{tabs.forEach(x=>x.setAttribute('aria-selected',x===b));panels.forEach(p=>p.dataset.t===b.dataset.t?p.setAttribute('data-active',''):p.removeAttribute('data-active'));}));
+document.querySelectorAll('.acc .h').forEach(h=>h.addEventListener('click',()=>h.parentElement.toggleAttribute('data-closed')));
+</script>
+</body>
+</html>

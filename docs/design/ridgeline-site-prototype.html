@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ridgeline — site redesign prototype</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/* ── tokens: Ridgeline's own, plus the tones ───────────────────────────── */
+:root{--navy:#172A4A;--navy-2:#21395F;--coral:#E8613C;--sky:#5BA8D9;--bg:#F5F6F9;--card:#fff;--line:#E4E8EF;--ink:#1E293B;--mut:#64748B;--link:#1D6396;
+--t-neutral-bg:#EEF1F5;--t-neutral-fg:#475569;--t-faint-fg:#94A3B8;--t-info-bg:#E7F2FA;--t-info-fg:#1D6396;--t-good-bg:#E5F3E5;--t-good-fg:#2E6B2E;--t-warn-bg:#FAF0DC;--t-warn-fg:#8A5410;--t-accent-bg:#EDEBFA;--t-accent-fg:#4F45A3;--t-bad-bg:#FBE9E9;--t-bad-fg:#A32D2D;
+--sans:"IBM Plex Sans",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,monospace;--r:10px}
+*{box-sizing:border-box}body{margin:0;background:#D9DDE5;font-family:var(--sans);color:var(--ink);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased}
+/* ── prototype chrome ── */
+.proto{max-width:1500px;margin:0 auto;padding:22px 20px 50px}
+.proto h1{font-size:20px;margin:0 0 2px}.proto .sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+.pbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.pbar button{font:inherit;font-size:12.5px;font-weight:600;padding:7px 12px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;color:var(--mut)}
+.pbar button[aria-selected=true]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.pbar .sp{flex:1}.pbar .vp{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.pbar .vp button{border:0;border-radius:0}
+.frame{margin:0 auto;background:var(--bg);border:1px solid #c5cad4;border-radius:12px;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.2);height:860px;transition:width .2s}
+.frame.dk{width:100%}.frame.ph{width:390px;border:10px solid #1a1d24;border-radius:38px}
+.scr{height:100%;overflow:auto;position:relative}
+.pg{display:none}.pg[data-on]{display:block}
+/* ── app header ── */
+.hdr{background:var(--navy);color:#fff;position:sticky;top:0;z-index:30}
+.hdr .spectrum{height:3px;background:linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%)}
+.hdr .row{display:flex;align-items:center;gap:14px;padding:8px 18px}
+.brand{font-weight:800;letter-spacing:.04em;font-size:14px}.brand small{display:block;font-weight:400;font-size:11px;opacity:.7;letter-spacing:0}
+.nav{margin-left:auto;display:flex;gap:2px}
+.nav a{padding:6px 11px;border-radius:999px;font-size:13px;font-weight:600;color:#fff;opacity:.85;cursor:pointer}
+.nav a[data-on]{background:rgba(255,255,255,.92);color:var(--navy);opacity:1;font-weight:700}
+.util{display:flex;gap:2px;align-items:center;padding-left:10px;border-left:1px solid rgba(255,255,255,.25)}
+.util span{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;position:relative;font-size:14px}
+.util .badge{position:absolute;top:2px;right:0;background:var(--coral);font-size:10px;font-weight:800;min-width:16px;height:16px;border-radius:999px;line-height:16px;text-align:center;padding:0 4px}
+.util .av{border:1.5px solid #fff;width:26px;height:26px;font-size:11px;font-weight:800}
+.ph .nav{display:none}.ph .hdr .row{padding:8px 14px}.ph .util{margin-left:auto;border:0}
+.ph .burger{width:18px;height:2px;background:#fff;box-shadow:0 5px 0 #fff,0 -5px 0 #fff;margin-right:4px}.dk .burger{display:none}
+.tabbar{display:none}.ph .tabbar{display:flex;position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);z-index:30;padding:6px 4px 10px}
+.tabbar a{flex:1;text-align:center;font-size:10.5px;font-weight:600;color:var(--mut)}.tabbar a i{display:block;font-style:normal;font-size:17px;margin-bottom:1px}.tabbar a[data-on]{color:var(--navy)}
+/* ── page shell ── */
+.container{width:100%;max-width:1080px;margin:0 auto;padding:16px 18px}.container.wide{max-width:1240px}.container.split{max-width:1200px}
+.ph .container{padding:12px 14px}
+.crumb{font-size:12px;color:var(--mut);margin-bottom:4px}.crumb b{color:var(--ink);font-weight:500}
+.page-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:2px 0 12px}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.4px;color:var(--navy);margin:0;line-height:1.2}
+.page-sub{font-size:12.5px;color:var(--mut)}
+.page-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ph .page-actions{margin-left:0;width:100%}
+.toolbar{display:flex;gap:8px;align-items:center;padding:8px 0;position:sticky;top:52px;background:var(--bg);z-index:20;border-bottom:1px solid var(--line);margin-bottom:10px}
+.search{flex:1;max-width:360px;display:flex;gap:8px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;color:var(--mut);font-size:12.5px}
+.facets{display:flex;gap:6px;flex-wrap:wrap}.ph .facets{flex-wrap:nowrap;overflow:auto;padding-bottom:2px}
+.f{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--mut);white-space:nowrap}.f b{color:var(--ink);margin-left:3px}.f[data-on]{background:var(--navy);color:#fff;border-color:var(--navy)}.f[data-on] b{color:#fff}
+.btn{font:inherit;font-size:13px;font-weight:700;padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--navy);white-space:nowrap;cursor:pointer}
+.btn.p{background:var(--navy);color:#fff;border-color:var(--navy)}.btn.a{background:var(--coral);border-color:var(--coral);color:#fff}.btn.sm{font-size:12px;padding:4px 9px}.btn.l{border:0;background:none;color:var(--link);padding:0;font-size:12px}
+.pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;line-height:1.5}
+.pill.neutral{background:var(--t-neutral-bg);color:var(--t-neutral-fg)}.pill.faint{background:var(--t-neutral-bg);color:var(--t-faint-fg)}.pill.info{background:var(--t-info-bg);color:var(--t-info-fg)}.pill.good{background:var(--t-good-bg);color:var(--t-good-fg)}.pill.warn{background:var(--t-warn-bg);color:var(--t-warn-fg)}.pill.accent{background:var(--t-accent-bg);color:var(--t-accent-fg)}.pill.bad{background:var(--t-bad-bg);color:var(--t-bad-fg)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}.dot.good{background:#2E8B3E}.dot.info{background:#1D6396}.dot.warn{background:#E0A100}.dot.bad{background:#C23A3A}.dot.accent{background:#6A5ACD}.dot.neutral{background:#B7BFCC}
+.id{font-family:var(--mono);font-size:12.5px;font-weight:600;letter-spacing:-.01em}.id.dim{color:var(--mut);font-weight:500}
+.mut{color:var(--mut)}.meta{font-size:11.5px;color:var(--mut)}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:12px;box-shadow:0 1px 2px rgba(23,42,74,.05)}
+.card-title{font-weight:800;font-size:15px;letter-spacing:-.2px;color:var(--navy);display:flex;align-items:center;gap:8px;margin:0 0 8px}.card-title .sp{flex:1}
+.eyebrow{font-size:11px;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.sec{display:flex;align-items:center;gap:8px;padding:14px 0 6px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.sec .n{font-weight:700;letter-spacing:0;background:var(--t-neutral-bg);border-radius:999px;padding:0 7px;font-size:11px}.sec .sp{flex:1}.sec a{font-weight:600;letter-spacing:0;text-transform:none;color:var(--link);font-size:12px}
+.empty{border:1.5px dashed var(--line);border-radius:var(--r);padding:22px 18px;text-align:center;color:var(--mut);font-size:12.5px}.empty b{color:var(--ink);display:block;font-size:13.5px;margin-bottom:3px}
+/* table */
+.tbl{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.tr{display:grid;grid-template-columns:var(--cols);gap:12px;align-items:center;padding:9px 14px;border-top:1px solid var(--line);min-width:0}
+.tr.h{border-top:0;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);background:#FAFBFD;padding:8px 14px}
+.tr.alt{background:#F9FAFC}.tr:hover:not(.h){background:#EDF3FA}
+.tr>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tr .acts{text-align:right;white-space:nowrap}.tr .acts .btn.l{opacity:0;margin-left:10px}.tr:hover .acts .btn.l{opacity:1}
+.tr .grp{display:flex;align-items:baseline;gap:8px;font-weight:800;color:var(--navy);font-size:14px;background:#fff;padding:14px 14px 6px;border-bottom:2px solid var(--navy);grid-column:1/-1}
+.ph .tr.h{display:none}.ph .tr{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 12px}.ph .tr>*{white-space:normal}.ph .tr .hide-m{display:none}.ph .tr .acts .btn.l{display:none}
+.kebab{width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:var(--mut);font-weight:700;letter-spacing:1px}
+.two{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;align-items:start}.ph .two{grid-template-columns:1fr}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}.ph .metric-grid{grid-template-columns:repeat(2,1fr)}
+.metric{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}.metric .v{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--navy);line-height:1.1}.metric .l{font-size:11px;color:var(--mut);font-weight:600;margin-top:2px}.metric .d{margin-top:6px}
+.list{display:flex;flex-direction:column}
+.li{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:9px 0;border-top:1px solid var(--line);align-items:center}.li:first-child{border-top:0}
+.li .t{font-weight:500;display:flex;gap:8px;align-items:center;min-width:0}.li .t span.txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.li .m{grid-column:1}.li .r{grid-row:1/3;display:flex;gap:6px;align-items:center}.li .r .btn.l{opacity:0}.li:hover .r .btn.l{opacity:1}.ph .li .r .btn.l{display:none}
+.legend{display:flex;gap:14px;font-size:11.5px;color:var(--mut);flex-wrap:wrap;margin:0 0 8px}.legend span{display:inline-flex;gap:5px;align-items:center}
+.hero{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;grid-template-columns:72px 1fr auto;gap:2px 14px;align-items:start;margin-bottom:12px}
+.ph .hero{grid-template-columns:56px 1fr auto}
+.hero .img{width:72px;height:72px;border-radius:10px;background:linear-gradient(135deg,#E6EBF3,#D3DAE6);grid-row:1/5}.ph .hero .img{width:56px;height:56px}
+.hero .title{font-size:22px;font-weight:800;letter-spacing:-.4px;color:var(--navy);line-height:1.15}.hero .title .id{font-size:22px}
+.hero .acts{grid-column:3;grid-row:1/5;display:flex;gap:6px}.ph .hero .acts .btn:not(.kb){display:none}
+.hero .stats{grid-column:2/4;display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-top:6px}.hero .stats b{color:var(--ink)}.hero .stats .w b{color:var(--t-warn-fg)}
+.jump{position:sticky;top:52px;z-index:20;display:flex;gap:4px;background:var(--bg);padding:8px 0;margin-bottom:4px;overflow:auto;box-shadow:0 6px 8px -8px rgba(23,42,74,.28)}
+.jump a{padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;color:var(--mut);border:1px solid var(--line);background:#fff;white-space:nowrap}.jump a[data-on]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.band{display:flex;align-items:center;gap:10px;margin:12px 0 8px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}.band:after{content:"";flex:1;height:1px;background:var(--line)}
+.cols{columns:2;column-gap:14px}.ph .cols{columns:1}.cols .card{break-inside:avoid}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12.5px}.kv dt{color:var(--mut)}.kv dd{margin:0}
+.stage{display:flex;gap:0;margin:8px 0}.stage span{flex:1;height:6px;background:var(--line)}.stage span:first-child{border-radius:3px 0 0 3px}.stage span:last-child{border-radius:0 3px 3px 0}.stage span.on{background:var(--navy)}.stage span.cur{background:var(--coral)}
+.stg{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mut)}
+.note{padding:8px 0;border-top:1px solid var(--line);font-size:12.5px}.note:first-child{border-top:0}.note .who{font-weight:600;font-size:12px}.note .when{color:var(--mut);font-size:11px;margin-left:6px}
+/* settings split */
+.sp-layout{display:grid;grid-template-columns:240px 1fr;gap:0;min-height:calc(100% - 55px)}.ph .sp-layout{grid-template-columns:1fr}
+.side{background:#fff;border-right:1px solid var(--line);padding:10px 0 20px}.ph .side{display:none}
+.side .g{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);font-weight:700;padding:12px 16px 4px}
+.side a{display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:13px;color:var(--ink);border-left:3px solid transparent;cursor:pointer}
+.side a .car{width:7px;height:7px;border-right:1.5px solid var(--mut);border-bottom:1.5px solid var(--mut);transform:rotate(-45deg);margin:0 3px;flex:none}.side a[data-open] .car{transform:rotate(45deg)}
+.side a .lbl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.side a .n{font-size:11px;color:var(--mut);background:var(--t-neutral-bg);border-radius:999px;padding:0 6px}
+.side a.l1{font-weight:600}.side a.l2{padding-left:28px}.side a.l3{padding-left:46px}.side a.l3 .lbl{font-family:var(--mono);font-weight:500;font-size:12px}.side a.l3 .mf{font-family:var(--sans);color:var(--mut);font-size:11px;font-weight:400;margin-left:4px}
+.side a[data-on]{background:var(--t-info-bg);border-left-color:var(--navy);color:var(--navy)}.side a[data-on] .lbl{font-weight:600}.side a[data-on] .n{background:#fff}
+.side a.add{color:var(--link);font-weight:600;font-size:12px}
+.main{padding:16px 18px;min-width:0}.ph .main{padding:12px 14px}
+.acc{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.acc .h{display:flex;align-items:center;gap:10px;padding:10px 14px;font-weight:700;font-size:13px;background:#FAFBFD;border-bottom:1px solid var(--line)}.acc .h .sp{flex:1}.acc .h .sub{font-weight:400;color:var(--mut);font-size:11.5px}
+.acc .li{padding:9px 14px}.acc .li:first-child{border-top:0}
+.acc.inh .h .t:before{content:"↑ ";color:var(--mut)}
+.stabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:12px;overflow:auto}.stabs span{padding:8px 12px;font-size:13px;font-weight:600;color:var(--mut);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}.stabs span[data-on]{color:var(--navy);font-weight:700;border-bottom-color:var(--coral)}.stabs span i{font-style:normal;font-size:11px;color:var(--mut);margin-left:4px}.stabs span i.w{color:var(--t-warn-fg)}
+.mobcats{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:12px}.mobcats a{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-top:1px solid var(--line);font-size:13.5px;font-weight:500}.mobcats a:first-child{border-top:0}.mobcats a .r{color:var(--mut);font-size:12px;font-weight:400;display:flex;gap:8px;align-items:center}.mobcats a .r:after{content:"›";font-size:16px;color:#B7BFCC}
+.dk .mobonly{display:none}
+.cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.ph .cardgrid{grid-template-columns:1fr}
+.eq{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;display:grid;grid-template-columns:52px 1fr auto;gap:3px 12px;align-items:start}.eq .im{width:52px;height:52px;border-radius:8px;background:linear-gradient(135deg,#E6EBF3,#D3DAE6);grid-row:1/4}.eq .im.no{background:var(--t-warn-bg)}.eq .md{font-family:var(--mono);font-weight:600;font-size:14px}.eq .kb{grid-column:3;grid-row:1/4}.eq .tg{grid-column:2/4;display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}
+</style></head><body>
+<div class="proto">
+ <h1>Ridgeline — the whole app in the new system</h1>
+ <p class="sub">Your palette (navy, coral, sky, spectrum bar) and your existing primitives (.page-head, .reg, .tabs, .sheet, .band-label), applied consistently. Tones replace ad-hoc pill colors; identifiers are monospace; status is a dot + legend; row actions hide until hover. Switch pages and viewport below; scroll inside the frame.</p>
+ <div class="pbar" role="tablist">
+  <button aria-selected="true" data-p="dash">Dashboard</button><button data-p="work">Work orders</button><button data-p="wo">Work order</button><button data-p="assets">Assets</button><button data-p="inst">Instrument record</button><button data-p="set">Settings · Procedures</button><button data-p="model">Model page</button><button data-p="eq">Settings · Equipment</button>
+  <span class="sp"></span>
+  <span class="vp"><button data-v="dk" aria-selected="true">Desktop</button><button data-v="ph">Mobile</button></span>
+ </div>
+
+ <div class="frame dk" id="frame"><div class="scr">
+  <!-- header -->
+  <div class="hdr"><div class="spectrum"></div><div class="row">
+   <span class="burger"></span>
+   <div class="brand">RIDGELINE<small>Sierra Spectra</small></div>
+   <nav class="nav"><a data-n="dash">Dashboard</a><a data-n="work">Work orders</a><a data-n="assets">Assets</a><a>Inventory</a><a>Operations ▾</a><a data-n="set">Library ▾</a></nav>
+   <div class="util"><span>⌕</span><span>✉<span class="badge">3</span></span><span>🔔</span><span class="av">J</span></div>
+  </div></div>
+
+  <!-- ═══ DASHBOARD ═══ -->
+  <section class="pg" data-p="dash" data-on><div class="container wide">
+   <div class="page-head"><h2 class="page-title">Friday, Aug 21</h2><span class="page-sub">Lab Zen · 11 systems in work · 2 blocked</span><div class="page-actions"><button class="btn">Daily digest</button><button class="btn p">+ Work order</button></div></div>
+   <div class="metric-grid">
+    <div class="metric"><div class="v">11</div><div class="l">In work</div><div class="d"><span class="pill neutral">4 stages</span></div></div>
+    <div class="metric"><div class="v">2</div><div class="l">Blocked</div><div class="d"><span class="pill bad">their move · 1</span></div></div>
+    <div class="metric"><div class="v">5</div><div class="l">Parts on order</div><div class="d"><span class="pill warn">1 no tracking</span></div></div>
+    <div class="metric"><div class="v">3</div><div class="l">PM due ≤ 14 d</div><div class="d"><span class="pill info">scheduled</span></div></div>
+    <div class="metric"><div class="v">$1.48M</div><div class="l">In escrow backlog</div><div class="d"><span class="pill good">↓ 2 shipped this wk</span></div></div>
+   </div>
+   <div class="legend"><span><span class="dot good"></span>our move</span><span><span class="dot warn"></span>waiting on client</span><span><span class="dot bad"></span>blocked</span><span><span class="dot info"></span>with supplier</span><span><span class="dot neutral"></span>parked</span></div>
+   <div class="tbl" style="--cols:12px 150px minmax(160px,1.4fr) minmax(120px,1fr) 110px 120px 90px">
+    <div class="tr h"><span></span><span>Serial</span><span>System</span><span>Stage</span><span>Whose move</span><span>Last touched</span><span></span></div>
+    <div class="tr"><span class="dot bad"></span><span class="id">US24051113</span><span><b>Agilent 6495C</b> · LC-MS <span class="hide-m">· Lab Zen #58</span></span><span class="hide-m">Repair</span><span><span class="pill bad">Blocked</span></span><span class="meta hide-m">2 h · Bill</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="dot warn"></span><span class="id">JH49203</span><span><b>Thermo ISQ 7000</b> · GC-MS</span><span class="hide-m">Checkout</span><span><span class="pill warn">Their move</span></span><span class="meta hide-m">1 d · Joe</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="dot good"></span><span class="id">O10955202</span><span><b>Shimadzu LCMS-8060</b> · LC-MS</span><span class="hide-m">Refurb</span><span><span class="pill good">Ours</span></span><span class="meta hide-m">3 h · Bill</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="dot info"></span><span class="id">DE43219871</span><span><b>Agilent 7890B / 5977B</b> · GC-MS</span><span class="hide-m">Parts</span><span><span class="pill info">Supplier</span></span><span class="meta hide-m">Part 5188-5365 · no tracking</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="dot good"></span><span class="id">8042178</span><span><b>Thermo UltiMate 3000</b> · HPLC</span><span class="hide-m">Sign-off</span><span><span class="pill good">Ours</span></span><span class="meta hide-m">Yesterday · Joe</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="dot neutral"></span><span class="id">C12345</span><span><b>Shimadzu GC-2010 / QP2020</b> · GC-MS</span><span class="hide-m">Parked</span><span><span class="pill faint">Parked</span></span><span class="meta hide-m">9 d</span><span class="acts"><button class="btn l">Open</button></span></div>
+   </div>
+   <div class="two">
+    <div class="card"><div class="card-title">Follow-ups <span class="pill neutral">4</span><span class="sp"></span><button class="btn l">All</button></div>
+     <div class="list">
+      <div class="li"><div class="t"><span class="dot bad"></span><span class="txt">Chase Agilent on 5188-5365 backorder</span></div><div class="m">GC-MS 7890B · 6 d with no tracking</div><div class="r"><button class="btn l">Done</button><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Adam to confirm ship date on #58</span></div><div class="m">Lab Zen · asked Tue</div><div class="r"><button class="btn l">Done</button><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="dot good"></span><span class="txt">File tune report for ISQ checkout</span></div><div class="m">Required for sign-off</div><div class="r"><button class="btn l">Done</button><span class="kebab">⋯</span></div></div>
+     </div></div>
+    <div class="card"><div class="card-title">Maintenance due <span class="pill info">3</span></div>
+     <div class="list">
+      <div class="li"><div class="t"><span class="txt">Replace rotor seal</span></div><div class="m"><span class="id dim">G7167B</span> · #58 · due in 4 d</div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="txt">Roughing pump oil</span></div><div class="m"><span class="id dim">MS40+</span> · O10955202 · due in 9 d</div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="txt">Source clean</span></div><div class="m"><span class="id dim">ISQ 7000</span> · JH49203 · due in 12 d</div><div class="r"><span class="kebab">⋯</span></div></div>
+     </div></div>
+   </div>
+  </div></section>
+
+  <!-- ═══ WORK ORDERS ═══ -->
+  <section class="pg" data-p="work"><div class="container wide">
+   <div class="page-head"><h2 class="page-title">Work orders</h2><span class="page-sub">14 open · 38 this quarter</span><div class="page-actions"><button class="btn">Export</button><button class="btn p">+ Work order</button></div></div>
+   <div class="toolbar"><div class="search">⌕ Serial, client, model or WO number</div><div class="facets"><span class="f" data-on>Open <b>14</b></span><span class="f">Mine <b>6</b></span><span class="f">Blocked <b>2</b></span><span class="f">Awaiting sign-off <b>3</b></span><span class="f">Closed</span></div></div>
+   <div class="tbl" style="--cols:90px minmax(180px,1.6fr) minmax(110px,1fr) 100px 120px 100px 80px">
+    <div class="tr h"><span>WO</span><span>System</span><span>Client</span><span>Type</span><span>Stage</span><span>Updated</span><span></span></div>
+    <div class="tr"><span class="id">WO-0412</span><span><b>Agilent 6495C</b> <span class="id dim hide-m">US24051113</span></span><span class="hide-m">Lab Zen</span><span class="hide-m">Repair</span><span><span class="pill bad">Blocked</span></span><span class="meta">2 h</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="id">WO-0411</span><span><b>Thermo ISQ 7000</b> <span class="id dim hide-m">JH49203</span></span><span class="hide-m">Lab Zen</span><span class="hide-m">Checkout</span><span><span class="pill warn">Their move</span></span><span class="meta">1 d</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="id">WO-0409</span><span><b>PerkinElmer Optima 8300</b> <span class="id dim hide-m">081N2041203</span></span><span class="hide-m">Coastal Analytical</span><span class="hide-m">Break/fix</span><span><span class="pill info">Quoted</span></span><span class="meta">2 d</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="id">WO-0408</span><span><b>Shimadzu LCMS-8060</b> <span class="id dim hide-m">O10955202</span></span><span class="hide-m">Lab Zen</span><span class="hide-m">Refurb</span><span><span class="pill good">Ours</span></span><span class="meta">3 h</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="id">WO-0405</span><span><b>Thermo UltiMate 3000</b> <span class="id dim hide-m">8042178</span></span><span class="hide-m">Lab Zen</span><span class="hide-m">Install / OQ</span><span><span class="pill accent">Sign-off</span></span><span class="meta">1 d</span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="id">WO-0402</span><span><b>Peak N2 generator</b> <span class="id dim hide-m">PGN-22913</span></span><span class="hide-m">Lab Zen</span><span class="hide-m">Break/fix</span><span><span class="pill good">Ours</span></span><span class="meta">4 d</span><span class="acts"><button class="btn l">Open</button></span></div>
+   </div>
+  </div></section>
+
+  <!-- ═══ WORK ORDER ═══ -->
+  <section class="pg" data-p="wo"><div class="container split">
+   <div class="crumb">Work orders › <b>WO-0412</b></div>
+   <div class="hero"><div class="img"></div><div class="eyebrow">Repair · Lab Zen · #58</div><div class="title"><span class="id">WO-0412</span> · Agilent 6495C</div><div class="meta"><span class="id dim">US24051113</span> · Triple quad LC-MS · Opened Aug 12 · Bill</div><div class="stats"><span class="w"><b>Blocked</b> on part</span><span><b>6</b> tasks · 4 done</span><span><b>2</b> required open</span><span><b>9.5 h</b> logged</span></div><div class="acts"><button class="btn">Log time</button><button class="btn">Service report</button><button class="btn kb">⋯</button></div></div>
+   <div class="stage"><span class="on"></span><span class="on"></span><span class="cur"></span><span></span><span></span></div><div class="stg"><span>Intake</span><span>Diagnose</span><span>Parts</span><span>Repair</span><span>Sign-off</span></div>
+   <div class="jump"><a data-on>Status</a><a>Tasks</a><a>Parts</a><a>Notes</a><a>Files</a><a>Time</a></div>
+   <div class="band">Status</div>
+   <div class="card"><div class="card-title">Blocked — waiting on supplier <span class="pill bad">6 d</span><span class="sp"></span><button class="btn sm">Unblock</button></div>
+    <div class="kv"><dt>Waiting on</dt><dd>Agilent · <span class="id">G1960-80039</span> oil mist filter + <span class="id">5188-5365</span> septa — backordered, no tracking</dd><dt>Whose move</dt><dd>Supplier's. Chase date set for Mon.</dd><dt>Client told</dt><dd>Yes — Adam, Tue digest</dd></div></div>
+   <div class="band">Tasks</div>
+   <div class="cols">
+    <div class="card"><div class="card-title">Required for sign-off <span class="pill warn">2 open</span></div>
+     <div class="list">
+      <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Post-PM · verify vacuum reached operating pressure</span></div><div class="m">Test · pass/fail · <span class="pill good">Pass</span> · Bill, Aug 14</div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Injection precision, single needle</span></div><div class="m">Test · enter % RSD or nL SD · limit &lt; 0.15 % RSD · needs report</div><div class="r"><button class="btn l">Record</button><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Replace rotor seal</span></div><div class="m">Task · logs <span class="id dim">5068-0198</span> · waiting on part</div><div class="r"><span class="kebab">⋯</span></div></div>
+     </div></div>
+    <div class="card"><div class="card-title">Other tasks <span class="pill neutral">3</span><span class="sp"></span><button class="btn l">+ Task</button></div>
+     <div class="list">
+      <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Clean sample tray and waste lines</span></div><div class="m">Done · Bill · Aug 13</div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Inspect needle seat &amp; capillary</span></div><div class="m">Inspected — OK · logs <span class="id dim">G4267-87012</span> (not replaced)</div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="dot neutral"></span><span class="txt">Photograph source before reassembly</span></div><div class="m">Not started</div><div class="r"><span class="kebab">⋯</span></div></div>
+     </div></div>
+    <div class="card"><div class="card-title">Parts <span class="pill info">2 on order</span><span class="sp"></span><button class="btn l">+ Part</button></div>
+     <div class="list">
+      <div class="li"><div class="t"><span class="id">G1960-80039</span><span class="txt mut">Oil exhaust mist filter</span></div><div class="m">Agilent OEM · PO-118 · <span class="pill warn">no tracking · 6 d</span></div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="id">5188-5365</span><span class="txt mut">Septa, 11 mm, 50/pk</span></div><div class="m">Agilent · PO-118 · backordered</div><div class="r"><span class="kebab">⋯</span></div></div>
+      <div class="li"><div class="t"><span class="id">5068-0198</span><span class="txt mut">Rotor seal</span></div><div class="m">From stock · pulled Aug 13</div><div class="r"><span class="kebab">⋯</span></div></div>
+     </div></div>
+    <div class="card"><div class="card-title">Notes <span class="pill neutral">5</span><span class="sp"></span><button class="btn l">+ Note</button></div>
+     <div class="note"><span class="who">Bill</span><span class="when">Today 9:12</span><div>Re-seated funnel assemblies after sonication; vacuum came up clean. Still can't run precision until rotor seal lands.</div></div>
+     <div class="note"><span class="who">Joe</span><span class="when">Tue</span><div>Told Adam we're gated on Agilent. He's fine with Mon check-in.</div></div>
+     <div class="note"><span class="who">Bill</span><span class="when">Aug 13</span><div>Needle seat inspected, no scoring — kept original.</div></div></div>
+    <div class="card"><div class="card-title">Files <span class="pill neutral">4</span><span class="sp"></span><button class="btn l">Upload</button></div>
+     <div class="list"><div class="li"><div class="t"><span class="txt">6495C_autotune_2026-08-14.pdf</span></div><div class="m">Tune report · 1.2 MB · Bill</div><div class="r"><button class="btn l">Open</button><span class="kebab">⋯</span></div></div><div class="li"><div class="t"><span class="txt">source_before.jpg</span></div><div class="m">Photo · Aug 13</div><div class="r"><button class="btn l">Open</button><span class="kebab">⋯</span></div></div></div></div>
+   </div>
+  </div></section>
+
+  <!-- ═══ ASSETS ═══ -->
+  <section class="pg" data-p="assets"><div class="container wide">
+   <div class="page-head"><h2 class="page-title">Assets</h2><span class="page-sub">47 registered · 11 in work · 3 organizations</span><div class="page-actions"><button class="btn">Import</button><button class="btn">Labels</button><button class="btn p">+ Asset</button></div></div>
+   <div class="toolbar"><div class="search">⌕ Serial, tag, model</div><div class="facets"><span class="f" data-on>All <b>47</b></span><span class="f">Lab Zen <b>31</b></span><span class="f">In work <b>11</b></span><span class="f">LC-MS</span><span class="f">GC-MS</span><span class="f">HPLC</span><span class="f">Retired</span></div></div>
+   <div class="tbl" style="--cols:12px 110px minmax(170px,1.6fr) minmax(100px,1fr) 110px 120px 80px">
+    <div class="tr"><span class="grp">Lab Zen <span class="pill neutral">31</span></span></div>
+    <div class="tr h"><span></span><span>Tag</span><span>Model</span><span>Serial</span><span>Type</span><span>Status</span><span></span></div>
+    <div class="tr"><span class="dot bad"></span><span class="id">#58</span><span><b>Agilent 6495C</b></span><span class="id dim hide-m">US24051113</span><span class="hide-m">LC-MS</span><span><span class="pill bad">In repair</span></span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="dot good"></span><span class="id">#57</span><span><b>Agilent 1290 Infinity II</b></span><span class="id dim hide-m">DEBAY02441</span><span class="hide-m">LC</span><span><span class="pill good">In service</span></span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="dot warn"></span><span class="id">#49</span><span><b>Thermo ISQ 7000 / TRACE 1310</b></span><span class="id dim hide-m">JH49203</span><span class="hide-m">GC-MS</span><span><span class="pill warn">Checkout</span></span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr alt"><span class="dot good"></span><span class="id">#41</span><span><b>Shimadzu LCMS-8060</b></span><span class="id dim hide-m">O10955202</span><span class="hide-m">LC-MS</span><span><span class="pill info">Refurb</span></span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="dot neutral"></span><span class="id">#33</span><span><b>Shimadzu GC-2010 / QP2020</b></span><span class="id dim hide-m">C12345</span><span class="hide-m">GC-MS</span><span><span class="pill faint">Stored</span></span><span class="acts"><button class="btn l">Open</button></span></div>
+    <div class="tr"><span class="grp">Coastal Analytical <span class="pill neutral">4</span></span></div>
+    <div class="tr"><span class="dot info"></span><span class="id">CA-02</span><span><b>PerkinElmer Optima 8300</b></span><span class="id dim hide-m">081N2041203</span><span class="hide-m">ICP-OES</span><span><span class="pill info">Quoted</span></span><span class="acts"><button class="btn l">Open</button></span></div>
+   </div>
+  </div></section>
+
+  <!-- ═══ INSTRUMENT RECORD ═══ -->
+  <section class="pg" data-p="inst"><div class="container split">
+   <div class="crumb">Assets › Lab Zen › <b>#58</b></div>
+   <div class="hero"><div class="img"></div><div class="eyebrow">LC-MS · Triple quad · Lab Zen</div><div class="title"><span class="id">#58</span> · Agilent 6495C</div><div class="meta"><span class="id dim">US24051113</span> · 1290 Infinity II front end · Installed 2021 · Bldg 2, Lab 214</div><div class="stats"><span class="w"><b>In repair</b> · WO-0412</span><span><b>1</b> open WO</span><span><b>3</b> PM due ≤ 30 d</span><span><b>OQ</b> current to Mar 2027</span><span><b>$142k</b> escrow</span></div><div class="acts"><button class="btn">Label</button><button class="btn">Binder</button><button class="btn p">+ Work order</button><button class="btn kb">⋯</button></div></div>
+   <div class="jump"><a data-on>Now</a><a>Work</a><a>Maintenance</a><a>Modules</a><a>Gases</a><a>Files</a><a>History</a></div>
+   <div class="band">Now</div>
+   <div class="cols">
+    <div class="card"><div class="card-title">Custody <span class="pill info">Our shop</span></div><div class="kv"><dt>Since</dt><dd>Aug 12 · picked up by Bill</dd><dt>Returns</dt><dd>After WO-0412 sign-off</dd><dt>Agreement</dt><dd>Lab Zen retainer · through Sep 30</dd></div></div>
+    <div class="card"><div class="card-title">Open work <span class="pill bad">1 blocked</span></div><div class="list"><div class="li"><div class="t"><span class="dot bad"></span><span class="txt"><span class="id">WO-0412</span> Repair — ion source, rotor seal</span></div><div class="m">Blocked on Agilent parts · 6 d · Bill</div><div class="r"><button class="btn l">Open</button></div></div></div></div>
+   </div>
+   <div class="band">Maintenance</div>
+   <div class="card"><div class="card-title">Schedule <span class="pill neutral">9 procedures</span><span class="sp"></span><button class="btn l">From catalog: LC-MS › 6495C</button></div>
+    <div class="legend"><span><span class="dot bad"></span>overdue</span><span><span class="dot warn"></span>due ≤ 30 d</span><span><span class="dot good"></span>on schedule</span></div>
+    <div class="tbl" style="--cols:12px minmax(180px,1.6fr) 100px 120px minmax(120px,1fr) 80px;margin:0">
+     <div class="tr h"><span></span><span>Procedure</span><span>Every</span><span>Next due</span><span>Last done</span><span></span></div>
+     <div class="tr"><span class="dot warn"></span><span>Replace rotor seal <span class="meta">· <span class="id dim">G7167B</span></span></span><span class="hide-m">12 mo</span><span>Aug 25</span><span class="meta hide-m">Aug 2025 · Bill</span><span class="acts"><button class="btn l">Schedule</button></span></div>
+     <div class="tr alt"><span class="dot warn"></span><span>Source clean &amp; funnel sonication</span><span class="hide-m">6 mo</span><span>Sep 3</span><span class="meta hide-m">Mar 2026 · Joe</span><span class="acts"><button class="btn l">Schedule</button></span></div>
+     <div class="tr"><span class="dot good"></span><span>Roughing pump oil <span class="meta">· <span class="id dim">MS40+</span></span></span><span class="hide-m">6 mo</span><span>Nov 2</span><span class="meta hide-m">May 2026 · Bill</span><span class="acts"><button class="btn l">Schedule</button></span></div>
+     <div class="tr alt"><span class="dot good"></span><span>Injection precision (OQ)</span><span class="hide-m">12 mo</span><span>Mar 2027</span><span class="meta hide-m">Mar 2026 · Joe</span><span class="acts"><button class="btn l">Schedule</button></span></div>
+    </div></div>
+   <div class="band">Modules</div>
+   <div class="cols">
+    <div class="card"><div class="card-title">Configuration <span class="pill neutral">5 modules</span><span class="sp"></span><button class="btn l">Edit</button></div>
+     <div class="list">
+      <div class="li"><div class="t"><span class="id">G6495C</span><span class="txt mut">Triple quad</span></div><div class="m"><span class="id dim">US24051113</span> · Mass spec</div><div class="r"><button class="btn l">Open model</button></div></div>
+      <div class="li"><div class="t"><span class="id">G7167B</span><span class="txt mut">Multisampler</span></div><div class="m"><span class="id dim">DEBAY02441</span> · Autosampler</div><div class="r"><button class="btn l">Open model</button></div></div>
+      <div class="li"><div class="t"><span class="id">G7120A</span><span class="txt mut">High-speed pump</span></div><div class="m"><span class="id dim">DEBAX01120</span> · Pump</div><div class="r"><button class="btn l">Open model</button></div></div>
+      <div class="li"><div class="t"><span class="id">G7116B</span><span class="txt mut">Multicolumn thermostat</span></div><div class="m">Column compartment</div><div class="r"><button class="btn l">Open model</button></div></div>
+      <div class="li"><div class="t"><span class="id">MS40+</span><span class="txt mut">Roughing pump</span></div><div class="m">Agilent · 2 yr oil cycle</div><div class="r"><button class="btn l">Open model</button></div></div>
+     </div></div>
+    <div class="card"><div class="card-title">Gases</div><div class="kv"><dt>N₂ source</dt><dd>Peak NM32LA · <span class="pill good">OK</span></dd><dt>Collision</dt><dd>N₂ cylinder, UHP · 1,800 psi</dd><dt>Filter</dt><dd><span class="id">RMSN-2</span> · changed Mar 2026</dd></div></div>
+   </div>
+  </div></section>
+
+  <!-- ═══ SETTINGS · PROCEDURES (tree) ═══ -->
+  <section class="pg" data-p="set"><div class="sp-layout">
+   <aside class="side">
+    <div class="g">Settings</div>
+    <a class="l1"><span class="lbl">Workspace</span></a><a class="l1" data-open><span class="lbl">Catalog</span></a>
+    <a class="l2"><span class="lbl">Equipment</span><span class="n">90</span></a><a class="l2" data-on><span class="lbl">Procedures &amp; maintenance</span><span class="n">53</span></a><a class="l2"><span class="lbl">Parts book</span><span class="n">47</span></a><a class="l2"><span class="lbl">Price book</span><span class="n">3</span></a>
+    <a class="l1"><span class="lbl">Organizations</span></a><a class="l1"><span class="lbl">Access</span></a>
+    <div class="g">Instrument › module › model</div>
+    <a class="l1"><span class="car"></span><span class="lbl">GC-MS</span><span class="n">0</span></a>
+    <a class="l1" data-open><span class="car"></span><span class="lbl">LC-MS</span><span class="n">27</span></a>
+    <a class="l2"><span class="car"></span><span class="lbl">System-wide</span><span class="n">1</span></a>
+    <a class="l2" data-open data-on><span class="car"></span><span class="lbl">Autosampler</span><span class="n">6</span></a>
+    <a class="l3"><span class="lbl">G7167B<span class="mf">Agilent</span></span><span class="dot warn"></span><span class="n">7</span></a><a class="l3"><span class="lbl">G7167A<span class="mf">Agilent</span></span><span class="n">6</span></a><a class="l3"><span class="lbl">G4226A<span class="mf">Agilent</span></span><span class="n">5</span></a><a class="l3"><span class="lbl">SIL-40C<span class="mf">Shimadzu</span></span><span class="dot warn"></span><span class="n">6</span></a><a class="l3 add"><span class="lbl">+ Model</span></a>
+    <a class="l2"><span class="car"></span><span class="lbl">Column compartment</span><span class="n">3</span></a><a class="l2"><span class="car"></span><span class="lbl">Detector</span><span class="n">1</span></a><a class="l2"><span class="car"></span><span class="lbl">LC system</span><span class="n">2</span></a><a class="l2"><span class="car"></span><span class="lbl">Mass spec</span><span class="n">8</span></a><a class="l2"><span class="car"></span><span class="lbl">Pump</span><span class="n">6</span></a><a class="l2"><span class="car"></span><span class="lbl">Roughing pump</span><span class="n">3</span></a>
+    <a class="l1"><span class="car"></span><span class="lbl">TOC</span><span class="n">19</span></a><a class="l1"><span class="car"></span><span class="lbl">UV-Vis</span><span class="n">5</span></a>
+   </aside>
+   <div class="main">
+    <div class="crumb">Settings › Catalog › Procedures › LC-MS › <b>Autosampler</b></div>
+    <div class="page-head"><h2 class="page-title">Autosampler <span class="mut" style="font-weight:500;font-size:14px">on LC-MS</span></h2><span class="page-sub">6 procedures · 4 unreviewed · 4 models</span><div class="page-actions"><button class="btn">Review all</button><button class="btn p">+ Procedure</button></div></div>
+    <div class="toolbar" style="top:0"><div class="facets"><span class="f" data-on>All <b>6</b></span><span class="f">Intake</span><span class="f">Maintenance</span><span class="f">Tests</span><span class="f">Tasks</span></div></div>
+    <div class="legend"><span><span class="dot good"></span>maintenance</span><span><span class="dot info"></span>checkout</span><span><span class="dot accent"></span>required</span><span><span class="dot warn"></span>unreviewed</span><span class="mut" style="margin-left:auto">Hover a row for actions</span></div>
+    <div class="acc"><div class="h"><span class="t">Procedures for every LC-MS autosampler</span><span class="sub">Inherited by all 4 models</span><span class="sp"></span><span class="pill neutral">6</span></div>
+     <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Inspect needle assembly for bends or burrs</span></div><div class="m">yearly · logs <span class="id dim">G4267-87201</span></div><div class="r"><button class="btn l">Edit</button><button class="btn l">Copy to…</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Inspect needle seat &amp; capillary connections</span></div><div class="m">yearly · logs <span class="id dim">G4267-87012</span> · 1 model overrides</div><div class="r"><button class="btn l">Edit</button><button class="btn l">Copy to…</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Replace rotor seal</span></div><div class="m">yearly · logs <span class="id dim">5068-0198</span></div><div class="r"><button class="btn l">Edit</button><button class="btn l">Copy to…</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Inspect metering device, check for leaks</span></div><div class="m">yearly</div><div class="r"><button class="btn l">Edit</button><button class="btn l">Copy to…</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Clean sample tray area and waste lines</span></div><div class="m">yearly · off on 1 model</div><div class="r"><button class="btn l">Edit</button><button class="btn l">Copy to…</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+     <div class="li"><div class="t"><span class="dot accent"></span><span class="txt">Injection precision, single needle</span></div><div class="m">required · test · &lt; 0.15 % RSD or &lt; 10 nL SD · caffeine</div><div class="r"><button class="btn l">Edit</button><button class="btn l">Copy to…</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+    </div>
+    <div class="acc inh"><div class="h"><span class="t">From LC-MS · System-wide</span><span class="sub">Applies to every LC-MS module</span><span class="sp"></span><span class="pill neutral">1</span><button class="btn l">Open LC-MS →</button></div>
+     <div class="li"><div class="t"><span class="dot info"></span><span class="txt">Record firmware &amp; serial at intake</span></div><div class="m">at intake</div><div class="r"><span class="kebab">⋯</span></div></div></div>
+    <div class="sec mobonly">Models<span class="n">4</span><span class="sp"></span><a>+ Model</a></div>
+    <div class="mobcats mobonly"><a><span class="id">G7167B</span> <span class="mut">Agilent</span><span class="r"><span class="dot warn"></span>7</span></a><a><span class="id">G7167A</span> <span class="mut">Agilent</span><span class="r">6</span></a><a><span class="id">G4226A</span> <span class="mut">Agilent</span><span class="r">5</span></a><a><span class="id">SIL-40C</span> <span class="mut">Shimadzu</span><span class="r"><span class="dot warn"></span>6</span></a></div>
+   </div>
+  </div></section>
+
+  <!-- ═══ MODEL PAGE ═══ -->
+  <section class="pg" data-p="model"><div class="container split">
+   <div class="crumb">Library › Equipment › LC-MS › Autosampler › <b>G7167B</b></div>
+   <div class="hero"><div class="img"></div><div class="eyebrow">LC-MS › Autosampler</div><div class="title"><span class="id">G7167B</span></div><div class="meta">Agilent · 1290 Infinity II Multisampler · 1 unit in the fleet</div><div class="stats"><span><b>7</b> procedures</span><span class="w"><b>6</b> unreviewed</span><span><b>3</b> parts</span><span class="w"><b>0</b> specs</span><span>Public page: <b>draft</b></span></div><div class="acts"><button class="btn">Edit model</button><button class="btn kb">⋯</button></div></div>
+   <div class="stabs"><span data-on>Procedures <i>7</i></span><span>Specs <i class="w">0</i></span><span>Parts <i>3</i></span><span>Reference <i class="w">0</i></span><span>Fleet <i>1</i></span><span>Public page <i class="w">draft</i></span></div>
+   <div class="toolbar" style="top:52px"><div class="facets"><span class="f" data-on>All 7</span><span class="f">Intake</span><span class="f">Maintenance</span><span class="f">Tests</span></div><span style="flex:1"></span><button class="btn">Copy from…</button><button class="btn p">+ Procedure for G7167B</button></div>
+   <div class="acc"><div class="h"><span class="t">Only G7167B</span><span class="sub">Lives on this model. Nothing else sees it.</span><span class="sp"></span><span class="pill neutral">1</span></div>
+    <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Replace needle assembly after 10k injections</span></div><div class="m">on condition · logs <span class="id dim">G4267-87201</span></div><div class="r"><button class="btn l">Edit</button><button class="btn l">Move up to Autosampler</button><button class="btn l" style="color:var(--t-bad-fg)">Delete</button><span class="kebab">⋯</span></div></div>
+    <div class="li" style="background:#FAFBFD"><div class="t"><span class="btn l">+ Procedure only for G7167B</span></div></div></div>
+   <div class="acc inh"><div class="h"><span class="t">From LC-MS › Autosampler</span><span class="sub">Shared by 4 models. Edit there, or override here.</span><span class="sp"></span><span class="pill neutral">6</span><button class="btn l">Open Autosampler →</button></div>
+    <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Inspect needle assembly for bends or burrs</span></div><div class="m">yearly · logs <span class="id dim">G4267-87201</span></div><div class="r"><button class="btn l">Override for G7167B</button><button class="btn l">Turn off here</button><span class="kebab">⋯</span></div></div>
+    <div class="li"><div class="t"><span class="dot warn"></span><span class="txt">Inspect needle seat &amp; capillary connections</span> <span class="pill accent">override</span></div><div class="m">yearly · logs <span class="id dim">G4267-87012</span> · part changed for this model</div><div class="r"><button class="btn l">Edit override</button><button class="btn l">Revert</button><span class="kebab">⋯</span></div></div>
+    <div class="li"><div class="t"><span class="dot good"></span><span class="txt">Replace rotor seal</span></div><div class="m">yearly · logs <span class="id dim">5068-0198</span></div><div class="r"><button class="btn l">Override for G7167B</button><button class="btn l">Turn off here</button><span class="kebab">⋯</span></div></div>
+    <div class="li" style="opacity:.55"><div class="t"><span class="dot good"></span><span class="txt" style="text-decoration:line-through">Clean sample tray area and waste lines</span></div><div class="m">turned off for G7167B · still applies to 3 other models</div><div class="r"><button class="btn l" style="opacity:1">Turn back on</button></div></div>
+    <div class="li"><div class="t"><span class="dot accent"></span><span class="txt">Injection precision, single needle</span></div><div class="m">required · &lt; 0.15 % RSD or &lt; 10 nL SD · caffeine</div><div class="r"><button class="btn l">Override for G7167B</button><button class="btn l">Turn off here</button><span class="kebab">⋯</span></div></div></div>
+  </div></section>
+
+  <!-- ═══ SETTINGS · EQUIPMENT ═══ -->
+  <section class="pg" data-p="eq"><div class="container wide">
+   <div class="crumb">Settings › Catalog › <b>Equipment</b></div>
+   <div class="page-head"><h2 class="page-title">Equipment catalog</h2><span class="page-sub">90 models · 13 manufacturers · 34 missing a photo</span><div class="page-actions"><button class="btn">Manage types</button><button class="btn p">+ Model</button></div></div>
+   <div class="toolbar"><div class="search">⌕ Model or manufacturer</div><div class="facets"><span class="f" data-on>All <b>90</b></span><span class="f">Agilent <b>41</b></span><span class="f">Shimadzu <b>30</b></span><span class="f">Thermo <b>9</b></span><span class="f">LC-MS</span><span class="f">GC-MS</span><span class="f">TOC</span><span class="f">Missing photo <b>34</b></span></div></div>
+   <div class="cardgrid">
+    <div class="eq"><div class="im"></div><div class="eyebrow">Agilent</div><div class="md">G6495C</div><div class="meta">Triple quad · LC-MS</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill neutral">8 procedures</span><span class="pill neutral">4 parts</span></div></div>
+    <div class="eq"><div class="im"></div><div class="eyebrow">Agilent</div><div class="md">G7167B</div><div class="meta">Autosampler · LC-MS</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill neutral">7 procedures</span><span class="pill warn">0 specs</span></div></div>
+    <div class="eq"><div class="im"></div><div class="eyebrow">Agilent</div><div class="md">G7120A</div><div class="meta">Pump · LC-MS</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill neutral">6 procedures</span><span class="pill accent">PM kit</span></div></div>
+    <div class="eq"><div class="im no"></div><div class="eyebrow">Shimadzu</div><div class="md">TOC-Lc</div><div class="meta">Analyzer · TOC</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill warn">No photo</span><span class="pill neutral">7 procedures</span></div></div>
+    <div class="eq"><div class="im"></div><div class="eyebrow">Shimadzu</div><div class="md">LCMS-8060</div><div class="meta">Triple quad · LC-MS</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill neutral">3 procedures</span></div></div>
+    <div class="eq"><div class="im"></div><div class="eyebrow">Thermo</div><div class="md">ISQ 7000</div><div class="meta">Single quad · GC-MS</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill bad">0 procedures</span></div></div>
+    <div class="eq"><div class="im no"></div><div class="eyebrow">Shimadzu</div><div class="md">GCMS-QP2020</div><div class="meta">Single quad · GC-MS</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill warn">No photo</span><span class="pill bad">0 procedures</span></div></div>
+    <div class="eq"><div class="im"></div><div class="eyebrow">Thermo</div><div class="md">UltiMate 3000</div><div class="meta">HPLC system · LC</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill neutral">5 procedures</span></div></div>
+    <div class="eq"><div class="im"></div><div class="eyebrow">Peak Scientific</div><div class="md">NM32LA</div><div class="meta">N₂ generator · Gas</div><span class="kebab kb">⋯</span><div class="tg"><span class="pill neutral">2 procedures</span></div></div>
+   </div>
+  </div></section>
+
+  <!-- mobile tab bar -->
+  <div class="tabbar"><a data-n="dash" data-on><i>◧</i>Today</a><a data-n="work"><i>☰</i>Work</a><a data-n="assets"><i>▣</i>Assets</a><a><i>✉</i>Inbox</a><a data-n="set"><i>⚙</i>Library</a></div>
+ </div></div>
+</div>
+<script>
+const frame=document.getElementById('frame'),pages=[...document.querySelectorAll('.pg')],pb=[...document.querySelectorAll('.pbar [data-p]')];
+const navMap={dash:'dash',work:'work',wo:'work',assets:'assets',inst:'assets',set:'set',model:'set',eq:'set'};
+function go(p){pages.forEach(x=>x.dataset.p===p?x.setAttribute('data-on',''):x.removeAttribute('data-on'));pb.forEach(b=>b.setAttribute('aria-selected',b.dataset.p===p));
+ document.querySelectorAll('[data-n]').forEach(a=>navMap[p]===a.dataset.n?a.setAttribute('data-on',''):a.removeAttribute('data-on'));frame.querySelector('.scr').scrollTop=0}
+pb.forEach(b=>b.addEventListener('click',()=>go(b.dataset.p)));
+document.querySelectorAll('.pbar [data-v]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.pbar [data-v]').forEach(x=>x.setAttribute('aria-selected',x===b));frame.className='frame '+b.dataset.v}));
+document.querySelectorAll('[data-n]').forEach(a=>a.addEventListener('click',()=>go(a.dataset.n)));
+</script>
+</body></html>
