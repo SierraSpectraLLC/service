@@ -11,7 +11,8 @@ import { visibleDirectory } from "@/lib/directory";
 export const dynamic = "force-dynamic";
 
 /** Settings > Organizations: who is on this instance, and who can be tagged. */
-export default async function OrganizationsPage() {
+export default async function OrganizationsPage({ searchParams }: { searchParams: Promise<{ q?: string; kind?: string }> }) {
+  const filter = await searchParams;
   let user;
   try { user = await requireOwner(); } catch { redirect("/"); }
   const isPlatform = isPlatformStaff(tenantViewer(user));
@@ -38,6 +39,7 @@ export default async function OrganizationsPage() {
         }))}
         orphans={allowRows.filter((r) => r.orgId === null).map((r) => ({ id: r.id, entry: r.entry }))}
         directory={directory}
+        filter={{ q: filter.q ?? "", kind: filter.kind ?? "" }}
         operatorOrgId={s?.operatorOrgId ?? null}
         sheetOrgId={s?.sheetOrgId ?? null}
         showRecipients={s?.eodEnabled ?? false}

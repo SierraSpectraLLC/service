@@ -8,7 +8,8 @@ import {
 } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import Panel from "@/components/ui/Panel";
+import { DataTable, FacetStrip, Panel, Pill, Toolbar } from "@/components/ui";
+import type { DataRow } from "@/components/ui/DataTable";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
   return (
@@ -41,10 +42,24 @@ export default function PersonnelForm(props: {
   directory: PersonRow[];
   operatorOrgId: number | null; sheetOrgId: number | null;
   showRecipients: boolean; showSheetSync: boolean;
+  /** From the URL, so a filtered list is a link. */
+  filter?: { q: string; kind: string };
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+
+  const q = (props.filter?.q ?? "").trim();
+  const kindSel = props.filter?.kind ?? "";
+  const needle = q.toLowerCase();
+  const shownOrgs = props.orgs.filter((o) =>
+    (!kindSel || o.kind === kindSel) && (!needle || o.name.toLowerCase().includes(needle)));
+  const orgHref = (k: string) => {
+    const p = new URLSearchParams();
+    if (q) p.set("q", q);
+    if (k) p.set("kind", k);
+    return `/settings/organizations${p.size ? `?${p}` : ""}`;
+  };
 
   const [orgDraft, setOrgDraft] = useState({ name: "", kind: "client" });
   const [orgError, setOrgError] = useState("");
@@ -54,7 +69,10 @@ export default function PersonnelForm(props: {
     startTransition(async () => {
       const res = await addOrg(orgDraft.name, orgDraft.kind);
       if (res?.error) setOrgError(res.error);
-      else setOrgDraft({ name: "", kind: orgDraft.kind });
+      else {
+        toast({ message: `Added ${orgDraft.name.trim()}` });
+        setOrgDraft({ name: "", kind: orgDraft.kind });
+      }
     });
   };
 
@@ -79,33 +97,59 @@ export default function PersonnelForm(props: {
           </div>
         </div>
 
-        {props.orgs.map((o) => (
-          <Link key={o.id} href={`/settings/organizations/${o.id}`} className="row-hover"
-            style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "9px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
-            {/* Their header color, so the list looks like the workspaces do. */}
-            <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: o.themeColor || "var(--line)" }} />
-            <span style={{ fontSize: 14, fontWeight: 700 }}>{o.name}</span>
-            <span className={`pill ${o.kind === "provider" ? "warn" : "info"}`}>{o.kind}</span>
-            {props.operatorOrgId === o.id && (
-              <span className="pill good">operator</span>
-            )}
-            {props.showSheetSync && props.sheetOrgId === o.id && (
-              <span className="pill good">sheet sync</span>
-            )}
-            <span className="mut" style={{ fontSize: 11, marginLeft: "auto", textAlign: "right" }}>
-              {o.systems} system{o.systems === 1 ? "" : "s"} ·{" "}
-              {o.logins === 0
-                ? "nobody can sign in"
-                : `${o.logins} sign-in${o.logins === 1 ? "" : "s"}${o.editors ? `, ${o.editors} can edit` : ""}`}
-              {props.showRecipients && !o.recipients.trim() && " · no report recipients"}
-            </span>
-          </Link>
-        ))}
-        {props.orgs.length === 0 && (
-          <div className="mut" style={{ fontSize: 12, margin: "6px 0" }}>
-            None yet - add one, then share systems with it from each system&apos;s page.
-          </div>
-        )}
+        <Toolbar
+          search={
+            <form action="/settings/organizations">
+              {kindSel && <input type="hidden" name="kind" value={kindSel} />}
+              <input name="q" defaultValue={q} placeholder="Organization name" aria-label="Search organizations" />
+            </form>
+          }
+          facets={
+            <FacetStrip facets={(["client", "provider"] as const).map((k) => ({
+              key: k, label: k === "client" ? "Clients" : "Providers",
+              count: props.orgs.filter((o) => o.kind === k).length || undefined,
+              on: kindSel === k, href: orgHref(kindSel === k ? "" : k),
+            }))} />
+          }
+        />
+        <DataTable
+          cols={[
+            { key: "name", label: "Organization", width: "minmax(160px, 1.6fr)" },
+            { key: "kind", label: "Kind", width: "90px" },
+            { key: "flags", label: "", width: "minmax(90px, 0.8fr)", hideMobile: true },
+            { key: "reach", label: "Reach", width: "minmax(160px, 1.2fr)", align: "right", hideMobile: true },
+          ]}
+          rows={shownOrgs.map((o): DataRow => ({
+            key: o.id,
+            href: `/settings/organizations/${o.id}`,
+            cells: {
+              name: (
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  {/* Their header color, so the list looks like the workspaces do. */}
+                  <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: o.themeColor || "var(--line)" }} />
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{o.name}</span>
+                </span>
+              ),
+              kind: <Pill tone={o.kind === "provider" ? "warn" : "info"}>{o.kind}</Pill>,
+              flags: (
+                <span className="mut" style={{ fontSize: 11 }}>
+                  {[props.operatorOrgId === o.id ? "operator" : "",
+                    props.showSheetSync && props.sheetOrgId === o.id ? "sheet sync" : ""].filter(Boolean).join(" · ")}
+                </span>
+              ),
+              reach: (
+                <span className="mut" style={{ fontSize: 11 }}>
+                  {o.systems} system{o.systems === 1 ? "" : "s"} ·{" "}
+                  {o.logins === 0
+                    ? "nobody can sign in"
+                    : `${o.logins} sign-in${o.logins === 1 ? "" : "s"}${o.editors ? `, ${o.editors} can edit` : ""}`}
+                  {props.showRecipients && !o.recipients.trim() && " · no report recipients"}
+                </span>
+              ),
+            },
+          }))}
+          empty="None yet - add one, then share systems with it from each system's page"
+        />
 
         <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
           <input value={orgDraft.name} onChange={(e) => setOrgDraft({ ...orgDraft, name: e.target.value })}
