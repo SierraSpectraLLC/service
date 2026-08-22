@@ -4,6 +4,8 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import { clearCatalogPhoto, setCatalogPhoto, setCatalogPhotoFraming } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { stockSrc } from "@/lib/photos";
 import { fmtBytes } from "@/lib/storage";
 import PhotoThumb from "./PhotoThumb";
@@ -148,11 +150,16 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
                         onClick={() => setFraming(e)}>Frame</button>
                       <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
                         aria-label={`Remove the catalog photo for ${label(e)}`}
-                        onClick={() => {
-                          if (!window.confirm(`Remove the catalog photo for "${label(e)}"? Units of this kind fall back to having no picture.`)) return;
+                        onClick={async () => {
+                          if (!(await confirmDialog({
+                            title: `Remove the catalog photo for "${label(e)}"?`,
+                            body: "Units of this kind fall back to having no picture.",
+                            action: "Remove photo", tone: "bad",
+                          }))) return;
                           startTransition(async () => {
                             const res = await clearCatalogPhoto(e.id);
                             setError(res?.error ?? "");
+                            if (!res?.error) toast({ message: `Removed the photo for ${label(e)}` });
                           });
                         }}>×</button>
                     </div>
