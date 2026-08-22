@@ -8,6 +8,8 @@ import {
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale,
 } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
@@ -162,12 +164,16 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
       setDigestMsg(err ?? "Saved \u2713");
     });
   };
-  const sendDigest = () => {
+  const sendDigest = async () => {
     if (!digestTo.length) { setDigestErr(true); setDigestMsg("Tick somebody first"); return; }
     if (digestDirty) { setDigestErr(true); setDigestMsg("Save your changes first"); return; }
     // Outward-facing and unrecallable, so it asks - and names the addresses,
     // because "send now" is only safe if you can see who now means.
-    if (!confirm(`Email ${org.name}'s digest now to ${digestTo.join(", ")}?`)) return;
+    if (!(await confirmDialog({
+      title: `Email ${org.name}'s digest now?`,
+      body: `Goes to ${digestTo.join(", ")}.`,
+      action: "Send digest",
+    }))) return;
     setDigestMsg(""); setDigestErr(false);
     startTransition(async () => {
       const res = await sendDigestNow(org.id);
@@ -235,10 +241,17 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               ) : null}
               {(isOwner || !domain) && (
                 <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
-                  onClick={() => {
-                    if (!window.confirm(`Remove ${r.entry}? Anyone covered only by this entry is signed out immediately.`)) return;
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Remove ${r.entry}?`,
+                      body: "Anyone covered only by this entry is signed out immediately.",
+                      action: `Remove ${r.entry}`, tone: "bad",
+                    }))) return;
                     setPeopleError("");
-                    startTransition(() => removeClientAccess(r.id));
+                    startTransition(async () => {
+                      await removeClientAccess(r.id);
+                      toast({ message: `Removed ${r.entry}` });
+                    });
                   }}>remove</button>
               )}
             </div>
@@ -508,12 +521,18 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                       action all along; there was simply no control for it, so the
                       first organization named here became permanent. */}
                   <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
-                    onClick={() => {
-                      if (!window.confirm(
-                        `Stop syncing the tracker sheet with ${org.name}? Their systems stay exactly as they are `
-                        + "- only the sheet stops being read and written.",
-                      )) return;
-                      startTransition(async () => { await setSheetOrg(null); });
+                    onClick={async () => {
+                      if (!(await confirmDialog({
+                        title: `Stop syncing the tracker sheet with ${org.name}?`,
+                        body: "Their systems stay exactly as they are - only the sheet stops being read and written.",
+                        action: "Stop syncing",
+                      }))) return;
+                      startTransition(async () => {
+                        await setSheetOrg(null);
+                        // Setting the tracker was reversible in the action all
+                        // along (see the comment above) - so Undo is real.
+                        toast({ message: "Stopped syncing the tracker sheet", undo: () => { void setSheetOrg(org.id); } });
+                      });
                     }}>stop syncing</button>
                 </>
               ) : (
