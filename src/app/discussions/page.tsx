@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { and, asc, desc, eq, isNull, isNotNull, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { discussionPosts, instruments, discussionReads, orgs } from "@/db/schema";
@@ -8,8 +7,10 @@ import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tena
 import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
+import { fmtWhen } from "@/lib/when";
 import DiscussionPanel from "@/components/DiscussionPanel";
 import { visibleDirectory } from "@/lib/directory";
+import { DataTable, Dot, PageHead, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -75,26 +76,52 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
   const visibleRecent = recent.filter((p) => canSeePost(viewer, { ...p, audience: p.audience as Audience }));
   const label = new Map(insts.map((i) => [i.id, i.externalId]));
 
+  // The rooms as a conversation list - the same shape as /messages: who,
+  // the last line said, what is new, when.
+  const roomRows = rooms.map((r) => {
+    const posts = readable.filter((p) => p.roomOrgId === r.orgId);
+    const last = posts[posts.length - 1];
+    return {
+      ...r,
+      unread: unreadIn(r.orgId),
+      lastWho: last ? (last.authorEmail === user.email ? "You" : last.author) : "",
+      lastLine: last?.body ?? "",
+      when: last ? fmtWhen(last.createdAt.toISOString()) : "",
+      on: r.orgId === active?.orgId,
+    };
+  });
+
   return (
     <div className="container page">
-      <div className="page-head">
-        <h1 className="page-title">Discussions</h1>
-      </div>
-      {/* Only the operator has more than one room, so only they get a picker. */}
+      <PageHead title="Discussions"
+        sub="Each organization has one private room with the operator; anything about a particular system belongs on that system." />
+      {/* Only the operator has more than one room, so only they get the list. */}
       {rooms.length > 1 && (
-        <div className="card" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <span className="mut" style={{ fontSize: 12, marginRight: 4 }}>Room</span>
-          {rooms.map((r) => {
-            const on = r.orgId === active?.orgId;
-            const unread = unreadIn(r.orgId);
-            return (
-              <Link key={r.orgId ?? "own"} href={r.orgId === null ? "/discussions" : `/discussions?room=${r.orgId}`}
-                className={on ? "btn sm accent" : "btn sm"} style={{ textDecoration: "none" }}>
-                {r.name}{unread > 0 ? ` (${unread})` : ""}
-              </Link>
-            );
-          })}
-        </div>
+        <DataTable
+          cols={[
+            { key: "dot", label: "", width: "12px" },
+            { key: "who", label: "Room", width: "minmax(140px, 1.2fr)" },
+            { key: "last", label: "Last post", width: "minmax(180px, 2fr)", hideMobile: true },
+            { key: "new", label: "", width: "70px" },
+            { key: "when", label: "When", width: "90px", align: "right" },
+          ]}
+          rows={roomRows.map((r) => ({
+            key: r.orgId ?? "own",
+            href: r.orgId === null ? "/discussions" : `/discussions?room=${r.orgId}`,
+            cells: {
+              dot: r.unread > 0 ? <Dot tone="info" /> : null,
+              who: <span style={{ fontSize: 13.5, fontWeight: r.on ? 800 : 700 }}>{r.name}</span>,
+              last: r.lastLine
+                ? <span className="mut" style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                    <b style={{ fontWeight: 600 }}>{r.lastWho}:</b> {r.lastLine}
+                  </span>
+                : <span className="mut" style={{ fontSize: 12 }}>nothing said yet</span>,
+              new: r.unread > 0 ? <Pill tone="info">{r.unread} new</Pill> : null,
+              when: <span className="mut" style={{ fontSize: 11.5 }}>{r.when}</span>,
+            },
+          }))}
+          empty="No rooms"
+        />
       )}
 
       {active ? (
@@ -124,25 +151,33 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
         </div>
       )}
 
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Recent system discussions</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>Tap through to reply on the system&apos;s page.</div>
-        {visibleRecent.slice(0, 30).map((p) => (
-          <Link key={p.id} href={`/instruments/${p.instrumentId}`} className="row-hover"
-            style={{ display: "block", padding: "8px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit" }}>
-            <div style={{ fontSize: 12 }}>
-              <span className="mono" style={{ fontWeight: 700, color: "var(--navy)" }}>{label.get(p.instrumentId!) ?? "?"}</span>{" "}
-              <b>{p.author}</b>{" "}
-              <span className="mut" style={{ fontSize: 11 }}>{shopTime(p.createdAt)}</span>
-              {p.audience === "internal" && (
-                <>{" "}<span className="pill warn">internal</span></>
-              )}
-            </div>
-            <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.body}</div>
-          </Link>
-        ))}
-        {visibleRecent.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No system discussions yet.</div>}
+      <div className="section-head" style={{ marginTop: 16 }}>
+        <span className="section-name">Recent system discussions</span>
+        <span className="mut" style={{ fontSize: 12, marginLeft: 8 }}>Tap through to reply on the system&apos;s page.</span>
       </div>
+      <DataTable
+        cols={[
+          { key: "dot", label: "", width: "12px" },
+          { key: "who", label: "System", width: "minmax(120px, 0.9fr)" },
+          { key: "last", label: "Post", width: "minmax(200px, 2.2fr)" },
+          { key: "when", label: "When", width: "110px", align: "right" },
+        ]}
+        rows={visibleRecent.slice(0, 30).map((p) => ({
+          key: p.id,
+          href: `/instruments/${p.instrumentId}`,
+          cells: {
+            dot: p.audience === "internal" ? <Dot tone="warn" /> : null,
+            who: <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{label.get(p.instrumentId!) ?? "?"}</span>,
+            last: (
+              <span style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+                <b>{p.author}</b>{p.audience === "internal" ? <> <Pill tone="warn">internal</Pill></> : null} · {p.body}
+              </span>
+            ),
+            when: <span className="mut" style={{ fontSize: 11.5 }}>{shopTime(p.createdAt)}</span>,
+          },
+        }))}
+        empty="No system discussions yet"
+      />
     </div>
   );
 }
