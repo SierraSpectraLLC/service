@@ -115,12 +115,14 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
       ))}
 
       {adding ? (
-        <div className="dash-form" style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <select value={pickedOrg} onChange={(e) => setPickedOrg(parseInt(e.target.value))} style={{ width: "auto", fontSize: 13 }}>
+        <div className="dash-form" style={{ marginTop: 8 }}>
+          <div className="panel-head"><span className="card-title" style={{ fontSize: 14 }}>Share this room</span></div>
+          <div className="row-2">
+          <select value={pickedOrg} aria-label="Organization" onChange={(e) => setPickedOrg(parseInt(e.target.value))} className="t-body" style={{ width: "auto" }}>
             <option value={0}>Pick an organization…</option>
             {options.map((o) => <option key={o.id} value={o.id}>{o.name} ({o.kind})</option>)}
           </select>
-          <select value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: "auto", fontSize: 13 }}>
+          <select value={level} aria-label="Access level" onChange={(e) => setLevel(e.target.value)} className="t-body" style={{ width: "auto" }}>
             <option value="view">can see counts</option>
             <option value="issue">can draw parts</option>
           </select>
@@ -131,6 +133,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
               else { setAdding(false); setPickedOrg(0); }
             })}>{pending ? "Sharing..." : "Share"}</button>
           <button className="btn sm" onClick={() => setAdding(false)}>Cancel</button>
+          </div>
         </div>
       ) : options.length > 0 ? (
         <button className="btn link" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setAdding(true)}>
