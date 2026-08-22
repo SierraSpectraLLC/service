@@ -7,6 +7,8 @@ import {
   addCatalogRef, addPhotos, clearCoverPhoto, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming,
   type WorkTarget,
 } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { promptReason } from "@/lib/reason";
 import { fmtBytes } from "@/lib/storage";
 import { coverIsChosen, fileSrc, orderPhotos, photoCount } from "@/lib/photos";
@@ -303,18 +305,31 @@ export default function PhotosPanel({
       {/* File a photo to the catalog's reference shelf. The note is the point:
           a picture with nothing written on it is a picture nobody can act on. */}
       {filing && (
-        <>
-          <div className="scrim" onClick={() => setFiling(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="File photo to the catalog">
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--navy)" }}>File to the catalog</div>
-              <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
-                onClick={() => setFiling(null)}>close</button>
-            </div>
-            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-              The photo stays on this record; the catalog points at it. Everyone working on
-              equipment like this sees it under Reference.
-            </div>
+        <Dialog open onClose={() => setFiling(null)} title="File to the catalog"
+          context="The photo stays on this record; the catalog points at it. Everyone working on equipment like this sees it under Reference."
+          footer={
+            <>
+              <span className="dialog-status" />
+              <button className="btn" onClick={() => setFiling(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending}
+                onClick={() => {
+                  const sc = catalogScopes[fileDraft.scope];
+                  if (!sc) return;
+                  setError("");
+                  startTransition(async () => {
+                    const res = await addCatalogRef({
+                      assetType: sc.assetType, model: sc.model, kind: "note",
+                      title: fileDraft.title || filing.fileName,
+                      url: fileSrc(filing.id), body: fileDraft.body,
+                    });
+                    if (res?.error) { setError(res.error); return; }
+                    setFiling(null);
+                    toast({ message: "Filed the photo to the catalog" });
+                    router.refresh();
+                  });
+                }}>{pending ? "Filing..." : "File it"}</button>
+            </>
+          }>
             <PhotoThumb src={fileSrc(filing.id)} framing="" alt={filing.fileName}
               width={160} height={110} radius={8} />
             <div style={{ marginTop: 10 }}>
@@ -335,27 +350,7 @@ export default function PhotosPanel({
                 placeholder="The trick this photo shows"
                 onChange={(e) => setFileDraft({ ...fileDraft, body: e.target.value })} />
             </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setFiling(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" disabled={pending}
-                onClick={() => {
-                  const sc = catalogScopes[fileDraft.scope];
-                  if (!sc) return;
-                  setError("");
-                  startTransition(async () => {
-                    const res = await addCatalogRef({
-                      assetType: sc.assetType, model: sc.model, kind: "note",
-                      title: fileDraft.title || filing.fileName,
-                      url: fileSrc(filing.id), body: fileDraft.body,
-                    });
-                    if (res?.error) { setError(res.error); return; }
-                    setFiling(null);
-                    router.refresh();
-                  });
-                }}>{pending ? "Filing..." : "File it"}</button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
 
       {framing && (
