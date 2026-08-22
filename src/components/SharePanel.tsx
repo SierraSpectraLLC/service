@@ -85,8 +85,8 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
           const l = LEVEL[s.access as keyof typeof LEVEL] ?? LEVEL.view;
           const mayRemove = canManageAll || (canAddProvider && s.kind === "provider");
           return (
-            <span key={s.orgId} className="pill"
-              style={{ background: s.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: s.kind === "provider" ? "#8A5410" : "#1D6396", display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span key={s.orgId} className={`pill ${s.kind === "provider" ? "warn" : "info"}`}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               {s.name}
               {s.orgId === ownerOrgId && <span style={{ fontWeight: 700 }}>· owner</span>}
               <span style={{ fontWeight: 400, opacity: 0.8 }}>· {l.label}</span>
