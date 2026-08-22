@@ -41,7 +41,7 @@ import {
 import { parseProcParts, partQty, partsForModel, procedureTaskBody, schedulePartsOf, serializeProcParts, type ProcPart } from "@/lib/procedures";
 import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
-import { completionBlocked, evaluateResult, needsResult, resultIsRecorded } from "@/lib/testResult";
+import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -1614,12 +1614,13 @@ async function testSpecFor(t: { procedureId: number | null; resultType?: string 
     const [p] = await db.select({
       kind: procedures.kind, resultType: procedures.resultType,
       target: procedures.target, tolerancePct: procedures.tolerancePct,
+      acceptance: procedures.acceptance,
     }).from(procedures).where(eq(procedures.id, t.procedureId));
     if (p && needsResult(p.kind, p.resultType)) return p;
   }
   // A hand-made task demanding an outcome (tasks.result_type). kind "test"
   // because that is the word the gate understands; no target, no band.
-  if (t.resultType) return { kind: "test", resultType: t.resultType, target: null, tolerancePct: null };
+  if (t.resultType) return { kind: "test", resultType: t.resultType, target: null, tolerancePct: null, acceptance: "" };
   return null;
 }
 
@@ -1655,6 +1656,7 @@ export async function recordTaskResult(
   const row = {
     resultType: spec.resultType, value, passed: verdict.passed,
     target: spec.target ?? "", tolerancePct: spec.tolerancePct ?? "",
+    acceptance: spec.acceptance ?? "",
     note: data.note.trim(), recordedBy: u.name || u.email, recordedAt: new Date(),
   };
   await db.insert(taskResults).values({ taskId, ...row })
@@ -4189,9 +4191,18 @@ const validProcedureType = (t: string) => t === "system" || (!!t.trim() && t.tri
 type ProcedureInput = {
   assetType: string; kind: string; name: string; notes: string;
   resultType: string; target: string; tolerancePct: string;
+  /** The structured spec (criteria, units, hints) - see lib/testResult. */
+  acceptance?: Acceptance;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | string | null;
+  /**
+   * Usage-based cadence ("every 2000 injections") - display and intake only,
+   * never scheduled by the calendar cron. Null/absent = none.
+   */
+  usage?: { every: number | string; unit: string } | null;
   required?: boolean;
+  /** Tests only: a report must be filed on the result before sign-off. */
+  needsReport?: boolean;
   qualification?: string;
   parts: ProcPart[]; modelScope: string[]; categoryScope?: string[];
   /** The steps, one per line. See lib/checklist. */
@@ -4204,9 +4215,11 @@ type ProcedureInput = {
 function cleanProcedure(data: ProcedureInput): { error: string } | {
   assetType: string; kind: string; name: string; notes: string;
   resultType: string; target: string | null; tolerancePct: string | null;
+  acceptance: string;
   requiresNote: boolean; consumesPart: boolean;
   runsAtIntake: boolean; intervalDays: number | null;
-  required: boolean;
+  usageEvery: number | null; usageUnit: string;
+  required: boolean; needsReport: boolean;
   qualification: string;
   parts: string; modelScope: string[]; categoryScope: string[];
   checklist: string;
@@ -4229,14 +4242,37 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
     if (Number.isNaN(n) || n < 0) return { error: "Tolerance must be a number, e.g. 10" };
     tolerancePct = String(n);
   }
+  // Structured acceptance, tests only. Serialization re-validates the rows
+  // (op, finite value, unit; center for pm), so half-filled criteria degrade
+  // to absent rather than storing garbage - but a measured test that CLAIMS
+  // criteria and provides none valid is refused, not silently unfenced.
+  let acceptance = "";
+  if (isTest && data.acceptance) {
+    acceptance = serializeAcceptance(data.acceptance);
+    const given = data.acceptance.criteria?.length ?? 0;
+    const kept = parseAcceptance(acceptance).criteria?.length ?? 0;
+    if (resultType === "measured" && given > 0 && kept < given) {
+      return { error: "Each pass limit needs an operator, a number and a unit" };
+    }
+  }
   let intervalDays: number | null = null;
   if (data.intervalDays !== null && String(data.intervalDays).trim() !== "") {
     const cadence = parseCadence(data.intervalDays);
     if ("error" in cadence) return cadence;
     intervalDays = cadence.days;
   }
+  // Usage cadence: valid only in its two units, whole and positive. It rides
+  // on the procedure and its intake tasks; the calendar cron never sees it.
+  let usageEvery: number | null = null;
+  let usageUnit = "";
+  if (data.usage && (data.usage.unit === "injections" || data.usage.unit === "hours")) {
+    const n = parseInt(String(data.usage.every), 10);
+    if (!Number.isInteger(n) || n <= 0) return { error: "Usage cadence must be a whole number above zero" };
+    usageEvery = n;
+    usageUnit = data.usage.unit;
+  }
   // A procedure that never fires is an orphan - refuse it at the source.
-  if (!data.runsAtIntake && intervalDays === null) {
+  if (!data.runsAtIntake && intervalDays === null && usageEvery === null) {
     return { error: "Pick when it runs: at intake, on a cadence, or both" };
   }
   // A system procedure USED to be refused a cadence here - "recurring work lives
@@ -4259,12 +4295,14 @@ function cleanProcedure(data: ProcedureInput): { error: string } | {
   const categoryScope = [...new Set((data.categoryScope ?? []).map((c) => c.trim()).filter(Boolean))];
   return {
     assetType: data.assetType, kind: data.kind, name, notes: data.notes.trim(),
-    resultType, target, tolerancePct,
+    resultType, target, tolerancePct, acceptance,
     requiresNote: !isTest && data.requiresNote, consumesPart: !isTest && data.consumesPart,
     runsAtIntake: data.runsAtIntake, intervalDays,
+    usageEvery, usageUnit,
     // Persisted since the sheet grew the checkbox - it used to be silently
     // dropped here, so "Required for sign-off" never actually saved.
     required: data.required ?? false,
+    needsReport: isTest && (data.needsReport ?? false),
     // '' when the tag isn't one of ours - an unknown value silently becoming a
     // qualification is exactly the kind of surprise a regulated record can't have.
     qualification: (QUALIFICATIONS as readonly string[]).includes(data.qualification ?? "")
@@ -4690,7 +4728,7 @@ async function gateFor(target: WorkTarget) {
   }
   const procIds = [...new Set(taskRows.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
   const procRows = procIds.length
-    ? await db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+    ? await db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required, needsReport: procedures.needsReport })
         .from(procedures).where(inArray(procedures.id, procIds))
     : [];
   const taskIds = taskRows.map((t) => t.id);
@@ -4710,7 +4748,11 @@ async function gateFor(target: WorkTarget) {
   return signoffGate(
     taskRows.map((t) => {
       const p = procRows.find((x) => x.id === t.procedureId);
-      return { id: t.id, title: t.title, state: t.state, required: p?.required ?? false, kind: p?.kind ?? "task" };
+      return {
+        id: t.id, title: t.title, state: t.state,
+        required: p?.required ?? false, kind: p?.kind ?? "task",
+        needsReport: p?.needsReport,
+      };
     }),
     reportsByTask,
   );

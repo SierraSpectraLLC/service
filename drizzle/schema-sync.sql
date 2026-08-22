@@ -2629,3 +2629,35 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "spectrum_stops" text NOT NU
 -- into the next edition instead of vanishing. See lib/digestDays.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "digest_days" text NOT NULL DEFAULT '';
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_days" text NOT NULL DEFAULT '';
+
+-- ── Structured test acceptance (Prompt B3) ──────────────────────────────────
+-- Tests grow a structured spec: measured values carry criteria rows
+-- ({op, value, unit, center?} joined by OR), pass/fail carries its guidance
+-- and attach-a-reading flag, readings their unit and typical range, notes
+-- their prompt. The prose target/tolerance stay as the legacy spec - a test
+-- with prose limits and no criteria shows in Needs review for hand migration,
+-- never parsed automatically. Results freeze the spec they were judged
+-- against, same rule as target.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "acceptance" text NOT NULL DEFAULT '';
+ALTER TABLE "task_results" ADD COLUMN IF NOT EXISTS "acceptance" text NOT NULL DEFAULT '';
+
+-- "Needs a report attached" splits out of "required": a test can gate
+-- sign-off on being done without demanding paper. Backfilled once from the
+-- old coupling (required tests always demanded a report), marker-guarded so
+-- a shop that later unchecks it is not re-checked on the next boot.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "needs_report" boolean NOT NULL DEFAULT false;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM "audit_log"
+                 WHERE "actor" = 'schema-sync' AND "entity_type" = 'procedure' AND "entity_id" = 'needs-report-backfill') THEN
+    UPDATE "procedures" SET "needs_report" = true WHERE "kind" = 'test' AND "required";
+    INSERT INTO "audit_log" ("actor","entity_type","entity_id","action")
+    VALUES ('schema-sync','procedure','needs-report-backfill',
+            'split the report requirement out of required - backfilled needs_report on required tests');
+  END IF;
+END $$;
+
+-- Usage-based cadence ("every 2000 injections"): display and intake-stamp
+-- only - the calendar cron schedules interval_days, and nothing counts
+-- injections for us. Unit '' = no usage cadence.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "usage_every" integer;
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "usage_unit" text NOT NULL DEFAULT '';

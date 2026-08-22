@@ -12,7 +12,11 @@ import { db } from "@/db";
 import { procedures, taskResults } from "@/db/schema";
 import { needsResult } from "@/lib/testResult";
 
-export type TaskTestSpec = { resultType: string; target: string | null; tolerancePct: string | null };
+export type TaskTestSpec = {
+  resultType: string; target: string | null; tolerancePct: string | null;
+  /** The structured spec (JSON, lib/testResult.Acceptance). "" = legacy prose. */
+  acceptance: string;
+};
 export type TaskTestResult = {
   value: string; passed: boolean | null; note: string; recordedBy: string; recordedAt: string;
 };
@@ -39,6 +43,7 @@ export async function loadTaskTests(
       ? db.select({
           id: procedures.id, kind: procedures.kind, resultType: procedures.resultType,
           target: procedures.target, tolerancePct: procedures.tolerancePct,
+          acceptance: procedures.acceptance,
         }).from(procedures).where(inArray(procedures.id, procIds))
       : [],
     db.select().from(taskResults).where(inArray(taskResults.taskId, rows.map((t) => t.id))),
@@ -49,12 +54,12 @@ export async function loadTaskTests(
     // Tests, and tasks whose outcome is inspected/replaced - both close by
     // recording what happened, so both get the result block and the gate.
     if (p && needsResult(p.kind, p.resultType)) {
-      tests.set(t.id, { resultType: p.resultType, target: p.target, tolerancePct: p.tolerancePct });
+      tests.set(t.id, { resultType: p.resultType, target: p.target, tolerancePct: p.tolerancePct, acceptance: p.acceptance });
     } else if (t.resultType) {
       // A hand-made task that demands an outcome (tasks.result_type): same
       // block, same gate, no target - "did the button toggle" has no
       // tolerance band, just an answer.
-      tests.set(t.id, { resultType: t.resultType, target: null, tolerancePct: null });
+      tests.set(t.id, { resultType: t.resultType, target: null, tolerancePct: null, acceptance: "" });
     }
   }
   for (const r of resultRows) {

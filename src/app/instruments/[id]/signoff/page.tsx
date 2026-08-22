@@ -59,7 +59,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const gateProcIds = [...new Set(gateTasks.flatMap((t) => (t.procedureId !== null ? [t.procedureId] : [])))];
   const [gateProcs, signRows] = await Promise.all([
     gateProcIds.length
-      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required })
+      ? db.select({ id: procedures.id, kind: procedures.kind, required: procedures.required, needsReport: procedures.needsReport })
           .from(procedures).where(inArray(procedures.id, gateProcIds))
       : [],
     db.select().from(signoffs).where(and(eq(signoffs.instrumentId, instId), isNull(signoffs.revokedAt)))
@@ -79,7 +79,7 @@ export default async function SignoffPage({ params }: { params: Promise<{ id: st
   const gate = signoffGate(
     gateTasks.map((t) => {
       const pr = gateProcs.find((x) => x.id === t.procedureId);
-      return { id: t.id, title: t.title, state: t.state, required: pr?.required ?? false, kind: pr?.kind ?? "task" };
+      return { id: t.id, title: t.title, state: t.state, required: pr?.required ?? false, kind: pr?.kind ?? "task", needsReport: pr?.needsReport };
     }),
     reportsByTask,
   );

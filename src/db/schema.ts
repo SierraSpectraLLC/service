@@ -583,6 +583,31 @@ export const procedures = pgTable("procedures", {
   resultType: text("result_type").notNull().default("pass_fail"),
   target: text("target"),
   tolerancePct: numeric("tolerance_pct"),
+  /**
+   * The structured acceptance spec, JSON per result type (see lib/testResult):
+   * measured carries criteria rows [{op, value, unit, center?}] joined by OR,
+   * plus what it is measured with and whether raw replicates are recorded;
+   * pass_fail carries the pass guidance and the attach-a-reading flag;
+   * reading carries its unit and typical range; note carries the tech prompt.
+   * "" = never set. `target`/`tolerance_pct` stay as the legacy prose spec -
+   * a test with prose limits and no criteria shows in the Needs review filter
+   * rather than being parsed automatically.
+   */
+  acceptance: text("acceptance").notNull().default(""),
+  /**
+   * A file (tune report, printout, photo) must be on the result before
+   * sign-off. Split out of `required` (which used to imply it for tests) so
+   * a test can gate sign-off on being done without demanding paper.
+   * Backfilled true for required tests - see the needs-report migration.
+   */
+  needsReport: boolean("needs_report").notNull().default(false),
+  /**
+   * Usage-based cadence: "every 2000 injections", "every 500 hours". Display
+   * and intake-stamp only - the calendar cron schedules `interval_days` and
+   * nothing counts injections for us. Unit '' = no usage cadence.
+   */
+  usageEvery: integer("usage_every"),
+  usageUnit: text("usage_unit").notNull().default(""),
   // Task-only
   requiresNote: boolean("requires_note").notNull().default(false),
   consumesPart: boolean("consumes_part").notNull().default(false),
@@ -837,6 +862,9 @@ export const taskResults = pgTable("task_results", {
   passed: boolean("passed"),                           // null where the spec supports no verdict
   target: text("target").notNull().default(""),        // the spec, frozen at the moment of recording
   tolerancePct: text("tolerance_pct").notNull().default(""),
+  // The structured spec it was judged against, frozen like target - re-tuning
+  // the criteria next year must not restate what this reading meant.
+  acceptance: text("acceptance").notNull().default(""),
   note: text("note").notNull().default(""),            // conditions, what was odd about it
   recordedBy: text("recorded_by").notNull().default(""),
   recordedAt: timestamp("recorded_at").notNull().defaultNow(),

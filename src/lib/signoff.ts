@@ -13,6 +13,12 @@ export type GateTask = {
   required: boolean;
   /** 'test' tests need a report on file; 'task' work just needs doing. */
   kind: string;
+  /**
+   * Whether this test demands evidence on file before sign-off. Split out of
+   * `required` (procedures.needs_report); absent falls back to `required`,
+   * which is what required always meant for a test before the split.
+   */
+  needsReport?: boolean;
 };
 
 export type Blocker = { kind: "open_work" | "missing_report"; text: string };
@@ -40,8 +46,11 @@ export type Gate = {
 export function signoffGate(tasks: GateTask[], reportsByTask: Map<number, number>): Gate {
   const open = tasks.filter((t) => t.state !== "Done");
   const requiredTests = tasks
-    .filter((t) => t.required && t.kind === "test")
-    .map((t) => ({ id: t.id, title: t.title, reports: reportsByTask.get(t.id) ?? 0 }));
+    .filter((t) => t.kind === "test" && (t.required || (t.needsReport ?? false)))
+    .map((t) => ({
+      id: t.id, title: t.title, reports: reportsByTask.get(t.id) ?? 0,
+      needsReport: t.needsReport ?? t.required,
+    }));
 
   const blockers: Blocker[] = [];
   if (open.length) {
@@ -55,7 +64,7 @@ export function signoffGate(tasks: GateTask[], reportsByTask: Map<number, number
   // Only complain about missing reports once the test itself is done - chasing
   // paperwork for work nobody has started is noise.
   for (const t of requiredTests) {
-    if (t.reports === 0 && !open.some((o) => o.id === t.id)) {
+    if (t.needsReport && t.reports === 0 && !open.some((o) => o.id === t.id)) {
       blockers.push({ kind: "missing_report", text: `"${t.title}" has no report on file` });
     }
   }
