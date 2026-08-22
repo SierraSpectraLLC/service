@@ -18,7 +18,7 @@ import DailyUpdatePanel from "@/components/DailyUpdatePanel";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopTime, shopToday } from "@/lib/shopday";
 import { formatHours } from "@/lib/hours";
-import { GASES } from "@/lib/stages";
+import { ASSET_TONE, GASES } from "@/lib/stages";
 import { schedulePartsOf } from "@/lib/procedures";
 import { mergeAssetHistory } from "@/lib/assetHistory";
 import { unitLabel } from "@/lib/assetServes";
@@ -48,6 +48,7 @@ import ActivityNoteForm from "@/components/ActivityNoteForm";
 import ActivityFeed from "@/components/ActivityFeed";
 import TrackAsSystem from "@/components/TrackAsSystem";
 import PanelLayout from "@/components/PanelLayout";
+import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { mentionableOn } from "@/lib/mentionAudience";
@@ -254,30 +255,54 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
   // nobody else - see lib/mentionAudience.
   const mentionable = await mentionableOn(peopleRows, { instrumentId: null, assetId });
 
+  const today = shopToday();
+  const openWosH = woRows.filter((w) => woOpen(w.state));
+  const openTasksH = taggedTasks.filter((t) => t.state !== "Done");
+  const overdueTasksH = openTasksH.filter((t) => t.dueDate && t.dueDate < today).length;
+  const pmDueH = pmRows.filter((sc) => !sc.paused && sc.nextDue <= today).length;
+  const statusTone = ASSET_TONE[asset.status] ?? "neutral";
+  const heroStats: HeroStat[] = [
+    { value: asset.status, label: "", tone: statusTone === "neutral" ? undefined : statusTone },
+    { value: openWosH.length, label: `open WO${openWosH.length === 1 ? "" : "s"}`, tone: openWosH.length ? "warn" : undefined },
+    { value: openTasksH.length, label: "open tasks", tone: overdueTasksH ? "bad" : undefined },
+    ...(pmDueH ? [{ value: pmDueH, label: "PM due", tone: "warn" as const }] : []),
+  ];
+
   return (
     <div className="container split">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <div className="crumb" style={{ margin: 0 }}>
-          <Link href="/assets" style={{ textDecoration: "none", color: "inherit" }}>Assets</Link> › <b>{asset.model || asset.kind}</b>
-        </div>
-        <span style={{ marginLeft: "auto" }} />
-        {/* A unit on no system can't be worked the way a system can - no stages,
-            no queue, no sign-off packet, and nothing on the dashboard. This is
-            the way out of that for the one-instrument client. */}
-        {canEdit && asset.instrumentId === null && (
-          <TrackAsSystem assetId={asset.id} suggestion={asset.serial || asset.model} />
-        )}
-        {isStaff && (
-          <>
-            <Link href={`/assets/${asset.id}/label`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
-              Label
-            </Link>
-            <Link href={`/assets/${asset.id}/signoff`} className="btn sm" style={{ textDecoration: "none", flexShrink: 0 }}>
-              Sign-off packet
-            </Link>
-          </>
-        )}
+      <div className="crumb">
+        <Link href="/assets" style={{ textDecoration: "none", color: "inherit" }}>Assets</Link> › <b>{asset.model || asset.kind}</b>
       </div>
+
+      <RecordHero
+        image={coverSrc || undefined}
+        imageAlt={`${asset.kind}${asset.model ? ` ${asset.model}` : ""}`}
+        eyebrow={<>{asset.manufacturer || asset.kind}{asset.owner ? <> · for {asset.owner}</> : null}</>}
+        id={asset.serial ? `SN ${asset.serial}` : undefined}
+        title={`${asset.kind}${asset.model ? ` — ${asset.model}` : ""}`}
+        meta={[
+          homeSystem ? `in ${homeSystem.externalId}` : "on the shelf",
+          asset.location,
+        ].filter(Boolean).join(" · ")}
+        stats={heroStats}
+        actions={
+          <>
+            {/* A unit on no system can't be worked the way a system can - no
+                stages, no queue, no sign-off packet. This is the way out of
+                that for the one-instrument client. */}
+            {canEdit && asset.instrumentId === null && (
+              <TrackAsSystem assetId={asset.id} suggestion={asset.serial || asset.model} />
+            )}
+          </>
+        }
+        kebab={
+          <HeroKebab arrange menuLabel={`Actions for this ${asset.kind}`}
+            items={isStaff ? [
+              { label: "Sign-off packet", href: `/assets/${asset.id}/signoff` },
+              { label: "Label", href: `/assets/${asset.id}/label` },
+            ] : []} />
+        }
+      />
 
       {/* Same two-column shell as the system page - a unit's record runs just
           as long. See PanelLayout. */}
@@ -288,14 +313,20 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
         defaultRight={["workorders", "parts", "photos", "reference", "hours", "activity"]}
         // Same tab shape as the system page, so moving between a system and
         // one of its units never means relearning where anything lives.
-        pinned={["unit"]}
+        pinned={[]}
+        // The system page's grouping minus what a bare unit doesn't have
+        // (queue, custody, gases), so moving between a system and one of its
+        // units never means relearning where anything lives.
         groups={[
           { key: "work", label: "Work",
-            keys: ["workorders", "tasks", "maintenance", "parts"],
-            badge: taggedTasks.filter((t) => t.state !== "Done").length || undefined,
-            badgeTone: taggedTasks.some((t) => t.state !== "Done" && t.dueDate && t.dueDate < shopToday()) ? "bad" : "info" },
-          { key: "documents", label: "Documents", keys: ["specs", "photos", "files", "reference"] },
-          { key: "log", label: "Log", keys: ["hours", "update", "history", "activity"] },
+            keys: ["workorders", "tasks", "hours", "parts"],
+            badge: openTasksH.length || undefined,
+            badgeTone: overdueTasksH ? "bad" : "info" },
+          { key: "maintenance", label: "Maintenance", keys: ["maintenance"],
+            badge: pmDueH || undefined, badgeTone: "warn" },
+          { key: "config", label: "Configuration", keys: ["unit", "specs"] },
+          { key: "files", label: "Files", keys: ["files", "photos", "reference"] },
+          { key: "history", label: "History", keys: ["history", "update", "activity"] },
         ]}
         panels={[
           { key: "unit", label: "Unit", node: (
