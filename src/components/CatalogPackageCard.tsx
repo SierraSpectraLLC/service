@@ -86,7 +86,7 @@ export default function CatalogPackageCard({ entries }: { entries: PackageEntry[
                 </span>
                 <span style={{ display: "flex", gap: 4, marginLeft: "auto", flexWrap: "wrap", justifyContent: "flex-end" }}>
                   {e.docTypes.map((t) => (
-                    <span key={t} className="pill" style={{ background: "#E9E4F5", color: "#5B3E96" }}>{t}</span>
+                    <span key={t} className="pill accent">{t}</span>
                   ))}
                 </span>
               </div>
