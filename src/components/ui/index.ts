@@ -23,6 +23,7 @@ export { ConfirmHost, confirmDialog } from "@/components/ui/ConfirmDialog";
 export { ToastHost, toast } from "@/components/ui/Toast";
 export { default as DataTable } from "@/components/ui/DataTable";
 export { CardGrid, EntityCard } from "@/components/ui/CardGrid";
+export { default as InlineEdit } from "@/components/ui/InlineEdit";
 export type { Tone } from "@/lib/tones";
 export type { Facet } from "@/components/ui/FacetStrip";
 export type { RowAction } from "@/components/ui/RowActions";

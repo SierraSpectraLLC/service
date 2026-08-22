@@ -819,6 +819,26 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .tab .tab-n { font-size: 11px; color: var(--mut); margin-left: 4px; font-weight: 600; }
 .tab .tab-n.warn { color: var(--t-warn-fg); }
 
+/* One field edited where it stands: the value with a pencil that shows on
+   hover, an input in its place on click. Enter saves, Esc cancels. Anything
+   bigger than one field opens a Dialog instead. */
+.inline-edit-view {
+  border: none; background: none; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  text-align: left;
+}
+.inline-edit-view .pencil { color: var(--mut); font-size: 11px; opacity: 0; transition: opacity 0.12s ease; }
+.inline-edit-view:hover .pencil, .inline-edit-view:focus-visible .pencil { opacity: 1; }
+.inline-edit-view:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; border-radius: 4px; }
+@media (hover: none) { .inline-edit-view .pencil { opacity: 1; } }
+.inline-edit {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--link); border-radius: 6px; padding: 2px 6px; background: #fff;
+}
+.inline-edit input { border: none; padding: 0; font-size: inherit; min-width: 120px; width: auto; }
+.inline-edit input:focus-visible { outline: none; box-shadow: none; }
+.inline-edit kbd { font-size: 10px; color: var(--mut); font-family: var(--sans, inherit); }
+
 /* A labelled form field: label, control, then a hint or an error - never
    both, the error takes the hint's place while it stands. */
 .field { margin-bottom: 10px; min-width: 0; }
