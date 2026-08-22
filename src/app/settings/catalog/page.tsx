@@ -63,6 +63,7 @@ export default async function CatalogPage() {
   const models = terms.filter((t) => t.kind === "model").map((m) => ({
     id: m.id, assetType: m.assetType, name: m.name, categories: m.categories, manufacturer: m.manufacturer,
     inUse: assetRows.filter((a) => a.kind === m.assetType && a.model.toLowerCase() === m.name.toLowerCase()).length,
+    hasPhoto: !!m.photoUrl,
   }));
 
   // Module types: the catalog's list, plus any kind that exists only on units
