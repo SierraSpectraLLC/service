@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { completeWelcome } from "@/app/actions";
 import { MIN_PASSWORD } from "@/lib/password";
+import { Field } from "@/components/ui";
 
 /**
  * The first minute of somebody's first sign-in, and the only time they see it.
@@ -61,46 +62,42 @@ export default function WelcomeForm({ email, suggested, kinds, brandName }: {
         One minute, once. Signed in as <b style={{ color: "var(--ink)" }}>{email}</b>.
       </p>
 
-      <label htmlFor="w-name">Your name</label>
-      <input id="w-name" required autoFocus maxLength={60} value={name} disabled={pending}
-        onChange={(e) => setName(e.target.value)} placeholder="Joe Harris"
-        style={{ fontSize: 16, marginBottom: 4 }} />
-      <div className="mut" style={{ fontSize: 11, marginBottom: 14 }}>
-        What the rest of the shop sees on your tasks, your notes and your hours.
-      </div>
+      <Field label="Your name" htmlFor="w-name" required
+        hint="What the rest of the shop sees on your tasks, your notes and your hours.">
+        <input id="w-name" required autoFocus maxLength={60} value={name} disabled={pending}
+          onChange={(e) => setName(e.target.value)} placeholder="Joe Harris"
+          style={{ fontSize: 16 }} />
+      </Field>
 
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Email me about</div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
-        All on to start with. Everything still reaches your inbox in here either way.
-      </div>
-      <div style={{ marginBottom: 14 }}>
-        {kinds.map((k) => (
-          <label key={k.kind} style={{
-            display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0",
-            textTransform: "none", letterSpacing: 0, color: "var(--ink)", fontWeight: 400,
-          }}>
-            <input type="checkbox" checked={!off.has(k.kind)} disabled={pending}
-              onChange={() => toggle(k.kind)} style={{ width: 15, height: 15 }} />
-            {k.label}
-          </label>
-        ))}
-      </div>
+      <Field label="Email me about"
+        hint="All on to start with. Everything still reaches your inbox in here either way.">
+        <div>
+          {kinds.map((k) => (
+            <label key={k.kind} style={{
+              display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0",
+              textTransform: "none", letterSpacing: 0, color: "var(--ink)", fontWeight: 400,
+            }}>
+              <input type="checkbox" className="check" checked={!off.has(k.kind)} disabled={pending}
+                onChange={() => toggle(k.kind)} />
+              {k.label}
+            </label>
+          ))}
+        </div>
+      </Field>
 
-      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-        Password <span className="mut" style={{ fontWeight: 400 }}>optional</span>
-      </div>
-      <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
-        You sign in with a emailed code. A password is the way in on the day email isn&apos;t
-        arriving - at least {MIN_PASSWORD} characters, or leave both blank.
-      </div>
-      <input type="password" autoComplete="new-password" value={password} disabled={pending}
-        onChange={(e) => setPassword(e.target.value)} placeholder="Password"
-        style={{ fontSize: 16, marginBottom: 6 }} />
-      {password && (
-        <input type="password" autoComplete="new-password" value={again} disabled={pending}
-          onChange={(e) => setAgain(e.target.value)} placeholder="Again"
-          style={{ fontSize: 16, marginBottom: 6 }} />
-      )}
+      <Field label="Password" optional
+        hint={`You sign in with an emailed code. A password is the way in on the day email isn't arriving - at least ${MIN_PASSWORD} characters, or leave both blank.`}>
+        <>
+          <input type="password" autoComplete="new-password" value={password} disabled={pending}
+            onChange={(e) => setPassword(e.target.value)} placeholder="Password"
+            style={{ fontSize: 16, marginBottom: 6 }} />
+          {password && (
+            <input type="password" autoComplete="new-password" value={again} disabled={pending}
+              onChange={(e) => setAgain(e.target.value)} placeholder="Again"
+              style={{ fontSize: 16 }} />
+          )}
+        </>
+      </Field>
 
       <button className="btn primary" type="submit" style={{ width: "100%", marginTop: 8 }}
         disabled={pending || !name.trim()}>

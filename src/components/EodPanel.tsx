@@ -3,6 +3,8 @@
 import { useRef, useState, useTransition } from "react";
 import { saveEodUpdate, setEodSkip, sendEodEmail } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
+import { Field, Panel } from "@/components/ui";
 
 /** One line on a client's report: a system, or a standalone asset. */
 export type EodLine = {
@@ -121,7 +123,9 @@ export default function EodPanel({
     setSendMsg("");
     startTransition(async () => {
       const res = await sendEodEmail(orgId);
-      setSendMsg(res?.error ? res.error : `Sent to ${res.sent} recipient${res.sent === 1 ? "" : "s"} ✓`);
+      if (res?.error) { setSendMsg(res.error); return; }
+      setSendMsg(`Sent to ${res.sent} recipient${res.sent === 1 ? "" : "s"} ✓`);
+      toast({ message: `Sent the report to ${res.sent} recipient${res.sent === 1 ? "" : "s"}` });
     });
   };
 
@@ -142,30 +146,33 @@ export default function EodPanel({
             <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
           <button className="btn link" style={{ color: "#A32D2D" }} disabled={pending}
-            onClick={() => startTransition(() => setEodSkip(targetOf(e), true))}>skip</button>
+            onClick={() => startTransition(async () => {
+              await setEodSkip(targetOf(e), true);
+              toast({ message: `Skipped ${e.externalId}` });
+            })}>skip</button>
         </div>
       </div>
-      <label style={{ fontSize: 11 }}>System Update</label>
-      <textarea rows={2} value={drafts[keyOf(e)]?.systemUpdate ?? ""}
-        onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
-        onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
-        placeholder={e.suggestedUpdate || "What happened today"}
-        style={{ marginBottom: 8, resize: "vertical" }} />
-      <label style={{ fontSize: 11 }}>Action Item</label>
-      <input value={drafts[keyOf(e)]?.actionItem ?? ""}
-        onChange={(ev) => setDraft(e, { actionItem: ev.target.value })}
-        onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
-        placeholder={e.suggestedAction || "Next step / what we need"} />
+      <Field label="System Update">
+        <textarea rows={2} value={drafts[keyOf(e)]?.systemUpdate ?? ""}
+          onChange={(ev) => setDraft(e, { systemUpdate: ev.target.value })}
+          onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+          placeholder={e.suggestedUpdate || "What happened today"}
+          style={{ resize: "vertical" }} />
+      </Field>
+      <Field label="Action Item">
+        <input value={drafts[keyOf(e)]?.actionItem ?? ""}
+          onChange={(ev) => setDraft(e, { actionItem: ev.target.value })}
+          onBlur={() => { if (status[keyOf(e)] === "dirty") flush(e); }}
+          placeholder={e.suggestedAction || "Next step / what we need"} />
+      </Field>
     </div>
   );
 
   return (
-    <div className="card">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-        <div className="card-title">{clientName}</div>
-        <span className="mut" style={{ fontSize: 12 }}>{dateMDY}</span>
-        {sentInfo && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{sentInfo} ✓</span>}
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+    <Panel title={clientName}
+      hint={<>{dateMDY}{sentInfo && <span style={{ color: "#2E6B2E", fontWeight: 700 }}> · {sentInfo} ✓</span>}</>}
+      actions={
+        <>
           {!readOnly && (
             <button className="btn sm accent" onClick={send} disabled={pending || anyUnsaved || !canSend || !filled.length}
               title={canSend ? `Emails ${clientName}'s recipients, with portal links per line` : `Add ${clientName}'s recipients in Settings first`}>
@@ -175,8 +182,8 @@ export default function EodPanel({
           <button className="btn sm primary" onClick={copy} disabled={!filled.length}>
             {copied ? "Copied ✓" : "Copy"}
           </button>
-        </div>
-      </div>
+        </>
+      }>
       {sendMsg && (
         <div style={{ fontSize: 12, marginBottom: 8, color: sendMsg.endsWith("✓") ? "#2E6B2E" : "#A32D2D" }}>{sendMsg}</div>
       )}
@@ -223,7 +230,10 @@ export default function EodPanel({
               {e.externalId}
               {!readOnly && (
                 <button className="btn link" style={{ fontSize: 10 }} disabled={pending}
-                  onClick={() => startTransition(() => setEodSkip(targetOf(e), false))}>include</button>
+                  onClick={() => startTransition(async () => {
+                    await setEodSkip(targetOf(e), false);
+                    toast({ message: `Included ${e.externalId}` });
+                  })}>include</button>
               )}
             </span>
           ))}
@@ -239,6 +249,6 @@ export default function EodPanel({
           }}>{emailText}</pre>
         </details>
       )}
-    </div>
+    </Panel>
   );
 }

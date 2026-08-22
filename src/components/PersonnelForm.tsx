@@ -8,7 +8,7 @@ import {
 } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { DataTable, FacetStrip, Panel, Pill, Toolbar } from "@/components/ui";
+import { DataTable, FacetStrip, Panel, Pill, SaveBar, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
 
 function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
@@ -46,8 +46,11 @@ export default function PersonnelForm(props: {
   filter?: { q: string; kind: string };
 }) {
   const [view, setView] = useState(props.clientAccessEnabled);
+  const [saved, setSaved] = useState(props.clientAccessEnabled);
+  const [barMsg, setBarMsg] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const dirty = view !== saved;
 
   const q = (props.filter?.q ?? "").trim();
   const kindSel = props.filter?.kind ?? "";
@@ -86,11 +89,7 @@ export default function PersonnelForm(props: {
           instead. Open one to set its look, its people and where its reports go.</>}>
 
         <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "2px 0 10px" }}>
-          <Toggle on={view} label="Client sign-in" onClick={() => {
-            const next = !view;
-            setView(next);
-            startTransition(() => updateSettings({ clientAccessEnabled: next }));
-          }} />
+          <Toggle on={view} label="Client sign-in" onClick={() => { setView(!view); setBarMsg(""); }} />
           <div>
             <div style={{ fontSize: 13, fontWeight: 700 }}>Client sign-in</div>
             <div className="mut" style={{ fontSize: 11 }}>Master switch. Off blocks every non-staff sign-in, whatever each organization&apos;s list says.</div>
@@ -212,6 +211,15 @@ export default function PersonnelForm(props: {
         ))}
         {props.directory.length === 0 && <div className="mut" style={{ fontSize: 12 }}>Nobody has a login yet.</div>}
       </Panel>
+
+      <SaveBar dirty={dirty} saving={pending} message={barMsg}
+        onSave={() => startTransition(async () => {
+          await updateSettings({ clientAccessEnabled: view });
+          setSaved(view);
+          setBarMsg(`Client sign-in turned ${view ? "on" : "off"}`);
+        })}
+        onDiscard={() => setView(saved)}
+      />
     </>
   );
 }

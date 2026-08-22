@@ -30,10 +30,12 @@ const FIXTURE = `
     ('Lab Zen', 'client'),
     ('Coastal Analytical', 'client');
 
-  INSERT INTO users (id, name, email, role, onboarded_at)
-    VALUES ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now());
-  INSERT INTO sessions (session_token, user_id, expires)
-    VALUES ('devtoken', 'dev-user', now() + interval '30 days');
+  INSERT INTO users (id, name, email, role, onboarded_at) VALUES
+    ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now()),
+    ('dev-new', '', 'new@local.test', 'tech', NULL);
+  INSERT INTO sessions (session_token, user_id, expires) VALUES
+    ('devtoken', 'dev-user', now() + interval '30 days'),
+    ('newtoken', 'dev-new', now() + interval '30 days');
 
   INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, notes) VALUES
     ('LZ-001', 'Lab Zen', 'Agilent 6495C LC-MS', 'Agilent', 'US2405111', 1, '{"Checkout"}', 'Reserpine test and tune.'),
