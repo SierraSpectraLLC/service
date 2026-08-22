@@ -6,6 +6,8 @@ import { useMemo, useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import { removeAssets } from "@/app/actions";
 import { duplicateIds } from "@/lib/assetDupe";
+import Dot from "@/components/ui/Dot";
+import { toast } from "@/components/ui/Toast";
 import type { Tone } from "@/lib/tones";
 
 export type RegistryRow = {
@@ -98,6 +100,8 @@ export default function AssetRegistryList({ rows, canSelect }: {
       if (res?.error) { setError(res.error); return; }
       if (res.failures?.length) {
         setError(`${res.deleted} deleted, ${res.failures.length} could not be: ${res.failures.map((f) => `#${f.id} ${f.error}`).join("; ")}`);
+      } else {
+        toast({ message: `Deleted ${res.deleted} asset record${res.deleted === 1 ? "" : "s"}` });
       }
       clear();
     });
@@ -183,14 +187,14 @@ export default function AssetRegistryList({ rows, canSelect }: {
                       aria-label={`Select ${a.kind} ${a.model}${a.serial ? ` SN ${a.serial}` : ""}`}
                       style={{ width: 15, height: 15 }} />
                   )}
-                  <span title={a.status} aria-hidden
-                    style={{ width: 10, height: 10, borderRadius: "50%", background: `var(--t-${a.statusTone}-fg)` }} />
+                  <span title={a.status}><Dot tone={a.statusTone} /></span>
                   <span className="reg-cell">
                     <Link href={`/assets/${a.id}`} style={{ fontSize: 13, fontWeight: 700, textDecoration: "none", color: "inherit" }}>
                       {a.model || <span className="mut">(no model)</span>}
                     </Link>
+                    {/* Text, not a second pill: the row's one pill is its status. */}
                     {isDupe && (
-                      <span className="pill warn" style={{ marginLeft: 6 }}
+                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 700, color: "var(--t-warn-fg)" }}
                         title="Matches an earlier row: same serial, or same type/model/owner/location on the same system">
                         dupe?
                       </span>

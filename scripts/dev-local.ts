@@ -43,10 +43,10 @@ const FIXTURE = `
   INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, status, location) VALUES
     (1, 'Mass spec', '6495C', 'US2405111', 'Agilent', 'In service', 'Bench 4'),
     (1, 'Pump', '1290 Quat Pump', 'DEBA2201', 'Agilent', 'In service', 'Bench 4'),
-    (2, 'Mass spec', 'ISQ 7000', 'ISQ70233', 'Thermo', 'In refurb', 'Bay 2'),
-    (2, 'Autosampler', 'TriPlus RSH', 'TP99120', 'Thermo', 'In refurb', 'Bay 2'),
+    (2, 'Mass spec', 'ISQ 7000', 'ISQ70233', 'Thermo', 'Needs attention', 'Bay 2'),
+    (2, 'Autosampler', 'TriPlus RSH', 'TP99120', 'Thermo', 'Needs attention', 'Bay 2'),
     (3, 'Mass spec', 'LCMS-8060', 'SH806014', 'Shimadzu', 'In service', 'Bay 1'),
-    (4, 'Spectrometer', 'Optima 8300', 'PE83007', 'PerkinElmer', 'Needs eval', 'Receiving'),
+    (4, 'Spectrometer', 'Optima 8300', 'PE83007', 'PerkinElmer', 'Needs attention', 'Receiving'),
     (5, 'GC', '7890B', 'CN14320', 'Agilent', 'Down', 'Bay 3'),
     (NULL, 'N2 generator', 'Peak Genius 1051', 'PG105188', 'Peak', 'In service', 'Utility room'),
     (NULL, 'Vacuum pump', 'Edwards nXDS10i', 'ED22981', 'Edwards', 'Spare', 'Shelf C'),

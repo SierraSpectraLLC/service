@@ -9,6 +9,7 @@ import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
 import AssetGridToggle from "@/components/AssetGridToggle";
 import AssetRegistryList from "@/components/AssetRegistryList";
+import { FacetStrip, Legend, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -58,19 +59,47 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
   // Deleting records is staff work, so only staff get the checkboxes.
   const isStaff = user.role === "owner" || user.role === "staff";
 
+  // Status facet hrefs keep every other filter in place - facet state is the URL.
+  const statusHref = (s: string) => {
+    const p = new URLSearchParams();
+    if (needle) p.set("q", needle);
+    if (kind) p.set("kind", kind);
+    if (s && s !== status) p.set("status", s);
+    if (owner) p.set("owner", owner);
+    return `/assets${p.size ? `?${p}` : ""}`;
+  };
+  const countFor = (s: string) => rows.filter((a) => a.status === s).length;
+
   return (
     <div className="container split">
-      <div className="page-head">
-        <h1 className="page-title">Assets</h1>
-        {unattached > 0 && (
-          <span className="mut" style={{ fontSize: 12 }}>{unattached} not in a system right now</span>
-        )}
-        <span className="page-actions">
-          {user.role !== "client_viewer" && <a className="btn link" href="/import">Import CSV</a>}
-          <a className="btn link" href="/api/export/assets">Export assets</a>
-          <a className="btn link" href="/api/export/systems">Export systems</a>
-        </span>
-      </div>
+      <PageHead title="Assets"
+        sub={unattached > 0 ? `${unattached} not in a system right now` : undefined}
+        actions={
+          <>
+            {user.role !== "client_viewer" && <a className="btn link" href="/import">Import CSV</a>}
+            <a className="btn link" href="/api/export/assets">Export assets</a>
+            <a className="btn link" href="/api/export/systems">Export systems</a>
+          </>
+        } />
+      <Toolbar
+        search={
+          <form action="/assets">
+            {kind && <input type="hidden" name="kind" value={kind} />}
+            {status && <input type="hidden" name="status" value={status} />}
+            {owner && <input type="hidden" name="owner" value={owner} />}
+            <input name="q" defaultValue={q} placeholder="Serial, model, owner, system..." aria-label="Search assets" />
+          </form>
+        }
+        facets={
+          <FacetStrip facets={ASSET_STATES.map((s) => ({
+            key: s, label: s, count: countFor(s) || undefined, on: status === s, href: statusHref(s),
+          }))} />
+        }
+        actions={
+          <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner}
+            kinds={filterKinds} owners={owners} />
+        }
+      />
       <div className="card">
         {user.role !== "client_viewer" && (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start", marginBottom: 10 }}>
@@ -78,8 +107,6 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
             <AssetGridToggle instrumentId={null} kinds={catalogKinds} models={gridModels} owners={owners} />
           </div>
         )}
-        <AssetRegistryFilter q={q} kind={kind} status={status} owner={owner}
-          kinds={filterKinds} statuses={[...ASSET_STATES]} owners={owners} />
 
         <AssetRegistryList
           canSelect={isStaff}
@@ -100,6 +127,13 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
           })}
         />
       </div>
+      <Legend items={[
+        { tone: "good", label: "in service" },
+        { tone: "neutral", label: "spare" },
+        { tone: "warn", label: "needs attention" },
+        { tone: "bad", label: "down" },
+        { tone: "faint", label: "decommissioned" },
+      ]} />
     </div>
   );
 }
