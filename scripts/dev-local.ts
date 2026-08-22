@@ -156,6 +156,9 @@ const FIXTURE = `
     (NULL, 1, NULL, NULL, 'Reserpine tune report.pdf', 'Report', 'Post-PM verification', 'https://blob.local/tune-report.pdf', 194227, 'rita@labzen.test'),
     (NULL, 2, NULL, NULL, 'Turbo swap photos.zip', 'Other', '', 'https://blob.local/turbo-photos.zip', 8112003, '${OWNER}');
 
+  INSERT INTO drop_links (org_id, folder_id, token, label, expires_on, created_by) VALUES
+    (1, NULL, 'devdroptoken12345678', 'Method files from Rita', to_char(now() + interval '14 days', 'YYYY-MM-DD'), '${OWNER}');
+
   INSERT INTO engagement_records (instrument_id, org_id, kind, external_id, label, revoked_by, revoked_at, data) VALUES
     (NULL, 1, 'revoked', 'LZ-000', 'GC-MS - 8890 GC', '${OWNER}', now() - interval '30 days', '${JSON.stringify({
       version: 1,

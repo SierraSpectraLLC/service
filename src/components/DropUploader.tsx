@@ -65,19 +65,19 @@ export default function DropUploader({ token }: { token: string }) {
         </button>
         <input ref={ref} type="file" multiple style={{ display: "none" }}
           onChange={(e) => { void send(e.target.files); e.target.value = ""; }} />
-        <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
+        <div className="mut t-small" style={{ marginTop: 8 }}>
           or drop them here · up to {fmtBytes(MAX_BYTES)} each
         </div>
       </div>
       {sent.length > 0 && (
-        <div style={{ fontSize: 13, color: "#2E6B2E" }}>
+        <div className="t-body" style={{ color: "var(--t-good-fg)" }}>
           <b style={{ fontWeight: 700 }}>Sent ✓</b>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
-            {sent.map((n, i) => <li key={i} style={{ fontSize: 12.5 }}>{n}</li>)}
+            {sent.map((n, i) => <li key={i} className="t-small">{n}</li>)}
           </ul>
         </div>
       )}
-      {error && <div style={{ fontSize: 12.5, color: "#A32D2D" }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)" }}>{error}</div>}
     </div>
   );
 }
