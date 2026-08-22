@@ -74,10 +74,10 @@ export default function ModelHeaderCard({ termId, name, assetType, manufacturer,
           </div>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             {(categories.length ? categories : ["Any system type"]).map((c) => (
-              <span key={c} className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{c}</span>
+              <span key={c} className="pill info">{c}</span>
             ))}
             {gases.map((g) => (
-              <span key={g} className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }} title="Gas requirement from the catalog">{g}</span>
+              <span key={g} className="pill warn" title="Gas requirement from the catalog">{g}</span>
             ))}
           </div>
           {hasPhoto && (
