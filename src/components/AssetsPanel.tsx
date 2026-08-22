@@ -3,6 +3,7 @@
 import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
 import { ASSET_TONE } from "@/lib/stages";
+import Dialog from "@/components/ui/Dialog";
 import { createAsset, attachAssets } from "@/app/actions";
 import { servesLine } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
@@ -102,8 +103,17 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
       </div>
 
       {picking && (
-        <div className="dash-form">
-          <label>Unassigned assets - check everything going into this system</label>
+        <Dialog open onClose={() => setPicking(false)} title="Add existing assets"
+          context="Check everything going into this system."
+          footer={
+            <>
+              <span className="dialog-status" />
+              <button className="btn" onClick={() => setPicking(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={attachChecked} disabled={pending || !checked.length}>
+                {pending ? "Adding..." : `Add ${checked.length || ""} asset${checked.length === 1 ? "" : "s"}`.replace("  ", " ")}
+              </button>
+            </>
+          }>
           {unassigned.length > 6 && (
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by type, model or serial..."
               style={{ marginBottom: 6, fontSize: 12 }} />
@@ -119,10 +129,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
             ))}
             {shown.length === 0 && <div className="mut" style={{ fontSize: 12, padding: 6 }}>Nothing matches.</div>}
           </div>
-          <button className="btn sm accent" onClick={attachChecked} disabled={pending || !checked.length}>
-            {pending ? "Adding..." : `Add ${checked.length || ""} asset${checked.length === 1 ? "" : "s"}`.replace("  ", " ")}
-          </button>
-        </div>
+        </Dialog>
       )}
 
       {grid && (
@@ -133,7 +140,16 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
       )}
 
       {open && (
-        <div className="dash-form">
+        <Dialog open onClose={() => setOpen(false)} title="Add a unit"
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={submit} disabled={pending || (!draft.model.trim() && !draft.serial.trim())}>
+                {pending ? "Saving..." : "Add asset"}
+              </button>
+            </>
+          }>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Type</label>
@@ -154,11 +170,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
               <datalist id="maker-book">{(makers ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
             <div><label>Note</label><input value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} placeholder='e.g. "seals replaced Jul 24"' /></div>
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-          <button className="btn sm accent" onClick={submit} disabled={pending || (!draft.model.trim() && !draft.serial.trim())}>
-            {pending ? "Saving..." : "Add asset"}
-          </button>
-        </div>
+        </Dialog>
       )}
       {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
 
