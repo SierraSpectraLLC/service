@@ -33,12 +33,13 @@ export const WO_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-/* Waiting is neutral rather than faint on purpose: it is a live state (the
-   ball is just in someone else's court), where cancelled is out of play. */
+/* Waiting carries the warn, not open: a fresh order is normal life, but an
+   order waiting on a part or a client is the one that goes stale unwatched.
+   Cancelled is faint - out of play, not a judgement. */
 export const WO_TONE: Record<string, Tone> = {
-  open: "warn",
+  open: "neutral",
   active: "info",
-  waiting: "neutral",
+  waiting: "warn",
   resolved: "good",
   closed: "neutral",
   cancelled: "faint",
