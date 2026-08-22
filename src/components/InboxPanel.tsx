@@ -5,6 +5,8 @@ import { useTransition } from "react";
 import { markNotificationRead, markAllNotificationsRead, setNotificationPref } from "@/app/actions";
 import { NOTIFY_KINDS } from "@/lib/inbox";
 import DesktopAlerts from "@/components/DesktopAlerts";
+import { DataTable, Dot, FacetStrip, Legend, PageHead, Panel, Toolbar } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
 
 export type InboxItem = {
   id: number; kind: string; title: string; href: string;
@@ -12,77 +14,102 @@ export type InboxItem = {
   read: boolean;
 };
 
-export default function InboxPanel({ items, prefs }: {
+export default function InboxPanel({ items, prefs, filter }: {
   items: InboxItem[];
   prefs: { kind: string; emailOn: boolean }[];
+  /** From the URL (?kind=, ?unread=1), so a filtered inbox is a link. */
+  filter: { kind?: string; unread?: string };
 }) {
   const [pending, startTransition] = useTransition();
   const unread = items.filter((i) => !i.read).length;
   const emailOn = (kind: string) => prefs.find((p) => p.kind === kind)?.emailOn ?? true;
+  const kindLabel = (k: string) => NOTIFY_KINDS.find((x) => x.kind === k)?.label ?? k;
+
+  const activeKind = filter.kind ?? "";
+  const unreadOnly = filter.unread === "1";
+  const shown = items.filter((n) =>
+    (!activeKind || n.kind === activeKind) && (!unreadOnly || !n.read));
+  const href = (next: { kind?: string; unread?: string }) => {
+    const merged = { kind: activeKind, unread: unreadOnly ? "1" : "", ...next };
+    const p = new URLSearchParams();
+    if (merged.kind) p.set("kind", merged.kind);
+    if (merged.unread === "1") p.set("unread", "1");
+    return `/inbox${p.size ? `?${p}` : ""}`;
+  };
+  const kindsPresent = [...new Set(items.map((n) => n.kind))];
 
   return (
     <>
-      <div className="page-head">
-        <h1 className="page-title">Inbox</h1>
-        {unread > 0 && (
-          <>
-            <span className="pill bad">{unread} unread</span>
-            <span className="page-actions">
-              <button className="btn sm" disabled={pending}
-                onClick={() => startTransition(async () => { await markAllNotificationsRead(); })}>
-                Mark all read
-              </button>
-            </span>
-          </>
-        )}
-      </div>
-      <div className="card">
-        {items.length === 0 && (
-          <div className="empty">
-            <b>Nothing yet</b>
-            Assignments, discussion posts, access requests and empty-gas
-            flags land here as well as in email.
-          </div>
-        )}
-        {items.map((n) => {
-          const body = (
-            <span style={{ fontSize: 13, fontWeight: n.read ? 400 : 700 }}>{n.title}</span>
-          );
-          return (
-            <div key={n.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
-              <span aria-hidden style={{
-                width: 7, height: 7, borderRadius: 999, flex: "0 0 auto", alignSelf: "center",
-                background: n.read ? "transparent" : "var(--accent, #1D6396)",
-              }} />
-              {n.href ? (
-                // Reading is a side effect of following the link, not a step
-                // the user has to remember - fire it and let navigation go on.
-                <Link href={n.href} style={{ textDecoration: "none", color: "inherit" }}
-                  onClick={() => { if (!n.read) markNotificationRead(n.id); }}>
-                  {body}
-                </Link>
-              ) : body}
-              <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>{n.when}</span>
-            </div>
-          );
-        })}
-      </div>
+      <PageHead title="Inbox"
+        actions={unread > 0 && (
+          <button className="btn sm" disabled={pending}
+            onClick={() => startTransition(async () => {
+              await markAllNotificationsRead();
+              toast({ message: `Marked ${unread} notification${unread === 1 ? "" : "s"} read` });
+            })}>
+            Mark all read
+          </button>
+        )} />
+      <Toolbar
+        facets={
+          <FacetStrip facets={[
+            { key: "unread", label: "Unread", count: unread || undefined, on: unreadOnly, href: href({ unread: unreadOnly ? "" : "1" }) },
+            ...kindsPresent.map((k) => ({
+              key: k, label: kindLabel(k),
+              count: items.filter((n) => n.kind === k).length,
+              on: activeKind === k,
+              href: href({ kind: activeKind === k ? "" : k }),
+            })),
+          ]} />
+        }
+      />
+      <DataTable
+        cols={[
+          { key: "dot", label: "", width: "12px" },
+          { key: "title", label: "Notification", width: "minmax(200px, 3fr)" },
+          { key: "kind", label: "Kind", width: "minmax(110px, 1fr)", hideMobile: true },
+          { key: "when", label: "When", width: "110px", align: "right" },
+        ]}
+        rows={shown.map((n) => ({
+          key: n.id,
+          cells: {
+            dot: n.read ? null : <Dot tone="info" />,
+            title: n.href ? (
+              // Reading is a side effect of following the link, not a step
+              // the user has to remember - fire it and let navigation go on.
+              <Link href={n.href} style={{ textDecoration: "none", color: "inherit", fontWeight: n.read ? 400 : 700, fontSize: 13 }}
+                onClick={() => { if (!n.read) markNotificationRead(n.id); }}>
+                {n.title}
+              </Link>
+            ) : (
+              <span style={{ fontSize: 13, fontWeight: n.read ? 400 : 700 }}>{n.title}</span>
+            ),
+            kind: <span className="mut">{kindLabel(n.kind)}</span>,
+            when: <span className="mut">{n.when}</span>,
+          },
+        }))}
+        empty="Nothing yet - assignments, discussion posts, access requests and empty-gas flags land here as well as in email"
+      />
+      <Legend items={[{ tone: "info", label: "unread" }]} />
 
       <DesktopAlerts />
 
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Email preferences</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Everything always lands in this inbox; these only control which kinds also email you.
-        </div>
+      <Panel title="Email preferences"
+        hint="Everything always lands in this inbox; these only control which kinds also email you.">
         {NOTIFY_KINDS.map((k) => (
           <label key={k.kind} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", fontSize: 13, cursor: "pointer" }}>
             <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} style={{ width: 15, height: 15 }}
-              onChange={(e) => startTransition(async () => { await setNotificationPref(k.kind, e.target.checked); })} />
+              onChange={(e) => {
+                const on = e.target.checked;
+                startTransition(async () => {
+                  await setNotificationPref(k.kind, on);
+                  toast({ message: `${k.label} emails ${on ? "on" : "off"}` });
+                });
+              }} />
             {k.label}
           </label>
         ))}
-      </div>
+      </Panel>
     </>
   );
 }

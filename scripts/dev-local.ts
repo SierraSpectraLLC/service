@@ -96,6 +96,11 @@ const FIXTURE = `
     (1, 'Rita Alvarez', 'rita@labzen.test', 'Any word on the checkout date? The lab is planning validation runs.'),
     (1, 'Dev Owner', '${OWNER}', 'Tune passed this morning; sign-off packet goes out tomorrow.');
 
+  INSERT INTO notifications (email, kind, title, href, created_at, read_at) VALUES
+    ('${OWNER}', 'task_assigned', 'Rita assigned you: Replace turbo and recertify', '/work/2', now() - interval '3 hours', NULL),
+    ('${OWNER}', 'discussion', 'Rita Alvarez posted on LZ-001', '/instruments/1', now() - interval '1 day', NULL),
+    ('${OWNER}', 'gas_empty', 'Helium marked empty on CA-003', '/instruments/6', now() - interval '2 days', now() - interval '1 day');
+
   INSERT INTO message_threads (title, created_by, last_message_at) VALUES
     ('Sign-off scheduling', '${OWNER}', now() - interval '2 hours');
   INSERT INTO thread_members (thread_id, email, name, org_name, added_by) VALUES

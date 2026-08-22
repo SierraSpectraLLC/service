@@ -15,9 +15,10 @@ export const dynamic = "force-dynamic";
  * of it also emails them. Scoped by sign-in email - there is no id or query
  * param, so there is nothing to probe.
  */
-export default async function InboxPage() {
+export default async function InboxPage({ searchParams }: { searchParams: Promise<{ kind?: string; unread?: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
+  const filter = await searchParams;
   const email = user.email.toLowerCase();
 
   const [items, prefs, [me]] = await Promise.all([
@@ -39,6 +40,7 @@ export default async function InboxPage() {
           when: shopTime(n.createdAt), read: n.readAt !== null,
         }))}
         prefs={prefs}
+        filter={{ kind: filter.kind, unread: filter.unread }}
       />
       <SignInSettings
         name={user.name} email={user.email}
