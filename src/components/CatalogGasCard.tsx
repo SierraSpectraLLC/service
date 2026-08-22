@@ -89,7 +89,7 @@ export default function CatalogGasCard({ entries }: { entries: GasEntry[] }) {
                 </span>
                 <span style={{ display: "flex", gap: 4, marginLeft: "auto", flexWrap: "wrap" }}>
                   {e.gases.map((g) => (
-                    <span key={g} className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>
+                    <span key={g} className="pill info">
                       {GAS_SYMBOL[g] ?? g}
                     </span>
                   ))}
