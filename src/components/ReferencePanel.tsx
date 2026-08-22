@@ -9,6 +9,7 @@ import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tall
 import { fmtBytes } from "@/lib/storage";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Dialog from "@/components/ui/Dialog";
 
 type PickFile = {
   id: number; fileName: string; kind: string; description: string; size: number;
@@ -110,7 +111,16 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
       </div>
 
       {open && (
-        <div className="dash-form">
+        <Dialog open onClose={() => setOpen(false)} title="File a reference"
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending}>
+                {pending ? "Saving..." : "File it"}
+              </button>
+            </>
+          }>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div className="seg" role="group" aria-label="Reference kind">
               {(["link", "note"] as const).map((k) => (
@@ -214,11 +224,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
           <div className="mut" style={{ fontSize: 10.5, marginBottom: 8 }}>
             {PROVENANCE_BLURB[(draft.provenance || "") as keyof typeof PROVENANCE_BLURB]}
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-          <button className="btn sm accent" onClick={save} disabled={pending}>
-            {pending ? "Saving..." : "File it"}
-          </button>
-        </div>
+        </Dialog>
       )}
 
       {groups.map((g) => (
