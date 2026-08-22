@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { useState, useTransition } from "react";
 import { ASSET_STATES, ASSET_TONE } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, setAssetServes, updateAsset } from "@/app/actions";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import Dialog from "@/components/ui/Dialog";
 import { serveCandidates, serversOf } from "@/lib/assetServes";
@@ -125,7 +124,11 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
         {isStaff && (
           <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
             onClick={async () => {
-              const reason = await confirmReasonText("Permanently delete this asset record AND its history? Only for records created by mistake.");
+              const reason = await confirmReason({
+                title: "Permanently delete this asset record?",
+                body: "Its history goes with it. Only for records created by mistake.",
+                action: "Delete record", tone: "bad",
+              });
               if (!reason) return;
               run(() => removeAsset(asset.id, reason));
             }}>

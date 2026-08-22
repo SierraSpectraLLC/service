@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { shareSystem, unshareSystem, setSystemOwner, shareAsset, unshareAsset, setAssetOwnerOrg } from "@/app/actions";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { orgNamed } from "@/lib/owner";
 
 export type ShareEntry = { orgId: number; name: string; kind: string; access: string };
@@ -62,10 +62,18 @@ export default function SharePanel({ target = "system", targetId, shares, orgOpt
   };
 
   const remove = async (s: ShareEntry) => {
-    const reason = await confirmReasonText(
+    const reason = await confirmReason(
       target === "system" && s.kind === "provider"
-        ? `End ${s.name}'s engagement? They keep a frozen, read-only record of the work up to today.`
-        : `Remove ${s.name}'s access? They lose sight of it immediately.`
+        ? {
+            title: `End ${s.name}'s engagement?`,
+            body: "They keep a frozen, read-only record of the work up to today.",
+            action: "End engagement", tone: "bad",
+          }
+        : {
+            title: `Remove ${s.name}'s access?`,
+            body: "They lose sight of it immediately.",
+            action: "Remove access", tone: "bad",
+          }
     );
     if (!reason) return; // the confirm doubles as the "are you sure"
     setError("");

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { Dot, Legend, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 import { linkRemoteDevice, removeRemoteDevice, renameRemoteDevice, setRemoteConsent } from "@/app/actions";
@@ -166,10 +166,11 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
 
                 <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11, marginLeft: "auto" }} disabled={pending}
                   onClick={async () => {
-                    const why = await confirmReasonText(
-                      `Remove "${deviceLabel(d.nickname, d.name)}" from remote support? This forgets the machine here - the agent keeps `
-                      + "running until somebody uninstalls it on the PC itself.",
-                    );
+                    const why = await confirmReason({
+                      title: `Remove "${deviceLabel(d.nickname, d.name)}" from remote support?`,
+                      body: "This forgets the machine here - the agent keeps running until somebody uninstalls it on the PC itself.",
+                      action: "Remove", tone: "bad",
+                    });
                     if (!why) return;
                     setError("");
                     startTransition(async () => {

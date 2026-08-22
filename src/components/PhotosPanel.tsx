@@ -9,7 +9,7 @@ import {
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { fmtBytes } from "@/lib/storage";
 import { coverIsChosen, fileSrc, orderPhotos, photoCount } from "@/lib/photos";
 import PhotoThumb from "./PhotoThumb";
@@ -115,7 +115,11 @@ export default function PhotosPanel({
     startTransition(async () => { setError(((await fn()) as { error?: string })?.error ?? ""); });
 
   const remove = async (p: { id: number; fileName: string }) => {
-    const why = await confirmReasonText(`Remove "${p.fileName}"? The file is permanently deleted from storage.`);
+    const why = await confirmReason({
+      title: `Remove "${p.fileName}"?`,
+      body: "The file is permanently deleted from storage.",
+      action: "Remove", tone: "bad",
+    });
     if (!why) return;
     act(() => deleteAttachment(p.id, why));
   };
@@ -131,8 +135,11 @@ export default function PhotosPanel({
   const removePicked = async () => {
     const n = picked.size;
     if (!n) return;
-    const why = await confirmReasonText(
-      `Remove ${n} photo${n === 1 ? "" : "s"}? The file${n === 1 ? " is" : "s are"} permanently deleted from storage.`);
+    const why = await confirmReason({
+      title: `Remove ${n} photo${n === 1 ? "" : "s"}?`,
+      body: `The file${n === 1 ? " is" : "s are"} permanently deleted from storage.`,
+      action: `Remove ${n} photo${n === 1 ? "" : "s"}`, tone: "bad",
+    });
     if (!why) return;
     const ids = [...picked];
     startTransition(async () => {

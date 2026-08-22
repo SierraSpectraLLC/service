@@ -5,7 +5,7 @@ import { deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder }
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
 
 /**
@@ -95,9 +95,11 @@ export default function WorkOrderControls({
                 existed - and it releases its work rather than taking it. */}
             <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
               onClick={async () => {
-                const why = await confirmReasonText(
-                  `Delete ${number}? Any tasks, hours, parts and files on it stay on the record, unattached. Its comments go with it.`,
-                );
+                const why = await confirmReason({
+                  title: `Delete ${number}?`,
+                  body: "Any tasks, hours, parts and files on it stay on the record, unattached. Its comments go with it.",
+                  action: "Delete", tone: "bad",
+                });
                 if (!why) return;
                 setError("");
                 startTransition(async () => {

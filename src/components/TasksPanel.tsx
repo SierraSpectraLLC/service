@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { useEffect, useOptimistic, useRef, useState, useTransition } from "react";
 import { TASK_STATES, TASK_TONE } from "@/lib/stages";
 import type { WorkTarget } from "@/app/actions";
@@ -18,7 +18,6 @@ import { checklistProgress } from "@/lib/checklist";
 import MentionBox from "./MentionBox";
 import type { Candidate } from "@/lib/mentions";
 import Dialog from "@/components/ui/Dialog";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
@@ -493,10 +492,10 @@ export default function TasksPanel({
                 {(isStaff || t.origin === "checkout") && (
                   <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 12, fontWeight: 700 }}
                     onClick={async () => {
-                      const msg = t.origin === "checkout"
-                        ? `Delete checkout item "${t.title}"? Use this for items that don't apply here.`
-                        : `Delete task "${t.title}"? Its checklist and notes go with it.`;
-                      const reason = await confirmReasonText(msg);
+                      const copy = t.origin === "checkout"
+                        ? { title: `Delete checkout item "${t.title}"?`, body: "Use this for items that don't apply here." }
+                        : { title: `Delete task "${t.title}"?`, body: "Its checklist and notes go with it." };
+                      const reason = await confirmReason({ ...copy, action: "Delete", tone: "bad" });
                       if (!reason) return;
                       startTransition(async () => { await deleteTask(t.id, reason); setExpanded(null); });
                     }}>Delete</button>

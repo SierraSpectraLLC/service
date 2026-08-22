@@ -1,6 +1,6 @@
 "use client";
 
-import { confirmReasonText, inputDialog } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason, inputDialog } from "@/components/ui/ConfirmDialog";
 import { useOptimistic, useState, useTransition } from "react";
 import StagePanel, { type StageDefLite } from "./StagePanel";
 import GasPanel, { type GasRow } from "./GasPanel";
@@ -12,7 +12,6 @@ import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPane
 import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 import { STANDING_TONE } from "@/lib/gxp";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 
@@ -201,7 +200,11 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                       label: `Type ${instrument.externalId} to confirm`,
                     });
                     if (typed !== instrument.externalId) return;
-                    const reason = await confirmReasonText(`Deleting ${instrument.externalId}.`);
+                    const reason = await confirmReason({
+                      title: `Why is ${instrument.externalId} being deleted?`,
+                      body: "Recorded with the deletion in the audit trail.",
+                      action: "Delete system", tone: "bad",
+                    });
                     if (!reason) return;
                     startTransition(async () => { await deleteInstrument(instrument.id, reason); });
                   }}

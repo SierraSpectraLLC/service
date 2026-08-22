@@ -3,7 +3,21 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { setBlockedReason, toggleStage } from "@/app/actions";
 import { BLOCKED_STAGE } from "@/lib/stages";
-import { promptBlockReason } from "@/lib/reason";
+import { inputDialog } from "@/components/ui/ConfirmDialog";
+
+/**
+ * Why a system is being blocked, asked at the moment of blocking.
+ *
+ * Not a destructive confirm needing an audit alibi: it is the fact that makes
+ * a blocked system actionable, and it is asked for that way. Pre-filled when
+ * re-wording an existing reason. The server demands it too - see
+ * actions.toggleStage.
+ */
+const askBlockReason = (action: string, existing = "") => inputDialog({
+  title: "Why is this system blocked?",
+  body: 'What is it waiting on, and what would clear it? Shown on the system and in the daily digest until it is unblocked - e.g. "waiting on LabZen to approve the quote for the HED supply".',
+  action, label: "Reason", initial: existing,
+});
 
 export type StageDefLite = { name: string; bg: string; fg: string };
 
@@ -23,10 +37,10 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
   // Blocking is the one stage change that asks a question first: a blocked
   // system with no recorded reason is one nobody else can pick up. Asked before
   // the optimistic flip, so cancelling leaves the pill exactly as it was.
-  const toggle = (s: string) => {
+  const toggle = async (s: string) => {
     let reason = "";
     if (s === BLOCKED_STAGE && !optimisticStages.includes(s)) {
-      const answer = promptBlockReason();
+      const answer = await askBlockReason("Block system");
       if (answer === null) return;
       reason = answer;
     }
@@ -38,8 +52,8 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
     });
   };
 
-  const editReason = () => {
-    const answer = promptBlockReason(blockedReason);
+  const editReason = async () => {
+    const answer = await askBlockReason("Save reason", blockedReason);
     if (answer === null) return;
     startTransition(async () => {
       setError("");

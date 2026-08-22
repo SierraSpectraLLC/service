@@ -1,6 +1,6 @@
 "use client";
 
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
@@ -535,7 +535,11 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <button
                 className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12, flexShrink: 0 }}
                 onClick={async () => {
-                  const reason = await confirmReasonText(`Remove "${a.fileName}"? The file is permanently deleted from storage.`);
+                  const reason = await confirmReason({
+                    title: `Remove "${a.fileName}"?`,
+                    body: "The file is permanently deleted from storage.",
+                    action: "Remove", tone: "bad",
+                  });
                   if (!reason) return;
                   startTransition(async () => { await deleteAttachment(a.id, reason); });
                 }}

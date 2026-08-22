@@ -1,6 +1,6 @@
 "use client";
 
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { useState, useTransition } from "react";
 import { postDiscussion, deleteDiscussionPost, updateDiscussionPost } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
@@ -100,7 +100,11 @@ export default function DiscussionPanel({
                       onClick={() => setEdits((e) => ({ ...e, [p.id]: p.body }))}>edit</button>
                     <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)", padding: "0 4px" }} disabled={pending}
                       onClick={async () => {
-                        const reason = await confirmReasonText("Delete this post? It stays in the audit history.");
+                        const reason = await confirmReason({
+                          title: "Delete this post?",
+                          body: "It stays in the audit history.",
+                          action: "Delete", tone: "bad",
+                        });
                         if (!reason) return;
                         startTransition(async () => { await deleteDiscussionPost(p.id, reason); });
                       }}>×</button>

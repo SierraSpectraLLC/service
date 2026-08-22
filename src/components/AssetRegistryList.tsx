@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { removeAssets } from "@/app/actions";
 import { duplicateIds } from "@/lib/assetDupe";
 import Dot from "@/components/ui/Dot";
@@ -90,9 +90,11 @@ export default function AssetRegistryList({ rows, canSelect }: {
   const remove = async () => {
     const ids = [...picked];
     if (!ids.length) return;
-    const why = await confirmReasonText(
-      `Delete ${ids.length} asset record${ids.length === 1 ? "" : "s"}? Their history goes with them. This can't be undone.`,
-    );
+    const why = await confirmReason({
+      title: `Delete ${ids.length} asset record${ids.length === 1 ? "" : "s"}?`,
+      body: "Their history goes with them. This can't be undone.",
+      action: `Delete ${ids.length} record${ids.length === 1 ? "" : "s"}`, tone: "bad",
+    });
     if (!why) return;
     setError("");
     startTransition(async () => {

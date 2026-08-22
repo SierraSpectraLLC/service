@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import PartNumberField from "./PartNumberField";
 import {
   addPoLine, cancelPurchaseOrder, deletePoLine, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
@@ -9,7 +9,6 @@ import {
 import Dialog from "@/components/ui/Dialog";
 import { formatCents, centsToInput } from "@/lib/money";
 import { PO_LABEL, PO_TONE, lineOutstanding, lineTotalCents, poEditable, poReceivable, poTotals } from "@/lib/po";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 
 export type PoRow = {
@@ -246,7 +245,11 @@ export default function PoPanel({ po, lines, canManage, makers }: {
         {canManage && po.status !== "cancelled" && po.status !== "received" && (
           <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12, marginTop: 10, fontWeight: 700 }} disabled={pending}
             onClick={async () => {
-              const why = await confirmReasonText(`Cancel ${po.number}? Anything already received stays on the shelf.`);
+              const why = await confirmReason({
+                title: `Cancel ${po.number}?`,
+                body: "Anything already received stays on the shelf.",
+                action: "Cancel order", cancel: "Keep it", tone: "bad",
+              });
               if (!why) return;
               run(() => cancelPurchaseOrder(po.id, why));
             }}>Cancel this order</button>

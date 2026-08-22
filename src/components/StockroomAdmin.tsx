@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { archiveStockroom, removeStockroomShare, setStockroomShare, updateStockroom } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
@@ -51,7 +51,11 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
               <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
               <button className="btn link danger"
                 onClick={async () => {
-                  const why = await confirmReasonText(`Archive "${room.name}"? Its ledger stays - the room just stops appearing.`);
+                  const why = await confirmReason({
+                    title: `Archive "${room.name}"?`,
+                    body: "Its ledger stays - the room just stops appearing.",
+                    action: "Archive", tone: "bad",
+                  });
                   if (!why) return;
                   startTransition(async () => {
                     const res = await archiveStockroom(room.id, why);

@@ -8,12 +8,11 @@ import {
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale,
 } from "@/app/actions";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
 import SaveBar from "@/components/ui/SaveBar";
 import { isValidHex, readableTextOn } from "@/lib/theme";
-import { confirmReasonText } from "@/components/ui/ConfirmDialog";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
 import StorageMeter from "@/components/StorageMeter";
 import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
@@ -541,9 +540,11 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             </span>
             <button className="btn sm" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
               onClick={async () => {
-                const reason = await confirmReasonText(
-                  `Remove ${org.name}?${org.isOperator ? " It operates this instance - reports and packets lose their operator name." : ""} Their ${people.length} sign-in entr${people.length === 1 ? "y" : "ies"} stop working and they lose access to ${org.systems} system${org.systems === 1 ? "" : "s"}.`
-                );
+                const reason = await confirmReason({
+                  title: `Remove ${org.name}?`,
+                  body: `${org.isOperator ? "It operates this instance - reports and packets lose their operator name. " : ""}Their ${people.length} sign-in entr${people.length === 1 ? "y" : "ies"} stop working and they lose access to ${org.systems} system${org.systems === 1 ? "" : "s"}.`,
+                  action: "Remove", tone: "bad",
+                });
                 if (!reason) return;
                 setDangerError("");
                 startTransition(async () => {
