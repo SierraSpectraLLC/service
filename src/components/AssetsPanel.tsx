@@ -174,7 +174,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           </div>
         </Dialog>
       )}
-      {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
 
       {assets.length === 0 && !open && (
         <div className="mut" style={{ fontSize: 13 }}>No assets listed yet.</div>

@@ -55,7 +55,7 @@ export default function ParityList({ diffs, showHistory = false }: { diffs: Diff
     <>
       {!showHistory && open.length === 0 && (
         <div className="card" style={{ padding: 14 }}>
-          <span style={{ fontSize: 13, color: "#2E6B2E", fontWeight: 700 }}>✓ No open mismatches.</span>
+          <span style={{ fontSize: 13, color: "var(--t-good-fg)", fontWeight: 700 }}>✓ No open mismatches.</span>
         </div>
       )}
 
@@ -74,8 +74,8 @@ export default function ParityList({ diffs, showHistory = false }: { diffs: Diff
               <div style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: "3px 8px", fontSize: 13, marginBottom: 8 }}>
                 <span className="eyebrow" style={{ alignSelf: "start", paddingTop: 2 }}>Sheet</span>
                 <span>{d.sheetValue || <span className="mut">(blank)</span>}</span>
-                <span className="eyebrow" style={{ alignSelf: "start", paddingTop: 2, color: "#1D6396" }}>Ours</span>
-                <span style={{ color: "#1D6396" }}>{d.dbValue || <span className="mut">(blank)</span>}</span>
+                <span className="eyebrow" style={{ alignSelf: "start", paddingTop: 2, color: "var(--t-info-fg)" }}>Ours</span>
+                <span style={{ color: "var(--t-info-fg)" }}>{d.dbValue || <span className="mut">(blank)</span>}</span>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn sm primary" disabled={pending} onClick={() => resolve(d.id, "kept_ours")}>Keep ours</button>
@@ -89,7 +89,7 @@ export default function ParityList({ diffs, showHistory = false }: { diffs: Diff
                   {d.field === "Row" && d.sheetValue === "(missing from sheet)" ? "Just acknowledge" : "Accept sheet"}
                 </button>
               </div>
-              {errors[d.id] && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{errors[d.id]}</div>}
+              {errors[d.id] && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{errors[d.id]}</div>}
             </div>
           ))}
         </div>

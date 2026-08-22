@@ -155,7 +155,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             {closed.map(row)}
           </details>
         )}
-        {error && !sheet && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+        {error && !sheet && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
       </div>
 
       {sheet && (

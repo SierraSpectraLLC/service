@@ -103,7 +103,7 @@ export default function WelcomeForm({ email, suggested, kinds, brandName }: {
         disabled={pending || !name.trim()}>
         {pending ? "Saving..." : "Start working"}
       </button>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </form>
   );
 }

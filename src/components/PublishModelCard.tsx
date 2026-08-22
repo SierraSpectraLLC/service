@@ -81,7 +81,7 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
       </div>
 
       {blockers.length > 0 && !published && (
-        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginBottom: 8 }}>
+        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8 }}>
           <b>Before this can go public:</b>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
             {blockers.map((b) => <li key={b}>{b}</li>)}
@@ -106,8 +106,8 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
           </button>
         )}
       </div>
-      {note && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {note && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

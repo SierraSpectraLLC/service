@@ -259,7 +259,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               </div>
               {canEdit && (
                 <button className="btn link" aria-label={`Remove ${r.title || "reference"}`} disabled={pending}
-                  style={{ color: "#A32D2D", fontSize: 13 }}
+                  style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove this from ${g}?`,

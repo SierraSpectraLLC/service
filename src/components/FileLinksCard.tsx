@@ -120,7 +120,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
                     void navigator.clipboard?.writeText(urlOf(l));
                     setCopiedId(l.id); setTimeout(() => setCopiedId(null), 1500);
                   }}>{copiedId === l.id ? "copied ✓" : "copy link"}</button>
-                <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+                <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: "Kill this link?",
@@ -144,7 +144,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
           selecting files and pressing Share makes one they can read.
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 4 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
     </div>
   );
 }

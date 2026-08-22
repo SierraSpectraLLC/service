@@ -52,7 +52,7 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
       <div className="card-title" style={{ marginBottom: 8 }}>Release sign-off</div>
 
       {!ready && (
-        <div style={{ fontSize: 12, background: "#FAF0DC", color: "#8A5410", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, background: "#FAF0DC", color: "var(--t-warn-fg)", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
           <b>Not ready to sign.</b>
           <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
             {blockers.map((b, i) => <li key={i}>{b.text}</li>)}
@@ -75,12 +75,12 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
             {s.snapshot.requiredTests.length > 0 && `, ${s.snapshot.requiredTests.length} mandatory test${s.snapshot.requiredTests.length === 1 ? "" : "s"} evidenced`}
           </div>
           {s.stale && (
-            <div style={{ fontSize: 11, color: "#8A5410", marginTop: 3 }}>
+            <div style={{ fontSize: 11, color: "var(--t-warn-fg)", marginTop: 3 }}>
               The record has changed since this was signed - the signature stands for the packet as it was that day.
             </div>
           )}
           {isOwner && (
-            <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: 0, marginTop: 3 }} disabled={pending}
+            <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)", padding: 0, marginTop: 3 }} disabled={pending}
               onClick={async () => {
                 const why = await confirmReasonText(`Withdraw ${s.signerName}'s sign-off? The withdrawal is kept in the record.`);
                 if (!why) return;
@@ -145,7 +145,7 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
       {canSign && alreadySigned && (
         <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>You have signed this.</div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

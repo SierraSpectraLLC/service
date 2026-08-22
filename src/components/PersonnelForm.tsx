@@ -161,13 +161,13 @@ export default function PersonnelForm(props: {
           </select>
           <button className="btn sm accent" onClick={submitOrg} disabled={pending || !orgDraft.name.trim()}>Add</button>
         </div>
-        {orgError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{orgError}</div>}
+        {orgError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{orgError}</div>}
       </Panel>
 
       {/* A sign-in with no organization has no scope, so it can't sign in at all. */}
       {props.orphans.length > 0 && (
         <div className="card" style={{ borderColor: "#EAD9B0", background: "#FDF8EE" }}>
-          <div className="card-title" style={{ color: "#8A5410" }}>Sign-ins with no organization</div>
+          <div className="card-title" style={{ color: "var(--t-warn-fg)" }}>Sign-ins with no organization</div>
           <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
             These cannot sign in until they name one - a login with no organization has nothing to see.
           </div>
@@ -180,7 +180,7 @@ export default function PersonnelForm(props: {
                 <option value="">choose an organization</option>
                 {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
-              <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
+              <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
                 onClick={async () => {
                   if (!(await confirmDialog({ title: `Remove ${r.entry}?`, action: `Remove ${r.entry}`, tone: "bad" }))) return;
                   setError("");
@@ -191,7 +191,7 @@ export default function PersonnelForm(props: {
                 }}>remove</button>
             </div>
           ))}
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
         </div>
       )}
 

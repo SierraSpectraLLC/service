@@ -370,7 +370,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               </div>
               {asset.asFound && (
                 <div style={{ fontSize: 13, background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
-                  <span className="eyebrow" style={{ color: "#8A5410" }}>As found</span>
+                  <span className="eyebrow" style={{ color: "var(--t-warn-fg)" }}>As found</span>
                   <div style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{asset.asFound}</div>
                 </div>
               )}

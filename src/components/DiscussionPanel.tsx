@@ -98,7 +98,7 @@ export default function DiscussionPanel({
                   <>
                     {" "}<button className="btn link" style={{ fontSize: 11 }}
                       onClick={() => setEdits((e) => ({ ...e, [p.id]: p.body }))}>edit</button>
-                    <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }} disabled={pending}
+                    <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)", padding: "0 4px" }} disabled={pending}
                       onClick={async () => {
                         const reason = await confirmReasonText("Delete this post? It stays in the audit history.");
                         if (!reason) return;

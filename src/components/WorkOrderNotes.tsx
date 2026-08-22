@@ -82,7 +82,7 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
                       onClick={() => { setError(""); setEditing({ id: n.id, draft: n.text }); }}>edit</button>
                   )}
                   {removable && (
-                    <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+                    <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
                       onClick={async () => {
                         if (!(await confirmDialog({
                           title: mine ? "Delete your comment?" : `Delete ${n.author}'s comment?`,
@@ -129,7 +129,7 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
           </button>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

@@ -93,7 +93,7 @@ export default function WorkOrderControls({
             {/* For the job opened by mistake. Cancelling is for one that was
                 real and called off; this is for one that never should have
                 existed - and it releases its work rather than taking it. */}
-            <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+            <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
               onClick={async () => {
                 const why = await confirmReasonText(
                   `Delete ${number}? Any tasks, hours, parts and files on it stay on the record, unattached. Its comments go with it.`,
@@ -170,7 +170,7 @@ export default function WorkOrderControls({
         </Dialog>
       )}
 
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

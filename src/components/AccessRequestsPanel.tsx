@@ -71,7 +71,7 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
                       const res = await approveAccessRequest(r.id, "edit");
                       if (res?.error) setError(res.error);
                     })}>{isClaim ? "Access only (edit)" : "Allow editing"}</button>
-                  <button className="btn link" style={{ color: "#A32D2D" }} disabled={pending}
+                  <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
                     onClick={() => startTransition(async () => {
                       const res = await denyAccessRequest(r.id);
                       if (res?.error) setError(res.error);
@@ -82,7 +82,7 @@ export default function AccessRequestsPanel({ requests, isOperator }: {
           </div>
         );
       })}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
     </>
   );
 }

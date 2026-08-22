@@ -106,7 +106,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
             <option value="view">{LEVEL.view.label}</option>
             <option value="issue">{LEVEL.issue.label}</option>
           </select>
-          <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
+          <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
             onClick={() => startTransition(async () => {
               const res = await removeStockroomShare(room.id, s.orgId);
               if (res?.error) setError(res.error);
@@ -141,7 +141,7 @@ export default function StockroomAdmin({ room, shares, orgOptions, ownerName }: 
         </button>
       ) : null}
 
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

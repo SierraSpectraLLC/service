@@ -214,7 +214,7 @@ export default function PhotosPanel({
             onClick={() => setPicked(new Set(ordered.map((p) => p.id)))}>all</button>
           <button className="btn link" style={{ fontSize: 12 }} disabled={pending || picked.size === 0}
             onClick={() => setPicked(new Set())}>none</button>
-          <button className="btn sm" style={{ marginLeft: "auto", borderColor: "#E4B4B4", color: "#A32D2D" }}
+          <button className="btn sm" style={{ marginLeft: "auto", borderColor: "#E4B4B4", color: "var(--t-bad-fg)" }}
             disabled={pending || picked.size === 0} onClick={removePicked}>
             Remove {picked.size || ""}
           </button>
@@ -223,7 +223,7 @@ export default function PhotosPanel({
 
       {busy && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>{busy}</div>}
       {storageFull && canEdit && (
-        <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 6 }}>
+        <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>
           Storage is full - remove a file or raise the limit.
         </div>
       )}
@@ -289,7 +289,7 @@ export default function PhotosPanel({
                           Catalog
                         </button>
                       )}
-                      <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+                      <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
                         aria-label={`Remove ${p.fileName}`} onClick={() => remove(p)}>×</button>
                     </div>
                   )}
@@ -300,7 +300,7 @@ export default function PhotosPanel({
         </div>
       )}
 
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
       {/* File a photo to the catalog's reference shelf. The note is the point:
           a picture with nothing written on it is a picture nobody can act on. */}

@@ -80,7 +80,7 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
       </div>
 
       {opened.error && (
-        <div className="card" style={{ fontSize: 13, color: "#A32D2D" }}>{opened.error}</div>
+        <div className="card" style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>{opened.error}</div>
       )}
 
       {opened.url && (

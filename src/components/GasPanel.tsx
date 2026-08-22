@@ -77,14 +77,14 @@ export default function GasPanel({ target, gases, knownGases, canEdit, isStaff }
               g.note && <span className="mut" style={{ fontSize: 12 }}>{g.note}</span>
             )}
             {isStaff && (
-              <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }}
+              <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }}
                 onClick={() => startTransition(() => removeInstrumentGas(g.id))}>remove</button>
             )}
           </div>
         ))}
         {gases.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No gas requirements recorded.</div>}
       </div>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
       {canEdit && (
         <div style={{ marginTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           {adding ? (

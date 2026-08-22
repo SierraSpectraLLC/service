@@ -136,7 +136,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                 <span>{x.signerName}{x.signerTitle ? `, ${x.signerTitle}` : ""}</span>
                 <span className="mut">{fmtWhen(x.createdAt)}</span>
                 {x.note && <span className="mut">- {x.note}</span>}
-                {x.revokedAt && <span style={{ color: "#A32D2D", textDecoration: "none" }}>withdrawn: {x.revokeReason}</span>}
+                {x.revokedAt && <span style={{ color: "var(--t-bad-fg)", textDecoration: "none" }}>withdrawn: {x.revokeReason}</span>}
                 {isStaff && !x.revokedAt && d.state !== "Superseded" && (
                   <button className="btn link" style={{ textDecoration: "none" }} onClick={async () => {
                     const reason = await confirmReasonText(`Withdraw the ${x.role} signature of ${x.signerName}?`);
@@ -182,7 +182,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
                     <button className="btn sm" onClick={() => openAdd("", d)}
                       title="File a revision - this version becomes Superseded and stays on the record">New version</button>
                     {canDelete(d, active.length) && (
-                      <button className="btn link" style={{ color: "#A32D2D" }} onClick={async () => {
+                      <button className="btn link" style={{ color: "var(--t-bad-fg)" }} onClick={async () => {
                         const reason = await confirmReasonText(`Remove draft "${d.title}"? Only unsigned drafts can be removed.`);
                         if (!reason) return;
                         startTransition(async () => {
@@ -298,7 +298,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
         </div>
       ))}
 
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

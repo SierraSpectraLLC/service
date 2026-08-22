@@ -386,7 +386,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                   {ATTACH_KINDS.map((k) => <option key={k}>{k}</option>)}
                 </select>
                 {!uploading && (
-                  <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }}
+                  <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }}
                     onClick={() => setStaged((x) => x.filter((y) => y.key !== s.key))}>remove</button>
                 )}
               </div>
@@ -410,8 +410,8 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                       : `${s.progress}%${s.attempt > 1 ? ` · retry ${s.attempt}` : ""}`}
                 </div>
               )}
-              {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "#2E6B2E" }}>Uploaded ✓</div>}
-              {s.state === "failed" && <div style={{ fontSize: 11, marginTop: 3, color: "#A32D2D" }}>Failed: {s.error}</div>}
+              {s.state === "done" && <div style={{ fontSize: 11, marginTop: 3, color: "var(--t-good-fg)" }}>Uploaded ✓</div>}
+              {s.state === "failed" && <div style={{ fontSize: 11, marginTop: 3, color: "var(--t-bad-fg)" }}>Failed: {s.error}</div>}
             </div>
           ))}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -533,7 +533,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
             )}
             {isStaff && (
               <button
-                className="btn link" style={{ color: "#A32D2D", fontSize: 12, flexShrink: 0 }}
+                className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12, flexShrink: 0 }}
                 onClick={async () => {
                   const reason = await confirmReasonText(`Remove "${a.fileName}"? The file is permanently deleted from storage.`);
                   if (!reason) return;

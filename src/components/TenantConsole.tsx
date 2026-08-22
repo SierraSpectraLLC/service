@@ -68,11 +68,11 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
               {pending ? "Opening..." : "Open"}
             </button>
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
         </div>
       )}
       {unassigned.length > 0 && (
-        <div style={{ fontSize: 12.5, color: "#8A5410", background: "#FAF0DC", borderRadius: 8, padding: "7px 10px", margin: "8px 0" }}>
+        <div style={{ fontSize: 12.5, color: "var(--t-warn-fg)", background: "#FAF0DC", borderRadius: 8, padding: "7px 10px", margin: "8px 0" }}>
           No company set for {unassigned.join(", ")} — they see nothing until one is.
         </div>
       )}

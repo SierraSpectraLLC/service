@@ -47,7 +47,7 @@ export function RequestAccessCard({ serial, assetDesc, requested, canClaim }: {
               ? "How you came to own it - e.g. \"Purchased from Acme Instruments, PO 4471, March 2024.\" Ownership is granted by review, not by knowing the serial."
               : "Who you are and why you're asking, e.g. \"We service this instrument for Acme Labs.\""}
             style={{ resize: "vertical", fontSize: 13 }} />
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 4 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 4 }}>{error}</div>}
           <button className="btn sm accent" style={{ marginTop: 6 }} disabled={pending}
             onClick={() => {
               setError("");

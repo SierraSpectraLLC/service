@@ -167,9 +167,9 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
       </div>
 
       {flag && (
-        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginBottom: 8, display: "flex", gap: 8 }}>
+        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8, display: "flex", gap: 8 }}>
           <span style={{ flex: 1 }}><b>Recorded.</b> {flag}</span>
-          <button className="btn link" style={{ fontSize: 11, color: "#8A5410" }} onClick={() => setFlag("")}>dismiss</button>
+          <button className="btn link" style={{ fontSize: 11, color: "var(--t-warn-fg)" }} onClick={() => setFlag("")}>dismiss</button>
         </div>
       )}
 
@@ -375,7 +375,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                 <input value={p.k} onChange={(e) => setPair(i, { k: e.target.value })} placeholder="Length" style={{ flex: "0 1 120px", fontSize: 13 }} />
                 <input value={p.v} onChange={(e) => setPair(i, { v: e.target.value })} placeholder="30 m" style={{ flex: 1, fontSize: 13 }} />
-                <button className="btn link" style={{ color: "#A32D2D", padding: "0 4px" }}
+                <button className="btn link" style={{ color: "var(--t-bad-fg)", padding: "0 4px" }}
                   onClick={() => setSpecPairs((s) => s.filter((_, idx) => idx !== i))}>×</button>
               </div>
             ))}
@@ -431,10 +431,10 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                 <div style={{ fontSize: 12, marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   {p.tracking && (link
                     ? <a className="mono" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{p.carrier} {p.tracking} ↗</a>
-                    : <span className="mono" style={{ color: "#1D6396" }}>{p.carrier ? p.carrier + " " : ""}{p.tracking}</span>)}
+                    : <span className="mono" style={{ color: "var(--t-info-fg)" }}>{p.carrier ? p.carrier + " " : ""}{p.tracking}</span>)}
                   {p.orderedAt && <span className="mut">Ordered {p.orderedAt}</span>}
                   {p.eta && <span className="mut">ETA {p.eta}</span>}
-                  {p.receivedAt && <span style={{ color: "#2E6B2E" }}>Received {dayText(p.receivedAt)}</span>}
+                  {p.receivedAt && <span style={{ color: "var(--t-good-fg)" }}>Received {dayText(p.receivedAt)}</span>}
                   {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {dayText(p.installedAt)}</span>}
                   {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {dayText(p.removedAt)}</span>}
                 </div>
@@ -504,7 +504,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                       <button className="btn sm accent" disabled={pending} onClick={() => saveVisitName()}>Save</button>
                       <button className="btn sm" disabled={pending} onClick={() => setNaming(null)}>Cancel</button>
                       {v.named && (
-                        <button className="btn link" style={{ fontSize: 12, color: "#A32D2D" }} disabled={pending}
+                        <button className="btn link" style={{ fontSize: 12, color: "var(--t-bad-fg)" }} disabled={pending}
                           onClick={() => { setNaming({ day: v.day, title: "" }); saveVisitName(v.day, ""); }}>
                           clear
                         </button>

@@ -92,7 +92,7 @@ export default async function LoginPage({ searchParams }: {
     <PublicShell brandName={brand.name} tagline={brand.tagline} title="Sign in" width={420}>
       <div className="card">
         {locked ? (
-          <p style={{ fontSize: 13, color: "#A32D2D" }}>
+          <p style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>
             Too many sign-in attempts for that address. Try again in {locked} minute{locked === "1" ? "" : "s"}.
           </p>
         ) : (
@@ -102,7 +102,7 @@ export default async function LoginPage({ searchParams }: {
               needed on this machine. Access is limited to approved accounts.
             </p>
             {error && (
-              <p style={{ fontSize: 13, color: "#A32D2D" }}>
+              <p style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>
                 That code didn&apos;t work. It may have expired or already been used - ask for a new one.
               </p>
             )}

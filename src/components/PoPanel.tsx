@@ -76,7 +76,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
         </div>
         {po.note && <div style={{ fontSize: 12, marginBottom: 8 }}>{po.note}</div>}
         {po.status === "cancelled" && po.cancelReason && (
-          <div style={{ fontSize: 12, color: "#8A5410", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
             Cancelled: {po.cancelReason}. Anything already received stayed on the shelf.
           </div>
         )}
@@ -118,7 +118,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                 <span className="mut" style={{ fontSize: 12 }}>× {l.qtyOrdered}</span>
                 {l.unitCents !== null
                   ? <span className="mut" style={{ fontSize: 12 }}>{formatCents(l.unitCents)} ea · {formatCents(total!)}</span>
-                  : <span style={{ fontSize: 12, color: "#8A5410" }}>unpriced</span>}
+                  : <span style={{ fontSize: 12, color: "var(--t-warn-fg)" }}>unpriced</span>}
                 {l.qtyReceived > 0 && (
                   <span className={`pill ${out === 0 ? "good" : "warn"}`}>{l.qtyReceived} received{out > 0 ? `, ${out} to come` : ""}</span>
                 )}
@@ -130,7 +130,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                     </button>
                   )}
                   {editable && (
-                    <button className="btn link" style={{ color: "#A32D2D", fontSize: 12 }} disabled={pending}
+                    <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12 }} disabled={pending}
                       onClick={() => run(() => deletePoLine(l.id))}>remove</button>
                   )}
                 </span>
@@ -244,14 +244,14 @@ export default function PoPanel({ po, lines, canManage, makers }: {
         )}
 
         {canManage && po.status !== "cancelled" && po.status !== "received" && (
-          <button className="btn link" style={{ color: "#A32D2D", fontSize: 12, marginTop: 10, fontWeight: 700 }} disabled={pending}
+          <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12, marginTop: 10, fontWeight: 700 }} disabled={pending}
             onClick={async () => {
               const why = await confirmReasonText(`Cancel ${po.number}? Anything already received stays on the shelf.`);
               if (!why) return;
               run(() => cancelPurchaseOrder(po.id, why));
             }}>Cancel this order</button>
         )}
-        {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+        {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
       </div>
     </>
   );

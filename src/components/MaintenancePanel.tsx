@@ -192,7 +192,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                   const res = await setPmPaused(s.id, !s.paused);
                   if (res?.error) setError(res.error);
                 })}>{s.paused ? "resume" : "pause"}</button>
-              <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+              <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
                 onClick={async () => {
                   const reason = await confirmReasonText(`Stop scheduling "${s.title}"? Tasks already created stay.`);
                   if (!reason) return;
@@ -516,7 +516,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         <div className="mut" style={{ fontSize: 12 }}>Nothing scheduled yet.</div>
       )}
       </>)}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }

@@ -113,7 +113,7 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
       )}
 
       {busy && <div className="mut" style={{ fontSize: 12, marginBottom: 6 }}>Uploading {busy}</div>}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
 
       <input ref={input} type="file" accept="image/*" style={{ display: "none" }}
         onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ""; }} />
@@ -148,7 +148,7 @@ export default function CatalogPhotosCard({ entries }: { entries: CatalogEntry[]
                         onClick={() => pick(e.id)}>Replace</button>
                       <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                         onClick={() => setFraming(e)}>Frame</button>
-                      <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
+                      <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending}
                         aria-label={`Remove the catalog photo for ${label(e)}`}
                         onClick={async () => {
                           if (!(await confirmDialog({

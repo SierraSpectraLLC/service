@@ -164,7 +164,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
                   <option value="never">never ask</option>
                 </select>
 
-                <button className="btn link" style={{ color: "#A32D2D", fontSize: 11, marginLeft: "auto" }} disabled={pending}
+                <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11, marginLeft: "auto" }} disabled={pending}
                   onClick={async () => {
                     const why = await confirmReasonText(
                       `Remove "${deviceLabel(d.nickname, d.name)}" from remote support? This forgets the machine here - the agent keeps `
@@ -182,7 +182,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
             )}
           </div>
         ))}
-        {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 10 }}>{error}</div>}
+        {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 10 }}>{error}</div>}
       </Panel>
       <Legend items={[{ tone: "good", label: "online" }, { tone: "faint", label: "offline" }]} />
     </>

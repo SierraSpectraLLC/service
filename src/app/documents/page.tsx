@@ -248,7 +248,7 @@ export default async function DocumentsPage(
       {/* Half-configured says so rather than vanishing. Staff only - the message
           names environment variables. */}
       {canEdit && isOwnStore && !cloud.configured && cloud.setupProblem && (
-        <div className="card" style={{ fontSize: 12, color: "#8A5410", background: "#FAF0DC",
+        <div className="card" style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC",
           border: "1px solid #F0C9A0" }}>
           {cloud.setupProblem}
         </div>

@@ -81,7 +81,7 @@ function TaskStateSelect({ task }: { task: Task }) {
       })} style={{ width: "auto", fontWeight: 700, fontSize: 12 }}>
         {TASK_STATES.map((s) => <option key={s}>{s}</option>)}
       </select>
-      {refused && <span style={{ fontSize: 11, color: "#A32D2D", flexBasis: "100%" }}>{refused}</span>}
+      {refused && <span style={{ fontSize: 11, color: "var(--t-bad-fg)", flexBasis: "100%" }}>{refused}</span>}
     </>
   );
 }
@@ -187,7 +187,7 @@ function TestResultBlock({ task, canEdit }: { task: Task; canEdit: boolean }) {
       )}
 
       {!canEdit && !r && <div className="mut" style={{ fontSize: 12 }}>Not recorded yet.</div>}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );
 }
@@ -304,7 +304,7 @@ export default function TasksPanel({
           {canEdit && !isEditing && (
             <>
               {" "}<button className="btn link" style={{ fontSize: 11 }} onClick={() => setInput(key, m.text)}>edit</button>
-              <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }}
+              <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)", padding: "0 4px" }}
                 onClick={async () => {
                   if (!(await confirmDialog({ title: "Delete this note?", action: "Delete note", tone: "bad" }))) return;
                   startTransition(async () => {
@@ -470,7 +470,7 @@ export default function TasksPanel({
                       {jobs.map((j) => <option key={j.id} value={j.id}>{j.number}</option>)}
                     </select>
                     {jobNote?.id === t.id && (
-                      <span style={{ fontSize: 11, color: "#A32D2D" }}>{jobNote.text}</span>
+                      <span style={{ fontSize: 11, color: "var(--t-bad-fg)" }}>{jobNote.text}</span>
                     )}
                   </>
                 )}
@@ -491,7 +491,7 @@ export default function TasksPanel({
                   style={{ width: "auto", fontSize: 12, padding: "3px 6px" }} />
                 <button className="btn link" onClick={() => { setEditDraft({ title: t.title, body: t.body }); setEditing(t.id); }}>edit</button>
                 {(isStaff || t.origin === "checkout") && (
-                  <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
+                  <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 12, fontWeight: 700 }}
                     onClick={async () => {
                       const msg = t.origin === "checkout"
                         ? `Delete checkout item "${t.title}"? Use this for items that don't apply here.`
@@ -514,7 +514,7 @@ export default function TasksPanel({
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 8 }}>
                       <span className="eyebrow" style={{ flex: 1 }}>{c.text.replace(/:$/, "")}</span>
                       {isStaff && (
-                        <button className="btn link" title="Remove heading" style={{ color: "#A32D2D", padding: "0 4px" }}
+                        <button className="btn link" title="Remove heading" style={{ color: "var(--t-bad-fg)", padding: "0 4px" }}
                           onClick={() => startTransition(() => deleteChecklistItem(c.id))}>×</button>
                       )}
                     </div>
@@ -527,7 +527,7 @@ export default function TasksPanel({
                       {tOpen ? "hide" : n > 0 ? "notes" : "+ note"}
                     </button>
                     {isStaff && (
-                      <button className="btn link" title="Remove item" style={{ color: "#A32D2D", padding: "0 4px" }}
+                      <button className="btn link" title="Remove item" style={{ color: "var(--t-bad-fg)", padding: "0 4px" }}
                         onClick={async () => {
                           if (n > 0 && !(await confirmDialog({
                             title: `Remove "${c.text}"?`,

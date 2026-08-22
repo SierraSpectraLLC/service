@@ -265,7 +265,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           { key: "job", label: "The job", node: (
       <div className="card">
         {entFlag && (
-          <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginTop: 10 }}>
+          <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginTop: 10 }}>
             {entFlag}
           </div>
         )}

@@ -271,7 +271,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                 <span className="pill neutral">agreements</span>
               ) : null}
               {(isOwner || !domain) && (
-                <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
+                <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove ${r.entry}?`,
@@ -304,8 +304,8 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             {pending ? "Inviting..." : "Invite"}
           </button>
         </div>
-        {sent && <div style={{ fontSize: 12, color: "#2E6B2E", marginTop: 6 }}>Invited {sent} - they got an email with a sign-in link.</div>}
-        {peopleError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{peopleError}</div>}
+        {sent && <div style={{ fontSize: 12, color: "var(--t-good-fg)", marginTop: 6 }}>Invited {sent} - they got an email with a sign-in link.</div>}
+        {peopleError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{peopleError}</div>}
       </Panel>
 
       <Panel title="Workspace appearance"
@@ -344,7 +344,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           </button>
           {logo && <button className="btn link" onClick={() => { setLogo(""); clearBar(); }}>remove logo</button>}
         </div>
-        {lookError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{lookError}</div>}
+        {lookError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{lookError}</div>}
       </Panel>
 
       {isOwner && showRecipients && (
@@ -445,7 +445,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {resaleOn ? "can list equipment for sale" : "not a reseller"}
             </span>
           </div>
-          {resaleMsg && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{resaleMsg}</div>}
+          {resaleMsg && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{resaleMsg}</div>}
         </Panel>
       )}
 
@@ -471,7 +471,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {remoteOn ? "their editors can connect" : "support only"}
             </span>
           </div>
-          {remoteMsg && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{remoteMsg}</div>}
+          {remoteMsg && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{remoteMsg}</div>}
         </Panel>
       )}
 
@@ -539,7 +539,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               {people.length} sign-in{people.length === 1 ? "" : "s"} stop working, access to {org.systems} system
               {org.systems === 1 ? "" : "s"} ends. The systems and their history are untouched.
             </span>
-            <button className="btn sm" style={{ marginLeft: "auto", color: "#A32D2D" }} disabled={pending}
+            <button className="btn sm" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
               onClick={async () => {
                 const reason = await confirmReasonText(
                   `Remove ${org.name}?${org.isOperator ? " It operates this instance - reports and packets lose their operator name." : ""} Their ${people.length} sign-in entr${people.length === 1 ? "y" : "ies"} stop working and they lose access to ${org.systems} system${org.systems === 1 ? "" : "s"}.`
@@ -554,7 +554,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                 });
               }}>remove</button>
           </div>
-          {dangerError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{dangerError}</div>}
+          {dangerError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{dangerError}</div>}
         </Panel>
       )}
 

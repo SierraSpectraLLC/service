@@ -85,7 +85,7 @@ export default function MakersCard({ makers }: { makers: MakerRow[] }) {
             <button className="btn link" style={{ fontSize: 11 }} disabled={pending} onClick={() => rename(m)}>rename</button>
             {m.id === null
               ? <button className="btn link" style={{ fontSize: 11 }} disabled={pending} title="Seen on records but not in the book yet" onClick={() => define(m)}>add to book</button>
-              : <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending} onClick={() => remove(m)}>remove</button>}
+              : <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending} onClick={() => remove(m)}>remove</button>}
           </span>
         </div>
       ))}
@@ -101,8 +101,8 @@ export default function MakersCard({ makers }: { makers: MakerRow[] }) {
           {splitNames(draft).length > 1 ? `Add ${splitNames(draft).length} names` : "Add"}
         </button>
       </div>
-      {note && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {note && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginTop: 8 }}>{note} ✓</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

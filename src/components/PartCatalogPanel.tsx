@@ -355,7 +355,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                       onChange={(e) => setAlias({ note: e.target.value })}
                       style={{ flex: "1 1 120px", fontSize: 12 }} />
                     <button className="btn link" aria-label={`Remove ${a.partNumber || "number"}`}
-                      style={{ color: "#A32D2D", fontSize: 13 }}
+                      style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
                       onClick={() => setDraft({ ...draft, aliases: draft.aliases.filter((_, i) => i !== idx) })}>×</button>
                   </div>
                 );
@@ -412,7 +412,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                               const res = await removePartPhoto(ph.id);
                               if (res?.error) setError(res.error); else router.refresh();
                             })}
-                            style={{ position: "absolute", top: 2, right: 2, background: "#fff", borderRadius: 4, color: "#A32D2D", fontSize: 12, lineHeight: 1, padding: "1px 4px" }}>×</button>
+                            style={{ position: "absolute", top: 2, right: 2, background: "#fff", borderRadius: 4, color: "var(--t-bad-fg)", fontSize: 12, lineHeight: 1, padding: "1px 4px" }}>×</button>
                         </div>
                         <input defaultValue={ph.caption} placeholder={i === 0 ? "cover" : "what this shows"}
                           aria-label="Caption"
@@ -540,7 +540,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   <span className="mono">{formatCents(p.priceCents)}</span>
                   {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontSize: 11 }}>link ↗</a>}
                   <button className="btn link" aria-label={`Remove ${p.vendor}'s price`} disabled={pending}
-                    style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 12 }}
+                    style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 12 }}
                     onClick={() => startTransition(async () => { await deletePartPrice(p.id); router.refresh(); })}>×</button>
                 </div>
               ))}

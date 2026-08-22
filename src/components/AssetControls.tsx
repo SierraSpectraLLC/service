@@ -110,7 +110,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
           </>
         )}
         {isStaff && asset.status !== "Decommissioned" && (
-          <button className="btn link" style={{ color: "#A32D2D", fontSize: 12, fontWeight: 700 }} disabled={pending}
+          <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12, fontWeight: 700 }} disabled={pending}
             onClick={async () => {
               if (!(await confirmDialog({
                 title: "Decommission this asset?",
@@ -123,7 +123,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
           </button>
         )}
         {isStaff && (
-          <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
+          <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
             onClick={async () => {
               const reason = await confirmReasonText("Permanently delete this asset record AND its history? Only for records created by mistake.");
               if (!reason) return;
@@ -240,7 +240,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
           </div>
         </Dialog>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </>
   );
 }

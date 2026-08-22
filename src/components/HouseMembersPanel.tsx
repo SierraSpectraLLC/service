@@ -136,7 +136,7 @@ export default function HouseMembersPanel({ members, myEmail }: {
                   : "last owner"}
               </span>
             ) : (
-              <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }} disabled={pending}
+              <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
                 onClick={async () => {
                   const why = await confirmReasonText(
                     `Revoke ${m.email}'s access to the whole shop?${m.fromEnv ? " They're also in STAFF_EMAILS, so this records an override." : ""}`,
@@ -150,7 +150,7 @@ export default function HouseMembersPanel({ members, myEmail }: {
         </div>
       ))}
 
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
       <div className="mut" style={{ fontSize: 11, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
         The <b>root</b> owner comes from the first <span className="mono">STAFF_EMAILS</span> entry and can&apos;t be

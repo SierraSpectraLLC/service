@@ -52,7 +52,7 @@ export default function SalePanel({ target = "system", targetId, forSale, saleNo
           <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
             placeholder='Public blurb, e.g. "Refurbished 2025, new pump seals, full checkout passed. Contact sales@..."'
             style={{ resize: "vertical", fontSize: 13, marginBottom: 6 }} />
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 6 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm accent" disabled={pending}
               onClick={() => {

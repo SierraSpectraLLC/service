@@ -117,7 +117,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
       )}>
         {done ? (
           <div>
-            <div style={{ fontSize: 13, color: "#2E6B2E", fontWeight: 700, marginBottom: 6 }}>
+            <div style={{ fontSize: 13, color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 6 }}>
               {done === "already" ? "Already asked ✓" : number ? `${number} opened ✓` : "Sent ✓"}
             </div>
             <div className="mut" style={{ fontSize: 12.5, marginBottom: 12 }}>

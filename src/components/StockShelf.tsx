@@ -176,7 +176,7 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
           </div>
         );
       })}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </>
   );
 }

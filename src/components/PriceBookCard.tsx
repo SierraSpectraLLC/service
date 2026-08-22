@@ -180,7 +180,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
                     ))}
                     <td style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                       {rows.length > 1 && (
-                        <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "#A32D2D", fontSize: 12 }}
+                        <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "var(--t-bad-fg)", fontSize: 12 }}
                           onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}>×</button>
                       )}
                     </td>
@@ -198,7 +198,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
               download="price-book-template.csv">download template</a>
           </div>
           {failures.length > 0 && (
-            <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>
+            <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>
               {failures.length} row{failures.length === 1 ? "" : "s"} still above:
               <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
                 {failures.map((f) => <li key={f.row}>{f.name}: {f.error}</li>)}
@@ -207,7 +207,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
           )}
         </Dialog>
       )}
-      {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
+      {saved && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
       {prices.length > 8 && (
         <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by PN or vendor"
@@ -229,7 +229,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
               {p.note && <span className="mut" style={{ fontSize: 12 }}>{p.note}</span>}
               <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
                 <button className="btn link" style={{ fontSize: 11 }} onClick={() => editRow(p)}>edit</button>
-                <button className="btn link" style={{ color: "#A32D2D", fontSize: 11 }} disabled={pending}
+                <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 11 }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove ${p.vendor}'s ${formatCents(p.priceCents)} price for PN ${p.partNumber}?`,

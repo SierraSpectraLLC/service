@@ -103,7 +103,7 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
         <PrintButton />
       </div>
       {openTasks > 0 && (
-        <div className="no-print" style={{ fontSize: 12, color: "#8A5410", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+        <div className="no-print" style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
           Heads up: {openTasks} task{openTasks === 1 ? " is" : "s are"} not Done - only completed work prints below.
         </div>
       )}

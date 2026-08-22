@@ -167,7 +167,7 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
       <div className="card">
 
         {short.length > 0 && (
-          <div style={{ fontSize: 12, color: "#8A5410", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", margin: "6px 0 10px" }}>
+          <div style={{ fontSize: 12, color: "var(--t-warn-fg)", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", margin: "6px 0 10px" }}>
             <b>{short.length} line{short.length === 1 ? "" : "s"} at or below the reorder point:</b>{" "}
             {short.slice(0, 6).map((s) => s.partNumber).join(", ")}
             {short.length > 6 ? `, +${short.length - 6} more` : ""}

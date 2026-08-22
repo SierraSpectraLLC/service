@@ -93,7 +93,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </>
   );
 }

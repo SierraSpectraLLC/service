@@ -440,7 +440,7 @@ export default function PdfStudio({
           }>
           {fileOver && <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>Drop to add</div>}
           {dropNote && (
-            <div style={{ fontSize: 11, color: "#8A5410", marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: "var(--t-warn-fg)", marginBottom: 8 }}>
               {dropNote} <button className="btn link" style={{ fontSize: 11 }} onClick={() => setDropNote("")}>dismiss</button>
             </div>
           )}
@@ -449,7 +449,7 @@ export default function PdfStudio({
               second way into a store rather than the first thing on the page. */}
           {cloud?.configured && (
             <details style={{ marginBottom: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, color: "#1D6396" }}>
+              <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--t-info-fg)" }}>
                 OneDrive, Teams and SharePoint
               </summary>
               <CloudBrowser account={cloud.account} brokenReason={cloud.brokenReason}
@@ -493,7 +493,7 @@ export default function PdfStudio({
                 </div>
                 <div className="mut" style={{ fontSize: 10, marginTop: 2 }}>
                   {d.state === "loading" ? "loading…"
-                    : d.state === "error" ? <span style={{ color: "#A32D2D" }}>{d.error}</span>
+                    : d.state === "error" ? <span style={{ color: "var(--t-bad-fg)" }}>{d.error}</span>
                     : `${d.pageCount} page${d.pageCount === 1 ? "" : "s"} · ${d.from}${d.bytes ? ` · ${fmtSize(d.bytes.byteLength)}` : ""}`}
                 </div>
               </div>
@@ -520,7 +520,7 @@ export default function PdfStudio({
               <b style={{ fontSize: 12 }}>{selected.size} selected</b>
               <button className="btn sm" onClick={() => rotateUids(selected, -1)}>⟲</button>
               <button className="btn sm" onClick={() => rotateUids(selected, 1)}>⟳</button>
-              <button className="btn sm" style={{ color: "#A32D2D" }} onClick={() => removeUids(selected)}>Remove</button>
+              <button className="btn sm" style={{ color: "var(--t-bad-fg)" }} onClick={() => removeUids(selected)}>Remove</button>
               <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
                 <input value={bulkTitle} onChange={(e) => setBulkTitle(e.target.value)}
                   aria-label="Header title for the selected pages" placeholder="header for these pages"
@@ -654,9 +654,9 @@ export default function PdfStudio({
             <button className="btn sm" disabled={!!busy || !pages.length} onClick={() => save("download")}>
               {busy === "download" ? "Building..." : "Download"}
             </button>
-            {saved && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{saved} ✓</span>}
+            {saved && <span style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700 }}>{saved} ✓</span>}
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+          {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
         </Panel>
       </div>
     </div>

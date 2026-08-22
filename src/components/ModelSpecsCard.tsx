@@ -105,7 +105,7 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
                 onChange={(e) => setRow(i, { value: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter" && i === rows.length - 1 && rows.length < MAX_SPECS) setRows((rs) => [...rs, { name: "", value: "" }]); }}
                 style={{ flex: "1 1 200px", fontSize: 13 }} />
-              <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "#A32D2D", fontSize: 13 }}
+              <button className="btn link" aria-label={`Remove row ${i + 1}`} style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
                 onClick={() => setRows((rs) => rs.filter((_, n) => n !== i))}>×</button>
             </div>
           ))}

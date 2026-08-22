@@ -410,7 +410,7 @@ export default function StoreFileList({
             </span>
           )}
           {sweepable.length > 0 && (
-            <button className="btn sm" disabled={pending} style={{ marginLeft: "auto", color: "#A32D2D" }}
+            <button className="btn sm" disabled={pending} style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }}
               onClick={async () => {
                 const why = await confirmReason({
                   title: `Delete ${sweepable.length} file${sweepable.length === 1 ? "" : "s"} from your files?`,
@@ -525,7 +525,7 @@ export default function StoreFileList({
                   }}>rename</button>
                 <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }} disabled={pending}
                   onClick={() => { setFolderMove(folderMove === d.id ? null : d.id); setError(""); }}>move</button>
-                <button className="btn link row-act" style={{ fontSize: 10.5, color: "#A32D2D", marginLeft: 6 }} disabled={pending}
+                <button className="btn link row-act" style={{ fontSize: 10.5, color: "var(--t-bad-fg)", marginLeft: 6 }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Delete the "${d.name}" folder?`,
@@ -663,7 +663,7 @@ export default function StoreFileList({
                   height: 92, borderRadius: 6, background: "#FAF6EE", marginBottom: 6,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <span aria-hidden style={{ fontSize: 30, color: "#8A5410" }}>▮</span>
+                  <span aria-hidden style={{ fontSize: 30, color: "var(--t-warn-fg)" }}>▮</span>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 700, ...oneLine }}>{d.name}</div>
                 <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</div>
@@ -712,7 +712,7 @@ export default function StoreFileList({
           {filedNote.text}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
 
       {/* One file, close up: what it is called, what it is, and where it came
           from. A store where a file cannot be renamed is a store that fills up
@@ -811,7 +811,7 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
         <span className="mut" style={{ fontSize: 11 }}>
           Not on a system
           {removable(shelf) && (
-            <button className="btn link row-act" style={{ fontSize: 10, color: "#A32D2D", marginLeft: 4 }} disabled={pending}
+            <button className="btn link row-act" style={{ fontSize: 10, color: "var(--t-bad-fg)", marginLeft: 4 }} disabled={pending}
               aria-label={`Delete ${file.fileName}`}
               onClick={async () => {
                 const why = await confirmReason({
@@ -834,7 +834,7 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
           <Link href={p.kind === "system" ? `/instruments/${p.id}` : `/assets/${p.id}`}
             style={{ textDecoration: "none" }}>{p.label}</Link>
           {removable(p) && (
-            <button className="btn link row-act" style={{ fontSize: 10, color: "#A32D2D" }} disabled={pending}
+            <button className="btn link row-act" style={{ fontSize: 10, color: "var(--t-bad-fg)" }} disabled={pending}
               aria-label={`Remove ${file.fileName} from ${p.label}`}
               onClick={async () => {
                 const scope = file.places.length > 1

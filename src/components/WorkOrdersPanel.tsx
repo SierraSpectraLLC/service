@@ -197,11 +197,11 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
           )}
         </Dialog>
       )}
-      {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
       {flag && (
-        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginBottom: 8, display: "flex", gap: 8 }}>
+        <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 8, display: "flex", gap: 8 }}>
           <span style={{ flex: 1 }}><b>Filed.</b> {flag}</span>
-          <button className="btn link" style={{ fontSize: 11, color: "#8A5410" }} onClick={() => setFlag("")}>dismiss</button>
+          <button className="btn link" style={{ fontSize: 11, color: "var(--t-warn-fg)" }} onClick={() => setFlag("")}>dismiss</button>
         </div>
       )}
 

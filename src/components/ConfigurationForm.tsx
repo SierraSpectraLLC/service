@@ -367,7 +367,7 @@ export default function ConfigurationForm(props: {
             onChange={(e) => { setHeader(e.target.value.toUpperCase()); clearBar(); }}
             style={{ width: 110, fontSize: 12 }} />
           {!headerDefault && !isValidHex(header) && (
-            <span style={{ fontSize: 12, color: "#A32D2D" }}>needs to be #RRGGBB</span>
+            <span style={{ fontSize: 12, color: "var(--t-bad-fg)" }}>needs to be #RRGGBB</span>
           )}
         </div>
 
@@ -423,7 +423,7 @@ export default function ConfigurationForm(props: {
               {!s.builtin && (
                 <>
                   <button className="btn link" style={{ fontSize: 11 }} disabled={pending} onClick={() => doRename(s)}>rename</button>
-                  <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending} onClick={() => doDelete(s)}>delete</button>
+                  <button className="btn link" style={{ fontSize: 11, color: "var(--t-bad-fg)" }} disabled={pending} onClick={() => doDelete(s)}>delete</button>
                 </>
               )}
               <input type="color" value={colors[s.id] ?? s.bg} onChange={(e) => changeColor(s.id, e.target.value)}
@@ -440,7 +440,7 @@ export default function ConfigurationForm(props: {
             style={{ width: 34, height: 30, padding: 2, border: "1px solid var(--line)", borderRadius: 6, background: "#fff", cursor: "pointer" }} />
           <button className="btn sm accent" onClick={submitStage} disabled={pending || !stageDraft.name.trim()}>Add</button>
         </div>
-        {stageError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{stageError}</div>}
+        {stageError && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{stageError}</div>}
       </Panel>
 
       {/* Modules, stages and the operator save themselves; the bar carries the

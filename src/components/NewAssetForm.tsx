@@ -44,7 +44,7 @@ export default function NewAssetForm({ owners, kinds, models }: {
         <button className="btn sm primary" onClick={() => { setOpen((v) => !v); setError(""); }}>
           {open ? "Cancel" : "+ New asset"}
         </button>
-        {saved && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{saved} ✓</span>}
+        {saved && <span style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700 }}>{saved} ✓</span>}
       </div>
 
       {open && (

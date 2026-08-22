@@ -383,7 +383,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 {r.instrumentIds.map((id) => {
                   const sys = systems.find((s2) => s2.id === id);
                   return (
-                    <span key={id} className="pill mono" style={{ background: "#E7F2FA", color: "#1D6396" }}>
+                    <span key={id} className="pill mono" style={{ background: "#E7F2FA", color: "var(--t-info-fg)" }}>
                       {sys?.externalId ?? `#${id}`}
                     </span>
                   );
@@ -481,7 +481,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               {(heldFiles.length > 0 || heldLib.length > 0) && (
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 4 }}>
                   {heldFiles.map((f, idx) => (
-                    <span key={`f${idx}`} className="pill mono" style={{ background: "#E7F2FA", color: "#1D6396" }}>
+                    <span key={`f${idx}`} className="pill mono" style={{ background: "#E7F2FA", color: "var(--t-info-fg)" }}>
                       {f.name}
                       <button type="button" aria-label={`Don't attach ${f.name}`} className="btn link"
                         style={{ fontSize: 12, marginLeft: 4, color: "inherit" }}
@@ -580,7 +580,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                     style={{ width: 62, fontSize: 12 }} />
                   <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{k.partNumber}</span>
                   <span className="mut" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
-                  <button className="btn link" aria-label={`Remove ${k.partNumber}`} style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 13 }}
+                  <button className="btn link" aria-label={`Remove ${k.partNumber}`} style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 13 }}
                     onClick={() => setDraft({ ...draft, includedKits: draft.includedKits.filter((_, i) => i !== idx) })}>×</button>
                 </div>
               ))}

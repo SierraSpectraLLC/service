@@ -120,7 +120,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
         }}>
           {picked.size > 0 ? (
             <>
-              <b style={{ fontSize: 13, color: "#A32D2D" }}>{picked.size} selected</b>
+              <b style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>{picked.size} selected</b>
               <button className="btn sm" onClick={clear} disabled={pending}>Clear</button>
               <button className="btn sm accent" style={{ marginLeft: "auto", background: "#A32D2D", borderColor: "#A32D2D" }}
                 onClick={remove} disabled={pending}>
@@ -129,7 +129,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
             </>
           ) : (
             <>
-              <span style={{ fontSize: 13, color: "#8A5410" }}>
+              <span style={{ fontSize: 13, color: "var(--t-warn-fg)" }}>
                 <b>{visibleDupes.length}</b> row{visibleDupes.length === 1 ? " looks" : "s look"} like duplicate
                 {visibleDupes.length === 1 ? "" : "s"} of another.
               </span>
@@ -141,7 +141,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
           )}
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 
       {rows.length > 0 && (
         <div className="reg-head">

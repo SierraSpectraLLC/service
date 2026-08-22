@@ -489,7 +489,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
               });
             })();
           }}
-          style={{ fontSize: 14, padding: 4, color: "#A32D2D" }}>×</button>
+          style={{ fontSize: 14, padding: 4, color: "var(--t-bad-fg)" }}>×</button>
       </div>
     );
   };
@@ -539,7 +539,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
           <span className="mut" style={{ fontSize: 11 }}>
             {focus.model} gets its own copies - edit them here without touching the model they came from.
           </span>
-          {seedNote && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, width: "100%" }}>{seedNote} ✓</span>}
+          {seedNote && <span style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, width: "100%" }}>{seedNote} ✓</span>}
         </div>
       )}
 
@@ -664,7 +664,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
         onToggle={(k) => setFilter(k as FilterKey)}
       />
       <div style={{ height: 8 }} />
-      {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
+      {saved && <div style={{ fontSize: 12, color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
       {/* One accordion, the Catalog's shape: System first, then a band per
           system category. An open band shows every module type inside it
@@ -750,7 +750,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                       </div>
                     )}
                     <button className="btn sm" onClick={() => openAdd(g.type, band.key)}
-                      style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "#1D6396" }}>
+                      style={{ width: "100%", border: "1px dashed var(--sky)", background: "#F7FBFE", color: "var(--t-info-fg)" }}>
                       ＋ Procedure{isSystemBand ? " · system-wide" : ` · ${g.label}`}
                     </button>
                   </div>
@@ -948,7 +948,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
             {/* Only on edit, and only when the timing actually changed: what
                 happens to existing units, with the opt-in to apply it now. */}
             {timingChange && (
-              <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "#8A5410", marginBottom: 10 }}>
+              <div style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, background: "#FAF0DC", color: "var(--t-warn-fg)", marginBottom: 10 }}>
                 {timingChange === "changed" && (
                   <>Existing units keep their current cadence; only units added from now on get the new one.</>
                 )}
@@ -1020,7 +1020,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                       placeholder="Name (optional)" style={{ flex: 1, fontSize: 13 }}
                       onChange={(name) => setPart({ name })}
                       onPick={(part) => setPart({ name: part.name || part.partNumber, number: pt.number.trim() || part.partNumber })} />
-                    <button className="btn link" aria-label="Remove part" style={{ color: "#A32D2D", fontSize: 13 }}
+                    <button className="btn link" aria-label="Remove part" style={{ color: "var(--t-bad-fg)", fontSize: 13 }}
                       onClick={() => setDraft({ ...draft, parts: draft.parts.filter((_, i) => i !== idx) })}>×</button>
                   </div>
                   {/* Which models take THIS part number. One procedure, one

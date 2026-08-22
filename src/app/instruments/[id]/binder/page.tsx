@@ -142,7 +142,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
           <div key={r.docType} style={{ marginBottom: 8, breakInside: "avoid" }}>
             <div style={{ fontSize: 13, fontWeight: 700, display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               {r.docType}
-              {r.required && !r.satisfied && <span style={{ color: "#A32D2D", fontWeight: 400, fontSize: 12 }}>— {r.docs.length ? "not approved" : "MISSING"}</span>}
+              {r.required && !r.satisfied && <span style={{ color: "var(--t-bad-fg)", fontWeight: 400, fontSize: 12 }}>— {r.docs.length ? "not approved" : "MISSING"}</span>}
               {!r.required && <span className="mut" style={{ fontWeight: 400, fontSize: 11 }}>beyond the declared package</span>}
             </div>
             {r.docs.map((d) => {
@@ -189,7 +189,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
                     <div style={{ fontWeight: 700 }}>
                       {t.state === "Done" ? "✓" : "○"} {t.title}
                       {t.completedAt && <span className="mut" style={{ fontWeight: 400 }}> - {shopMonthDay(t.completedAt)}</span>}
-                      {t.state !== "Done" && <span style={{ color: "#8A5410", fontWeight: 400 }}> - {t.state.toLowerCase()}</span>}
+                      {t.state !== "Done" && <span style={{ color: "var(--t-warn-fg)", fontWeight: 400 }}> - {t.state.toLowerCase()}</span>}
                     </div>
                     {r && (
                       <div style={{ fontSize: 12, fontWeight: 600, marginLeft: 16 }}>
@@ -213,7 +213,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
           const t = taskRows.find((x) => x.id === r.taskId);
           return (
             <div key={r.id} style={{ fontSize: 13, marginBottom: 4 }}>
-              <b style={{ color: "#A32D2D" }}>FAIL</b> {t?.title ?? `task #${r.taskId}`}: {r.value}
+              <b style={{ color: "var(--t-bad-fg)" }}>FAIL</b> {t?.title ?? `task #${r.taskId}`}: {r.value}
               {r.target && <span className="mut"> (target {r.target}{r.tolerancePct ? ` ± ${r.tolerancePct}%` : ""})</span>}
               {r.note && <span className="mut"> - {r.note}</span>}
               <span className="mut"> - {r.recordedBy}, {shopMonthDay(r.recordedAt)}</span>
@@ -227,7 +227,7 @@ export default async function BinderPage({ params }: { params: Promise<{ id: str
         {dated.map((a) => (
           <div key={a.id} style={{ fontSize: 13 }}>
             {a.fileName} <span className="mut">({a.kind})</span> — valid until {a.expiresOn}
-            {a.expiresOn < today && <b style={{ color: "#A32D2D" }}> · {expiryLabel(a.expiresOn, today)}</b>}
+            {a.expiresOn < today && <b style={{ color: "var(--t-bad-fg)" }}> · {expiryLabel(a.expiresOn, today)}</b>}
           </div>
         ))}
 

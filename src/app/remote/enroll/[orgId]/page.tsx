@@ -73,7 +73,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
         <span className="pill info">{org.name}</span>
       </div>
 
-      {"error" in group && <div className="card" style={{ fontSize: 13, color: "#A32D2D" }}>{group.error}</div>}
+      {"error" in group && <div className="card" style={{ fontSize: 13, color: "var(--t-bad-fg)" }}>{group.error}</div>}
 
       {downloads.length > 0 && (
         <>
@@ -94,7 +94,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 certificate; until then this is the whole of the friction, and
                 somebody standing at a lab PC should not have to guess it. */}
             <details style={{ fontSize: 12.5, marginBottom: 16 }}>
-              <summary style={{ cursor: "pointer", color: "#1D6396" }}>
+              <summary style={{ cursor: "pointer", color: "var(--t-info-fg)" }}>
                 Windows blocked it and offered no way through
               </summary>
               <div className="mut" style={{ marginTop: 8, lineHeight: 1.65 }}>
@@ -137,7 +137,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 catchable before a client's IT sees it on their own desktop. */}
             {branding && !branding.branded && (
               <div style={{ background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 10px", marginTop: 12, fontSize: 12 }}>
-                <b style={{ color: "#8A5410" }}>The support host has no agent branding set.</b>{" "}
+                <b style={{ color: "var(--t-warn-fg)" }}>The support host has no agent branding set.</b>{" "}
                 This downloads as <span className="mono">{branding.fileName}</span>, and installs a window and a
                 Windows service under the engine&apos;s name rather than {brand.operatorName || brand.name}&apos;s.
                 Fix it on the host — <span className="mono">agentCustomization</span> in{" "}

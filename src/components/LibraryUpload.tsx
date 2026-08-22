@@ -105,9 +105,9 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
           or drop them anywhere on this page
           {folderName ? <> · into <b style={{ fontWeight: 700 }}>{folderName}</b></> : ""}
         </span>
-        {full && <span style={{ fontSize: 12, color: "#A32D2D" }}>Storage is full - delete something or raise the limit.</span>}
+        {full && <span style={{ fontSize: 12, color: "var(--t-bad-fg)" }}>Storage is full - delete something or raise the limit.</span>}
       </div>
-      {!open && error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {!open && error && <div style={{ fontSize: 12, color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
 
       <input ref={ref} type="file" multiple style={{ display: "none" }}
         onChange={(e) => { void send(e.target.files); e.target.value = ""; }} />

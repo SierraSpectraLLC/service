@@ -145,7 +145,7 @@ export default function EodPanel({
           {canAutofill(e) && (
             <button className="btn link" onClick={() => autofill(e)} disabled={pending} title="Draft from today's activity and open items">autofill</button>
           )}
-          <button className="btn link" style={{ color: "#A32D2D" }} disabled={pending}
+          <button className="btn link" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
             onClick={() => startTransition(async () => {
               await setEodSkip(targetOf(e), true);
               toast({ message: `Skipped ${e.externalId}` });
@@ -170,7 +170,7 @@ export default function EodPanel({
 
   return (
     <Panel title={clientName}
-      hint={<>{dateMDY}{sentInfo && <span style={{ color: "#2E6B2E", fontWeight: 700 }}> · {sentInfo} ✓</span>}</>}
+      hint={<>{dateMDY}{sentInfo && <span style={{ color: "var(--t-good-fg)", fontWeight: 700 }}> · {sentInfo} ✓</span>}</>}
       actions={
         <>
           {!readOnly && (
