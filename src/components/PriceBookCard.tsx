@@ -8,6 +8,7 @@ import { toCsv } from "@/lib/csv";
 import { matchesQuery } from "@/lib/search";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Dialog from "@/components/ui/Dialog";
 
 export type PriceBookRow = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string; note: string;
@@ -139,7 +140,17 @@ export default function PriceBookCard({ prices, knownVendors }: {
       </div>
 
       {open && (
-        <div className="dash-form" style={{ marginBottom: 12 }}>
+        <Dialog open onClose={() => setOpen(false)} size="lg" title="Add prices"
+          context="Paste from a spreadsheet. A PN + vendor already on file gets its price updated."
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending || !usable.length}>
+                {pending ? "Saving..." : `Save ${usable.length || ""} price${usable.length === 1 ? "" : "s"}`.replace("  ", " ")}
+              </button>
+            </>
+          }>
           <div style={{ overflowX: "auto", border: "1px solid var(--line)", borderRadius: 8, background: "#fff" }}>
             <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: 640 }}>
               <thead>
@@ -185,10 +196,6 @@ export default function PriceBookCard({ prices, knownVendors }: {
             <a className="btn link" style={{ fontSize: 12 }}
               href={"data:text/csv;charset=utf-8," + encodeURIComponent(template())}
               download="price-book-template.csv">download template</a>
-            <span className="mut" style={{ fontSize: 11 }}>Paste from a spreadsheet. A PN + vendor already on file gets its price updated.</span>
-            <button className="btn sm accent" style={{ marginLeft: "auto" }} onClick={save} disabled={pending || !usable.length}>
-              {pending ? "Saving..." : `Save ${usable.length || ""} price${usable.length === 1 ? "" : "s"}`.replace("  ", " ")}
-            </button>
           </div>
           {failures.length > 0 && (
             <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>
@@ -198,8 +205,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
               </ul>
             </div>
           )}
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+        </Dialog>
       )}
       {saved && <div style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700, marginBottom: 8 }}>{saved} ✓</div>}
 
