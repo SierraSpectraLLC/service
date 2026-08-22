@@ -56,10 +56,7 @@ export default function PublishModelCard({ termId, modelName, published, slug, s
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
         <div className="card-title">Public page</div>
-        <span className="pill" style={{
-          background: published ? "#E3F1E3" : "#EEF1F5",
-          color: published ? "#2E6B2E" : "#64748B", fontSize: 10,
-        }}>{published ? "live" : "not published"}</span>
+        <span className={`pill ${published ? "good" : "neutral"}`} style={{ fontSize: 10 }}>{published ? "live" : "not published"}</span>
       </div>
       <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
         A page anyone can find on the web: the specs, the part numbers, the kit contents and how often
