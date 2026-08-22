@@ -9,8 +9,10 @@ import { makerNames } from "@/lib/makersData";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
 import PoPanel from "@/components/PoPanel";
+import { RecordHero, type HeroStat } from "@/components/ui";
 import PoJobCard from "@/components/PoJobCard";
 import { woOpen } from "@/lib/workOrders";
+import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 
 export const dynamic = "force-dynamic";
 
@@ -65,21 +67,26 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
   };
   const onJob = woRows.find((w) => w.id === po.workOrderId) ?? null;
 
+  const totals = poTotals(lines);
+  const heroStats: HeroStat[] = [
+    { value: PO_LABEL[po.status] ?? po.status, label: "", tone: (PO_TONE[po.status] ?? "neutral") === "neutral" ? undefined : PO_TONE[po.status] },
+    { value: `${totals.received} of ${totals.ordered}`, label: "received", tone: po.status === "partial" ? "warn" : undefined },
+    ...(po.expectedAt ? [{ value: po.expectedAt, label: "expected" }] : []),
+  ];
+
   return (
     <div className="container page">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <div className="crumb" style={{ margin: 0 }}>
-          Operations › <Link href="/purchasing" style={{ textDecoration: "none", color: "inherit" }}>Purchasing</Link> › <b>{po.number}</b>
-        </div>
-        {room && (
-          <Link href={`/stock/${room.id}`} className="mut" style={{ fontSize: 13, textDecoration: "none" }}>
-            {room.name} →
-          </Link>
-        )}
-        <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>
-          {org?.name ? `${org.name}'s order` : "Our order"}
-        </span>
+      <div className="crumb">
+        Operations › <Link href="/purchasing" style={{ textDecoration: "none", color: "inherit" }}>Purchasing</Link> › <b>{po.number}</b>
       </div>
+
+      <RecordHero
+        eyebrow={org?.name ? `${org.name}'s order` : "Our order"}
+        id={po.number}
+        title={po.vendor}
+        meta={<>→ {room ? <Link href={`/stock/${room.id}`} style={{ color: "inherit" }}>{room.name}</Link> : "(stockroom gone)"}</>}
+        stats={heroStats}
+      />
 
       <PoPanel
         po={{

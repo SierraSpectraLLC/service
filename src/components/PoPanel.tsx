@@ -47,13 +47,9 @@ export default function PoPanel({ po, lines, canManage, makers }: {
   return (
     <>
       <div className="card">
+        {/* Identity lives in the page's RecordHero now; this row is the order's controls. */}
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-          <div className="card-title">{po.number}</div>
-          <span className={`pill ${PO_TONE[po.status] ?? "neutral"}`}>
-            {PO_LABEL[po.status] ?? po.status}
-          </span>
-          <span className="mut" style={{ fontSize: 13 }}>{po.vendor}</span>
-          <span className="mut" style={{ fontSize: 12 }}>→ {po.roomName}</span>
+          <div className="card-title">Lines</div>
           <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             {editable && (
               <>
