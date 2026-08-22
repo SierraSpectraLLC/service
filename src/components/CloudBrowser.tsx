@@ -68,7 +68,7 @@ export default function CloudBrowser({
   if (!account || brokenReason) {
     if (!manage) {
       return (
-        <div className="mut" style={{ fontSize: 11, marginTop: 10 }}>
+        <div className="mut t-meta" style={{ marginTop: 10 }}>
           {brokenReason || "No outside account is connected."}{" "}
           <Link href="/documents">Connect one in Files</Link> to pull documents straight in.
         </div>
@@ -76,12 +76,12 @@ export default function CloudBrowser({
     }
     return (
       <div style={{ marginTop: 10 }}>
-        {brokenReason && <div style={{ fontSize: 11, color: "#A32D2D", marginBottom: 6 }}>{brokenReason}</div>}
+        {brokenReason && <div className="t-meta" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>{brokenReason}</div>}
         <a href="/api/cloud/connect" className="btn sm" style={{ textDecoration: "none" }}>
           {brokenReason ? "Connect again" : "Connect OneDrive"}
         </a>
         {!brokenReason && (
-          <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
+          <div className="mut t-meta" style={{ marginTop: 4 }}>
             Sign in with your work account to reach OneDrive, Teams and SharePoint from here.
           </div>
         )}
@@ -92,9 +92,9 @@ export default function CloudBrowser({
   return (
     <div style={{ marginTop: 10 }}>
       {manage && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-          <span className="mut" style={{ fontSize: 11 }}>{account}</span>
-          <button className="btn link" style={{ fontSize: 11, marginLeft: "auto" }} disabled={busy}
+        <div className="row-2" style={{ marginBottom: 6 }}>
+          <span className="mut t-meta">{account}</span>
+          <button className="btn link t-meta" style={{ marginLeft: "auto" }} disabled={busy}
             onClick={() => { void disconnectCloud().then(() => location.reload()); }}>disconnect</button>
         </div>
       )}
@@ -108,25 +108,25 @@ export default function CloudBrowser({
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") setSearching(query.trim()); }}
           placeholder={`Search ${trail[1]?.name ?? "your files"}, or press Enter`}
-          style={{ fontSize: 12, marginBottom: 6 }} />
+          className="t-small" style={{ marginBottom: 6 }} />
       )}
 
       {searching ? (
-        <div style={{ display: "flex", gap: 6, alignItems: "baseline", marginBottom: 4 }}>
-          <span className="mut" style={{ fontSize: 11 }}>results for &ldquo;{searching}&rdquo;</span>
-          <button className="btn link" style={{ fontSize: 11 }}
+        <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
+          <span className="mut t-meta">results for &ldquo;{searching}&rdquo;</span>
+          <button className="btn link t-meta"
             onClick={() => { setQuery(""); setSearching(""); }}>back to folders</button>
         </div>
       ) : (
         // Crumbs rather than a path string: a driveItem is addressed by its id,
         // and two shared libraries can both hold a folder called /Reports/2026.
-        <div style={{ display: "flex", gap: 3, flexWrap: "wrap", alignItems: "baseline", marginBottom: 4 }}>
+        <div className="row-1" style={{ alignItems: "baseline", marginBottom: 4 }}>
           {trail.map((c, i) => (
-            <span key={crumbKey(c)} style={{ fontSize: 11 }}>
+            <span key={crumbKey(c)} className="t-meta">
               {i > 0 && <span className="mut"> / </span>}
               {i === trail.length - 1
                 ? <span className="mut">{c.name}</span>
-                : <button className="btn link" style={{ fontSize: 11 }}
+                : <button className="btn link t-meta"
                   onClick={() => setTrail((t) => truncateTo(t, crumbKey(c)))}>{c.name}</button>}
             </span>
           ))}
@@ -136,18 +136,18 @@ export default function CloudBrowser({
       {/* Saving into the folder you are looking at, rather than choosing a path
           twice. Not offered on a search, where "here" is not a place. */}
       {onPickFolder && !searching && !isPlaces(here) && (
-        <button className="btn link" style={{ fontSize: 11, marginBottom: 4 }} disabled={busy}
+        <button className="btn link t-meta" style={{ marginBottom: 4 }} disabled={busy}
           onClick={() => onPickFolder(here.driveId, here.id, here.name)}>
           save finished packets into {here.name}
         </button>
       )}
 
-      {error && <div style={{ fontSize: 11, color: "#A32D2D", marginBottom: 6 }}>{error}</div>}
+      {error && <div className="t-meta" style={{ color: "var(--t-bad-fg)", marginBottom: 6 }}>{error}</div>}
 
       <div className="pdf-srclist">
-        {busy && <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>Loading...</div>}
+        {busy && <div className="mut t-small" style={{ padding: "6px 0" }}>Loading...</div>}
         {!busy && items.length === 0 && !error && (
-          <div className="mut" style={{ fontSize: 12, padding: "6px 0" }}>
+          <div className="mut t-small" style={{ padding: "6px 0" }}>
             {searching ? (pdfOnly ? "No PDFs match." : "Nothing matches.")
               : isPlaces(here) ? "Nothing to browse."
                 : pdfOnly ? "No folders or PDFs here." : "Nothing here."}
@@ -157,20 +157,20 @@ export default function CloudBrowser({
           <div key={`${i.driveId}:${i.id}:${i.name}`}
             style={{ display: "flex", gap: 6, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
             {i.isFolder ? (
-              <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}
+              <button className="btn link t-small" style={{ fontWeight: 700, flexShrink: 0 }}
                 onClick={() => { setQuery(""); setSearching(""); setTrail((t) => pushCrumb(t, i)); }}>open</button>
             ) : (
-              <button className="btn link" style={{ fontSize: 12, fontWeight: 700, flexShrink: 0 }}
+              <button className="btn link t-small" style={{ fontWeight: 700, flexShrink: 0 }}
                 disabled={disabled} onClick={() => onAdd(i)}>{addLabel}</button>
             )}
-            <span style={{ fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            <span className="t-small" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
               title={i.name}>
-              {i.isFolder ? "📁 " : ""}{i.name}
+              {i.isFolder ? <span aria-hidden style={{ color: "var(--t-warn-fg)" }}>▮ </span> : null}{i.name}
             </span>
             {/* A store has no item count worth printing - "My files · 0 items"
                 reads as empty when it is simply not a folder anybody counted. */}
             {!isPlaces(here) && (
-              <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{itemNote(i)}</span>
+              <span className="mut t-meta" style={{ marginLeft: "auto", flexShrink: 0 }}>{itemNote(i)}</span>
             )}
           </div>
         ))}
