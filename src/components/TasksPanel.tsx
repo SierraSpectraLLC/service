@@ -607,8 +607,9 @@ export default function TasksPanel({
 
       {picking && (
         <div className="dash-form" style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, fontWeight: 700 }}>
+          <div className="panel-head"><span className="card-title" style={{ fontSize: 14 }}>Copy tasks</span></div>
+          <div className="row-2">
+            <span className="t-small" style={{ fontWeight: 700 }}>
               {picked.size === 0 ? "Tick the tasks to copy" : `${picked.size} selected`}
             </span>
             <button className="btn link" style={{ fontSize: 11 }}
