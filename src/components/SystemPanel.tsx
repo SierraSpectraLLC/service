@@ -13,6 +13,7 @@ import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 import { STANDING_TONE } from "@/lib/gxp";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 
 type Inst = {
@@ -169,7 +170,44 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       </div>
 
       {editing && (
-        <div className="dash-form" style={{ marginTop: 10, marginBottom: 0 }}>
+        <Dialog open onClose={() => setEditing(false)} title={`Edit ${instrument.externalId}`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              {!instrument.archived && (
+                <button className="btn" disabled={pending}
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Archive ${instrument.externalId}?`,
+                      body: "It keeps all its history and can be restored any time. It leaves the dashboard, EOD, and sheet parity.",
+                      action: `Archive ${instrument.externalId}`,
+                    }))) return;
+                    startTransition(async () => {
+                      await setInstrumentArchived(instrument.id, true);
+                      toast({
+                        message: `Archived ${instrument.externalId}`,
+                        undo: () => { void setInstrumentArchived(instrument.id, false); },
+                      });
+                    });
+                  }}>Archive</button>
+              )}
+              {isOwner && (
+                <button className="btn link danger"
+                  onClick={() => {
+                    const typed = window.prompt(
+                      `This permanently deletes ${instrument.externalId} with all its tasks, parts, gases and attachments.\n\nType ${instrument.externalId} to confirm:`
+                    );
+                    if (typed !== instrument.externalId) return;
+                    const reason = promptReason(`Deleting ${instrument.externalId}.`);
+                    if (!reason) return;
+                    startTransition(async () => { await deleteInstrument(instrument.id, reason); });
+                  }}
+                >Delete system</button>
+              )}
+              <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending}>{pending ? "Saving..." : "Save changes"}</button>
+            </>
+          }>
           {canEdit && (
             <>
               <div className="pf3" style={{ marginBottom: 8 }}>
@@ -228,43 +266,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
             <textarea value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={3}
               placeholder='Current state of the system, e.g. "No Helium - waiting on refill"' style={{ resize: "vertical" }} />
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn sm accent" onClick={save} disabled={pending}>{pending ? "Saving..." : "Save changes"}</button>
-            <button className="btn sm" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
-            {!instrument.archived && (
-              <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
-                onClick={async () => {
-                  if (!(await confirmDialog({
-                    title: `Archive ${instrument.externalId}?`,
-                    body: "It keeps all its history and can be restored any time. It leaves the dashboard, EOD, and sheet parity.",
-                    action: `Archive ${instrument.externalId}`,
-                  }))) return;
-                  startTransition(async () => {
-                    await setInstrumentArchived(instrument.id, true);
-                    toast({
-                      message: `Archived ${instrument.externalId}`,
-                      undo: () => { void setInstrumentArchived(instrument.id, false); },
-                    });
-                  });
-                }}>Archive</button>
-            )}
-            {isOwner && (
-              <button
-                className="btn link" style={{ color: "#A32D2D", fontSize: 12, fontWeight: 700 }}
-                onClick={() => {
-                  const typed = window.prompt(
-                    `This permanently deletes ${instrument.externalId} with all its tasks, parts, gases and attachments.\n\nType ${instrument.externalId} to confirm:`
-                  );
-                  if (typed !== instrument.externalId) return;
-                  const reason = promptReason(`Deleting ${instrument.externalId}.`);
-                  if (!reason) return;
-                  startTransition(async () => { await deleteInstrument(instrument.id, reason); });
-                }}
-              >Delete system</button>
-            )}
-          </div>
-        </div>
+        </Dialog>
       )}
 
       <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit}
