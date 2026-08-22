@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { addOrgSite, archiveOrgSite, setOrgBillingAddress, updateOrgSite } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { addressLine, siteLabel } from "@/lib/sites";
 
 export type SiteRow = {
@@ -158,13 +159,16 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
       </div>
 
       {sheet && (
-        <>
-          <div className="scrim" onClick={() => setSheet(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="Site">
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>
-              {sheet.id ? "Edit" : "New"} site
-            </div>
-
+        <Dialog open onClose={() => setSheet(null)} title={sheet.id ? "Edit site" : "New site"}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending}>
+                {pending ? "Saving..." : "Save site"}
+              </button>
+            </>
+          }>
             <label>Name</label>
             <input value={draft.name} autoFocus placeholder="Building 4 lab"
               onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ marginBottom: 8 }} />
@@ -196,15 +200,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
               installed here.
             </div>
 
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 4 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" onClick={save} disabled={pending}>
-                {pending ? "Saving..." : "Save"}
-              </button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
     </>
   );
