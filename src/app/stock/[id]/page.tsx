@@ -152,8 +152,8 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
           <div className="card-title">{room.name}</div>
-          <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[room.kind] ?? room.kind}</span>
-          {!acc.issue && <span className="pill" style={{ background: "#EEF1F5", color: "#94A3B8" }}>read-only for you</span>}
+          <span className="pill neutral">{KIND_LABEL[room.kind] ?? room.kind}</span>
+          {!acc.issue && <span className="pill faint">read-only for you</span>}
           <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>
             {totals.lines} line{totals.lines === 1 ? "" : "s"} · {totals.units} unit{totals.units === 1 ? "" : "s"}
           </span>
