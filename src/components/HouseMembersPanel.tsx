@@ -9,9 +9,9 @@ export type HouseRow = {
 };
 
 const ROLE = {
-  owner: { label: "Owner", bg: "#EDEBFA", fg: "#4F45A3" },
-  staff: { label: "Staff", bg: "#E7EFF8", fg: "#1D6396" },
-  none: { label: "Revoked", bg: "#F4F6F9", fg: "#94A3B8" },
+  owner: { label: "Owner", tone: "accent" },
+  staff: { label: "Staff", tone: "info" },
+  none: { label: "Revoked", tone: "faint" },
 } as const;
 
 /**
@@ -94,21 +94,21 @@ export default function HouseMembersPanel({ members, myEmail }: {
           </span>
           <span className="mono mut" style={{ fontSize: 12 }}>{m.email}</span>
           {m.email === myEmail.toLowerCase() && (
-            <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>you</span>
+            <span className="pill good">you</span>
           )}
           {m.isRoot && (
-            <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }} title="First entry in STAFF_EMAILS">
+            <span className="pill warn" title="First entry in STAFF_EMAILS">
               root
             </span>
           )}
           {m.fromEnv && !m.isRoot && (
-            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }} title="Listed in STAFF_EMAILS">
+            <span className="pill neutral" title="Listed in STAFF_EMAILS">
               from env
             </span>
           )}
 
           {m.locked ? (
-            <span className="pill" style={{ background: ROLE[m.role as keyof typeof ROLE]?.bg, color: ROLE[m.role as keyof typeof ROLE]?.fg, fontWeight: 700 }}>
+            <span className={`pill ${ROLE[m.role as keyof typeof ROLE]?.tone ?? "neutral"}`}>
               {ROLE[m.role as keyof typeof ROLE]?.label ?? m.role}
             </span>
           ) : (
@@ -116,7 +116,8 @@ export default function HouseMembersPanel({ members, myEmail }: {
               onChange={(e) => run(() => setHouseMember(m.email, e.target.value, m.name))}
               style={{
                 width: "auto", fontSize: 11, fontWeight: 700, padding: "3px 6px", borderRadius: 999, cursor: "pointer",
-                background: ROLE[m.role as keyof typeof ROLE]?.bg, color: ROLE[m.role as keyof typeof ROLE]?.fg,
+                background: `var(--t-${ROLE[m.role as keyof typeof ROLE]?.tone ?? "neutral"}-bg)`,
+                color: `var(--t-${ROLE[m.role as keyof typeof ROLE]?.tone ?? "neutral"}-fg)`,
               }}>
               <option value="staff">Staff</option>
               <option value="owner">Owner</option>
