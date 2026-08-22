@@ -9,6 +9,8 @@ import {
   moveFilesToFolder, moveFolder, renameFolder, saveFileColumns, updateAttachment,
   type FileColumnWidths,
 } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { addDaysIso, DEFAULT_LINK_DAYS } from "@/lib/dropShare";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { canMoveFolder, childrenOf, descendantIds, folderPath, type FolderLike } from "@/lib/folders";
@@ -697,11 +699,22 @@ export default function StoreFileList({
           from. A store where a file cannot be renamed is a store that fills up
           with "scan_0043 (1).pdf" and stays that way. */}
       {details && (
-        <>
-          <div className="scrim" onClick={() => setDetails(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="File details">
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)", marginBottom: 10 }}>File details</div>
-
+        <Dialog open onClose={() => setDetails(null)} title="File details"
+          footer={
+            <>
+              <a className="btn" href={`/api/files/${details.places[0].attachmentId}`} download
+                style={{ textDecoration: "none" }}>Download</a>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setDetails(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !draft.fileName.trim()}
+                onClick={() => startTransition(async () => {
+                  const res = await updateAttachment(details.places[0].attachmentId, draft);
+                  if (res?.error) { setError(res.error); return; }
+                  setDetails(null); setError("");
+                  toast({ message: `Saved ${draft.fileName.trim()}` });
+                })}>{pending ? "Saving..." : "Save file"}</button>
+            </>
+          }>
             <label>Name</label>
             <input value={draft.fileName} autoFocus maxLength={200}
               onChange={(e) => setDraft({ ...draft, fileName: e.target.value })}
@@ -751,19 +764,7 @@ export default function StoreFileList({
                 </div>
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <a className="btn sm" href={`/api/files/${details.places[0].attachmentId}`} download
-                style={{ marginRight: "auto", textDecoration: "none" }}>Download</a>
-              <button className="btn sm" onClick={() => setDetails(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" disabled={pending || !draft.fileName.trim()}
-                onClick={() => startTransition(async () => {
-                  const res = await updateAttachment(details.places[0].attachmentId, draft);
-                  if (res?.error) { setError(res.error); return; }
-                  setDetails(null); setError("");
-                })}>{pending ? "Saving..." : "Save"}</button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
     </>
   );
