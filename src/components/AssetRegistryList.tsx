@@ -6,11 +6,12 @@ import { useMemo, useState, useTransition } from "react";
 import { promptReason } from "@/lib/reason";
 import { removeAssets } from "@/app/actions";
 import { duplicateIds } from "@/lib/assetDupe";
+import type { Tone } from "@/lib/tones";
 
 export type RegistryRow = {
   id: number; kind: string; model: string; serial: string; manufacturer: string;
   owner: string; location: string;
-  status: string; statusBg: string; statusFg: string;
+  status: string; statusTone: Tone;
   /** Where it lives, already worded by the page. */
   whereLabel: string;
   /** The owning system's external id, lowercased - "" on the shelf. Match key. */
@@ -183,13 +184,13 @@ export default function AssetRegistryList({ rows, canSelect }: {
                       style={{ width: 15, height: 15 }} />
                   )}
                   <span title={a.status} aria-hidden
-                    style={{ width: 10, height: 10, borderRadius: "50%", background: a.statusFg }} />
+                    style={{ width: 10, height: 10, borderRadius: "50%", background: `var(--t-${a.statusTone}-fg)` }} />
                   <span className="reg-cell">
                     <Link href={`/assets/${a.id}`} style={{ fontSize: 13, fontWeight: 700, textDecoration: "none", color: "inherit" }}>
                       {a.model || <span className="mut">(no model)</span>}
                     </Link>
                     {isDupe && (
-                      <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410", marginLeft: 6 }}
+                      <span className="pill warn" style={{ marginLeft: 6 }}
                         title="Matches an earlier row: same serial, or same type/model/owner/location on the same system">
                         dupe?
                       </span>
@@ -200,7 +201,7 @@ export default function AssetRegistryList({ rows, canSelect }: {
                   <span className="reg-cell" style={mut}>{a.owner || "—"}</span>
                   <span className="reg-cell" style={mut}>{a.whereLabel}</span>
                   <span>
-                    <span className="pill" style={{ background: a.statusBg, color: a.statusFg }}>{a.status}</span>
+                    <span className={`pill ${a.statusTone}`}>{a.status}</span>
                   </span>
                 </div>
               );

@@ -2,7 +2,7 @@
 
 import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
-import { ASSET_COLOR } from "@/lib/stages";
+import { ASSET_TONE } from "@/lib/stages";
 import { createAsset, attachAssets } from "@/app/actions";
 import { servesLine } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
@@ -166,7 +166,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
         <div className="mut" style={{ fontSize: 13 }}>No assets listed yet.</div>
       )}
       {assets.map((a) => {
-        const c = ASSET_COLOR[a.status] ?? ASSET_COLOR.Spare;
+        const statusTone = ASSET_TONE[a.status] ?? "neutral";
         // Read off the same list rather than fetched: the panel already has
         // every unit on this system, and who serves whom is among them.
         const serving = a.servesAssetId ? assets.find((x) => x.id === a.servesAssetId) : null;
@@ -175,7 +175,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
           <Fragment key={a.id}>
           <Link href={`/assets/${a.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 4px", borderTop: "1px solid var(--line)", flexWrap: "wrap", textDecoration: "none", color: "inherit" }}>
-            <span title={a.status} style={{ width: 10, height: 10, borderRadius: "50%", background: c.fg, flexShrink: 0 }} />
+            <span title={a.status} style={{ width: 10, height: 10, borderRadius: "50%", background: `var(--t-${statusTone}-fg)`, flexShrink: 0 }} />
             {/* A thumbnail here is what makes the list read as the bench rather
                 than as a parts manifest. Absent for units without one, rather
                 than a placeholder box per row. */}
@@ -183,10 +183,10 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
               <PhotoThumb src={a.photoSrc} framing={a.photoFraming ?? ""} alt=""
                 width={34} height={34} radius={6} />
             )}
-            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
+            <span className="pill neutral">{a.kind}</span>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{a.model || <span className="mut">(no model)</span>}</span>
             {a.serial && <span className="mono mut" style={{ fontSize: 12 }}>SN {a.serial}</span>}
-            {a.status !== "In service" && <span className="pill" style={{ background: c.bg, color: c.fg }}>{a.status}</span>}
+            {a.status !== "In service" && <span className={`pill ${statusTone}`}>{a.status}</span>}
             {/* One line each way, so the stack reads as plumbed rather than as
                 an alphabetical parts manifest. */}
             {serving && (
@@ -221,7 +221,7 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
                   specs {specsOpen.includes(a.id) ? "▴" : "▾"}
                 </span>
               )}
-              {a.openItems > 0 && <span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>{a.openItems} open</span>}
+              {a.openItems > 0 && <span className="pill warn">{a.openItems} open</span>}
               <span className="mut" style={{ fontSize: 12 }}>→</span>
             </span>
           </Link>

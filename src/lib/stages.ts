@@ -113,12 +113,12 @@ export const MODULE_KINDS = [
 
 // "Spare" is unattached-but-fine; "Decommissioned" is end of life.
 export const ASSET_STATES = ["In service", "Spare", "Needs attention", "Down", "Decommissioned"] as const;
-export const ASSET_COLOR: Record<string, { bg: string; fg: string }> = {
-  "In service": { bg: "#E5F3E5", fg: "#2E6B2E" },
-  Spare: { bg: "#EEF1F5", fg: "#475569" },
-  "Needs attention": { bg: "#FAF0DC", fg: "#8A5410" },
-  Down: { bg: "#FBE9E9", fg: "#A32D2D" },
-  Decommissioned: { bg: "#EEF1F5", fg: "#94A3B8" },
+export const ASSET_TONE: Record<string, Tone> = {
+  "In service": "good",
+  Spare: "neutral",
+  "Needs attention": "warn",
+  Down: "bad",
+  Decommissioned: "faint",
 };
 /** True when an asset status should surface on the system row / dashboard. */
 /**

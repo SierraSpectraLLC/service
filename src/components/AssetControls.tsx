@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { promptReason } from "@/lib/reason";
 import { useState, useTransition } from "react";
-import { ASSET_STATES, ASSET_COLOR } from "@/lib/stages";
+import { ASSET_STATES, ASSET_TONE } from "@/lib/stages";
 import { setAssetStatus, moveAsset, detachAsset, decommissionAsset, removeAsset, setAssetServes, updateAsset } from "@/app/actions";
 import { serveCandidates, serversOf } from "@/lib/assetServes";
 import CatalogSelect from "./CatalogSelect";
@@ -34,7 +34,7 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
   const [draft, setDraft] = useState({ kind: asset.kind, model: asset.model, serial: asset.serial, manufacturer: asset.manufacturer, owner: asset.owner, asFound: asset.asFound, location: asset.location, note: asset.note });
   const [role, setRole] = useState(asset.servesRole);
   const [pending, startTransition] = useTransition();
-  const c = ASSET_COLOR[asset.status] ?? ASSET_COLOR.Spare;
+  const statusTone = ASSET_TONE[asset.status] ?? "neutral";
 
   // What this unit may be pointed at, and what is pointed at it. Both from the
   // same rules the server checks against, so the picker never offers something
@@ -57,11 +57,11 @@ export default function AssetControls({ asset, siblings = [], systems, kinds, mo
         {canEdit ? (
           <select value={asset.status} disabled={pending}
             onChange={(e) => run(() => setAssetStatus(asset.id, e.target.value))}
-            style={{ width: "auto", fontSize: 12, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: c.bg, color: c.fg }}>
+            style={{ width: "auto", fontSize: 12, fontWeight: 700, padding: "3px 8px", borderRadius: 999, background: `var(--t-${statusTone}-bg)`, color: `var(--t-${statusTone}-fg)` }}>
             {ASSET_STATES.map((s) => <option key={s}>{s}</option>)}
           </select>
         ) : (
-          <span className="pill" style={{ background: c.bg, color: c.fg }}>{asset.status}</span>
+          <span className={`pill ${statusTone}`}>{asset.status}</span>
         )}
         {canEdit && (
           <>

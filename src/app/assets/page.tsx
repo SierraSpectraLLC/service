@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { assets, instruments, vocabTerms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { forTenant, viewTenant, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
-import { ASSET_COLOR, ASSET_STATES } from "@/lib/stages";
+import { ASSET_TONE, ASSET_STATES } from "@/lib/stages";
 import AssetRegistryFilter from "@/components/AssetRegistryFilter";
 import NewAssetForm from "@/components/NewAssetForm";
 import AssetGridToggle from "@/components/AssetGridToggle";
@@ -84,12 +84,12 @@ export default async function AssetsPage({ searchParams }: { searchParams: Promi
         <AssetRegistryList
           canSelect={isStaff}
           rows={filtered.map((a) => {
-            const c = ASSET_COLOR[a.status] ?? ASSET_COLOR.Spare;
+            const statusTone = ASSET_TONE[a.status] ?? "neutral";
             const sys = a.instrumentId !== null ? home.get(a.instrumentId) : undefined;
             return {
               id: a.id, kind: a.kind, model: a.model, serial: a.serial, manufacturer: a.manufacturer,
               owner: a.owner, location: a.location,
-              status: a.status, statusBg: c.bg, statusFg: c.fg,
+              status: a.status, statusTone,
               whereLabel: sys ? `in ${sys.externalId}`
                 : a.status === "Decommissioned" ? "retired"
                 : `On the shelf${a.location ? ` · ${a.location}` : ""}`,
