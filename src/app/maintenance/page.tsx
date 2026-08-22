@@ -70,18 +70,15 @@ export default async function MaintenancePage() {
         style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", opacity: s.paused ? 0.55 : 1 }}>
         <span className="mono" style={{ fontWeight: 700, fontSize: 12, color: "var(--navy)" }}>{place.label}</span>
         <span style={{ fontSize: 13 }}>{s.title}</span>
-        <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{cadenceLabel(s.everyDays)}</span>
+        <span className="pill accent">{cadenceLabel(s.everyDays)}</span>
         {s.assignee && <span className="mut" style={{ fontSize: 11 }}>{s.assignee}</span>}
         <span style={{ marginLeft: "auto" }}>
           {s.paused ? (
-            <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>paused</span>
+            <span className="pill neutral">paused</span>
           ) : s.openTaskId !== null ? (
-            <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>task open</span>
+            <span className="pill info">task open</span>
           ) : (
-            <span className="pill" style={{
-              background: overdue ? "#FBE9E9" : dueToday ? "#FAF0DC" : "#EEF1F5",
-              color: overdue ? "#A32D2D" : dueToday ? "#8A5410" : "#475569",
-            }}>
+            <span className={`pill ${overdue ? "bad" : dueToday ? "warn" : "neutral"}`}>
               {overdue ? `overdue - was due ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
             </span>
           )}
@@ -102,7 +99,7 @@ export default async function MaintenancePage() {
         {allClear && next && schedules.length > 0 && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "8px 4px", borderTop: "1px solid var(--line)" }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>Nothing due</span>
-            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>next due {next.label}</span>
+            <span className="pill good">next due {next.label}</span>
           </div>
         )}
 
