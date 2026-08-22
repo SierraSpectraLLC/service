@@ -215,7 +215,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
           {offers.map((p, i) => (
             <div key={p.id} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "2px 0", flexWrap: "wrap" }}>
               <span style={{ fontSize: 13 }}>{p.vendor}</span>
-              {p.isOem && <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>OEM</span>}
+              {p.isOem && <span className="pill accent">OEM</span>}
               <span style={{ fontSize: 13, fontWeight: 700, color: i === 0 ? "#085041" : undefined }}>{formatCents(p.priceCents)}</span>
               {p.url && <a href={p.url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>order ↗</a>}
               {p.note && <span className="mut" style={{ fontSize: 12 }}>{p.note}</span>}
