@@ -100,7 +100,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
                 <td style={{ ...cell, textAlign: "left", fontWeight: 700 }}>
                   {r.name}
                   {r.id === rootOrgId && (
-                    <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396", marginLeft: 6 }}>runs the platform</span>
+                    <span className="pill info" style={{ marginLeft: 6 }}>runs the platform</span>
                   )}
                 </td>
                 <td style={cell}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</td>
