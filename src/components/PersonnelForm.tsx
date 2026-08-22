@@ -85,12 +85,12 @@ export default function PersonnelForm(props: {
             {/* Their header color, so the list looks like the workspaces do. */}
             <span aria-hidden style={{ width: 10, height: 10, borderRadius: 3, flexShrink: 0, background: o.themeColor || "var(--line)" }} />
             <span style={{ fontSize: 14, fontWeight: 700 }}>{o.name}</span>
-            <span className="pill" style={{ background: o.kind === "provider" ? "#FAF0DC" : "#E7F2FA", color: o.kind === "provider" ? "#8A5410" : "#1D6396" }}>{o.kind}</span>
+            <span className={`pill ${o.kind === "provider" ? "warn" : "info"}`}>{o.kind}</span>
             {props.operatorOrgId === o.id && (
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>operator</span>
+              <span className="pill good">operator</span>
             )}
             {props.showSheetSync && props.sheetOrgId === o.id && (
-              <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>sheet sync</span>
+              <span className="pill good">sheet sync</span>
             )}
             <span className="mut" style={{ fontSize: 11, marginLeft: "auto", textAlign: "right" }}>
               {o.systems} system{o.systems === 1 ? "" : "s"} ·{" "}
@@ -162,7 +162,7 @@ export default function PersonnelForm(props: {
         {props.directory.map((p) => (
           <div key={p.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
             <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
-            {p.org && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{p.org}</span>}
+            {p.org && <span className="pill neutral">{p.org}</span>}
             <span className="mut mono" style={{ fontSize: 11, marginLeft: "auto" }}>{p.email}</span>
           </div>
         ))}
