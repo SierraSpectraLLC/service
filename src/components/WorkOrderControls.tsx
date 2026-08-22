@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
 import { promptReason } from "@/lib/reason";
 import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
@@ -47,12 +49,13 @@ export default function WorkOrderControls({
   const moves = woMoves(state, mover).filter((s) => s !== "resolved");
   const canResolve = woMoves(state, mover).includes("resolved");
 
-  const run = (fn: () => Promise<{ error?: string } | void>) => {
+  const run = (fn: () => Promise<{ error?: string } | void>, done?: string) => {
     setError("");
     startTransition(async () => {
       const res = await fn();
       if (res && "error" in res && res.error) { setError(res.error); return; }
       setMode(""); setSummary("");
+      if (done) toast({ message: done });
     });
   };
 
@@ -109,7 +112,17 @@ export default function WorkOrderControls({
       </div>
 
       {mode === "resolve" && (
-        <div className="dash-form" style={{ marginTop: 10 }}>
+        <Dialog open onClose={() => setMode("")} title={`Resolve ${number}`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || summary.trim().length < 3}
+                onClick={() => run(() => resolveWorkOrder(id, summary), `Resolved ${number}`)}>
+                {pending ? "Saving..." : `Resolve ${number}`}
+              </button>
+            </>
+          }>
           <label>What was done? *</label>
           <textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={3} autoFocus
             placeholder="Replaced the deuterium lamp and re-ran the baseline - back in spec."
@@ -118,15 +131,21 @@ export default function WorkOrderControls({
             This is what {number} leaves behind. The tasks, hours and parts on it are counted and
             added for you, and it goes on the system&apos;s discussion where the client will see it.
           </div>
-          <button className="btn sm accent" disabled={pending || summary.trim().length < 3}
-            onClick={() => run(() => resolveWorkOrder(id, summary))}>
-            {pending ? "Saving..." : "Resolve"}
-          </button>
-        </div>
+        </Dialog>
       )}
 
       {mode === "edit" && (
-        <div className="dash-form" style={{ marginTop: 10 }}>
+        <Dialog open onClose={() => setMode("")} title={`Edit ${number}`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending || !form.title.trim()}
+                onClick={() => run(() => updateWorkOrder(id, form), `Saved ${number}`)}>
+                {pending ? "Saving..." : "Save changes"}
+              </button>
+            </>
+          }>
           <label>What is the job?</label>
           <input value={form.title} maxLength={160} style={{ marginBottom: 8 }}
             onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -148,11 +167,7 @@ export default function WorkOrderControls({
               </select>
             </div>
           </div>
-          <button className="btn sm accent" disabled={pending || !form.title.trim()}
-            onClick={() => run(() => updateWorkOrder(id, form))}>
-            {pending ? "Saving..." : "Save"}
-          </button>
-        </div>
+        </Dialog>
       )}
 
       {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
