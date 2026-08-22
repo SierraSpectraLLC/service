@@ -10,6 +10,8 @@ import {
 } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Panel from "@/components/ui/Panel";
+import SaveBar from "@/components/ui/SaveBar";
 import { isValidHex, readableTextOn } from "@/lib/theme";
 import { promptReason } from "@/lib/reason";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
@@ -55,19 +57,33 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
 }) {
   const [pending, startTransition] = useTransition();
 
+  // The page's one save bar: the panels edit drafts, the bar compares them to
+  // the last stored state and saves whatever differs. Instant controls (roles,
+  // toggles, invitations) stay instant - the bar carries only the drafts.
+  const [base, setBase] = useState(() => ({
+    themeColor: org.themeColor, logoUrl: org.logoUrl,
+    eodRecipients: org.eodRecipients,
+    digestTo: splitEmails(org.digestRecipients),
+    hour: org.digestHour,
+    days: (() => { const d = parseDigestDays(org.digestDays); return d.length ? d : [...WEEK_ORDER]; })(),
+    limitMb: org.storageLimitMb,
+  }));
+  const [barMsg, setBarMsg] = useState("");
+  const [barErr, setBarErr] = useState("");
+  const clearBar = () => { setBarMsg(""); setBarErr(""); };
+
   // Appearance
   const [color, setColor] = useState(org.themeColor || "#172A4A");
   const [useDefault, setUseDefault] = useState(!org.themeColor);
   const [logo, setLogo] = useState(org.logoUrl);
   const [lookError, setLookError] = useState("");
-  const [lookSaved, setLookSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const effective = useDefault ? "#172A4A" : color;
   const fg = isValidHex(effective) ? readableTextOn(effective) : "#fff";
 
   const pickLogo = async (file: File) => {
-    setLookError(""); setLookSaved(false);
+    setLookError(""); clearBar();
     if (!/^image\/(png|jpeg|svg\+xml|webp)$/.test(file.type)) { setLookError("Logo must be a PNG, JPEG, SVG or WebP image"); return; }
     if (file.size > MAX_LOGO_BYTES) { setLookError("Logo must be under 1 MB"); return; }
     setUploading(true);
@@ -81,15 +97,6 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
       if (fileRef.current) fileRef.current.value = "";
     }
   };
-  const saveLook = () => {
-    setLookError(""); setLookSaved(false);
-    startTransition(async () => {
-      const res = await setOrgAppearance({ themeColor: useDefault ? "" : color, logoUrl: logo }, org.id);
-      if (res?.error) setLookError(res.error);
-      else setLookSaved(true);
-    });
-  };
-
   // Remote support tier
   const [remoteOn, setRemoteOn] = useState(org.remoteAccessEnabled);
   // Resale: off unless this organization is actually in that business.
@@ -99,18 +106,9 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
 
   // Storage ceiling
   const [limitMb, setLimitMb] = useState(org.storageLimitMb);
-  const [limitMsg, setLimitMsg] = useState("");
 
   // Recipients
   const [recipients, setRecipients] = useState(org.eodRecipients);
-  const [recipientsMsg, setRecipientsMsg] = useState("");
-  const saveRecipients = () => {
-    setRecipientsMsg("");
-    startTransition(async () => {
-      const res = await updateEodRecipients(org.id, recipients);
-      setRecipientsMsg(res?.error ?? "Saved ✓");
-    });
-  };
 
   // The partner edition of the daily digest: who gets it, and when.
   //
@@ -135,34 +133,23 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     ...people.map((p) => p.entry.trim().toLowerCase()).filter((e) => e && !e.startsWith("@")),
     ...digestTo,
   ])];
-  const storedDays = (() => { const d = parseDigestDays(org.digestDays); return d.length ? d : [...WEEK_ORDER]; })();
-  const digestDirty = digestTo.join(", ") !== splitEmails(org.digestRecipients).join(", ")
-    || hour !== org.digestHour
-    || [...sendDays].sort().join() !== [...storedDays].sort().join();
+  const digestDirty = digestTo.join(", ") !== base.digestTo.join(", ")
+    || hour !== base.hour
+    || [...sendDays].sort().join() !== [...base.days].sort().join();
   const toggleDay = (d: number) => {
-    setDigestMsg("");
+    setDigestMsg(""); clearBar();
     setSendDays((list) => (list.includes(d) ? list.filter((x) => x !== d) : [...list, d]));
   };
   const toggleDigest = (email: string) => {
-    setDigestMsg("");
+    setDigestMsg(""); clearBar();
     setDigestTo((list) => (list.includes(email) ? list.filter((x) => x !== email) : [...list, email]));
   };
   const addDigestExtra = () => {
     const v = digestExtra.trim().toLowerCase();
     if (!v) return;
-    setDigestMsg("");
+    setDigestMsg(""); clearBar();
     setDigestTo((list) => (list.includes(v) ? list : [...list, v]));
     setDigestExtra("");
-  };
-  const saveDigest = () => {
-    setDigestMsg(""); setDigestErr(false);
-    startTransition(async () => {
-      const res = await updateDigestRecipients(org.id, digestTo.join(", "));
-      const res2 = res?.error ? null : await setDigestHour(org.id, hour, sendDays);
-      const err = res?.error ?? res2?.error;
-      setDigestErr(!!err);
-      setDigestMsg(err ?? "Saved \u2713");
-    });
   };
   const sendDigest = async () => {
     if (!digestTo.length) { setDigestErr(true); setDigestMsg("Tick somebody first"); return; }
@@ -180,6 +167,53 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
       setDigestErr(!!res?.error);
       setDigestMsg(res?.error ?? `Sent to ${res.to}`);
     });
+  };
+
+  const lookDirty = (useDefault ? "" : color) !== base.themeColor || logo !== base.logoUrl;
+  const recipientsDirty = recipients !== base.eodRecipients;
+  const limitDirty = limitMb !== base.limitMb;
+  const dirty = lookDirty || recipientsDirty || digestDirty || limitDirty;
+
+  const saveAll = () => {
+    clearBar();
+    startTransition(async () => {
+      if (lookDirty) {
+        const res = await setOrgAppearance({ themeColor: useDefault ? "" : color, logoUrl: logo }, org.id);
+        if (res?.error) { setBarErr(res.error); return; }
+      }
+      if (recipientsDirty) {
+        const res = await updateEodRecipients(org.id, recipients);
+        if (res?.error) { setBarErr(res.error); return; }
+      }
+      if (digestDirty) {
+        const res = await updateDigestRecipients(org.id, digestTo.join(", "));
+        const res2 = res?.error ? null : await setDigestHour(org.id, hour, sendDays);
+        const err = res?.error ?? res2?.error;
+        if (err) { setBarErr(err); return; }
+      }
+      if (limitDirty) {
+        const res = await setOrgStorageLimit(org.id, limitMb);
+        if (res?.error) { setBarErr(res.error); return; }
+      }
+      setBase({
+        themeColor: useDefault ? "" : color, logoUrl: logo,
+        eodRecipients: recipients,
+        digestTo: [...digestTo], hour, days: [...sendDays],
+        limitMb,
+      });
+      setBarMsg("Saved");
+    });
+  };
+  const discardAll = () => {
+    clearBar(); setLookError("");
+    setColor(base.themeColor || "#172A4A");
+    setUseDefault(!base.themeColor);
+    setLogo(base.logoUrl);
+    setRecipients(base.eodRecipients);
+    setDigestTo([...base.digestTo]);
+    setHour(base.hour);
+    setSendDays([...base.days]);
+    setLimitMb(base.limitMb);
   };
 
   // People
@@ -202,13 +236,10 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
 
   return (
     <>
-      <div className="card">
-        <div className="card-title">People at {org.name}</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Everyone here signs in with their email - no passwords. An editor can change records they have edit
+      <Panel title={<>People at {org.name}</>}
+        hint="Everyone here signs in with their email - no passwords. An editor can change records they have edit
           access to; a viewer reads. A whole-domain entry lets anyone with that email address in, so only the
-          platform owner can add or change one.
-        </div>
+          platform owner can add or change one.">
         {people.map((r) => {
           const domain = r.entry.trim().startsWith("@");
           return (
@@ -275,13 +306,10 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
         </div>
         {sent && <div style={{ fontSize: 12, color: "#2E6B2E", marginTop: 6 }}>Invited {sent} - they got an email with a sign-in link.</div>}
         {peopleError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{peopleError}</div>}
-      </div>
+      </Panel>
 
-      <div className="card">
-        <div className="card-title">Workspace appearance</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Applies to everyone signing in as {org.name}. Nobody else&apos;s workspace changes.
-        </div>
+      <Panel title="Workspace appearance"
+        hint={<>Applies to everyone signing in as {org.name}. Nobody else&apos;s workspace changes.</>}>
 
         {/* Live preview using the same color math as the real header. */}
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid var(--line)", marginBottom: 10 }}>
@@ -298,14 +326,14 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
         <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, fontWeight: 400, color: "var(--ink)" }}>
             <input type="checkbox" checked={useDefault} style={{ width: "auto" }}
-              onChange={(e) => { setUseDefault(e.target.checked); setLookSaved(false); }} />
+              onChange={(e) => { setUseDefault(e.target.checked); clearBar(); }} />
             Default look
           </label>
           {!useDefault && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 12, fontWeight: 400, color: "var(--ink)" }}>
               Header color
               <input type="color" value={isValidHex(color) ? color : "#172A4A"}
-                onChange={(e) => { setColor(e.target.value); setLookSaved(false); }}
+                onChange={(e) => { setColor(e.target.value); clearBar(); }}
                 style={{ width: 34, height: 28, padding: 2, border: "1px solid var(--line)", borderRadius: 6, background: "#fff", cursor: "pointer" }} />
             </label>
           )}
@@ -314,43 +342,27 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           <button className="btn sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
             {uploading ? "Uploading..." : logo ? "Replace logo" : "Add logo"}
           </button>
-          {logo && <button className="btn link" onClick={() => { setLogo(""); setLookSaved(false); }}>remove logo</button>}
-          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {lookSaved && <span className="mut" style={{ fontSize: 12 }}>Saved.</span>}
-            <button className="btn sm accent" onClick={saveLook} disabled={pending || uploading}>
-              {pending ? "Saving..." : "Save appearance"}
-            </button>
-          </span>
+          {logo && <button className="btn link" onClick={() => { setLogo(""); clearBar(); }}>remove logo</button>}
         </div>
         {lookError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{lookError}</div>}
-      </div>
+      </Panel>
 
       {isOwner && showRecipients && (
-        <div className="card">
-          <div className="card-title">Daily report</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Where {org.name}&apos;s daily update goes. Comma-separated; empty means no report is sent for them.
-          </div>
+        <Panel title="Daily report"
+          hint={<>Where {org.name}&apos;s daily update goes. Comma-separated; empty means no report is sent for them.</>}>
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
             <input className="mono" value={recipients}
-              onChange={(e) => { setRecipients(e.target.value); setRecipientsMsg(""); }}
+              onChange={(e) => { setRecipients(e.target.value); clearBar(); }}
               placeholder="nobody - no report is sent" style={{ flex: "1 1 220px", fontSize: 12 }} />
-            <button className="btn sm" onClick={saveRecipients} disabled={pending || recipients === org.eodRecipients}>Save</button>
           </div>
-          {recipientsMsg && (
-            <div style={{ fontSize: 12, marginTop: 6, color: recipientsMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{recipientsMsg}</div>
-          )}
-        </div>
+        </Panel>
       )}
 
       {isOwner && showDigest && (
-        <div className="card">
-          <div className="card-title">Daily digest</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Who at {org.name} receives their edition each morning - their systems&apos; status,
+        <Panel title="Daily digest"
+          hint={<>Who at {org.name} receives their edition each morning - their systems&apos; status,
             yesterday&apos;s work, and what&apos;s waiting on whom. Nobody ticked means their
-            digest stays internal.
-          </div>
+            digest stays internal.</>}>
           {digestPeople.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
               {digestPeople.map((email) => (
@@ -399,7 +411,6 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             </div>
           )}
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <button className="btn sm accent" onClick={saveDigest} disabled={pending || !digestDirty}>Save</button>
             <a className="btn sm" href={`/api/digest/preview?org=${org.id}`} target="_blank" rel="noreferrer">Preview</a>
             <button className="btn sm" onClick={sendDigest} disabled={pending}>Send now</button>
           </div>
@@ -410,17 +421,14 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           {digestMsg && (
             <div style={{ fontSize: 12, marginTop: 6, color: digestErr ? "#A32D2D" : "#2E6B2E" }}>{digestMsg}</div>
           )}
-        </div>
+        </Panel>
       )}
 
       {isOwner && (
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 4 }}>Resale</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Off unless {org.name} deals in used equipment. When it is off, systems and units
+        <Panel title="Resale"
+          hint={<>Off unless {org.name} deals in used equipment. When it is off, systems and units
             carry no listing controls at all - anything already listed keeps its own, so
-            turning this off never strands a live listing.
-          </div>
+            turning this off never strands a live listing.</>}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className={`btn sm${resaleOn ? "" : " accent"}`} disabled={pending}
               onClick={() => {
@@ -438,18 +446,15 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             </span>
           </div>
           {resaleMsg && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{resaleMsg}</div>}
-        </div>
+        </Panel>
       )}
 
       {isOwner && showRemote && (
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 4 }}>Remote support</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            Lets {org.name}&apos;s own editors connect to their machines. Ours is unaffected.{" "}
+        <Panel title="Remote support"
+          hint={<>Lets {org.name}&apos;s own editors connect to their machines. Ours is unaffected.{" "}
             {org.remoteDevices > 0
               ? `${org.remoteDevices} machine${org.remoteDevices === 1 ? "" : "s"} enrolled.`
-              : "No machines enrolled."}
-          </div>
+              : "No machines enrolled."}</>}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button className={`btn sm${remoteOn ? "" : " accent"}`} disabled={pending}
               onClick={() => {
@@ -467,47 +472,32 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
             </span>
           </div>
           {remoteMsg && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{remoteMsg}</div>}
-        </div>
+        </Panel>
       )}
 
       {isOwner && (
-        <div className="card">
-          <div className="card-title" style={{ marginBottom: 8 }}>File storage</div>
+        <Panel title="File storage">
           <StorageMeter quota={org.quota} hint={`${org.name}'s own shelf plus the files on every system and unit they own.`} />
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
             <select value={STORAGE_TIERS.some((t) => t.mb === limitMb) ? String(limitMb) : "custom"}
               aria-label={`File storage limit for ${org.name}`} style={{ width: "auto", fontSize: 12 }}
-              onChange={(e) => { if (e.target.value !== "custom") { setLimitMb(parseInt(e.target.value)); setLimitMsg(""); } }}>
+              onChange={(e) => { if (e.target.value !== "custom") { setLimitMb(parseInt(e.target.value)); clearBar(); } }}>
               {STORAGE_TIERS.map((t) => <option key={t.mb} value={t.mb}>{t.label}</option>)}
               {!STORAGE_TIERS.some((t) => t.mb === limitMb) && <option value="custom">{limitMb} MB (custom)</option>}
             </select>
             <input value={String(limitMb)} inputMode="numeric" aria-label="Limit in megabytes"
-              onChange={(e) => { setLimitMb(Math.max(0, parseInt(e.target.value.replace(/\D/g, "")) || 0)); setLimitMsg(""); }}
+              onChange={(e) => { setLimitMb(Math.max(0, parseInt(e.target.value.replace(/\D/g, "")) || 0)); clearBar(); }}
               style={{ width: 90, fontSize: 12 }} />
             <span className="mut" style={{ fontSize: 11 }}>MB · 0 = no limit</span>
-            <button className="btn sm" disabled={pending || limitMb === org.storageLimitMb}
-              onClick={() => {
-                setLimitMsg("");
-                startTransition(async () => {
-                  const res = await setOrgStorageLimit(org.id, limitMb);
-                  setLimitMsg(res?.error ?? "Saved ✓");
-                });
-              }}>Save</button>
           </div>
-          {limitMsg && (
-            <div style={{ fontSize: 12, marginTop: 6, color: limitMsg === "Saved ✓" ? "#2E6B2E" : "#A32D2D" }}>{limitMsg}</div>
-          )}
-        </div>
+        </Panel>
       )}
 
       {isOwner && (
-        <div className="card">
-          <div className="card-title">Operator controls</div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            {org.isOperator
-              ? `${org.name} operates this instance, so it is named on sign-off packets and reports.`
-              : `${org.name} is one of the organizations on this instance.`}
-          </div>
+        <Panel title="Operator controls"
+          hint={org.isOperator
+            ? `${org.name} operates this instance, so it is named on sign-off packets and reports.`
+            : `${org.name} is one of the organizations on this instance.`}>
           {/* Offered to clients, and always to whoever is currently syncing: an
               organization switched from client to provider while named here would
               otherwise take the only control with it. */}
@@ -565,8 +555,13 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               }}>remove</button>
           </div>
           {dangerError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{dangerError}</div>}
-        </div>
+        </Panel>
       )}
+
+      {/* Roles, toggles and invitations save themselves; the bar carries the
+          drafts - look, recipients, digest, storage. */}
+      <SaveBar dirty={dirty} saving={pending} message={barMsg} error={barErr}
+        label="Save changes" onSave={saveAll} onDiscard={discardAll} />
     </>
   );
 }

@@ -8,6 +8,9 @@ import {
 } from "@/app/actions";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
+import Panel from "@/components/ui/Panel";
+import Field from "@/components/ui/Field";
+import SaveBar from "@/components/ui/SaveBar";
 import {
   DEFAULT_HEADER, DEFAULT_SPECTRUM_HEIGHT, DEFAULT_STOPS, MAX_SPECTRUM_HEIGHT, MAX_STOPS,
   gradientCss, type Stop,
@@ -24,16 +27,6 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
       style={{ width: 42, height: 24, borderRadius: 999, border: "none", cursor: "pointer", background: on ? "var(--coral)" : "var(--line)", position: "relative", flexShrink: 0, padding: 0 }}>
       <span style={{ position: "absolute", top: 3, left: on ? 21 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 120ms" }} />
     </button>
-  );
-}
-
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="card">
-      <div className="card-title">{title}</div>
-      {hint && <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>{hint}</div>}
-      {children}
-    </div>
   );
 }
 
@@ -98,17 +91,21 @@ export default function ConfigurationForm(props: {
     });
   };
 
+  // The page's one save bar. Panels edit a draft; the bar compares it to the
+  // last stored state and saves whatever differs, so there is exactly one
+  // Save on the page however many panels it grows.
+  const [base, setBase] = useState({
+    name: props.platformName, tagline: props.platformTagline,
+    headerColor: props.appearance.headerColor,
+    spectrumHeight: props.appearance.spectrumHeight,
+    spectrumStops: props.appearance.spectrumStops,
+  });
+  const [barMsg, setBarMsg] = useState("");
+  const [barErr, setBarErr] = useState("");
+  const clearBar = () => { setBarMsg(""); setBarErr(""); };
+
   const [brandDraft, setBrandDraft] = useState({ name: props.platformName, tagline: props.platformTagline });
-  const [brandError, setBrandError] = useState("");
-  const [brandSaved, setBrandSaved] = useState(false);
-  const saveBrand = () => {
-    setBrandError(""); setBrandSaved(false);
-    startTransition(async () => {
-      const res = await setBranding(brandDraft);
-      if (res?.error) setBrandError(res.error);
-      else setBrandSaved(true);
-    });
-  };
+  const [opError, setOpError] = useState("");
 
   // ---- Appearance -------------------------------------------------------
   // Every control writes to local state and the preview redraws from it, so
@@ -118,18 +115,16 @@ export default function ConfigurationForm(props: {
   const [headerDefault, setHeaderDefault] = useState(!props.appearance.headerColor);
   const [bandH, setBandH] = useState(props.appearance.spectrumHeight);
   const [stops, setStops] = useState<Stop[]>(props.appearance.spectrumStops);
-  const [lookMsg, setLookMsg] = useState("");
-  const [lookErr, setLookErr] = useState(false);
 
   const effectiveHeader = headerDefault ? DEFAULT_HEADER : header;
   const headerOk = isValidHex(effectiveHeader);
   const previewFg = headerOk ? readableTextOn(effectiveHeader) : "#fff";
   const setStop = (i: number, patch: Partial<Stop>) => {
-    setLookMsg("");
+    clearBar();
     setStops((list) => list.map((s, n) => (n === i ? { ...s, ...patch } : s)));
   };
   const addStop = () => {
-    setLookMsg("");
+    clearBar();
     setStops((list) => {
       if (list.length >= MAX_STOPS) return list;
       // Drop the new band in the widest gap, which is where a person is
@@ -145,25 +140,52 @@ export default function ConfigurationForm(props: {
     });
   };
   const resetLook = () => {
-    setLookMsg(""); setLookErr(false);
+    clearBar();
     setHeaderDefault(true); setHeader(DEFAULT_HEADER);
     setBandH(DEFAULT_SPECTRUM_HEIGHT); setStops(DEFAULT_STOPS);
   };
-  const saveLook = () => {
-    setLookMsg(""); setLookErr(false);
-    if (!headerDefault && !isValidHex(header)) {
-      setLookErr(true); setLookMsg("The header colour needs to be a hex like #1D9E75");
+
+  const brandDirty = brandDraft.name !== base.name || brandDraft.tagline !== base.tagline;
+  const lookDirty = (headerDefault ? "" : header) !== base.headerColor
+    || bandH !== base.spectrumHeight
+    || JSON.stringify(stops) !== JSON.stringify(base.spectrumStops);
+  const dirty = brandDirty || lookDirty;
+
+  const saveAll = () => {
+    clearBar();
+    if (brandDirty && !brandDraft.name.trim()) { setBarErr("The platform needs a name"); return; }
+    if (lookDirty && !headerDefault && !isValidHex(header)) {
+      setBarErr("The header colour needs to be a hex like #1D9E75");
       return;
     }
     startTransition(async () => {
-      const res = await setPlatformAppearance({
+      if (brandDirty) {
+        const res = await setBranding(brandDraft);
+        if (res?.error) { setBarErr(res.error); return; }
+      }
+      if (lookDirty) {
+        const res = await setPlatformAppearance({
+          headerColor: headerDefault ? "" : header,
+          spectrumHeight: bandH,
+          spectrumStops: stops,
+        });
+        if (res?.error) { setBarErr(res.error); return; }
+      }
+      setBase({
+        name: brandDraft.name, tagline: brandDraft.tagline,
         headerColor: headerDefault ? "" : header,
-        spectrumHeight: bandH,
-        spectrumStops: stops,
+        spectrumHeight: bandH, spectrumStops: stops,
       });
-      setLookErr(!!res?.error);
-      setLookMsg(res?.error ?? "Saved \u2713");
+      setBarMsg("Saved");
     });
+  };
+  const discardAll = () => {
+    clearBar();
+    setBrandDraft({ name: base.name, tagline: base.tagline });
+    setHeader(base.headerColor || DEFAULT_HEADER);
+    setHeaderDefault(!base.headerColor);
+    setBandH(base.spectrumHeight);
+    setStops(base.spectrumStops);
   };
 
   const [stageDraft, setStageDraft] = useState({ name: "", bg: "#C9DAF8" });
@@ -209,48 +231,39 @@ export default function ConfigurationForm(props: {
 
   return (
     <>
-      <Section title="This instance"
+      <Panel title="This instance"
         hint="The portal's name, who operates it, and which optional workflows are switched on.">
-        <div className="pf2" style={{ marginBottom: 8 }}>
-          <div>
-            <label>Name</label>
-            <input value={brandDraft.name} onChange={(e) => { setBrandSaved(false); setBrandDraft({ ...brandDraft, name: e.target.value }); }}
+        <div className="pf2">
+          <Field label="Name">
+            <input value={brandDraft.name} onChange={(e) => { clearBar(); setBrandDraft({ ...brandDraft, name: e.target.value }); }}
               placeholder="e.g. Instrapath" />
-          </div>
-          <div>
-            <label>Tagline</label>
-            <input value={brandDraft.tagline} onChange={(e) => { setBrandSaved(false); setBrandDraft({ ...brandDraft, tagline: e.target.value }); }}
+          </Field>
+          <Field label="Tagline">
+            <input value={brandDraft.tagline} onChange={(e) => { clearBar(); setBrandDraft({ ...brandDraft, tagline: e.target.value }); }}
               placeholder="instrument portal" />
-          </div>
+          </Field>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button className="btn sm accent" onClick={saveBrand} disabled={pending || !brandDraft.name.trim()}>
-            {pending ? "Saving..." : "Save name"}
-          </button>
-          {brandSaved && <span className="mut" style={{ fontSize: 12 }}>Saved.</span>}
-          <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
-            <span className="mut" style={{ fontSize: 12 }}>Operated by</span>
-            <select value={props.operatorOrgId ?? ""} disabled={pending}
-              onChange={(e) => {
-                const next = e.target.value ? parseInt(e.target.value) : null;
-                setBrandError("");
-                startTransition(async () => {
-                  const res = await setOperatorOrg(next);
-                  if (res?.error) setBrandError(res.error);
-                });
-              }}
-              style={{ width: "auto", fontSize: 12 }}>
-              <option value="">nobody - use the platform name</option>
-              {props.orgs.filter((o) => o.kind === "provider").map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          </span>
-        </div>
-        <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
-          The operator is named on sign-off packets and reports; systems staff create are shared with it.
-        </div>
-        {brandError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{brandError}</div>}
+        {/* Names an operator the moment it's picked - who runs the instance is
+            not a draft to sit unsaved behind a bar. */}
+        <Field label="Operated by"
+          hint="The operator is named on sign-off packets and reports; systems staff create are shared with it."
+          error={opError || undefined}>
+          <select value={props.operatorOrgId ?? ""} disabled={pending}
+            onChange={(e) => {
+              const next = e.target.value ? parseInt(e.target.value) : null;
+              setOpError("");
+              startTransition(async () => {
+                const res = await setOperatorOrg(next);
+                if (res?.error) setOpError(res.error);
+              });
+            }}
+            style={{ width: "auto", fontSize: 12 }}>
+            <option value="">nobody - use the platform name</option>
+            {props.orgs.filter((o) => o.kind === "provider").map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+        </Field>
 
         <SubHead>Modules</SubHead>
         <div className="mut" style={{ fontSize: 11, marginBottom: 6 }}>
@@ -319,13 +332,13 @@ export default function ConfigurationForm(props: {
             )}
           </div>
         ))}
-      </Section>
+      </Panel>
 
       {/* What the platform LOOKS like, as distinct from what it is called.
           Both are the instance's own, so they sit in the same tab; the preview
           is the point, since nobody can pick a five-stop gradient from a list
           of hex codes. */}
-      <Section title="Appearance"
+      <Panel title="Appearance"
         hint="The header bar and the spectrum above it. Organizations that set their own colour keep it - this is what everyone else sees.">
 
         <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: 12 }}>
@@ -343,15 +356,15 @@ export default function ConfigurationForm(props: {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
             <input type="checkbox" checked={headerDefault} disabled={pending}
-              onChange={(e) => { setHeaderDefault(e.target.checked); setLookMsg(""); }}
+              onChange={(e) => { setHeaderDefault(e.target.checked); clearBar(); }}
               style={{ width: "auto", margin: 0 }} />
             Use the default
           </label>
           <input type="color" value={isValidHex(header) ? header : DEFAULT_HEADER} disabled={pending || headerDefault}
-            onChange={(e) => { setHeader(e.target.value.toUpperCase()); setLookMsg(""); }}
+            onChange={(e) => { setHeader(e.target.value.toUpperCase()); clearBar(); }}
             style={{ width: 44, height: 30, padding: 2 }} />
           <input className="mono" value={header} disabled={pending || headerDefault}
-            onChange={(e) => { setHeader(e.target.value.toUpperCase()); setLookMsg(""); }}
+            onChange={(e) => { setHeader(e.target.value.toUpperCase()); clearBar(); }}
             style={{ width: 110, fontSize: 12 }} />
           {!headerDefault && !isValidHex(header) && (
             <span style={{ fontSize: 12, color: "#A32D2D" }}>needs to be #RRGGBB</span>
@@ -362,7 +375,7 @@ export default function ConfigurationForm(props: {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           <span className="mut" style={{ fontSize: 12 }}>Thickness</span>
           <input type="range" min={0} max={MAX_SPECTRUM_HEIGHT} value={bandH} disabled={pending}
-            onChange={(e) => { setBandH(parseInt(e.target.value)); setLookMsg(""); }}
+            onChange={(e) => { setBandH(parseInt(e.target.value)); clearBar(); }}
             style={{ width: 160 }} />
           <span className="mono" style={{ fontSize: 12, minWidth: 34 }}>{bandH}px</span>
           {bandH === 0 && <span className="mut" style={{ fontSize: 12 }}>hidden</span>}
@@ -380,7 +393,7 @@ export default function ConfigurationForm(props: {
               style={{ flex: "1 1 90px", minWidth: 80 }} />
             <span className="mono" style={{ fontSize: 12, minWidth: 34 }}>{st.at}%</span>
             <button className="btn link" disabled={pending || stops.length <= 1}
-              onClick={() => { setLookMsg(""); setStops((l) => l.filter((_, n) => n !== i)); }}
+              onClick={() => { clearBar(); setStops((l) => l.filter((_, n) => n !== i)); }}
               style={{ fontSize: 12 }}>remove</button>
           </div>
         ))}
@@ -391,25 +404,17 @@ export default function ConfigurationForm(props: {
           <button className="btn link" onClick={resetLook} disabled={pending} style={{ fontSize: 12 }}>
             reset to the default look
           </button>
-          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {lookMsg && (
-              <span style={{ fontSize: 12, color: lookErr ? "#A32D2D" : "#2E6B2E" }}>{lookMsg}</span>
-            )}
-            <button className="btn sm accent" onClick={saveLook} disabled={pending}>
-              {pending ? "Saving..." : "Save appearance"}
-            </button>
-          </span>
         </div>
         <div className="mut" style={{ fontSize: 11, marginTop: 8 }}>
           Buttons, titles and tabs keep the house navy on purpose - one colour applied to
           every accent is a redesign rather than a brand, and it is how a readable interface
           stops being one.
         </div>
-      </Section>
+      </Panel>
 
       {/* Equipment vocabulary - system types and models - lives in Settings >
           Catalog; stages are workflow, so they stay with the instance. */}
-      <Section title="Stages">
+      <Panel title="Stages">
 
         {props.stageDefs.map((s) => (
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)" }}>
@@ -436,7 +441,12 @@ export default function ConfigurationForm(props: {
           <button className="btn sm accent" onClick={submitStage} disabled={pending || !stageDraft.name.trim()}>Add</button>
         </div>
         {stageError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{stageError}</div>}
-      </Section>
+      </Panel>
+
+      {/* Modules, stages and the operator save themselves; the bar carries the
+          drafts - the name and the look. */}
+      <SaveBar dirty={dirty} saving={pending} message={barMsg} error={barErr}
+        label="Save configuration" onSave={saveAll} onDiscard={discardAll} />
     </>
   );
 }

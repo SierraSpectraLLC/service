@@ -483,6 +483,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .mnav-tabbar a:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; border-radius: 6px; }
   /* The page ends above the bar, not underneath it. */
   body.has-tabbar { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
+  body.has-tabbar .savebar { bottom: calc(58px + env(safe-area-inset-bottom)); }
 
   .mnav-drawer { display: block; position: fixed; inset: 0; z-index: 45; }
   .mnav-pane {
@@ -953,3 +954,20 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .field-opt { font-weight: 400; text-transform: none; letter-spacing: 0; }
 .field-hint { font-size: 12px; color: var(--mut); margin-top: 4px; }
 .field-err { font-size: 12px; color: var(--t-bad-fg); margin-top: 4px; }
+
+/* A line of context under a panel's title, before its fields. */
+.panel-hint { font-size: 12px; color: var(--mut); margin: -2px 0 10px; }
+
+/* ── Save bar ───────────────────────────────────────────────────────────────
+   One sticky bar saves a whole settings page. It stays out of the way until
+   something is dirty, and on a phone it rides above the tab bar. */
+.savebar {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border-top: 1px solid var(--line);
+  padding: 10px 14px; margin-top: 8px;
+  box-shadow: 0 -8px 12px -12px rgba(23, 42, 74, 0.35);
+}
+.savebar-status { flex: 1; font-size: 12px; color: var(--mut); min-width: 0; }
+.savebar-status .err { color: var(--t-bad-fg); }
+.savebar-status .ok { color: var(--t-good-fg); }
