@@ -229,9 +229,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           <span className="mono" style={{ fontWeight: 700, fontSize: 13, color: "var(--navy)" }}>{wo.number}</span>
           <span style={{ fontSize: 16, fontWeight: 700 }}>{wo.title}</span>
           <span className={`pill ${tone}`}>{WO_LABEL[wo.state] ?? wo.state}</span>
-          <span className="pill" style={{ background: "#EDEBFA", color: "#4F45A3" }}>{sev.label}</span>
+          <span className="pill accent">{sev.label}</span>
           {woLate(wo, today) && (
-            <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>
+            <span className="pill bad">
               wanted by {targetDay(wo.severity, wo.openedOn)}
             </span>
           )}
