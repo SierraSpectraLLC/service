@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { addVocabTerms, deleteVocabTerm, renameMaker } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { makerUsageLine, type MakerRow } from "@/lib/makers";
 
 /**
@@ -52,16 +54,20 @@ export default function MakersCard({ makers }: { makers: MakerRow[] }) {
     });
   };
 
-  const remove = (m: MakerRow) => {
+  const remove = async (m: MakerRow) => {
     if (m.id === null) return;
-    const warn = m.total
-      ? `Remove "${m.name}" from the book? The ${m.total} record${m.total === 1 ? "" : "s"} naming it keep the name - it just stops being suggested.`
-      : `Remove "${m.name}" from the book?`;
-    if (!window.confirm(warn)) return;
+    if (!(await confirmDialog({
+      title: `Remove "${m.name}" from the book?`,
+      body: m.total
+        ? `The ${m.total} record${m.total === 1 ? "" : "s"} naming it keep the name - it just stops being suggested.`
+        : undefined,
+      action: `Remove ${m.name}`, tone: "bad",
+    }))) return;
     setError(""); setNote("");
     startTransition(async () => {
       const res = await deleteVocabTerm(m.id!);
       if (res?.error) setError(res.error);
+      else toast({ message: `Removed ${m.name} from the book` });
     });
   };
 
