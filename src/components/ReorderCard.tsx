@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createPurchaseOrder } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { formatCents, centsToInput } from "@/lib/money";
 import type { SuggestedLine } from "@/lib/po";
 
@@ -50,6 +51,7 @@ export default function ReorderCard({ stockroomId, groups }: {
         })),
       });
       if (res?.error) { setError(res.error); return; }
+      toast({ message: `Raised a PO on ${g.vendor || "TBD"} with ${lines.length} line${lines.length === 1 ? "" : "s"}` });
       if (res.id) router.push(`/purchasing/${res.id}`);
     });
   };
@@ -57,7 +59,7 @@ export default function ReorderCard({ stockroomId, groups }: {
   return (
     <div className="card">
       <div className="card-title" style={{ marginBottom: 4 }}>Needs ordering</div>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
+      <div className="mut t-small" style={{ marginBottom: 10 }}>
         Grouped into the orders they&apos;d become, priced from the cheapest vendor on file
         (OEM breaks ties). Untick anything you don&apos;t want on the order.
       </div>
@@ -68,11 +70,11 @@ export default function ReorderCard({ stockroomId, groups }: {
         const total = priced.reduce((n, l) => n + l.unitCents! * l.qty, 0);
         return (
           <div key={g.vendor || "__none"} style={{ borderTop: "1px solid var(--line)", padding: "8px 0" }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-              <b style={{ fontSize: 13 }}>{g.vendor || "No vendor priced"}</b>
-              {priced.length > 0 && <span className="mut" style={{ fontSize: 12 }}>{formatCents(total)}</span>}
+            <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
+              <b className="t-body">{g.vendor || "No vendor priced"}</b>
+              {priced.length > 0 && <span className="mut t-small">{formatCents(total)}</span>}
               {kept.length > priced.length && (
-                <span className="mut" style={{ fontSize: 11 }}>
+                <span className="mut t-meta">
                   {kept.length - priced.length} line{kept.length - priced.length === 1 ? "" : "s"} unpriced
                 </span>
               )}
@@ -84,21 +86,21 @@ export default function ReorderCard({ stockroomId, groups }: {
             {g.lines.map((l) => {
               const on = !skip.has(key(g.vendor, l.partNumber));
               return (
-                <label key={l.partNumber} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "3px 0", fontSize: 12, cursor: "pointer", opacity: on ? 1 : 0.45, flexWrap: "wrap" }}>
-                  <input type="checkbox" checked={on} onChange={() => toggle(g.vendor, l.partNumber)} style={{ width: 15, height: 15 }} />
+                <label key={l.partNumber} className="row-2 t-small" style={{ alignItems: "baseline", padding: "3px 0", cursor: "pointer", opacity: on ? 1 : 0.45 }}>
+                  <input type="checkbox" className="check" checked={on} onChange={() => toggle(g.vendor, l.partNumber)} />
                   <span className="mono" style={{ fontWeight: 700 }}>{l.partNumber}</span>
                   {l.name && <span>{l.name}</span>}
                   <span className="mut">× {l.qty}</span>
                   {l.unitCents !== null
                     ? <span className="mut">{formatCents(l.unitCents)} ea{l.isOem ? " · OEM" : ""}</span>
-                    : <span style={{ color: "#8A5410" }}>no price on file</span>}
+                    : <span style={{ color: "var(--t-warn-fg)" }}>no price on file</span>}
                 </label>
               );
             })}
           </div>
         );
       })}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }
