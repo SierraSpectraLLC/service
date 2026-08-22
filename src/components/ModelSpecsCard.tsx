@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setModelSpecs } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { MAX_SPECS, mergeModelSpecs, type Spec } from "@/lib/modelSpecs";
 import SpecTable from "./SpecTable";
 
@@ -73,7 +74,16 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
       )}
 
       {editing && (
-        <div className="dash-form">
+        <Dialog open onClose={() => setEditing(false)} title="Edit specs"
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending}>
+                {pending ? "Saving..." : "Save specs"}
+              </button>
+            </>
+          }>
           {siblings.length > 0 && (
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <select value={copyFrom} onChange={(e) => copy(e.target.value)} style={{ width: "auto", fontSize: 12 }}
@@ -100,19 +110,10 @@ export default function ModelSpecsCard({ termId, modelName, specs, siblings, nam
             </div>
           ))}
           <datalist id="spec-names">{nameSuggestions.map((n) => <option key={n} value={n} />)}</datalist>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
-            {rows.length < MAX_SPECS && (
-              <button className="btn sm" onClick={() => setRows((rs) => [...rs, { name: "", value: "" }])}>＋ Row</button>
-            )}
-            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-              <button className="btn sm" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" onClick={save} disabled={pending}>
-                {pending ? "Saving..." : "Save specs"}
-              </button>
-            </span>
-          </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-        </div>
+          {rows.length < MAX_SPECS && (
+            <button className="btn sm" style={{ marginTop: 4 }} onClick={() => setRows((rs) => [...rs, { name: "", value: "" }])}>＋ Row</button>
+          )}
+        </Dialog>
       )}
     </div>
   );
