@@ -6,6 +6,7 @@ import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { daysUntil, expiryLabel } from "@/lib/gxp";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, attachLibraryFile, listLibraryFiles, type WorkTarget } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
 import StorageMeter from "@/components/StorageMeter";
@@ -338,14 +339,14 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       )}
 
       {library !== null && (
-        <div className="dash-form" style={{ marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-            <b style={{ fontSize: 13, color: "var(--navy)" }}>Document library</b>
-            <span className="mut" style={{ fontSize: 11 }}>
-              files on the shop&apos;s shelf; filing one here leaves the library&apos;s copy in place
-            </span>
-            <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }} onClick={() => setLibrary(null)}>close</button>
-          </div>
+        <Dialog open onClose={() => setLibrary(null)} title="Document library"
+          context="Files on the shop's shelf; filing one here leaves the library's copy in place."
+          footer={
+            <>
+              <span className={`dialog-status${libraryError ? " err" : ""}`}>{libraryError}</span>
+              <button className="btn" onClick={() => setLibrary(null)}>Close</button>
+            </>
+          }>
           {library === "loading" && <div className="mut" style={{ fontSize: 12 }}>Loading…</div>}
           {Array.isArray(library) && library.length === 0 && (
             <div className="mut" style={{ fontSize: 12 }}>
@@ -365,8 +366,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               <span className="mut" style={{ fontSize: 11, marginLeft: "auto", flexShrink: 0 }}>{fmtSize(f.size)}</span>
             </div>
           ))}
-          {libraryError && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{libraryError}</div>}
-        </div>
+        </Dialog>
       )}
 
       {staged.length > 0 && (
