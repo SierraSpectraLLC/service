@@ -95,7 +95,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
     <div className="card">
       {instrument.archived && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
-          <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>Archived</span>
+          <span className="pill neutral">Archived</span>
           <span className="mut" style={{ fontSize: 12 }}>
             Kept for the record{instrument.archivedBy ? ` · by ${instrument.archivedBy}` : ""} · hidden from the dashboard, EOD, and sheet parity.
           </span>
@@ -135,7 +135,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   {label || <span className="mut" style={{ fontWeight: 400, fontSize: 15 }}>No assets listed yet</span>}
                 </div>
                 {instrument.category && (
-                  <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{instrument.category}</span>
+                  <span className="pill info">{instrument.category}</span>
                 )}
                 {/* The one-glance answer a regulated system owes: qualified or
                     not, with the reasons on hover. Unregulated systems show
@@ -147,7 +147,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
                   </span>
                 )}
                 {instrument.forSale && (
-                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+                  <span className="pill good">For sale</span>
                 )}
               </div>
               {instrument.location && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{instrument.location}</div>}
