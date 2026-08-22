@@ -97,61 +97,61 @@ export default function PdfCombiner({ target, pdfs, defaultCover, coverLines }: 
   return (
     <div style={{ marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
       {!open ? (
-        <span style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button className="btn link" style={{ fontSize: 12 }} onClick={openIt}>
+        <span className="row-3">
+          <button className="btn link t-small" onClick={openIt}>
             Combine {pdfs.length} PDFs into one packet…
           </button>
-          <a className="btn link" style={{ fontSize: 12 }} href="/pdf">
+          <a className="btn link t-small" href="/pdf">
             page-level editing in the PDF studio →
           </a>
         </span>
       ) : (
         <div className="dash-form">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }}>
-            <b style={{ fontSize: 13, color: "var(--navy)" }}>Combine into one packet</b>
-            <span className="mut" style={{ fontSize: 11 }}>
+          <div className="row-2" style={{ alignItems: "baseline", marginBottom: 8 }}>
+            <b className="t-body" style={{ color: "var(--navy)" }}>Combine into one packet</b>
+            <span className="mut t-meta">
               order with the arrows; titles go in each document&apos;s header bar
             </span>
-            <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }} onClick={() => setOpen(false)}>close</button>
+            <button className="btn link t-small" style={{ marginLeft: "auto" }} onClick={() => setOpen(false)}>close</button>
           </div>
 
           {rows.map((r, ix) => (
-            <div key={r.id} style={{ display: "flex", gap: 6, alignItems: "center", padding: "3px 0", flexWrap: "wrap" }}>
-              <input type="checkbox" checked={r.included} style={{ width: 15, height: 15 }}
+            <div key={r.id} className="row-2" style={{ padding: "3px 0" }}>
+              <input type="checkbox" className="check" checked={r.included}
                 onChange={() => setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, included: !x.included } : x)))} />
-              <span className="mut" style={{ fontSize: 11, width: 18, textAlign: "right" }}>
+              <span className="mut t-meta" style={{ width: 18, textAlign: "right" }}>
                 {r.included ? included.indexOf(r) + 1 : "—"}
               </span>
-              <button className="btn link" style={{ fontSize: 13, padding: "0 3px" }} aria-label={`Move ${r.fileName} up`}
+              <button className="btn link t-body" style={{ padding: "0 3px" }} aria-label={`Move ${r.fileName} up`}
                 onClick={() => move(ix, -1)}>↑</button>
-              <button className="btn link" style={{ fontSize: 13, padding: "0 3px" }} aria-label={`Move ${r.fileName} down`}
+              <button className="btn link t-body" style={{ padding: "0 3px" }} aria-label={`Move ${r.fileName} down`}
                 onClick={() => move(ix, 1)}>↓</button>
               <input value={r.title} aria-label={`Header title for ${r.fileName}`}
                 onChange={(e) => setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, title: e.target.value } : x)))}
-                style={{ flex: "1 1 200px", fontSize: 12 }} />
-              <span className="mut mono" style={{ fontSize: 11, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                className="t-small" style={{ flex: "1 1 200px" }} />
+              <span className="mut mono t-meta" style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {r.fileName}
               </span>
             </div>
           ))}
 
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "10px 0", fontSize: 12 }}>
+          <div className="row-3 t-small" style={{ margin: "10px 0" }}>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={withCover} onChange={(e) => setWithCover(e.target.checked)} style={{ width: 15, height: 15 }} />
+              <input type="checkbox" className="check" checked={withCover} onChange={(e) => setWithCover(e.target.checked)} />
               Cover page
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={numbers} onChange={(e) => setNumbers(e.target.checked)} style={{ width: 15, height: 15 }} />
+              <input type="checkbox" className="check" checked={numbers} onChange={(e) => setNumbers(e.target.checked)} />
               Page numbers
             </label>
             <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-              <input type="checkbox" checked={headers} onChange={(e) => setHeaders(e.target.checked)} style={{ width: 15, height: 15 }} />
+              <input type="checkbox" className="check" checked={headers} onChange={(e) => setHeaders(e.target.checked)} />
               Header bar per document
             </label>
           </div>
           {withCover && (
             <input value={cover} onChange={(e) => setCover(e.target.value)} placeholder="Packet title for the cover"
-              style={{ fontSize: 13, marginBottom: 10 }} />
+              className="t-body" style={{ marginBottom: 10 }} />
           )}
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -161,9 +161,9 @@ export default function PdfCombiner({ target, pdfs, defaultCover, coverLines }: 
             <button className="btn sm" disabled={!!busy || !included.length} onClick={() => run("download")}>
               {busy === "download" ? "Building..." : "Download"}
             </button>
-            {savedName && <span style={{ fontSize: 12, color: "#2E6B2E", fontWeight: 700 }}>{savedName} filed ✓</span>}
+            {savedName && <span className="t-small" style={{ color: "var(--t-good-fg)", fontWeight: 700 }}>{savedName} filed ✓</span>}
           </div>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+          {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
         </div>
       )}
     </div>
