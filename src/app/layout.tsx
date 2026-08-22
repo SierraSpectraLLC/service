@@ -12,6 +12,7 @@ import { welcomeRedirect } from "@/lib/welcome";
 import { PATH_HEADER } from "@/middleware";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import HeaderNav from "@/components/HeaderNav";
+import MobileNav from "@/components/MobileNav";
 import AccountMenu from "@/components/AccountMenu";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
@@ -111,9 +112,80 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const pageTint = tint(themed ?? look.headerColor, 0.93);
   const logoUrl = orgTheme?.logoUrl || "";
 
+  /* The nav, as data: the same links and menus feed the desktop header row
+     and the phone's drawer, so the two can never disagree about what the app
+     contains. The primary links are where the work is; the long tail lives
+     in two labelled menus - Operations for the shop's rhythms, Library for
+     files and tools - instead of one flat "More". */
+  const navLinks = [
+    { href: "/", label: "Dashboard" },
+    /* For everyone, not just staff. A work order exists so that both sides
+       read the same state, and hiding the list from the people who asked for
+       the work would undo the point. */
+    { href: "/work", label: "Work orders" },
+    { href: "/assets", label: "Assets" },
+    ...(hasStock ? [{ href: "/stock", label: "Inventory" }] : []),
+  ];
+  const navGroups = isStaff ? [
+    {
+      label: "Operations",
+      items: [
+        ...(modules.eod ? [{ href: "/eod", label: "EOD update" }] : []),
+        { href: "/maintenance", label: "Maintenance" },
+        { href: "/purchasing", label: "Purchasing" },
+        /* Something you DO to a system, so it sits with the other doing - it
+           was under Library, which is files and tools, and a remote session
+           is neither. */
+        ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
+        { href: "/metrics", label: "Metrics" },
+        ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
+        { href: "/archive", label: "Archived" },
+      ],
+    },
+    {
+      label: "Library",
+      items: [
+        /* The equipment catalog is reference material the shop reaches for
+           daily; burying it three taps into Settings made it feel like
+           configuration. It still lives at its Settings URL - this is the
+           short way in. */
+        { href: "/settings/catalog", label: "Equipment catalog" },
+        { href: "/settings/parts", label: "Parts book" },
+        { href: "/documents", label: "Files" },
+        { href: "/gallery", label: "Gallery" },
+        { href: "/pdf", label: "PDF studio" },
+        { href: "/import", label: "Import spreadsheet" },
+      ],
+    },
+  ] : [
+    // Same two menus as staff see, so the shape of the app does not change
+    // with who is reading it - a client asking where remote support lives
+    // gets the same answer as the engineer.
+    ...(orgRemoteOn ? [{
+      label: "Operations",
+      items: [{ href: "/remote", label: "Remote support" }],
+    }] : []),
+    // An organization's own tools: its file shelf and the studio. Both used
+    // to be staff-only, which left a client with nowhere to keep a document
+    // and no way to assemble a packet.
+    {
+      label: "Library",
+      items: [
+        { href: "/documents", label: "Files" },
+        { href: "/gallery", label: "Gallery" },
+        { href: "/pdf", label: "PDF studio" },
+      ],
+    },
+  ];
+  const settingsHref =
+    user?.role === "owner" ? "/settings"
+      : isStaff ? "/settings/catalog"
+        : user?.role === "client_editor" && user.orgId !== null ? `/settings/organizations/${user.orgId}`
+          : null;
+
   return (
     <html lang="en">
-      <body style={{
+      <body className={user ? "has-tabbar" : undefined} style={{
         ["--bg" as string]: pageTint,
         ["--spectrum-h" as string]: `${look.spectrumHeight}px`,
         ["--spectrum-bg" as string]: look.spectrumCss,
@@ -125,6 +197,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <div className="app-header" style={{ background: headerBg, color: headerFg }}>
           <div className="spectrum" />
           <div className="container wide header-row">
+            {/* The burger renders here (mobile only); the drawer and tab bar
+                it controls are fixed overlays, so their DOM home is moot. */}
+            {user && (
+              <MobileNav links={navLinks} groups={navGroups} settingsHref={settingsHref}
+                userName={user.name || user.email} orgName={user.orgName || brand.operatorName} />
+            )}
             <Link href="/" className="brand">
               {logoUrl && (
                 // Plain img: the logo lives on Blob, outside next/image's domain allowlist.
@@ -137,71 +215,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </Link>
             {user && (
               <nav className="header-nav">
-                {/* The primary links: where the work is. The long tail lives in
-                    two labelled menus - Operations for the shop's rhythms,
-                    Library for files and tools - instead of one flat "More". */}
-                <HeaderNav
-                  links={[
-                    { href: "/", label: "Dashboard" },
-                    /* For everyone, not just staff. A work order exists so that
-                       both sides read the same state, and hiding the list from
-                       the people who asked for the work would undo the point. */
-                    { href: "/work", label: "Work orders" },
-                    { href: "/assets", label: "Assets" },
-                    ...(hasStock ? [{ href: "/stock", label: "Inventory" }] : []),
-                  ]}
-                  groups={isStaff ? [
-                    {
-                      label: "Operations",
-                      items: [
-                        ...(modules.eod ? [{ href: "/eod", label: "EOD update" }] : []),
-                        { href: "/maintenance", label: "Maintenance" },
-                        { href: "/purchasing", label: "Purchasing" },
-                        /* Something you DO to a system, so it sits with the
-                           other doing - it was under Library, which is files
-                           and tools, and a remote session is neither. */
-                        ...(modules.remote ? [{ href: "/remote", label: "Remote support" }] : []),
-                        { href: "/metrics", label: "Metrics" },
-                        ...(modules.sheetSync ? [{ href: "/parity", label: `Sheet parity${openDiffs ? ` (${openDiffs})` : ""}` }] : []),
-                        { href: "/archive", label: "Archived" },
-                      ],
-                    },
-                    {
-                      label: "Library",
-                      items: [
-                        /* The equipment catalog is reference material the shop
-                           reaches for daily; burying it three taps into
-                           Settings made it feel like configuration. It still
-                           lives at its Settings URL - this is the short way in. */
-                        { href: "/settings/catalog", label: "Equipment catalog" },
-                        { href: "/settings/parts", label: "Parts book" },
-                        { href: "/documents", label: "Files" },
-                        { href: "/gallery", label: "Gallery" },
-                        { href: "/pdf", label: "PDF studio" },
-                        { href: "/import", label: "Import spreadsheet" },
-                      ],
-                    },
-                  ] : [
-                    // Same two menus as staff see, so the shape of the app does
-                    // not change with who is reading it - a client asking where
-                    // remote support lives gets the same answer as the engineer.
-                    ...(orgRemoteOn ? [{
-                      label: "Operations",
-                      items: [{ href: "/remote", label: "Remote support" }],
-                    }] : []),
-                    // An organization's own tools: its file shelf and the studio.
-                    // Both used to be staff-only, which left a client with nowhere
-                    // to keep a document and no way to assemble a packet.
-                    {
-                      label: "Library",
-                      items: [
-                        { href: "/documents", label: "Files" },
-                        { href: "/gallery", label: "Gallery" },
-                        { href: "/pdf", label: "PDF studio" },
-                      ],
-                    },
-                  ]}
-                />
+                <HeaderNav links={navLinks} groups={navGroups} />
 
                 {/* Right of the divide: the furniture. Always these four, always
                     here, small - so the row above can change without the way out
@@ -223,12 +237,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   <AccountMenu
                     name={user.name} email={user.email}
                     orgName={user.orgName} roleLabel={ROLE_LABEL[user.role] ?? user.role}
-                    settingsHref={
-                      user.role === "owner" ? "/settings"
-                        : isStaff ? "/settings/catalog"
-                          : user.role === "client_editor" && user.orgId !== null ? `/settings/organizations/${user.orgId}`
-                            : null
-                    }
+                    settingsHref={settingsHref}
                     viewAs={mayViewAs && !view.persona ? <ViewAsBar orgs={orgOptions} active={null} /> : undefined}
                   />
                 </span>
