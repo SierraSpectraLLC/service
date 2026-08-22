@@ -66,8 +66,8 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}>{label || "Instrument system"}</div>
-          {category && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{category}</span>}
-          <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>For sale</span>
+          {category && <span className="pill info">{category}</span>}
+          <span className="pill good">For sale</span>
         </div>
         {saleNote && <div style={{ fontSize: 14, marginTop: 8, whiteSpace: "pre-wrap" }}>{saleNote}</div>}
 
@@ -90,7 +90,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
           {taskRows.map((t) => (
             <div key={t.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
               <span>{t.title}</span>
-              {t.origin === "checkout" && <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>checkout</span>}
+              {t.origin === "checkout" && <span className="pill neutral">checkout</span>}
               {t.completedAt && <span className="mut" style={{ fontSize: 11, marginLeft: "auto", whiteSpace: "nowrap" }}>{shopMonthDay(t.completedAt)}</span>}
             </div>
           ))}
@@ -119,7 +119,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
           {fileRows.map((a) => (
             <div key={a.id} style={{ display: "flex", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
               <a href={`/api/files/${a.id}`} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{a.fileName}</a>
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
+              <span className="pill neutral">{a.kind}</span>
               {a.description && <span className="mut" style={{ fontSize: 12 }}>{a.description}</span>}
             </div>
           ))}
