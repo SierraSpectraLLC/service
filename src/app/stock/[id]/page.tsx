@@ -17,6 +17,7 @@ import StockGrid from "@/components/StockGrid";
 import StockroomAdmin from "@/components/StockroomAdmin";
 import StockAddCard from "@/components/StockAddCard";
 import ReorderCard from "@/components/ReorderCard";
+import { RecordHero, type HeroStat } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -138,29 +139,32 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
   const instLabel = new Map(systemRows.map((s) => [s.id, s.externalId]));
   const roomName = new Map(otherRooms.map((r) => [r.id, r.name]));
 
+  const heroStats: HeroStat[] = [
+    { value: totals.lines, label: `line${totals.lines === 1 ? "" : "s"}` },
+    { value: totals.units, label: `unit${totals.units === 1 ? "" : "s"}` },
+    ...(short.length ? [{ value: short.length, label: "at reorder point", tone: "warn" as const }] : []),
+    ...(!acc.issue ? [{ value: "read-only", label: "for you", tone: "faint" as const }] : []),
+  ];
+
   return (
     <div className="container wide">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-        <div className="crumb" style={{ margin: 0 }}>
-          <Link href="/stock" style={{ textDecoration: "none", color: "inherit" }}>Inventory</Link> › <b>{room.name}</b>
-        </div>
-        {acc.issue && (
-          <Link href="/purchasing" className="btn sm" style={{ marginLeft: "auto", textDecoration: "none" }}>
-            Purchase orders
-          </Link>
-        )}
+      <div className="crumb">
+        <Link href="/stock" style={{ textDecoration: "none", color: "inherit" }}>Inventory</Link> › <b>{room.name}</b>
       </div>
 
+      <RecordHero
+        eyebrow={KIND_LABEL[room.kind] ?? room.kind}
+        title={room.name}
+        meta={[room.keeper, room.location, room.note].filter(Boolean).join(" · ")}
+        stats={heroStats}
+        actions={acc.issue ? (
+          <Link href="/purchasing" className="btn sm" style={{ textDecoration: "none" }}>
+            Purchase orders
+          </Link>
+        ) : undefined}
+      />
+
       <div className="card">
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-          <div className="card-title">{room.name}</div>
-          <span className="pill neutral">{KIND_LABEL[room.kind] ?? room.kind}</span>
-          {!acc.issue && <span className="pill faint">read-only for you</span>}
-          <span className="mut" style={{ fontSize: 12, marginLeft: "auto" }}>
-            {totals.lines} line{totals.lines === 1 ? "" : "s"} · {totals.units} unit{totals.units === 1 ? "" : "s"}
-          </span>
-        </div>
-        {room.note && <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>{room.note}</div>}
 
         {short.length > 0 && (
           <div style={{ fontSize: 12, color: "#8A5410", background: "#FAF0DC", border: "1px solid #F0C9A0", borderRadius: 8, padding: "8px 12px", margin: "6px 0 10px" }}>
