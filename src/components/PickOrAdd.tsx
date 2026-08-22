@@ -20,7 +20,7 @@ export default function PickOrAdd({ value, options, onChange, newLabel = "+ New.
 
   if (typing) {
     return (
-      <div style={{ display: "flex", gap: 6 }}>
+      <div className="row-2" style={{ flexWrap: "nowrap" }}>
         <input autoFocus value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
         {list.length > 0 && (
           <button type="button" className="btn sm" style={{ flexShrink: 0 }}
