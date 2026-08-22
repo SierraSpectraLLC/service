@@ -9,6 +9,7 @@ import { needsAttention } from "@/lib/agreements";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
 import AgreementsPanel from "@/components/AgreementsPanel";
+import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +21,10 @@ export const dynamic = "force-dynamic";
  * own organization page; this is the book of business, and one client reading
  * another's contract terms is the worst leak this application could have.
  */
-export default async function AgreementsPage() {
+export default async function AgreementsPage({ searchParams }: { searchParams: Promise<{ q?: string; org?: string; f?: string }> }) {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
+  const { q = "", org = "", f = "" } = await searchParams;
   const today = shopToday();
   const tenant = readTenant(user);
 
@@ -64,11 +66,54 @@ export default async function AgreementsPage() {
     used: usage.get(r.id) ?? nothing,
   }));
 
-  const chase = needsAttention(shaped, today);
-  const rest = shaped.filter((r) => !chase.includes(r));
+  const needle = q.trim().toLowerCase();
+  const orgId = parseInt(org) || 0;
+  const filtered = shaped.filter((r) =>
+    (!orgId || r.orgId === orgId)
+    && (!needle || [r.number, r.title, r.orgName].join(" ").toLowerCase().includes(needle)));
+  const allChase = needsAttention(shaped, today);
+  const shown = f === "attention" ? filtered.filter((r) => allChase.includes(r)) : filtered;
+  const chase = shown.filter((r) => allChase.includes(r));
+  const rest = shown.filter((r) => !allChase.includes(r));
+  const href = (next: { org?: string; f?: string }) => {
+    const merged = { org: String(orgId || ""), f, ...next };
+    const p = new URLSearchParams();
+    if (needle) p.set("q", needle);
+    if (merged.org) p.set("org", merged.org);
+    if (merged.f) p.set("f", merged.f);
+    return `/settings/agreements${p.size ? `?${p}` : ""}`;
+  };
+  const orgFacets = orgIds.map((id) => ({
+    key: `org-${id}`,
+    label: name.get(id) ?? `#${id}`,
+    count: shaped.filter((r) => r.orgId === id).length,
+    on: orgId === id,
+    href: href({ org: orgId === id ? "" : String(id) }),
+  }));
 
   return (
     <div>
+      <PageHead title="Agreements"
+        sub="The paper behind the work, across every client: what is in force, what is up for renewal, and how much of each allowance is left." />
+      <Toolbar
+        search={
+          <form action="/settings/agreements">
+            {orgId ? <input type="hidden" name="org" value={orgId} /> : null}
+            {f && <input type="hidden" name="f" value={f} />}
+            <input name="q" defaultValue={q} placeholder="Number, title or client" aria-label="Search agreements" />
+          </form>
+        }
+        facets={
+          <FacetStrip facets={[
+            {
+              key: "attention", label: "Needs attention",
+              count: allChase.length || undefined,
+              on: f === "attention", href: href({ f: f === "attention" ? "" : "attention" }),
+            },
+            ...orgFacets,
+          ]} />
+        }
+      />
 
       {chase.length > 0 && (
         <AgreementsPanel rows={chase} today={today} systems={systems}
@@ -76,9 +121,11 @@ export default async function AgreementsPage() {
           title={`Needs attention · ${chase.length}`} />
       )}
 
-      <AgreementsPanel rows={rest} today={today} systems={systems}
-        orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
-        title={chase.length ? "Everything else" : "Agreements"} />
+      {(rest.length > 0 || shown.length === 0) && (
+        <AgreementsPanel rows={rest} today={today} systems={systems}
+          orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
+          title={chase.length ? "Everything else" : "In force"} />
+      )}
 
       <div className="mut" style={{ fontSize: 12, padding: "0 4px" }}>
         Allowances are summed from the work every time this page loads - parts fitted on

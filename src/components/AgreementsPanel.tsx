@@ -7,6 +7,7 @@ import {
   removeAgreement, unfileAgreementPaper, updateAgreement, uploadAgreementPapers,
 } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 import { promptReason } from "@/lib/reason";
 import {
   AGREEMENT_KINDS, KIND_LABEL, STANDING_LABEL, STANDING_TONE, allowance, kitStates, parseKits,
@@ -275,6 +276,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
           return;
         }
       }
+      toast({ message: sheet.id ? `Saved ${draft.number || "the agreement"}` : `Added ${draft.number || "an agreement"}` });
       setSheet(null);
     });
   };
@@ -322,6 +324,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                       startTransition(async () => {
                         const res = await removeAgreement(r.id, why);
                         if (res?.error) setError(res.error);
+                        else toast({ message: `Removed ${r.number || KIND_LABEL[r.kind]}` });
                       });
                     }}>remove</button>
                 </span>
@@ -404,7 +407,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   {states.map((k) => (
                     <span key={k.partNumber} title={k.partNumber}
                       className={`pill ${k.over ? "bad" : k.remaining === 0 ? "warn" : "good"}`}>
-                      🧰 {k.name || k.partNumber} {k.used}/{k.qty}
+                      {k.name || k.partNumber} {k.used}/{k.qty}
                       {k.over ? ` · ${k.used - k.qty} billable` : ""}
                     </span>
                   ))}
