@@ -74,7 +74,7 @@ export default function DiscussionPanel({
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: subtitle ? 4 : 10 }}>
         <div className="card-title">{title ?? "Discussion"}</div>
         {newCount > 0 && (
-          <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{newCount} new</span>
+          <span className="pill info">{newCount} new</span>
         )}
       </div>
       {subtitle && <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>{subtitle}</div>}
@@ -92,7 +92,7 @@ export default function DiscussionPanel({
                 {p.authorParty && <span className="mut" style={{ fontSize: 11 }}> · {p.authorParty}</span>}{" "}
                 <span className="mut" style={{ fontSize: 11 }}>{when(p.createdAt)}</span>
                 {p.internal && (
-                  <>{" "}<span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>internal</span></>
+                  <>{" "}<span className="pill warn">internal</span></>
                 )}
                 {canEdit && !editing && (
                   <>
