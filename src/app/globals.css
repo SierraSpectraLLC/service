@@ -15,6 +15,33 @@
   --shadow-sm: 0 1px 2px rgba(23, 42, 74, 0.05);
   --shadow-md: 0 8px 24px rgba(23, 42, 74, 0.14);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ── Tones ──────────────────────────────────────────────────────────────
+     The status vocabulary. Seven meanings, each a bg/fg pair, distilled from
+     the ~45 hex pairs the inline pills grew by feel (the near-duplicates
+     #E5F3E5 / #E8F3EC / #E3F1E3 were all trying to be `good`). A pill, a dot
+     or a status only ever says one of these seven things:
+       neutral  a fact, no judgement          ("5 procedures", "Draft")
+       faint    out of play                   ("Parked", "Cancelled")
+       info     in motion, on plan            ("Shipped", "Quoted")
+       good     done / healthy                ("Pass", "In service")
+       warn     needs an eye soon             ("Due ≤ 14 d", "No tracking")
+       accent   special standing              ("Required", "Override")
+       bad      blocked / failing / overdue   ("Blocked", "Overdue")
+     Stage colors are NOT tones - they live per tenant in stage_defs and stay
+     hex. Email templates (lib/digest, lib/eodEmail) also stay hex: mail
+     clients read inline styles, not this file. */
+  --t-neutral-bg: #EEF1F5; --t-neutral-fg: #475569;
+  --t-faint-bg:   #F4F6F9; --t-faint-fg:   #94A3B8;
+  --t-info-bg:    #E7F2FA; --t-info-fg:    #1D6396;
+  --t-good-bg:    #E5F3E5; --t-good-fg:    #2E6B2E;
+  --t-warn-bg:    #FAF0DC; --t-warn-fg:    #8A5410;
+  --t-accent-bg:  #EDEBFA; --t-accent-fg:  #4F45A3;
+  --t-bad-bg:     #FBE9E9; --t-bad-fg:     #A32D2D;
+
+  /* Spacing steps. Five, deliberately few: the inline styles picked gaps and
+     margins by feel, and every page drifted a pixel or two from the next. */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -193,6 +220,31 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   background: var(--spectrum-bg, linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%));
 }
 .pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+/* A pill states its tone by name; the bg/fg pairs live in :root. A bare .pill
+   with an inline style is the legacy form and sweeps away file by file. */
+.pill.neutral { background: var(--t-neutral-bg); color: var(--t-neutral-fg); }
+.pill.faint   { background: var(--t-faint-bg);   color: var(--t-faint-fg); }
+.pill.info    { background: var(--t-info-bg);    color: var(--t-info-fg); }
+.pill.good    { background: var(--t-good-bg);    color: var(--t-good-fg); }
+.pill.warn    { background: var(--t-warn-bg);    color: var(--t-warn-fg); }
+.pill.accent  { background: var(--t-accent-bg);  color: var(--t-accent-fg); }
+.pill.bad     { background: var(--t-bad-bg);     color: var(--t-bad-fg); }
+
+/* Status as a dot: for rows, where a pill on every line is noise. A dot means
+   the page carries a Legend naming what the colors say. Dot colors are the
+   saturated cousins of the tone fg - an 8px disc of #8A5410 reads as mud. */
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.neutral { background: #B7BFCC; }
+.dot.faint   { background: #D3DAE4; }
+.dot.info    { background: #1D6396; }
+.dot.good    { background: #2E8B3E; }
+.dot.warn    { background: #E0A100; }
+.dot.accent  { background: #6A5ACD; }
+.dot.bad     { background: #C23A3A; }
+
+/* One per list page that uses dots, above or below the table. */
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--mut); flex-wrap: wrap; align-items: center; }
+.legend > span { display: inline-flex; gap: 5px; align-items: center; }
 .btn {
   cursor: pointer; border-radius: 8px; font-weight: 700; font-size: 13px;
   padding: 8px 14px; border: 1px solid var(--line); background: #fff; color: var(--navy);
@@ -210,6 +262,42 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .mut { color: var(--mut); }
 .mono { font-family: var(--mono); }
 .eyebrow { font-size: 11px; color: var(--mut); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ── Type scale ─────────────────────────────────────────────────────────────
+   Six sizes with names, replacing ~1,600 inline fontSize picks of 11/12/13 by
+   feel. Size only - weight and color stay with the element's own class - so a
+   sweep can swap `style={{fontSize: 12}}` for `t-small` without changing
+   anything else. Body text is 14px by default (see body above); these exist
+   for the text that is deliberately not body. */
+.t-meta  { font-size: 11px; }   /* timestamps, counts, the smallest print   */
+.t-small { font-size: 12px; }   /* secondary lines, hints, row meta         */
+.t-body  { font-size: 13px; }   /* dense-page prose, table cells            */
+.t-lead  { font-size: 14px; }   /* a paragraph that leads a section         */
+.t-title { font-size: 16px; }   /* card titles (matches .card-title)        */
+.t-page  { font-size: 22px; }   /* page titles (matches .page-title)        */
+/* An identifier: serial, part number, WO number, model code. Monospace and a
+   half-point small, so it reads as a designation rather than prose. `dim` for
+   the secondary one on a line that already has a primary. */
+.t-mono-id { font-family: var(--mono); font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
+.t-mono-id.dim { color: var(--mut); font-weight: 500; }
+
+/* ── Stacks and rows ────────────────────────────────────────────────────────
+   The two layouts almost every inline style={{display:"flex"...}} was
+   reaching for: things above each other, things beside each other. The number
+   is the spacing step. Rows center their items and wrap by default - the
+   wrapping is what the inline versions kept forgetting until a phone found
+   out. .sp is the flexible spacer that pushes what follows to the far edge. */
+.stack-1 { display: flex; flex-direction: column; gap: var(--sp-1); }
+.stack-2 { display: flex; flex-direction: column; gap: var(--sp-2); }
+.stack-3 { display: flex; flex-direction: column; gap: var(--sp-3); }
+.stack-4 { display: flex; flex-direction: column; gap: var(--sp-4); }
+.stack-5 { display: flex; flex-direction: column; gap: var(--sp-5); }
+.row-1 { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.row-2 { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.row-3 { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.row-4 { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.row-5 { display: flex; align-items: center; gap: var(--sp-5); flex-wrap: wrap; }
+.sp { flex: 1 1 auto; min-width: 0; }
 .row-hover:hover { background: #F8FAFD; cursor: pointer; }
 .skeleton {
   border-radius: 6px;
@@ -507,3 +595,87 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .file-row:hover .row-act,
 .file-row:focus-within .row-act { opacity: 1; }
 @media (hover: none) { .file-row .row-act { opacity: 1; } }
+
+/* ── Component kit (src/components/ui) ──────────────────────────────────────
+   The classes behind the shared components. The components own the markup;
+   this file owns every visual decision, so a component never carries an
+   inline style. */
+
+/* Breadcrumb above the page head. The current page is the bold end. */
+.crumb { font-size: 12px; color: var(--mut); margin-bottom: 4px; }
+.crumb a { color: var(--mut); text-decoration: none; }
+.crumb a:hover { color: var(--link); text-decoration: underline; }
+.crumb b { color: var(--ink); font-weight: 500; }
+
+/* The list page's working row: search on the left, facets beside it, the odd
+   action on the right. Sticky, because the filters should still be in reach
+   when row 80 is on screen. */
+.toolbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  padding: 8px 0; margin-bottom: 10px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.toolbar-search { flex: 1 1 200px; max-width: 360px; }
+
+/* Counted facet pills. One row, never two: on a phone the strip scrolls
+   sideways instead of wrapping into a wall. */
+.facets { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.facet {
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: #fff; color: var(--mut);
+  white-space: nowrap; cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.facet:hover { color: var(--navy); background: #F4F7FB; }
+.facet b { color: var(--ink); margin-left: 3px; font-weight: 700; }
+.facet.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+.facet.on b { color: #fff; }
+.facet:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+@media (max-width: 640px) {
+  .facets { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+}
+
+/* A section heading inside a list page: label, count, room for one action.
+   Same voice as .band-label, without the trailing rule - these sit over
+   tables and card grids that draw their own top edge. */
+.sec-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 0 6px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.8px; text-transform: uppercase; color: var(--slate);
+}
+.sec-head .sec-count {
+  font-weight: 700; letter-spacing: 0; background: var(--t-neutral-bg);
+  border-radius: 999px; padding: 0 7px; font-size: 11px; color: var(--mut);
+}
+.sec-head.sticky { position: sticky; top: 0; z-index: 3; background: var(--bg); }
+
+/* The one card chrome for record-page panels: title, count, actions right.
+   Wraps .card, so a panel is a card that agreed to a shape. */
+.panel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* Row actions: quiet links plus a kebab, revealed by the row like the file
+   list's delete. The reveal hook is the .row-reveal parent - opacity, not
+   display, so the row never changes width under the pointer. Keyboards and
+   touch always see them. */
+.row-acts { display: flex; gap: 6px; align-items: center; justify-content: flex-end; white-space: nowrap; }
+.kebab {
+  width: 26px; height: 26px; border-radius: 6px; border: none; background: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--mut); font-weight: 700; letter-spacing: 1px; cursor: pointer;
+  font-size: 13px; line-height: 1;
+}
+.kebab:hover { background: #EDF3FA; color: var(--navy); }
+.kebab:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+.row-reveal .row-acts .btn.link { opacity: 0; transition: opacity 0.12s ease; }
+.row-reveal:hover .row-acts .btn.link,
+.row-reveal:focus-within .row-acts .btn.link { opacity: 1; }
+@media (hover: none) { .row-reveal .row-acts .btn.link { opacity: 1; } }
+
+/* A labelled form field: label, control, then a hint or an error - never
+   both, the error takes the hint's place while it stands. */
+.field { margin-bottom: 10px; min-width: 0; }
+.field-req { color: var(--t-bad-fg); }
+.field-opt { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.field-hint { font-size: 12px; color: var(--mut); margin-top: 4px; }
+.field-err { font-size: 12px; color: var(--t-bad-fg); margin-top: 4px; }
