@@ -126,7 +126,7 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
       entries.push({
         kind: "asset", id: a.id,
         externalId: a.serial ? `SN ${a.serial}` : a.kind,
-        label: `${a.kind}${a.model ? ` — ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
+        label: `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}`,
         systemUpdate: u.systemUpdate, actionItem: u.actionItem, skipped: u.skipped,
         written: !!(u.systemUpdate || u.actionItem),
       });

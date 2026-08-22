@@ -26,7 +26,7 @@ describe("mergeAssetHistory", () => {
     expect(lines.map((l) => l.kind)).toEqual(["part", "time", "event", "task", "event"]);
     expect(lines[0].instrumentId).toBe(2);
     expect(lines[3].text).toBe("✓ Flow calibration");
-    expect(lines[1].text).toBe("1.5 h — Bill");
+    expect(lines[1].text).toBe("1.5 h - Bill");
   });
   it("keeps work the asset owns on its own, with no system attribution", () => {
     const lines = mergeAssetHistory(

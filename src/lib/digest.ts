@@ -533,7 +533,7 @@ function renderBoard(section: DigestSection, internal: boolean): string {
 
 function renderSection(section: DigestSection, internal: boolean, operatorName: string, window: string): string {
   const title = section.orgId === null
-    ? `${esc(operatorName)} — own &amp; unassigned`
+    ? `${esc(operatorName)} - own &amp; unassigned`
     : `${esc(operatorName)} × ${esc(section.name)}`;
   const c = courts(section.pending);
   const counts = [

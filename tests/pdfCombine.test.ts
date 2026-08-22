@@ -208,8 +208,8 @@ describe("assemblePdf (page-level)", () => {
       { coverTitle: "Packet", coverLines: ["SS-1"], pageNumbers: true, headers: true },
     ));
     const cover = pageText(out, 0);
-    expect(cover).toContain("1.  Intro — p. 2");
-    expect(cover).toContain("2.  Data — p. 3");
+    expect(cover).toContain("1.  Intro - p. 2");
+    expect(cover).toContain("2.  Data - p. 3");
     expect(cover).not.toContain("3.  ");
   });
 
@@ -223,9 +223,9 @@ describe("assemblePdf (page-level)", () => {
       { coverTitle: "Packet", coverLines: ["SS-1"], pageNumbers: true, headers: true },
     ));
     const cover = pageText(out, 0);
-    expect(cover).toContain("1.  Section 1 — p. 2");
+    expect(cover).toContain("1.  Section 1 - p. 2");
     expect(cover).toMatch(/and \d+ more sections/);
     // The last entry drawn must still be the last one that fits, not entry 60.
-    expect(cover).not.toContain("Section 60 — p. 61");
+    expect(cover).not.toContain("Section 60 - p. 61");
   });
 });

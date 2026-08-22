@@ -29,7 +29,7 @@ export default async function AssetLabelPage({ params }: { params: Promise<{ id:
       url={base ? `${base}/assets/${asset.id}` : ""}
       headline={asset.serial ? `SN ${asset.serial}` : asset.kind}
       lines={[
-        `${asset.kind}${asset.model ? ` — ${asset.model}` : ""}`,
+        `${asset.kind}${asset.model ? ` - ${asset.model}` : ""}`,
         asset.manufacturer,
       ]}
       brandName={brand.operatorName}

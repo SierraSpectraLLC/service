@@ -72,7 +72,7 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
       return i ? (named ? `${i.externalId} - ${named}` : i.externalId) : "?";
     }
     const a = assetRows.find((r) => r.id === w.assetId);
-    return a ? `${a.kind}${a.model ? ` — ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}` : "?";
+    return a ? `${a.kind}${a.model ? ` - ${a.model}` : ""}${a.serial ? ` (SN ${a.serial})` : ""}` : "?";
   };
 
   const counts = (id: number) => {

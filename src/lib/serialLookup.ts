@@ -55,7 +55,7 @@ export async function findOutsideMatches(user: SessionUser, query: string): Prom
   const out: OutsideMatch[] = [];
   const seenSystems = new Set<number>();
   for (const a of hidden) {
-    const desc = `${a.kind}${a.model ? ` — ${a.model}` : ""}`;
+    const desc = `${a.kind}${a.model ? ` - ${a.model}` : ""}`;
     if (a.instrumentId !== null) {
       if (seenSystems.has(a.instrumentId)) continue; // one card per system
       seenSystems.add(a.instrumentId);

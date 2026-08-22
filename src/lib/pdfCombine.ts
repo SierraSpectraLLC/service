@@ -178,7 +178,7 @@ export async function assemblePdf(
     const room = Math.max(1, Math.floor((tocTop - 20 - 72) / 16) + 1);
     const shown = runs.length > room ? runs.slice(0, room - 1) : runs;
     shown.forEach((run, i) => {
-      cover.drawText(fit(`${i + 1}.  ${run.title || "(untitled)"} — p. ${run.page}`, 88), {
+      cover.drawText(fit(`${i + 1}.  ${run.title || "(untitled)"} - p. ${run.page}`, 88), {
         x: 72, y: tocTop - 20 - i * 16, size: 10, font, color: MUT,
       });
     });

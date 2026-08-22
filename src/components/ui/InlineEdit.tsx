@@ -35,7 +35,7 @@ export default function InlineEdit({ value, onSave, label, mono, placeholder }: 
       <button type="button" className={`inline-edit-view${mono ? " mono" : ""}`}
         aria-label={`Edit ${label}`}
         onClick={() => { setDraft(value); setEditing(true); }}>
-        <span>{value || <span className="mut">{placeholder ?? "—"}</span>}</span>
+        <span>{value || <span className="mut">{placeholder ?? "-"}</span>}</span>
         <span className="pencil" aria-hidden="true">✎</span>
       </button>
     );

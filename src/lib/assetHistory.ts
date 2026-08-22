@@ -45,7 +45,7 @@ export function mergeAssetHistory(
     })),
     ...time.map((t) => ({
       at: t.createdAt, instrumentId: t.instrumentId, kind: "time" as const,
-      text: `${formatHours(t.minutes)} — ${t.person}`, detail: t.note || undefined,
+      text: `${formatHours(t.minutes)} - ${t.person}`, detail: t.note || undefined,
     })),
   ];
   return lines.sort((a, b) => b.at.getTime() - a.at.getTime());
