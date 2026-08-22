@@ -137,7 +137,7 @@ export default function PartNumberField({
                   {/* What it costs, where the reader is allowed to know - the
                       answer to "is this the one to order" is half price. */}
                   {h.entry.priceCents !== null && (
-                    <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>
+                    <span className="pill good">
                       {formatCents(h.entry.priceCents)}{h.entry.vendor ? ` · ${h.entry.vendor}` : ""}
                     </span>
                   )}
