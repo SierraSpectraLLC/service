@@ -134,6 +134,8 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
 
       {grid && (
         <div className="dash-form">
+          <div className="panel-head"><span className="card-title">Add several units</span></div>
+          <div className="panel-hint">A row per unit; paste a block straight from a spreadsheet.</div>
           <AssetGrid instrumentId={instrumentId} kinds={kinds} models={gridModels} owners={owners}
             onDone={() => setGrid(false)} />
         </div>
