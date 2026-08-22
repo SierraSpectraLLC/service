@@ -11,7 +11,7 @@ export default function StockAddCard({ children }: { children: React.ReactNode }
   const [open, setOpen] = useState(false);
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: open ? 10 : 0 }}>
+      <div className="row-2" style={{ marginBottom: open ? 10 : 0 }}>
         <div className="card-title">Add to inventory</div>
         <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => setOpen(!open)}>
           {open ? "Cancel" : "+ Add lines"}
