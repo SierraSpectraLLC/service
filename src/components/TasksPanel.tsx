@@ -17,6 +17,8 @@ import { evaluateResult, resultIsRecorded, toleranceBand } from "@/lib/testResul
 import { checklistProgress } from "@/lib/checklist";
 import MentionBox from "./MentionBox";
 import type { Candidate } from "@/lib/mentions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 type Note = { id: number; author: string; text: string; createdAt: string };
 type Item = { id: number; text: string; done: boolean; heading?: boolean; thread: Note[] };
@@ -302,9 +304,12 @@ export default function TasksPanel({
             <>
               {" "}<button className="btn link" style={{ fontSize: 11 }} onClick={() => setInput(key, m.text)}>edit</button>
               <button className="btn link" style={{ fontSize: 11, color: "#A32D2D", padding: "0 4px" }}
-                onClick={() => {
-                  if (!window.confirm("Delete this note?")) return;
-                  startTransition(() => (kind === "item" ? deleteItemNote(m.id) : deleteTaskNote(m.id)));
+                onClick={async () => {
+                  if (!(await confirmDialog({ title: "Delete this note?", action: "Delete note", tone: "bad" }))) return;
+                  startTransition(async () => {
+                    await (kind === "item" ? deleteItemNote(m.id) : deleteTaskNote(m.id));
+                    toast({ message: "Deleted the note" });
+                  });
                 }}>×</button>
             </>
           )}
@@ -516,9 +521,16 @@ export default function TasksPanel({
                     </button>
                     {isStaff && (
                       <button className="btn link" title="Remove item" style={{ color: "#A32D2D", padding: "0 4px" }}
-                        onClick={() => {
-                          if (n > 0 && !window.confirm(`Remove "${c.text}" and its ${n} note${n > 1 ? "s" : ""}?`)) return;
-                          startTransition(() => deleteChecklistItem(c.id));
+                        onClick={async () => {
+                          if (n > 0 && !(await confirmDialog({
+                            title: `Remove "${c.text}"?`,
+                            body: `Its ${n} note${n > 1 ? "s go" : " goes"} with it.`,
+                            action: "Remove item", tone: "bad",
+                          }))) return;
+                          startTransition(async () => {
+                            await deleteChecklistItem(c.id);
+                            toast({ message: "Removed the item" });
+                          });
                         }}>×</button>
                     )}
                   </div>
