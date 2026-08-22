@@ -12,6 +12,8 @@ import AccessRequestsPanel, { type AccessRequestRow } from "./AccessRequestsPane
 import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 import { STANDING_TONE } from "@/lib/gxp";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 type Inst = {
   id: number; externalId: string; client: string; category: string; priority: number;
@@ -232,9 +234,19 @@ export default function SystemPanel({ instrument, label, clients, categories, st
             <button className="btn sm" onClick={() => setEditing(false)} disabled={pending}>Cancel</button>
             {!instrument.archived && (
               <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending}
-                onClick={() => {
-                  if (!window.confirm(`Archive ${instrument.externalId}? It keeps all its history and can be restored any time.`)) return;
-                  startTransition(() => setInstrumentArchived(instrument.id, true));
+                onClick={async () => {
+                  if (!(await confirmDialog({
+                    title: `Archive ${instrument.externalId}?`,
+                    body: "It keeps all its history and can be restored any time. It leaves the dashboard, EOD, and sheet parity.",
+                    action: `Archive ${instrument.externalId}`,
+                  }))) return;
+                  startTransition(async () => {
+                    await setInstrumentArchived(instrument.id, true);
+                    toast({
+                      message: `Archived ${instrument.externalId}`,
+                      undo: () => { void setInstrumentArchived(instrument.id, false); },
+                    });
+                  });
                 }}>Archive</button>
             )}
             {isOwner && (
