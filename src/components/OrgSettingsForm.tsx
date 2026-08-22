@@ -208,7 +208,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
           return (
             <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
               <span className="mono" style={{ fontSize: 13 }}>{r.entry}</span>
-              {domain && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>whole domain</span>}
+              {domain && <span className="pill info">whole domain</span>}
               {isOwner ? (
                 <select value={r.canEdit ? "editor" : "viewer"} disabled={pending} aria-label={`Role for ${r.entry}`}
                   onChange={(e) => startTransition(async () => { await setClientAccessRole(r.id, e.target.value === "editor"); })}
@@ -217,7 +217,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                   <option value="editor">editor</option>
                 </select>
               ) : (
-                <span className="pill" style={{ background: r.canEdit ? "#E5F3E5" : "#EEF1F5", color: r.canEdit ? "#2E6B2E" : "#475569" }}>
+                <span className={`pill ${r.canEdit ? "good" : "neutral"}`}>
                   {r.canEdit ? "editor" : "viewer"}
                 </span>
               )}
@@ -231,7 +231,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
                   agreements
                 </label>
               ) : r.canSeeAgreements ? (
-                <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>agreements</span>
+                <span className="pill neutral">agreements</span>
               ) : null}
               {(isOwner || !domain) && (
                 <button className="btn link" style={{ marginLeft: "auto", color: "#A32D2D", fontSize: 11 }} disabled={pending}
@@ -420,7 +420,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               }}>
               {resaleOn ? "Turn resale off" : "Turn resale on"}
             </button>
-            <span className="pill" style={{ background: resaleOn ? "#E5F3E5" : "#EEF1F5", color: resaleOn ? "#2E6B2E" : "#475569" }}>
+            <span className={`pill ${resaleOn ? "good" : "neutral"}`}>
               {resaleOn ? "can list equipment for sale" : "not a reseller"}
             </span>
           </div>
@@ -449,7 +449,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               }}>
               {remoteOn ? "Turn client access off" : "Turn client access on"}
             </button>
-            <span className="pill" style={{ background: remoteOn ? "#E5F3E5" : "#EEF1F5", color: remoteOn ? "#2E6B2E" : "#475569" }}>
+            <span className={`pill ${remoteOn ? "good" : "neutral"}`}>
               {remoteOn ? "their editors can connect" : "support only"}
             </span>
           </div>
@@ -503,7 +503,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               <span style={{ fontSize: 13 }}>Google Sheet tracker</span>
               {org.isSheetOrg ? (
                 <>
-                  <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>syncing with {org.name}</span>
+                  <span className="pill good">syncing with {org.name}</span>
                   {/* The way back out. Setting the tracker was reversible in the
                       action all along; there was simply no control for it, so the
                       first organization named here became permanent. */}
