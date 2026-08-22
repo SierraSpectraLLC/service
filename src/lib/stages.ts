@@ -192,13 +192,13 @@ export const PART_TONE: Record<string, Tone> = {
   Installed: "good",
   Removed: "neutral",
 };
-export const ATTACH_META: Record<string, { glyph: string; bg: string; fg: string }> = {
-  "Tune report": { glyph: "⚙", bg: "#EDEBFA", fg: "#4F45A3" },
-  "Test data": { glyph: "▤", bg: "#E7F2FA", fg: "#1D6396" },
-  Report: { glyph: "▦", bg: "#E5F3E5", fg: "#2E6B2E" },
-  Photo: { glyph: "▣", bg: "#FAF0DC", fg: "#8A5410" },
-  Manual: { glyph: "▥", bg: "#FBEAE3", fg: "#A33A1A" },
-  Other: { glyph: "▢", bg: "#EEF1F5", fg: "#475569" },
+export const ATTACH_META: Record<string, { glyph: string; tone: Tone }> = {
+  "Tune report": { glyph: "⚙", tone: "accent" },
+  "Test data": { glyph: "▤", tone: "info" },
+  Report: { glyph: "▦", tone: "good" },
+  Photo: { glyph: "▣", tone: "warn" },
+  Manual: { glyph: "▥", tone: "neutral" },
+  Other: { glyph: "▢", tone: "neutral" },
 };
 
 export function trackUrl(carrier: string, n: string): string | null {

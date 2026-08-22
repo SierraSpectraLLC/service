@@ -482,22 +482,20 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
                   style={{ width: 52, height: 52, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} />
               </a>
             ) : (
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: m.bg, color: m.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: `var(--t-${m.tone}-bg)`, color: `var(--t-${m.tone}-fg)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{m.glyph}</div>
             )}
             <div style={{ minWidth: 0, flex: "1 1 190px" }}>
               <div className="mono" style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.fileName}</div>
               {a.description && <div style={{ fontSize: 12, marginTop: 2, overflowWrap: "anywhere" }}>{a.description}</div>}
               <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
-                <span className="pill" style={{ background: m.bg, color: m.fg }}>{a.kind}</span>
+                <span className={`pill ${m.tone}`}>{a.kind}</span>
                 {a.expiresOn && today && (() => {
                   const days = daysUntil(a.expiresOn, today);
                   const late = days < 0, soon = days >= 0 && days <= 60;
                   return (
-                    <span className="pill" title={`Valid until ${a.expiresOn}`} style={{
-                      marginLeft: 4,
-                      background: late ? "#FBE9E9" : soon ? "#FAF0DC" : "#EEF1F5",
-                      color: late ? "#A32D2D" : soon ? "#8A5410" : "#475569",
-                    }}>{expiryLabel(a.expiresOn, today)}</span>
+                    <span className={`pill ${late ? "bad" : soon ? "warn" : "neutral"}`}
+                      title={`Valid until ${a.expiresOn}`} style={{ marginLeft: 4 }}>
+                      {expiryLabel(a.expiresOn, today)}</span>
                   );
                 })()}
                 <span style={{ marginLeft: 6 }}>

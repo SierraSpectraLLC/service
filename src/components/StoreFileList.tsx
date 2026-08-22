@@ -572,7 +572,7 @@ export default function StoreFileList({
               and never the information. */}
           <span style={{ flex: "1 1 200px", minWidth: 0, display: "flex", gap: 7, alignItems: "baseline" }}
             title={f.description ? `${f.fileName} - ${f.description}` : f.fileName}>
-            <span aria-hidden style={{ color: glyph(f).fg, flexShrink: 0 }}>{glyph(f).glyph}</span>
+            <span aria-hidden style={{ color: `var(--t-${glyph(f).tone}-fg)`, flexShrink: 0 }}>{glyph(f).glyph}</span>
             <a href={`/api/files/${f.places[0].attachmentId}`} target="_blank" rel="noreferrer"
               style={{ fontSize: 13, fontWeight: 600, textDecoration: "none", minWidth: 0, flexShrink: 1, ...oneLine }}>
               {f.fileName}
@@ -591,7 +591,7 @@ export default function StoreFileList({
               <button className="pill" type="button"
                 title={folderPath(folders, f.folderId).map((x) => x.name).join(" / ")}
                 onClick={() => { setFilter(""); setAt(f.folderId); }}
-                style={{ background: "#FAF0DC", color: "#8A5410", border: "none", cursor: "pointer", ...oneLine, maxWidth: 120 }}>
+                style={{ background: "var(--t-warn-bg)", color: "var(--t-warn-fg)", border: "none", cursor: "pointer", ...oneLine, maxWidth: 120 }}>
                 ▮ {folders.find((x) => x.id === f.folderId)?.name ?? "folder"}
               </button>
             )}
@@ -668,7 +668,7 @@ export default function StoreFileList({
                     <img src={`/api/files/${f.places[0].attachmentId}`} alt="" loading="lazy"
                       style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
-                    <span aria-hidden style={{ fontSize: 30, color: glyph(f).fg }}>{glyph(f).glyph}</span>
+                    <span aria-hidden style={{ fontSize: 30, color: `var(--t-${glyph(f).tone}-fg)` }}>{glyph(f).glyph}</span>
                   )}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.25 }}>{f.fileName}</div>
@@ -805,7 +805,7 @@ function WhereChips({ file, removable, pending, onRemoved, startTransition }: {
         </span>
       )}
       {records.slice(0, 2).map((p) => (
-        <span key={p.attachmentId} className="pill" style={{ background: "#EEF1F5", color: "#475569", display: "inline-flex", gap: 4, alignItems: "center" }}>
+        <span key={p.attachmentId} className="pill neutral" style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
           <Link href={p.kind === "system" ? `/instruments/${p.id}` : `/assets/${p.id}`}
             style={{ textDecoration: "none" }}>{p.label}</Link>
           {removable(p) && (
