@@ -304,15 +304,12 @@ export default function PanelLayout({ viewKey, panels, defaultRight, saved, grou
         <nav className="section-bar" aria-label="Page sections">
           {groups!.map((g) => {
             const tone = g.badgeTone ?? "info";
-            const badgeStyle = tone === "bad" ? { background: "#FBE9E9", color: "#A32D2D" }
-              : tone === "warn" ? { background: "#FAF0DC", color: "#8A5410" }
-              : { background: "#E7F2FA", color: "#1D6396" };
             return (
               <button key={g.key} className={`subtab${active === g.key ? " active" : ""}`}
                 aria-current={active === g.key} onClick={() => jumpTo(g.key)}>
                 {g.label}
                 {g.badge !== undefined && g.badge !== 0 && (
-                  <span className="pill" style={{ ...badgeStyle, marginLeft: 6 }}>{g.badge}</span>
+                  <span className={`pill ${tone}`} style={{ marginLeft: 6 }}>{g.badge}</span>
                 )}
               </button>
             );
