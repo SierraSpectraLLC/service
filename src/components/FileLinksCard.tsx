@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { createDropLink, revokeDropLink, revokeShareLink } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { addDaysIso, DEFAULT_LINK_DAYS, linkLine, MAX_LINK_DAYS } from "@/lib/dropShare";
 
 export type StoreLink = {
@@ -119,11 +121,16 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
                     setCopiedId(l.id); setTimeout(() => setCopiedId(null), 1500);
                   }}>{copiedId === l.id ? "copied ✓" : "copy link"}</button>
                 <button className="btn link" style={{ fontSize: 11, color: "#A32D2D" }} disabled={pending}
-                  onClick={() => {
-                    if (!window.confirm(`Kill this link? Anyone holding it loses access immediately.`)) return;
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: "Kill this link?",
+                      body: "Anyone holding it loses access immediately.",
+                      action: "Kill link", tone: "bad",
+                    }))) return;
                     startTransition(async () => {
                       const res = await (l.kind === "drop" ? revokeDropLink(l.id) : revokeShareLink(l.id));
                       setError(res?.error ?? "");
+                      if (!res?.error) toast({ message: "Killed the link" });
                     });
                   }}>revoke</button>
               </span>
