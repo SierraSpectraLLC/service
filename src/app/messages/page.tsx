@@ -77,7 +77,7 @@ export default async function MessagesPage() {
       <div className="page-head">
         <h1 className="page-title">Messages</h1>
         {totalUnread > 0 && (
-          <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D", fontWeight: 700 }}>
+          <span className="pill bad">
             {totalUnread} unread
           </span>
         )}
@@ -104,10 +104,10 @@ export default async function MessagesPage() {
             }}>
             <span style={{ fontSize: 13, fontWeight: r.unread ? 700 : 600, flex: "0 0 auto" }}>{r.title}</span>
             {r.members > 2 && (
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{r.members}</span>
+              <span className="pill neutral">{r.members}</span>
             )}
             {r.unread > 0 && (
-              <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>{r.unread} new</span>
+              <span className="pill bad">{r.unread} new</span>
             )}
             <span className="mut" style={{ fontSize: 12, flex: "1 1 200px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {r.lastWho ? `${r.lastWho}: ` : ""}{r.lastLine}
