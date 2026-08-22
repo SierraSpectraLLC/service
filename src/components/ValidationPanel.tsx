@@ -288,7 +288,7 @@ export default function ValidationPanel({ instrumentId, docs, requiredTypes, fil
           <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
             <span className="eyebrow">{r.docType}</span>
             {r.required && !r.satisfied && (
-              <span className="pill" style={{ background: "#FBE9E9", color: "#A32D2D" }}>
+              <span className="pill bad">
                 {r.docs.length ? "not approved yet" : "missing"}
               </span>
             )}
