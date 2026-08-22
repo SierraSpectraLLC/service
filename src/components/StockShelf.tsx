@@ -134,10 +134,12 @@ export default function StockShelf({ items, targets, rooms, canIssue, canManage,
 
             {isOpen && (
               <div className="dash-form" style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <label style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--slate)" }}>
+                <div className="panel-head" style={{ marginBottom: 0 }}>
+                  <span className="card-title" style={{ fontSize: 14 }}>
                     {open.mode === "issue" ? "Issue" : open.mode === "receive" ? "Receive" : "Move"}
-                  </label>
+                  </span>
+                </div>
+                <div className="row-2">
                   <button className="btn sm" style={TAP} onClick={() => setQty(String(Math.max(1, (parseInt(qty, 10) || 1) - 1)))} aria-label="One fewer">−</button>
                   <input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="numeric" aria-label="How many"
                     style={{ width: 64, textAlign: "center", ...TAP }} />
