@@ -163,9 +163,12 @@ export default function DevUiGallery() {
             { key: "updated", label: "Updated", width: "90px", hideMobile: true },
           ]}
           rows={[
-            { key: 1, group: "Lab Zen", href: "#", cells: { dot: <Dot tone="bad" />, wo: <Id>WO-0412</Id>, system: <b>Agilent 6495C</b>, stage: <Pill tone="bad">Blocked</Pill>, updated: "2 h" } },
-            { key: 2, group: "Lab Zen", href: "#", cells: { dot: <Dot tone="warn" />, wo: <Id>WO-0411</Id>, system: <b>Thermo ISQ 7000</b>, stage: <Pill tone="warn">Their move</Pill>, updated: "1 d" } },
-            { key: 3, group: "Lab Zen", href: "#", cells: { dot: <Dot tone="good" />, wo: <Id>WO-0408</Id>, system: <b>Shimadzu LCMS-8060</b>, stage: <Pill tone="good">Ours</Pill>, updated: "3 h" } },
+            { key: 1, group: "Lab Zen", cells: { dot: <Dot tone="bad" />, wo: <Id>WO-0412</Id>, system: <b>Agilent 6495C</b>, stage: <Pill tone="bad">Blocked</Pill>, updated: "2 h" },
+              actions: [{ label: "Open", onClick: () => {} }] },
+            { key: 2, group: "Lab Zen", cells: { dot: <Dot tone="warn" />, wo: <Id>WO-0411</Id>, system: <b>Thermo ISQ 7000</b>, stage: <Pill tone="warn">Their move</Pill>, updated: "1 d" },
+              actions: [{ label: "Open", onClick: () => {} }] },
+            { key: 3, group: "Lab Zen", cells: { dot: <Dot tone="good" />, wo: <Id>WO-0408</Id>, system: <b>Shimadzu LCMS-8060</b>, stage: <Pill tone="good">Ours</Pill>, updated: "3 h" },
+              actions: [{ label: "Open", onClick: () => {} }] },
             { key: 4, group: "Coastal Analytical", cells: { dot: <Dot tone="info" />, wo: <Id>WO-0409</Id>, system: <b>PerkinElmer Optima 8300</b>, stage: <Pill tone="info">Quoted</Pill>, updated: "2 d" },
               actions: [{ label: "Open", onClick: () => {} }, { label: "Close out", onClick: () => {} }, { label: "Cancel", onClick: () => {}, tone: "bad" }] },
             { key: 5, group: "Coastal Analytical", cells: { dot: <Dot tone="neutral" />, wo: <Id>WO-0388</Id>, system: <b>Peak N2 generator</b>, stage: <Pill tone="faint">Parked</Pill>, updated: "9 d" },

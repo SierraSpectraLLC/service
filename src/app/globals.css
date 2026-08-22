@@ -678,9 +678,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 /* A destructive entry says so in red, in a row or in a menu. */
 .btn.link.danger { color: var(--t-bad-fg); }
 .menu-panel a.danger, .menu-panel button.danger { color: var(--t-bad-fg); }
-/* The button that does the destructive thing, in a ConfirmDialog's footer. */
-.btn.danger { background: var(--t-bad-fg); border-color: var(--t-bad-fg); color: #fff; }
-.btn.danger:hover { background: #8B2626; border-color: #8B2626; }
+/* The button that does the destructive thing, in a ConfirmDialog's footer.
+   :not(.link), or this filled style swallows the quiet red text links -
+   `btn link danger` rendered as a solid red bar until the /dev/ui fixture
+   caught it. */
+.btn.danger:not(.link) { background: var(--t-bad-fg); border-color: var(--t-bad-fg); color: #fff; }
+.btn.danger:not(.link):hover { background: #8B2626; border-color: #8B2626; }
 
 /* ── Dialog ─────────────────────────────────────────────────────────────────
    One modal for the whole app, built on the .sheet responsive rule (bottom
@@ -767,23 +770,32 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    in a grid that goes 1 to 4 columns by width. */
 .cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
 @media (max-width: 640px) { .cardgrid { grid-template-columns: 1fr; } }
+/* Every cell is placed EXPLICITLY. Auto-placement let a card without a
+   kebab pull its title up beside the eyebrow, so the same grid read two
+   ways in one row of cards. The kebab cell is always rendered (empty when
+   there are no actions) and holds its 26px, so the anatomy never varies. */
 .ecard {
   background: var(--card); border: 1px solid var(--line); border-radius: 12px;
   padding: 12px; display: grid; grid-template-columns: 52px minmax(0, 1fr) auto;
-  gap: 3px 12px; align-items: start;
+  grid-template-rows: auto auto auto auto; gap: 3px 12px; align-items: start;
 }
 .ecard-img {
-  width: 52px; height: 52px; border-radius: 8px; overflow: hidden; grid-row: 1 / 5;
+  width: 52px; height: 52px; border-radius: 8px; overflow: hidden;
+  grid-column: 1; grid-row: 1 / 5;
   background: linear-gradient(135deg, #E6EBF3, #D3DAE6);
   display: flex; align-items: center; justify-content: center;
 }
 .ecard-img img { width: 100%; height: 100%; object-fit: cover; }
 .ecard-img.missing { background: var(--t-warn-bg); }
-.ecard-title { font-weight: 700; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ecard-eyebrow { grid-column: 2; grid-row: 1; }
+.ecard-title {
+  grid-column: 2; grid-row: 2;
+  font-weight: 700; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .ecard-title a { color: inherit; text-decoration: none; }
-.ecard-meta { font-size: 12px; color: var(--mut); min-width: 0; }
-.ecard-kebab { grid-column: 3; grid-row: 1 / 5; }
-.ecard-pills { grid-column: 2 / 4; display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
+.ecard-meta { grid-column: 2; grid-row: 3; font-size: 12px; color: var(--mut); min-width: 0; }
+.ecard-kebab { grid-column: 3; grid-row: 1; min-width: 26px; justify-self: end; }
+.ecard-pills { grid-column: 2 / 4; grid-row: 4; display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
 
 /* ── Toasts ─────────────────────────────────────────────────────────────────
    The confirmation an action owes. Bottom-right on a desktop, bottom-centre

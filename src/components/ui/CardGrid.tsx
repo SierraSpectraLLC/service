@@ -30,12 +30,14 @@ export function EntityCard({ image, imageAlt = "", eyebrow, title, mono, href, m
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {image && <img src={image} alt={imageAlt} loading="lazy" />}
       </span>
-      {eyebrow != null && <span className="eyebrow">{eyebrow}</span>}
+      {eyebrow != null && <span className="eyebrow ecard-eyebrow">{eyebrow}</span>}
       <span className={`ecard-title${mono ? " mono" : ""}`}>
         {href ? <Link href={href}>{title}</Link> : title}
       </span>
       {meta != null && <span className="ecard-meta">{meta}</span>}
-      {kebab != null && <span className="ecard-kebab">{kebab}</span>}
+      {/* Always rendered: the corner belongs to the kebab whether or not
+          this card has one, so titles line up across the grid. */}
+      <span className="ecard-kebab">{kebab}</span>
       {pills != null && <span className="ecard-pills">{pills}</span>}
     </div>
   );
