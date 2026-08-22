@@ -1,0 +1,116 @@
+/**
+ * A real run with a throwaway database: `npm run dev:local`.
+ *
+ * Seeds an in-process PGlite Postgres from drizzle/schema-sync.sql (the same
+ * idempotent DDL every deploy applies), plants a small fixture so every list
+ * page has rows, forges an owner session, and boots `next dev` with LOCAL_DB=1
+ * so src/db swaps in the PGlite client. Nothing here can touch a real
+ * database: no DATABASE_URL is read, and the swap in src/db/index.ts is gated
+ * on NODE_ENV=development.
+ *
+ * Sign in by cookie, not by email: `authjs.session-token=devtoken`.
+ * Wipe and reseed by deleting the data dir (printed on boot).
+ */
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const DATA_DIR = process.env.PGLITE_DIR
+  || path.join(process.cwd(), "node_modules", ".cache", "ridgeline-pglite");
+const PORT = process.env.PORT || "3100";
+const OWNER = "dev@local.test";
+
+const FIXTURE = `
+  INSERT INTO app_settings (id, client_access_enabled) VALUES (1, true);
+
+  INSERT INTO orgs (name, kind) VALUES
+    ('Lab Zen', 'client'),
+    ('Coastal Analytical', 'client');
+
+  INSERT INTO users (id, name, email, role, onboarded_at)
+    VALUES ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now());
+  INSERT INTO sessions (session_token, user_id, expires)
+    VALUES ('devtoken', 'dev-user', now() + interval '30 days');
+
+  INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, notes) VALUES
+    ('LZ-001', 'Lab Zen', 'Agilent 6495C LC-MS', 'Agilent', 'US2405111', 1, '{"Checkout"}', 'Reserpine test and tune.'),
+    ('LZ-002', 'Lab Zen', 'Thermo ISQ 7000 GC-MS', 'Thermo', 'ISQ70233', 2, '{"Refurbishment","System setup"}', 'Turbo replaced, pumping down.'),
+    ('LZ-003', 'Lab Zen', 'Shimadzu LCMS-8060', 'Shimadzu', 'SH806014', 3, '{"Sign-off"}', 'Awaiting client sign-off.'),
+    ('CA-001', 'Coastal Analytical', 'PerkinElmer Optima 8300 ICP-OES', 'PerkinElmer', 'PE83007', 4, '{"Intake"}', ''),
+    ('CA-002', 'Coastal Analytical', 'Agilent 7890B GC', 'Agilent', 'CN14320', 5, '{"Waiting / blocked"}', 'HED fault - part on order.'),
+    ('CA-003', 'Coastal Analytical', 'Waters Xevo TQ-S', 'Waters', 'WAT5521', 6, '{"In service"}', '');
+
+  INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, status, location) VALUES
+    (1, 'Mass spec', '6495C', 'US2405111', 'Agilent', 'In service', 'Bench 4'),
+    (1, 'Pump', '1290 Quat Pump', 'DEBA2201', 'Agilent', 'In service', 'Bench 4'),
+    (2, 'Mass spec', 'ISQ 7000', 'ISQ70233', 'Thermo', 'In refurb', 'Bay 2'),
+    (2, 'Autosampler', 'TriPlus RSH', 'TP99120', 'Thermo', 'In refurb', 'Bay 2'),
+    (3, 'Mass spec', 'LCMS-8060', 'SH806014', 'Shimadzu', 'In service', 'Bay 1'),
+    (4, 'Spectrometer', 'Optima 8300', 'PE83007', 'PerkinElmer', 'Needs eval', 'Receiving'),
+    (5, 'GC', '7890B', 'CN14320', 'Agilent', 'Down', 'Bay 3'),
+    (NULL, 'N2 generator', 'Peak Genius 1051', 'PG105188', 'Peak', 'In service', 'Utility room'),
+    (NULL, 'Vacuum pump', 'Edwards nXDS10i', 'ED22981', 'Edwards', 'Spare', 'Shelf C'),
+    (NULL, 'Computer', 'Z2 Mini G9', 'HPZ29910', 'HP', 'Spare', 'Shelf A');
+
+  INSERT INTO work_orders (number, instrument_id, org_id, title, severity, state, assignee, opened_on, requested_by) VALUES
+    ('WO-0401', 1, 1, 'Annual PM and checkout',            'Routine',  'open',     '',    '2026-08-18', 'Rita Alvarez'),
+    ('WO-0402', 2, 1, 'Replace turbo and recertify',       'Down',     'active',   'joe', '2026-08-11', 'Rita Alvarez'),
+    ('WO-0403', 5, 2, 'No signal at detector',             'Down',     'waiting',  'joe', '2026-08-04', 'Sam Okafor'),
+    ('WO-0404', 3, 1, 'Carryover on blank injections',     'Degraded', 'resolved', 'joe', '2026-07-28', 'Rita Alvarez'),
+    ('WO-0405', 4, 2, 'Intake inspection and quote',       'Routine',  'closed',   'joe', '2026-07-14', 'Sam Okafor');
+
+  INSERT INTO stockrooms (name, kind, keeper, location) VALUES
+    ('Main stockroom', 'shop', 'joe', 'Back wall');
+
+  INSERT INTO stock_items (stockroom_id, part_number, name, qty, min_qty, bin, unit_cost_cents) VALUES
+    (1, 'G1960-80039', 'Oil mist filter',            2, 1, 'A1', 18500),
+    (1, '5188-5365',   'Septa, 11 mm, 50/pk',        0, 2, 'A2', 4200),
+    (1, '0100-1847',   'PTFE ferrule, 10/pk',        6, 2, 'A3', 2900),
+    (1, 'ED-A72401',   'nXDS tip seal kit',          1, 1, 'B1', 21000),
+    (1, 'WAT271066',   'ESI capillary',              0, 1, 'B2', 68000),
+    (1, '221-48601',   'Desolvation line, LCMS-8060', 3, 1, 'B3', 45500);
+
+  INSERT INTO purchase_orders (number, vendor, stockroom_id, org_id, status, expected_at, created_by) VALUES
+    ('PO-0118', 'Agilent', 1, 1, 'sent', '2026-08-29', '${OWNER}');
+  INSERT INTO po_lines (po_id, part_number, name, qty_ordered, qty_received, unit_cents) VALUES
+    (1, '5188-5365', 'Septa, 11 mm, 50/pk', 4, 0, 4200),
+    (1, 'G1960-80039', 'Oil mist filter', 2, 0, 18500),
+    (1, 'WAT271066', 'ESI capillary', 1, 0, 68000);
+
+  INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, visits_included, parts_allowance_cents, labor_included_minutes, value_cents, created_by) VALUES
+    (1, 'contract', 'AGR-2026-01', 'Lab Zen full service', 'active', '2026-01-01', '2026-12-31', 6, 500000, 4800, 3600000, '${OWNER}');
+`;
+
+async function seed() {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const pg = new PGlite(DATA_DIR);
+  await pg.exec(readFileSync("drizzle/schema-sync.sql", "utf8"));
+  const seeded = await pg.query("SELECT 1 FROM orgs LIMIT 1");
+  if (seeded.rows.length === 0) {
+    await pg.exec(FIXTURE);
+    console.log("[dev:local] seeded fixture (2 orgs, 6 systems, 10 assets, 5 WOs, 1 PO, 1 stockroom)");
+  } else {
+    console.log("[dev:local] existing data kept - delete the data dir to reseed");
+  }
+  await pg.close();
+}
+
+async function main() {
+  console.log(`[dev:local] database: ${DATA_DIR}`);
+  await seed();
+  console.log(`[dev:local] session cookie: authjs.session-token=devtoken (owner ${OWNER})`);
+  const child = spawn("npx", ["next", "dev", "-p", PORT], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      LOCAL_DB: "1",
+      PGLITE_DIR: DATA_DIR,
+      AUTH_SECRET: process.env.AUTH_SECRET || "dev-local-secret-not-for-production",
+      STAFF_EMAILS: process.env.STAFF_EMAILS || OWNER,
+      EMAIL_FROM: process.env.EMAIL_FROM || OWNER,
+    },
+  });
+  child.on("exit", (code) => process.exit(code ?? 0));
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });

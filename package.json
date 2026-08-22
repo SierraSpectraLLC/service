@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:local": "tsx scripts/dev-local.ts",
     "build": "next build",
     "start": "next start",
     "db:generate": "drizzle-kit generate",
@@ -30,6 +31,7 @@
     "resend": "^4.1.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.5",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^22.10.7",
     "@types/qrcode": "^1.5.6",

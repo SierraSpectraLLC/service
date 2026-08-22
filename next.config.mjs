@@ -3,6 +3,9 @@ import { PHASE_PRODUCTION_BUILD } from "next/constants.js";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // PGlite ships its own wasm and reads it off disk; bundling breaks that.
+  // Only the dev:local harness (LOCAL_DB=1) ever loads it - see src/db/index.ts.
+  serverExternalPackages: ["@electric-sql/pglite"],
   env: {
     // Evaluated once at build time; Vercel injects VERCEL_GIT_COMMIT_SHA.
     NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || "dev").slice(0, 7),

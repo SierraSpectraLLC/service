@@ -60,6 +60,34 @@ npm run dev
 (sees Settings), the rest are staff. `CLIENT_EMAILS` lists Lab Zen accounts;
 they can only sign in when the owner enables client access in Settings.
 
+### No credentials? `npm run dev:local`
+
+For UI work and screenshots there is a zero-setup path that needs no Neon, no
+Resend and no env file:
+
+```bash
+npm install
+npm run dev:local    # http://localhost:3100
+```
+
+It boots `next dev` against an in-process PGlite Postgres (a throwaway file
+under `node_modules/.cache/ridgeline-pglite`), applies the same
+`drizzle/schema-sync.sql` DDL every deploy runs, and seeds a small fixture -
+two client orgs, six systems, ten assets, five work orders across the states,
+one purchase order, one stockroom with a reorder list, one agreement - so
+every list page has rows. There is no email sign-in; the seed forges an owner
+session, and you enter with a cookie:
+
+```
+authjs.session-token=devtoken
+```
+
+The database swap lives in `src/db/index.ts`, gated on `NODE_ENV=development`
+plus `LOCAL_DB=1` (which only `scripts/dev-local.ts` sets), so production code
+paths are untouched. Delete the data dir to wipe and reseed. This harness is
+what the per-page 375/1280 captures under `docs/design/screens/` are taken
+from.
+
 ### 5. Vercel
 Import the repo in Vercel. Add all env vars from `.env`. Then:
 - **Region**: page speed is dominated by the latency between the Vercel
