@@ -37,7 +37,7 @@ export default function CatalogSelect({ value, options, onChange, hint, ariaLabe
         <input value={value} autoFocus aria-label={ariaLabel}
           placeholder="Type the model as it reads on the unit"
           onChange={(e) => onChange(e.target.value)} />
-        <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+        <div className="row-2" style={{ alignItems: "baseline" }}>
           <button type="button" className="btn link" style={{ fontSize: 10 }}
             onClick={() => { setTyping(false); if (!options.includes(value)) onChange(""); }}>
             pick from the catalog instead
