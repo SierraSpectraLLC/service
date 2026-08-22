@@ -111,9 +111,7 @@ export default function PoPanel({ po, lines, canManage, makers }: {
                   ? <span className="mut" style={{ fontSize: 12 }}>{formatCents(l.unitCents)} ea · {formatCents(total!)}</span>
                   : <span style={{ fontSize: 12, color: "#8A5410" }}>unpriced</span>}
                 {l.qtyReceived > 0 && (
-                  <span className="pill" style={{
-                    background: out === 0 ? "#E8F3EC" : "#FAF0DC", color: out === 0 ? "#2E6B2E" : "#8A5410", fontWeight: 700,
-                  }}>{l.qtyReceived} received{out > 0 ? `, ${out} to come` : ""}</span>
+                  <span className={`pill ${out === 0 ? "good" : "warn"}`}>{l.qtyReceived} received{out > 0 ? `, ${out} to come` : ""}</span>
                 )}
                 <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
                   {receivable && out > 0 && (
