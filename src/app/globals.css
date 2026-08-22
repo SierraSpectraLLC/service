@@ -96,8 +96,9 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .container.split { max-width: 1200px; }
 /* Settings. One width for every screen under it - Configuration, Personnel,
    Procedures, the catalog - because moving between them and having the column
-   jump is the kind of small wrongness that reads as a broken page. */
-.container.settings { max-width: 1080px; }
+   jump is the kind of small wrongness that reads as a broken page. Wider than
+   it was: the width now carries a 240px sidebar beside the content. */
+.container.settings { max-width: 1240px; }
 .container.fluid { max-width: 1440px; }    /* the file browser: a table with user-sized columns wants the room */
 
 /* ── Page header ────────────────────────────────────────────────────────────
@@ -405,6 +406,47 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .nav-utility { padding-left: 0; }
   .nav-utility::before { display: none; }
   .nav-ico { width: 38px; height: 38px; }
+}
+
+/* ── Settings shell ─────────────────────────────────────────────────────────
+   A 240px sidebar beside the page, replacing the two-row tab stack. On a
+   phone the sidebar folds into a drilldown: one closed row naming where you
+   are, opening to the same grouped list. */
+.settings-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 0 20px; align-items: start; }
+.settings-side {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 6px 0 14px; position: sticky; top: 12px;
+}
+.settings-group {
+  padding: 14px 16px 4px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.6px; text-transform: uppercase; color: var(--mut);
+}
+.settings-side a, .settings-mobnav nav a {
+  display: block; padding: 7px 16px; font-size: 13px; color: var(--ink);
+  text-decoration: none; border-left: 3px solid transparent;
+}
+.settings-side a:hover, .settings-mobnav nav a:hover { background: #F4F7FB; }
+.settings-side a.active, .settings-mobnav nav a.active {
+  background: var(--t-info-bg); border-left-color: var(--navy); color: var(--navy); font-weight: 600;
+}
+.settings-main { min-width: 0; }
+.settings-mobnav { display: none; }
+@media (max-width: 899px) {
+  .settings-shell { display: block; }
+  .settings-side { display: none; }
+  .settings-mobnav {
+    display: block; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; margin-bottom: 12px; overflow: hidden;
+  }
+  .settings-mobnav > summary {
+    list-style: none; cursor: pointer; padding: 11px 14px;
+    font-size: 13.5px; font-weight: 600; color: var(--navy);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .settings-mobnav > summary::-webkit-details-marker { display: none; }
+  .settings-mobnav > summary::marker { content: ""; }
+  .settings-mobnav nav { border-top: 1px solid var(--line); padding-bottom: 8px; }
+  .settings-mobnav nav a { border-left: none; }
 }
 
 /* ── Mobile navigation ──────────────────────────────────────────────────────

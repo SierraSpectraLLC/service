@@ -6,7 +6,6 @@ import {
 } from "@/db/schema";
 import { requirePlatformOwner } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
-import SettingsTabs from "@/components/SettingsTabs";
 import TenantConsole from "@/components/TenantConsole";
 
 export const dynamic = "force-dynamic";
@@ -69,8 +68,7 @@ export default async function TenantsPage() {
   const unassigned = staffRows.filter((s) => s.orgId === null).map((s) => s.email);
 
   return (
-    <div className="container settings">
-      <SettingsTabs active="tenants" />
+    <div>
       <TenantConsole rows={rows} unassigned={unassigned} rootOrgId={user.rootOperatorOrgId} />
     </div>
   );

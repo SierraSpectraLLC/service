@@ -7,7 +7,6 @@ import { houseEmails } from "@/lib/house";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getAppearance } from "@/lib/appearanceData";
 import { viewTenant, visibleOrgs } from "@/lib/tenancy";
-import SettingsTabs from "@/components/SettingsTabs";
 import ConfigurationForm from "@/components/ConfigurationForm";
 
 export const dynamic = "force-dynamic";
@@ -38,8 +37,7 @@ export default async function SettingsPage() {
   const digestHour = operatorRow?.digestHour ?? s?.digestHour ?? 7;
   const digestDays = operatorRow?.digestDays ?? s?.digestDays ?? "";
   return (
-    <div className="container settings">
-      <SettingsTabs active="configuration" />
+    <div>
       <ConfigurationForm
         stageDefs={stageDefList}
         orgs={orgRows.map((o) => ({ id: o.id, name: o.name, kind: o.kind }))}

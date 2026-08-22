@@ -5,7 +5,6 @@ import { assets, catalogRefs, instruments, vocabTerms } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
-import SettingsTabs from "@/components/SettingsTabs";
 import CatalogForm from "@/components/CatalogForm";
 import MakersCard from "@/components/MakersCard";
 import PendingModelsCard from "@/components/PendingModelsCard";
@@ -101,8 +100,7 @@ export default async function CatalogPage() {
   for (const m of models) (modelsByTypeName[m.assetType] ??= []).push(m.name);
 
   return (
-    <div className="container settings">
-      <SettingsTabs active="catalog" isOwner={user.role === "owner"} isPlatform={isPlatform} />
+    <div>
       <PendingModelsCard pending={pendingModels} modelOptions={modelsByTypeName} makers={makerRows.map((m) => m.name)} />
       <CatalogForm categories={categories} models={models} types={types} makers={makerRows.map((m) => m.name)} />
       <MakersCard makers={makerRows} />

@@ -11,7 +11,6 @@ import { forTenant, readTenant } from "@/lib/tenancy";
 import { makerNames } from "@/lib/makersData";
 import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
 import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
-import SettingsTabs from "@/components/SettingsTabs";
 import PartCatalogPanel from "@/components/PartCatalogPanel";
 import PriceBookCard from "@/components/PriceBookCard";
 
@@ -126,8 +125,7 @@ export default async function PartsCatalogPage() {
   ];
 
   return (
-    <div className="container settings">
-      <SettingsTabs active="parts" isOwner={user.role === "owner"} isPlatform={isPlatformStaff(tenantViewer(user))} />
+    <div>
       <PartCatalogPanel
         items={rows.map((r) => ({
           id: r.id, partNumber: r.partNumber, name: r.name, manufacturer: r.manufacturer,

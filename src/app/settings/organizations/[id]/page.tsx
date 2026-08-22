@@ -88,7 +88,7 @@ export default async function OrgSettingsPage({ params }: { params: Promise<{ id
     .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
   return (
-    <div className="container split">
+    <div>
       {isOwner && (
         <div style={{ marginBottom: 2 }}>
           <Link href="/settings/organizations" className="mut" style={{ fontSize: 13, textDecoration: "none" }}>← Organizations</Link>

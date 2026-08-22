@@ -10,7 +10,6 @@ import { systemLabel } from "@/lib/systemLabel";
 import { visibleOrgs } from "@/lib/tenancy";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
-import SettingsTabs from "@/components/SettingsTabs";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
 import { listHouseMembers } from "@/app/actions";
 
@@ -59,8 +58,7 @@ export default async function AdminSettingsPage() {
   }
 
   return (
-    <div className="container settings">
-      <SettingsTabs active="admin" isPlatform={isPlatform} />
+    <div>
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 

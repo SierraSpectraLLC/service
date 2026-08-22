@@ -6,7 +6,6 @@ import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { parseProcParts } from "@/lib/procedures";
 import { forTenant, readTenant } from "@/lib/tenancy";
-import SettingsTabs from "@/components/SettingsTabs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 
 export const dynamic = "force-dynamic";
@@ -46,8 +45,7 @@ export default async function ProceduresPage() {
   const categories = terms.filter((t) => t.kind === "category").map((t) => t.name);
 
   return (
-    <div className="container settings">
-      <SettingsTabs active="procedures" isOwner={user.role === "owner"} isPlatform={isPlatform} />
+    <div>
       <ProceduresPanel
         assetTypes={assetTypes}
         modelOptions={modelOptions}

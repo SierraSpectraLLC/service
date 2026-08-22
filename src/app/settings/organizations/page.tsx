@@ -5,7 +5,6 @@ import { appSettings, clientAllowlist, orgs, systemShares } from "@/db/schema";
 import { requireOwner } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
-import SettingsTabs from "@/components/SettingsTabs";
 import PersonnelForm from "@/components/PersonnelForm";
 import { visibleDirectory } from "@/lib/directory";
 
@@ -27,8 +26,7 @@ export default async function OrganizationsPage() {
     db.select({ orgId: systemShares.orgId }).from(systemShares),
   ]);
   return (
-    <div className="container settings">
-      <SettingsTabs active="organizations" isPlatform={isPlatform} />
+    <div>
       <PersonnelForm
         isPlatform={isPlatform}
         clientAccessEnabled={s?.clientAccessEnabled ?? false}

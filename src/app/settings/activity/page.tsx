@@ -8,7 +8,6 @@ import { visibleOrgs } from "@/lib/tenancy";
 import { daysAgo, rollup, shortAgent, type Account } from "@/lib/loginLog";
 import { loginsSince } from "@/lib/loginLogData";
 import { listHouseMembers } from "@/app/actions";
-import SettingsTabs from "@/components/SettingsTabs";
 import UsagePanel from "@/components/UsagePanel";
 
 export const dynamic = "force-dynamic";
@@ -88,8 +87,7 @@ export default async function ActivitySettingsPage() {
   }
 
   return (
-    <div className="container settings">
-      <SettingsTabs active="activity" isOwner isPlatform={platform} />
+    <div>
       <UsagePanel
         rows={rows.map((r) => ({
           ...r,
