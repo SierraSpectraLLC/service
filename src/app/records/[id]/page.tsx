@@ -9,6 +9,7 @@ import { houseOfRecord } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import type { SystemDossier } from "@/lib/dossier";
 import ActivityFeed from "@/components/ActivityFeed";
+import { RecordHero, type HeroStat } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -50,44 +51,48 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
       isNull(engagementRecords.supersededAt),
     ));
 
+  const heroStats: HeroStat[] = [
+    { value: shopTime(rec.revokedAt), label: handoff ? "handed on" : "ended" },
+    { value: d.tasks.length, label: "tasks" },
+    { value: d.parts.length, label: "parts" },
+    { value: d.attachments.length, label: "files" },
+  ];
+
   return (
     <div className="container page">
       <div className="crumb">
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Dashboard</Link> › <b>Engagement record</b>
       </div>
 
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
-          <span className="pill neutral">Frozen record</span>
-          <span className="mut" style={{ fontSize: 12 }}>
-            {handoff
-              ? `Handed on ${shopTime(rec.revokedAt)}. Your tenure as it stood that day - it never updates, and the live system has moved on without it.`
-              : `Engagement ended ${shopTime(rec.revokedAt)}. Never updates.`}
-          </span>
-          {rec.supersededAt !== null && (
-            <span className="mut" style={{ fontSize: 12 }}>
-              · Superseded {shopTime(rec.supersededAt)}
-              {current && <> — <Link href={`/records/${current.id}`}>the current record</Link> covers this system</>}
-            </span>
-          )}
-        </div>
+      <RecordHero
+        eyebrow={`${handoff ? "Handoff" : "Engagement"} record${d.system.client ? ` · ${d.system.client}` : ""}`}
+        id={d.system.externalId}
+        title={d.label || "No assets were listed"}
+        meta={[d.system.category, ...d.system.stages, d.system.location].filter(Boolean).join(" · ") || undefined}
+        stats={heroStats}
+      />
 
-        <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
-          {d.system.externalId}{d.system.client ? ` · ${d.system.client}` : ""}
-        </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
-            {d.label || <span className="mut" style={{ fontWeight: 400, fontSize: 15 }}>No assets were listed</span>}
-          </div>
-          {d.system.category && <span className="pill info">{d.system.category}</span>}
-          {d.system.stages.map((s) => <span key={s} className="pill neutral">{s}</span>)}
-        </div>
-        {d.system.location && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{d.system.location}</div>}
-        {d.system.notes && <div className="mut" style={{ fontSize: 13, marginTop: 6, whiteSpace: "pre-wrap" }}>{d.system.notes}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
+        <span className="pill neutral">Frozen record</span>
+        <span className="mut" style={{ fontSize: 12 }}>
+          {handoff
+            ? `Handed on ${shopTime(rec.revokedAt)}. Your tenure as it stood that day - it never updates, and the live system has moved on without it.`
+            : `Engagement ended ${shopTime(rec.revokedAt)}. Never updates.`}
+        </span>
+        {rec.supersededAt !== null && (
+          <span className="mut" style={{ fontSize: 12 }}>
+            · Superseded {shopTime(rec.supersededAt)}
+            {current && <> — <Link href={`/records/${current.id}`}>the current record</Link> covers this system</>}
+          </span>
+        )}
+      </div>
+
+      {(d.system.notes || d.assets.length > 0 || d.gases.length > 0) && <div className="card">
+        {d.system.notes && <div className="mut" style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{d.system.notes}</div>}
 
         {d.assets.length > 0 && (
           <>
-            <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>Assets</div>
+            <div className="eyebrow" style={{ marginTop: d.system.notes ? 14 : 0, marginBottom: 6 }}>Assets</div>
             {d.assets.map((a, i) => (
               <div key={i} style={{ padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
                 <b>{a.kind}</b>{a.model ? ` — ${a.model}` : ""}{a.serial ? <span className="mono mut"> SN {a.serial}</span> : ""}
@@ -111,7 +116,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
             </div>
           </>
         )}
-      </div>
+      </div>}
 
       {d.tasks.length > 0 && (
         <div className="card">

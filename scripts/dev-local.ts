@@ -133,6 +133,20 @@ const FIXTURE = `
   INSERT INTO messages (thread_id, author_email, author_name, body) VALUES
     (1, 'rita@labzen.test', 'Rita Alvarez', 'Could we do Thursday morning for the sign-off?'),
     (1, '${OWNER}', 'Dev Owner', 'Thursday 9am works. I will bring the packet.');
+
+  INSERT INTO engagement_records (instrument_id, org_id, kind, external_id, label, revoked_by, revoked_at, data) VALUES
+    (NULL, 1, 'revoked', 'LZ-000', 'GC-MS - 8890 GC', '${OWNER}', now() - interval '30 days', '${JSON.stringify({
+      version: 1,
+      system: { externalId: "LZ-000", client: "Lab Zen", category: "GC-MS", location: "Annex bench 2", lead: "Rita Alvarez", notes: "Decommissioned unit kept for parts.", stages: ["Decommissioned"] },
+      label: "GC-MS - 8890 GC",
+      assets: [{ kind: "GC", model: "8890 GC", serial: "GC-0090", manufacturer: "Agilent", status: "Decommissioned", asFound: "", note: "" }],
+      gases: [{ gas: "Helium", status: "OK", note: "" }],
+      tasks: [{ title: "Final decontamination wipe-down", body: "", state: "Done", assignee: "Rita Alvarez", dueDate: "", origin: "", createdAt: "2026-06-20T15:00:00Z", completedAt: "2026-06-21T18:00:00Z", checklist: [], notes: [] }],
+      parts: [{ kind: "part", name: "Inlet liner", partNumber: "5190-2293", serial: "", qty: "1", specs: "", vendor: "Agilent", status: "Installed", installedAt: "2026-05-02", removedAt: "", note: "", createdAt: "2026-05-02T12:00:00Z" }],
+      attachments: [],
+      discussion: [{ author: "Rita Alvarez", body: "Confirming the unit is off the books.", createdAt: "2026-06-21T19:00:00Z" }],
+      activity: [{ actor: "Dev Owner", action: "archived", field: "", newValue: "", createdAt: "2026-06-22T09:00:00Z" }],
+    })}'::jsonb);
 `;
 
 async function seed() {
