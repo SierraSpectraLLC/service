@@ -7,6 +7,8 @@ import { looksLikeImage, refScopeLabel } from "@/lib/catalogRefs";
 import ProvenanceChip from "./ProvenanceChip";
 import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
 import { fmtBytes } from "@/lib/storage";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 
 type PickFile = {
   id: number; fileName: string; kind: string; description: string; size: number;
@@ -252,9 +254,17 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
               {canEdit && (
                 <button className="btn link" aria-label={`Remove ${r.title || "reference"}`} disabled={pending}
                   style={{ color: "#A32D2D", fontSize: 13 }}
-                  onClick={() => {
-                    if (!window.confirm(`Remove this from ${g}? It disappears from every unit that shows it.`)) return;
-                    startTransition(async () => { await removeCatalogRef(r.id); router.refresh(); });
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Remove this from ${g}?`,
+                      body: "It disappears from every unit that shows it.",
+                      action: "Remove reference", tone: "bad",
+                    }))) return;
+                    startTransition(async () => {
+                      await removeCatalogRef(r.id);
+                      toast({ message: `Removed the reference from ${g}` });
+                      router.refresh();
+                    });
                   }}>×</button>
               )}
             </div>
