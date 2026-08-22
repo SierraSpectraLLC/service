@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { setSystemSite } from "@/app/actions";
+import { toast } from "@/components/ui/Toast";
 import { addressLine, siteLabel } from "@/lib/sites";
 
 export type SiteOption = { id: number; name: string; address: string; archived: boolean };
@@ -34,13 +35,14 @@ export default function SiteCard({ instrumentId, siteId, options, site, ownerOrg
     startTransition(async () => {
       const res = await setSystemSite(instrumentId, value === "" ? null : parseInt(value));
       if (res?.error) { setError(res.error); return; }
+      toast({ message: value === "" ? "Cleared the site" : "Moved the system to the site" });
       setEditing(false);
     });
   };
 
   return (
     <div className="card">
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+      <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
         <div className="card-title">Site</div>
         {canEdit && options.length > 0 && (
           <button className="btn sm" style={{ marginLeft: "auto" }} onClick={() => { setEditing(!editing); setError(""); }}>
@@ -51,22 +53,22 @@ export default function SiteCard({ instrumentId, siteId, options, site, ownerOrg
 
       {site ? (
         <>
-          <div style={{ fontSize: 13, fontWeight: 700 }}>{siteLabel(site)}</div>
-          {site.address && <div className="mut" style={{ fontSize: 12 }}>{addressLine(site.address)}</div>}
+          <div className="t-body" style={{ fontWeight: 700 }}>{siteLabel(site)}</div>
+          {site.address && <div className="mut t-small">{addressLine(site.address)}</div>}
           {(site.contactName || site.contactPhone) && (
-            <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>
+            <div className="mut t-small" style={{ marginTop: 2 }}>
               {[site.contactName, site.contactPhone].filter(Boolean).join(" · ")}
             </div>
           )}
           {site.accessNotes && (
             <div style={{ marginTop: 8 }}>
               <div className="eyebrow" style={{ marginBottom: 2 }}>Getting in</div>
-              <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{site.accessNotes}</div>
+              <div className="t-small" style={{ whiteSpace: "pre-wrap" }}>{site.accessNotes}</div>
             </div>
           )}
         </>
       ) : (
-        <div className="mut" style={{ fontSize: 12.5 }}>
+        <div className="mut t-small">
           {options.length === 0
             ? ownerOrgId === null
               ? "House-stewarded, so there is no client site to put it at."
@@ -88,10 +90,10 @@ export default function SiteCard({ instrumentId, siteId, options, site, ownerOrg
           </select>
         </div>
       )}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 6 }}>{error}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
 
       {canEdit && ownerOrgId !== null && (
-        <div className="mut no-print" style={{ fontSize: 11, marginTop: 8 }}>
+        <div className="mut no-print t-meta" style={{ marginTop: 8 }}>
           Sites are kept on the{" "}
           <Link href={`/settings/organizations/${ownerOrgId}`} style={{ color: "var(--navy)" }}>
             owner&apos;s settings page
