@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import { reportIssue, requestPm } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { PM_WINDOWS } from "@/lib/pmRequest";
 
 /**
@@ -99,15 +100,21 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
   }
 
   return (
-    <>
-      <div className="scrim" onClick={close} />
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={`${title} - ${externalId}`}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>{title}</div>
-          <span className="mut" style={{ fontSize: 12 }}>{externalId}</span>
-          <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }} onClick={close}>close</button>
-        </div>
-
+    <Dialog open onClose={close} title={title} context={externalId}
+      footer={done ? (
+        <>
+          <span className="dialog-status" />
+          <button className="btn accent" onClick={close}>Done</button>
+        </>
+      ) : (
+        <>
+          <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+          <button className="btn" disabled={pending} onClick={close}>Cancel</button>
+          <button className="btn accent" disabled={pending || (!isPm && !summary.trim())} onClick={submit}>
+            {busy || (pending ? "Sending..." : "Send request")}
+          </button>
+        </>
+      )}>
         {done ? (
           <div>
             <div style={{ fontSize: 13, color: "#2E6B2E", fontWeight: 700, marginBottom: 6 }}>
@@ -120,7 +127,6 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
                   ? `${externalId} is in the service queue with your request on it. Follow ${number || "the work order"} under Work orders to see what's happening, and add to your note on the system's discussion.`
                   : `${externalId} is marked as needing maintenance and is in the service queue. Follow ${number || "the work order"} under Work orders to see what's happening, and add to your note on the system's discussion.`}
             </div>
-            <button className="btn sm accent" onClick={close}>Done</button>
           </div>
         ) : (
           <>
@@ -180,16 +186,8 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
               </>
             )}
 
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 10 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="btn sm accent" disabled={pending || (!isPm && !summary.trim())} onClick={submit}>
-                {busy || (pending ? "Sending..." : "Send")}
-              </button>
-              <button className="btn sm" disabled={pending} onClick={close}>Cancel</button>
-            </div>
           </>
         )}
-      </div>
-    </>
+    </Dialog>
   );
 }
