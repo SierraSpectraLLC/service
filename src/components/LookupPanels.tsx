@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { requestAccess, createSystemFromSerial } from "@/app/actions";
 import CatalogSelect from "./CatalogSelect";
+import { Field } from "@/components/ui";
 
 /**
  * The knock on the door: the serial matched a system in someone else's
@@ -89,44 +90,37 @@ export function CreateSystemForm({ serial, kinds, models, categories }: {
 
   return (
     <div className="dash-form" style={{ marginTop: 10, marginBottom: 0 }}>
-      <div className="mut" style={{ fontSize: 12, marginBottom: 8 }}>
-        Nobody has this serial yet - create it and start its service record.
-      </div>
+      <div className="panel-head"><span className="card-title" style={{ fontSize: 14 }}>Create the system</span></div>
+      <div className="panel-hint">Nobody has this serial yet - create it and start its service record.</div>
       <div className="pf3" style={{ marginBottom: 8 }}>
-        <div>
-          <label>System ID *</label>
+        <Field label="System ID" required>
           <input className="mono" value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} placeholder="Your reference, e.g. SP-101" />
-        </div>
-        <div>
-          <label>Owner / site</label>
+        </Field>
+        <Field label="Owner / site">
           <input value={draft.client} onChange={(e) => setDraft({ ...draft, client: e.target.value })} placeholder="Whose instrument it is" />
-        </div>
-        <div>
-          <label>Category</label>
+        </Field>
+        <Field label="Category">
           <CatalogSelect value={draft.category} options={categories} ariaLabel="System category"
             onChange={(category) => setDraft({ ...draft, category })} />
-        </div>
+        </Field>
       </div>
       <div className="pf3" style={{ marginBottom: 8 }}>
-        <div>
-          <label>Unit type *</label>
+        <Field label="Unit type" required>
           <CatalogSelect value={draft.kind} options={kinds} ariaLabel="Unit type"
             onChange={(kind) => setDraft({ ...draft, kind, model: "" })}
             hint="Define module types in Settings → Catalog" />
-        </div>
-        <div>
-          <label>Model</label>
+        </Field>
+        <Field label="Model">
           <CatalogSelect value={draft.model} options={models[draft.kind] ?? []} ariaLabel="Model"
             onChange={(model) => setDraft({ ...draft, model })}
             hint={`No ${draft.kind || "?"} models defined yet - add them in Settings → Catalog`} />
-        </div>
-        <div>
-          <label>Manufacturer</label>
+        </Field>
+        <Field label="Manufacturer">
           <input value={draft.manufacturer} onChange={(e) => setDraft({ ...draft, manufacturer: e.target.value })} placeholder="Shimadzu" />
-        </div>
+        </Field>
       </div>
-      <div className="mut mono" style={{ fontSize: 12, marginBottom: 8 }}>Serial: {serial}</div>
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
+      <div className="mut mono t-small" style={{ marginBottom: 8 }}>Serial: {serial}</div>
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginBottom: 8 }}>{error}</div>}
       <button className="btn sm accent" onClick={submit} disabled={pending || !draft.externalId.trim() || !draft.kind.trim()}>
         {pending ? "Creating..." : "Create system"}
       </button>
