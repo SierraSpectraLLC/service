@@ -85,9 +85,8 @@ export default function NotificationCenter({ initialUnread }: { initialUnread: n
       <NavIcon href="/inbox" label="Notifications" count={unread}><BellIcon /></NavIcon>
 
       {toasts.length > 0 && (
-        <div aria-live="polite" style={{
-          position: "fixed", right: 14, bottom: 14, zIndex: 60,
-          display: "flex", flexDirection: "column", gap: 8, maxWidth: 360,
+        <div aria-live="polite" className="stack-2" style={{
+          position: "fixed", right: 14, bottom: 14, zIndex: 60, maxWidth: 360,
         }}>
           {toasts.map((t) => (
             <div key={t.id} style={{
@@ -96,14 +95,14 @@ export default function NotificationCenter({ initialUnread }: { initialUnread: n
               display: "flex", gap: 8, alignItems: "baseline",
             }}>
               {t.href ? (
-                <Link href={t.href} style={{ fontSize: 13, textDecoration: "none", color: "var(--ink)", fontWeight: 600, flex: 1 }}
+                <Link href={t.href} className="t-body" style={{ textDecoration: "none", color: "var(--ink)", fontWeight: 600, flex: 1 }}
                   onClick={() => { void markNotificationRead(t.id); dismiss(t.id); }}>
                   {t.title}
                 </Link>
               ) : (
-                <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{t.title}</span>
+                <span className="t-body" style={{ fontWeight: 600, flex: 1 }}>{t.title}</span>
               )}
-              <button className="btn link" aria-label="Dismiss" style={{ fontSize: 13, padding: "0 2px" }}
+              <button className="btn link t-body" aria-label="Dismiss" style={{ padding: "0 2px" }}
                 onClick={() => dismiss(t.id)}>×</button>
             </div>
           ))}
