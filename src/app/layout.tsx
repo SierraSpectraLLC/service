@@ -16,6 +16,8 @@ import AccountMenu from "@/components/AccountMenu";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import NotificationCenter from "@/components/NotificationCenter";
+import { ConfirmHost } from "@/components/ui/ConfirmDialog";
+import { ToastHost } from "@/components/ui/Toast";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { getAppearance } from "@/lib/appearanceData";
@@ -244,6 +246,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             PT
           </div>
         </div>
+        {/* The shared feedback layer: one confirm, one toast rack, for every
+            page. Both render nothing until asked. */}
+        <ConfirmHost />
+        <ToastHost />
         <Analytics />
       </body>
     </html>

@@ -675,6 +675,98 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 /* A destructive entry says so in red, in a row or in a menu. */
 .btn.link.danger { color: var(--t-bad-fg); }
 .menu-panel a.danger, .menu-panel button.danger { color: var(--t-bad-fg); }
+/* The button that does the destructive thing, in a ConfirmDialog's footer. */
+.btn.danger { background: var(--t-bad-fg); border-color: var(--t-bad-fg); color: #fff; }
+.btn.danger:hover { background: #8B2626; border-color: #8B2626; }
+
+/* ── Dialog ─────────────────────────────────────────────────────────────────
+   One modal for the whole app, built on the .sheet responsive rule (bottom
+   sheet on a phone, centred dialog from 700px). The .dialog modifier turns
+   the sheet into a head / scrolling body / foot column so long forms scroll
+   inside while the title and the buttons stay put. */
+.sheet.dialog { padding: 0; display: flex; flex-direction: column; }
+.sheet.dialog.sm { max-width: 440px; }
+.sheet.dialog.lg { max-width: 860px; }
+.dialog-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.dialog-title { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.2px; color: var(--navy); }
+.dialog-context { font-size: 12px; color: var(--mut); margin-top: 2px; }
+.dialog-x {
+  margin-left: auto; border: none; background: none; cursor: pointer;
+  width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
+  color: var(--mut); font-size: 15px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.dialog-x:hover { background: #EDF3FA; color: var(--navy); }
+.dialog-x:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
+.dialog-body { padding: 6px 18px 16px; overflow-y: auto; min-height: 0; }
+.dialog-foot {
+  display: flex; gap: 8px; align-items: center; padding: 12px 18px;
+  border-top: 1px solid var(--line); flex-shrink: 0; background: var(--card);
+}
+.dialog-status { flex: 1; font-size: 12px; color: var(--mut); min-width: 0; }
+.dialog-status.err { color: var(--t-bad-fg); }
+.dialog-status.ok { color: var(--t-good-fg); }
+
+/* Stepped dialogs: a left step rail on a desktop, a thin progress bar on a
+   phone. The rail marks each step done (filled check) or needing attention
+   (amber bang) from live validation; the body is the caller's. */
+.dialog-body.steps { display: grid; grid-template-columns: 170px minmax(0, 1fr); padding: 0; }
+.dialog-stepnav { background: #FAFBFD; border-right: 1px solid var(--line); padding: 12px 0; }
+.dialog-stepnav button {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 14px; font-size: 12.5px; color: var(--mut); font-weight: 500;
+  border: none; background: none; cursor: pointer; text-align: left;
+  border-left: 3px solid transparent;
+}
+.dialog-stepnav button i {
+  width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #C9D1DE;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-style: normal; flex: none;
+}
+.dialog-stepnav button.done i { background: var(--t-good-fg); border-color: var(--t-good-fg); color: #fff; }
+.dialog-stepnav button.warn i { border-color: #E0A100; background: var(--t-warn-bg); color: var(--t-warn-fg); font-weight: 700; }
+.dialog-stepnav button.active { color: var(--ink); font-weight: 600; border-left-color: var(--navy); background: var(--card); }
+.dialog-stepnav button:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
+.dialog-stepbody { padding: 6px 18px 16px; overflow-y: auto; min-height: 0; }
+.dialog-progress { display: none; }
+@media (max-width: 699px) {
+  .dialog-stepnav { display: none; }
+  .dialog-body.steps { display: flex; flex-direction: column; }
+  .dialog-progress { display: flex; gap: 4px; padding: 10px 18px 0; flex-shrink: 0; }
+  .dialog-progress span { flex: 1; height: 3px; border-radius: 2px; background: var(--line); }
+  .dialog-progress span.on { background: var(--navy); }
+  .dialog-progress span.done { background: var(--t-good-fg); }
+}
+
+/* ── Toasts ─────────────────────────────────────────────────────────────────
+   The confirmation an action owes. Bottom-right on a desktop, bottom-centre
+   on a phone (above the thumb, under nothing). Five seconds, stacking,
+   with room for one Undo. */
+.toasts {
+  position: fixed; z-index: 60; bottom: 18px; right: 18px;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  background: var(--navy); color: #fff; padding: 10px 14px; border-radius: 10px;
+  font-size: 12.5px; display: flex; gap: 14px; align-items: center;
+  box-shadow: 0 10px 30px rgba(23, 42, 74, 0.3); pointer-events: auto;
+  max-width: min(420px, calc(100vw - 28px));
+}
+.toast.bad { background: var(--t-bad-fg); }
+.toast-undo {
+  border: none; background: none; cursor: pointer; padding: 0;
+  color: #9CC9EA; font-weight: 700; font-size: 12.5px; white-space: nowrap;
+}
+.toast.bad .toast-undo { color: #F8D0D0; }
+.toast-undo:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+@media (max-width: 640px) {
+  .toasts { left: 14px; right: 14px; bottom: 14px; align-items: stretch; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .toast { animation: toast-up 0.16s ease-out; }
+}
+@keyframes toast-up { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* The count beside a tab's label; warn when the section wants attention. */
 .tab .tab-n { font-size: 11px; color: var(--mut); margin-left: 4px; font-weight: 600; }
