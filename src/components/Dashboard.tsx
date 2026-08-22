@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import PickOrAdd from "./PickOrAdd";
 import CatalogSelect from "./CatalogSelect";
 import { createInstrument } from "@/app/actions";
+import Dialog from "@/components/ui/Dialog";
 import { matchesQuery } from "@/lib/search";
 
 type StageDefLite = { name: string; bg: string; fg: string };
@@ -313,7 +314,17 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       </div>
 
       {showNew && (
-        <div className="dash-form">
+        <Dialog open onClose={() => setShowNew(false)} title="New instrument"
+          context="The system is named by the assets you add on its page."
+          footer={
+            <>
+              <span className="dialog-status" />
+              <button className="btn" onClick={() => setShowNew(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={submitNew} disabled={pending}>
+                {pending ? "Creating..." : "Create instrument"}
+              </button>
+            </>
+          }>
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div><label>System ID *</label><input value={draft.externalId} onChange={(e) => setDraft({ ...draft, externalId: e.target.value })} placeholder="G-012" /></div>
             <div>
@@ -331,22 +342,16 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
                 hint="Define system types in Settings → Catalog" />
             </div>
           </div>
-          <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-            The system is named by the assets you add on its page.
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            {people.length > 0 && (
-              <>
-                <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
-                <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
-                  <option value="">-</option>
-                  {people.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </>
-            )}
-            <button className="btn sm accent" onClick={submitNew} disabled={pending}>{pending ? "Creating..." : "Create instrument"}</button>
-          </div>
-        </div>
+          {people.length > 0 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span className="mut" style={{ fontSize: 12 }}>Lead:</span>
+              <select value={draft.lead} onChange={(e) => setDraft({ ...draft, lead: e.target.value })} style={{ width: "auto", fontSize: 12 }}>
+                <option value="">-</option>
+                {people.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          )}
+        </Dialog>
       )}
 
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ID, module, serial, client, stage..." style={{ marginBottom: 12 }} />
