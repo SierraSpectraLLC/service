@@ -95,7 +95,7 @@ export default function ParityList({ diffs }: { diffs: Diff[] }) {
             style={{ cursor: "pointer", width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, display: "flex", alignItems: "center", gap: 8 }}>
             <span className="mut" style={{ fontSize: 12 }}>{showHistory ? "▾" : "▸"}</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--slate)" }}>History</span>
-            <span className="pill" style={{ background: "#EEF1F5", color: "#64748B" }}>{history.length}</span>
+            <span className="pill neutral">{history.length}</span>
           </button>
           {showHistory && (
             <div style={{ marginTop: 8 }}>
@@ -104,9 +104,7 @@ export default function ParityList({ diffs }: { diffs: Diff[] }) {
                   style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 12 }}>
                   <span className="mono" style={{ fontWeight: 700, color: "var(--navy)" }}>{d.externalId}</span>
                   <span>{d.field === "Row" ? "Row presence" : d.field}</span>
-                  <span className="pill" style={d.resolution === "auto_cleared"
-                    ? { background: "#EEF1F5", color: "#64748B" }
-                    : { background: "#E5F3E5", color: "#2E6B2E" }}>
+                  <span className={`pill ${d.resolution === "auto_cleared" ? "neutral" : "good"}`}>
                     {RESOLUTION_LABEL[d.resolution] || "resolved"}
                   </span>
                   <span className="mut" style={{ marginLeft: "auto" }}>{when(d.runAt)}</span>
