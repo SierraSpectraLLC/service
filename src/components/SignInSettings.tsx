@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { setMyPassword, clearMyPassword, setMyName, setMyPhone } from "@/app/actions";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { MIN_PASSWORD } from "@/lib/password";
 
 /**
@@ -39,6 +41,7 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
       if (res?.error) { setError(res.error); return; }
       setPw(""); setAgain(""); setOpen(false);
       setMsg(hasPassword ? "Password changed." : "Password set - it's there if email ever isn't.");
+      toast({ message: hasPassword ? "Changed the password" : "Set the password" });
     });
   };
 
@@ -49,6 +52,7 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
       const res = await setMyName(who);
       if (res?.error) { setError(res.error); return; }
       setMsg("Name saved - it's what the rest of the shop sees.");
+      toast({ message: "Saved your name" });
     });
   };
 
@@ -59,6 +63,7 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
       const res = await setMyPhone(tel);
       if (res?.error) { setError(res.error); return; }
       setMsg(tel.trim() ? "Number saved - you can have codes texted." : "Number removed.");
+      toast({ message: tel.trim() ? "Saved the number" : "Removed the number" });
     });
   };
 
@@ -70,10 +75,10 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
           your mentions and your hours; before this it was whatever somebody
           typed when they added you, which was usually nothing. */}
       <form onSubmit={saveName} style={{ marginBottom: 14 }}>
-        <label htmlFor="my-name" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>
+        <label htmlFor="my-name" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>
           Your name <span className="mut" style={{ fontWeight: 400 }}>{email}</span>
         </label>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="row-2">
           <input id="my-name" value={who} disabled={pending} maxLength={60}
             onChange={(e) => setWho(e.target.value)} placeholder="Joe Harris"
             style={{ flex: "1 1 200px", fontSize: 16 }} />
@@ -88,10 +93,10 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
           set the three Twilio variables and this appears on its own. */}
       {smsConfigured && (
         <form onSubmit={savePhone} style={{ marginBottom: 14 }}>
-          <label htmlFor="tel" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>
+          <label htmlFor="tel" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>
             Mobile number <span className="mut" style={{ fontWeight: 400 }}>for codes by text</span>
           </label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="row-2">
             <input id="tel" type="tel" autoComplete="tel" value={tel} disabled={pending}
               onChange={(e) => setTel(e.target.value)} placeholder="+1 555 123 4567"
               style={{ flex: "1 1 200px", fontSize: 16 }} />
@@ -104,17 +109,17 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
 
       {open ? (
         <form onSubmit={savePassword}>
-          <label htmlFor="new-pw" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>
+          <label htmlFor="new-pw" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>
             {hasPassword ? "New password" : "Password"} <span className="mut" style={{ fontWeight: 400 }}>at least {MIN_PASSWORD} characters</span>
           </label>
           <input id="new-pw" type="password" autoComplete="new-password" autoFocus value={pw}
             disabled={pending} onChange={(e) => setPw(e.target.value)}
             style={{ width: "100%", fontSize: 16, marginBottom: 8 }} />
-          <label htmlFor="again-pw" style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 3 }}>Again</label>
+          <label htmlFor="again-pw" className="t-small" style={{ fontWeight: 700, display: "block", marginBottom: 3 }}>Again</label>
           <input id="again-pw" type="password" autoComplete="new-password" value={again}
             disabled={pending} onChange={(e) => setAgain(e.target.value)}
             style={{ width: "100%", fontSize: 16, marginBottom: 10 }} />
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="row-2" style={{ flexWrap: "nowrap" }}>
             <button className="btn sm accent" type="submit" disabled={pending || !pw || !again}>
               {pending ? "Saving..." : hasPassword ? "Change it" : "Set it"}
             </button>
@@ -123,25 +128,33 @@ export default function SignInSettings({ name, email, hasPassword, phone, smsCon
           </div>
         </form>
       ) : (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12.5 }}>
+        <div className="row-2">
+          <span className="t-small">
             {hasPassword ? "A password is set." : "No password set - you sign in by code."}
           </span>
           <button className="btn sm" onClick={() => setOpen(true)}>
             {hasPassword ? "Change password" : "Set a password"}
           </button>
           {hasPassword && (
-            <button className="btn link" style={{ fontSize: 12, color: "#A32D2D" }} disabled={pending}
-              onClick={() => startTransition(async () => {
-                await clearMyPassword();
-                setMsg("Password removed - codes still work as they always did.");
-              })}>Remove</button>
+            <button className="btn link t-small" style={{ color: "var(--t-bad-fg)" }} disabled={pending}
+              onClick={async () => {
+                if (!(await confirmDialog({
+                  title: "Remove your password?",
+                  body: "Codes by email keep working as they always did.",
+                  action: "Remove password", tone: "bad",
+                }))) return;
+                startTransition(async () => {
+                  await clearMyPassword();
+                  toast({ message: "Removed the password" });
+                  setMsg("Password removed - codes still work as they always did.");
+                });
+              }}>Remove</button>
           )}
         </div>
       )}
 
-      {msg && <div style={{ fontSize: 12, color: "#2E6B2E", marginTop: 8 }}>{msg}</div>}
-      {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
+      {msg && <div className="t-small" style={{ color: "var(--t-good-fg)", marginTop: 8 }}>{msg}</div>}
+      {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
     </div>
   );
 }
