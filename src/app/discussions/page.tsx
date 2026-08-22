@@ -135,7 +135,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
               <b>{p.author}</b>{" "}
               <span className="mut" style={{ fontSize: 11 }}>{shopTime(p.createdAt)}</span>
               {p.audience === "internal" && (
-                <>{" "}<span className="pill" style={{ background: "#FAF0DC", color: "#8A5410" }}>internal</span></>
+                <>{" "}<span className="pill warn">internal</span></>
               )}
             </div>
             <div style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.body}</div>
