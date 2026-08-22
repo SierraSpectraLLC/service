@@ -25,10 +25,10 @@ describe("failed tests in the digest", () => {
     expect(html).toContain(TONE_HEX.bad.fg);
   });
 
-  it("words the partner edition factually, without the internal framing", () => {
-    const html = renderDigestBody([section({ failedTests: [{ ...failed, required: false }] })], false, "Sierra Spectra");
-    expect(html).toContain("Recorded results outside their pass limits.");
-    expect(html).not.toContain("blocks sign-off");
+  it("names the consequence only where it is one", () => {
+    const optional = renderDigestBody([section({ failedTests: [{ ...failed, required: false }] })], true, "Sierra Spectra");
+    expect(optional).toContain("Failed tests (1)");
+    expect(optional).not.toContain("blocks sign-off");
   });
 
   it("a failed test forfeits the quiet line and lands in the counts", () => {

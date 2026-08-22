@@ -11,12 +11,23 @@
 //   4. What actually happened since yesterday?
 //   5. Where does every system stand right now?
 //
-// The same section renders twice. The INTERNAL edition stitches every
-// engagement together for the engineering team, cross-fleet rollup on top.
-// The PARTNER edition is one engagement, worded for the other side, and goes
-// only to recipients that organization has been opted into
-// (orgs.digest_recipients) - never merged, so no organization ever sees
-// another's systems. Same isolation rule as the EOD report, one level up.
+// One collection, two editions, rendered by different files on purpose.
+//
+// The INTERNAL edition stitches every engagement together for the engineering
+// team, cross-fleet rollup on top, and renders here: a dense operational
+// page-in-an-email that staff read on a desktop every morning.
+//
+// The PARTNER edition is one engagement, worded for the other side, and
+// renders in lib/digestPartner - a real email, built to survive Outlook and a
+// 320px phone, carrying only what a client can act on. It goes only to
+// recipients that organization has been opted into (orgs.digest_recipients),
+// never merged, so no organization ever sees another's systems. Same
+// isolation rule as the EOD report, one level up.
+//
+// What the two editions carry differs by design, not by accident: the
+// follow-up list, the activity tally, the since-yesterday narrative and the
+// failed-test card are ours to read, and the client's EOD report is where
+// their narrative lives.
 import { and, asc, eq, gte, inArray, lt, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -34,6 +45,9 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import { digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel } from "@/lib/digestDays";
+import {
+  dayLabel, partnerPreheader, partnerView, renderPartnerDigest, renderPartnerDigestText,
+} from "@/lib/digestPartner";
 
 // ---------------------------------------------------------------------------
 // The classifications - pure, so they are unit-tested.
@@ -46,6 +60,18 @@ import { digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel } from "
  */
 export type Court = "partner" | "us" | "supplier";
 
+/**
+ * WHY something is pending, as a value rather than a sentence to sniff.
+ *
+ * The partner edition merges items that share a system and a cause (a system
+ * missing tracking for two parts is one ask, not two) and words each cause as
+ * an imperative. Deriving that by matching the prose in `what` would break the
+ * first time somebody improved the wording.
+ */
+export type PendingCause =
+  | "blocked" | "ship" | "task" | "workorder"
+  | "part-order" | "part-tracking" | "part-transit" | "part-backorder";
+
 export type PendingItem = {
   systemId: number;
   externalId: string;
@@ -55,6 +81,11 @@ export type PendingItem = {
   what: string;
   /** Whole days waited, where the record carries a start. Null = unknown. */
   days: number | null;
+  cause: PendingCause;
+  /** The bare thing being waited on: a part name, a task title, a reason. */
+  subject: string;
+  /** A supplier's promised date, where one is on the record. */
+  eta?: string;
 };
 
 /**
@@ -145,21 +176,27 @@ export function pendingForSystem(
   ctx: PendingCtx,
 ): PendingItem[] {
   const items: PendingItem[] = [];
-  const add = (court: Court, who: string, what: string, days: number | null = null) =>
-    items.push({ systemId: i.id, externalId: i.externalId, court, who, what, days });
+  const add = (
+    court: Court, who: string, what: string, cause: PendingCause, subject: string,
+    days: number | null = null, eta = "",
+  ) =>
+    items.push({
+      systemId: i.id, externalId: i.externalId, court, who, what, days, cause, subject,
+      ...(eta.trim() ? { eta: eta.trim() } : {}),
+    });
 
   if (i.stages.includes(BLOCKED_STAGE) && i.blockedReason.trim()) {
-    add("us", ctx.operatorName, `Blocked: ${i.blockedReason.trim()}`,
+    add("us", ctx.operatorName, `Blocked: ${i.blockedReason.trim()}`, "blocked", i.blockedReason.trim(),
       i.blockedSince ? daysSince(i.blockedSince, ctx.now) : null);
   }
   if (i.stages.includes("Waiting to ship")) {
-    add("us", ctx.operatorName, "Ready and waiting to ship");
+    add("us", ctx.operatorName, "Ready and waiting to ship", "ship", "shipping");
   }
-  for (const t of ctx.blockedTasks) add("us", ctx.operatorName, `Blocked task: ${t.title}`);
+  for (const t of ctx.blockedTasks) add("us", ctx.operatorName, `Blocked task: ${t.title}`, "task", t.title);
   for (const w of ctx.waitingWorkOrders) {
     const theirs = w.orgId !== null && w.orgId === ctx.sectionOrgId;
     add(theirs ? "partner" : "us", theirs ? ctx.orgName(w.orgId) : ctx.operatorName,
-      `Work order${w.number ? ` ${w.number}` : ""} waiting: ${w.title}`);
+      `Work order${w.number ? ` ${w.number}` : ""} waiting: ${w.title}`, "workorder", w.title);
   }
   for (const p of ctx.openParts) {
     const buyer = p.requestedOrgId ?? (p.poId === null ? ctx.sectionOrgId : null);
@@ -169,14 +206,15 @@ export function pendingForSystem(
     // Only a formal request carries a date, so only it can be aged.
     const asked = p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null;
     if (p.status === "Needed") {
-      add(court, who, theirs ? `Part to order: ${p.name}` : `Part needed: ${p.name}`, asked);
+      add(court, who, theirs ? `Part to order: ${p.name}` : `Part needed: ${p.name}`, "part-order", p.name, asked);
     } else if ((p.status === "Ordered" || p.status === "In transit") && p.tracking) {
       add("supplier", "supplier",
-        `Part ${p.status === "Ordered" ? "on order" : "in transit"}: ${p.name}${p.eta ? ` - ETA ${p.eta}` : ""}`);
+        `Part ${p.status === "Ordered" ? "on order" : "in transit"}: ${p.name}${p.eta ? ` - ETA ${p.eta}` : ""}`,
+        "part-transit", p.name, null, p.eta);
     } else if (p.status === "Ordered" || p.status === "In transit") {
-      add(court, who, `No tracking yet for ${p.name}`, asked);
+      add(court, who, `No tracking yet for ${p.name}`, "part-tracking", p.name, asked);
     } else if (p.status === "Backordered") {
-      add(court, who, `Backordered: ${p.name} - no firm ETA yet`, asked);
+      add(court, who, `Backordered: ${p.name} - no firm ETA yet`, "part-backorder", p.name, asked);
     }
   }
   return items;
@@ -745,34 +783,30 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
  */
 export async function composePartnerDigest(
   tenantOrgId: number | null, orgId: number,
-): Promise<{ subject: string; html: string } | null> {
-  const brand = await brandForTenant(tenantOrgId);
+): Promise<{ subject: string; html: string; text: string } | null> {
   const gap = digestGapDays(await lastSentFor(tenantOrgId, orgId), shopToday());
-  const { sections, operatorName, window } = await collectDigest(tenantOrgId, gap);
+  const { sections, operatorName } = await collectDigest(tenantOrgId, gap);
   const section = sections.find((s) => s.orgId === orgId);
   if (!section) return null;
-  const n = digestCounts([section]);
-  const today = todayLabel();
-  const url = appUrl();
 
-  // Constant, for the same reason as the internal edition's.
-  const subject = `${operatorName} × ${section.name}: daily digest`;
-  const html = emailShell({
-    brand: brand.operatorName,
-    logoUrl: brand.operatorLogoUrl || undefined,
-    tagline: `${operatorName} × ${section.name} · Daily digest · ${today}`,
-    preheader: n.partner
-      ? `${today} - ${n.partner} item${n.partner === 1 ? "" : "s"} awaiting ${section.name} intervention · ${n.systems} systems in work.`
-      : n.handoffs
-        ? `${today} - ${n.handoffs} system${n.handoffs === 1 ? "" : "s"} in your hands, nothing needs your intervention.`
-        : `${today} - ${n.systems} system${n.systems === 1 ? "" : "s"} in work, nothing needs your intervention.`,
-    width: 680,
-    body: renderDigestBody([section], false, operatorName, window),
-    footer: url
-      ? `Sent each morning by ${esc(operatorName)}. Questions on a system? Open it in the portal and reply there: <a href="${esc(url)}" style="color:${EMAIL.faint};">${esc(url.replace(/^https?:\/\//, ""))}</a>`
-      : `Sent each morning by ${esc(operatorName)}.`,
+  const view = partnerView({
+    section,
+    operatorName,
+    dateLabel: dayLabel(new Date()),
+    portalUrl: appUrl(),
+    blockedStage: BLOCKED_STAGE,
+    stageHex: (s) => STAGE_COLOR[s] ?? TONE_HEX.neutral,
+    gasBlocking: gasAttention,
   });
-  return { subject, html };
+  const preheader = partnerPreheader(view);
+
+  // Constant, for the same reason as the internal edition's: a subject that
+  // carries the date starts a new conversation every morning.
+  return {
+    subject: `${operatorName} × ${section.name}: daily digest`,
+    html: renderPartnerDigest(view, preheader),
+    text: renderPartnerDigestText(view, preheader),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -839,8 +873,8 @@ export async function sendDigestEdition(
   const from = digestFrom();
   const replyTo = digestReplyTo();
   const host = mailHost(from);
-  const send = (to: string[], subject: string, html: string, key: string) =>
-    sendEmail(to, subject, html, { from, replyTo, headers: threadHeaders(threadRootId(key, host)) });
+  const send = (to: string[], subject: string, html: string, key: string, text?: string) =>
+    sendEmail(to, subject, html, { from, replyTo, text, headers: threadHeaders(threadRootId(key, host)) });
   if (orgId === null) {
     const to = await houseEmails(tenantOrgId);
     if (!to.length) return { sent: false, to: [], reason: "nobody to send to" };
@@ -855,7 +889,7 @@ export async function sendDigestEdition(
   if (!to.length) return { sent: false, to: [], reason: "no recipients configured" };
   const edition = await composePartnerDigest(tenantOrgId, orgId);
   if (!edition) return { sent: false, to, reason: "nothing on the board" };
-  await send(to, edition.subject, edition.html, `org-${orgId}`);
+  await send(to, edition.subject, edition.html, `org-${orgId}`, edition.text);
   await stampSent(tenantOrgId, orgId, today);
   return { sent: true, to };
 }
