@@ -67,7 +67,7 @@ function Bar({ label, included, used, fmt, unlimited = false }: {
       <div style={BLOCK}>
         <div className="mut" style={{ fontSize: 11, marginBottom: 3 }}>{label}</div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span className="pill" style={{ background: "#E8F3EC", color: "#2E6B2E" }}>unlimited</span>
+          <span className="pill good">unlimited</span>
           <span style={{ fontSize: 11, fontWeight: 700 }}>{fmt(a.used)} used</span>
         </div>
       </div>
@@ -301,7 +301,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 {[r.number, r.title].filter(Boolean).join(" ") || KIND_LABEL[r.kind]}
               </span>
               <span className={`pill ${STANDING_TONE[s]}`}>{STANDING_LABEL[s]}</span>
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{KIND_LABEL[r.kind]}</span>
+              <span className="pill neutral">{KIND_LABEL[r.kind]}</span>
               {orgs.length !== 1 && <span className="mut" style={{ fontSize: 12 }}>{r.orgName}</span>}
               {r.valueCents != null && (
                 <span className="mono" style={{ fontSize: 11, color: "var(--slate)" }}
