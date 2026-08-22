@@ -198,7 +198,7 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
               <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{p.partNumber}</span>
               <span style={{ fontSize: 13 }}>{p.name || <span className="mut">no description yet</span>}</span>
-              <span className="pill" style={{ background: p.kind === "kit" ? "#EDEBFA" : "#EEF1F5", color: p.kind === "kit" ? "#4F45A3" : "#475569", fontSize: 10 }}>
+              <span className={`pill ${p.kind === "kit" ? "accent" : "neutral"}`} style={{ fontSize: 10 }}>
                 {PART_KIND_LABEL[p.kind] ?? p.kind}
               </span>
               {p.manufacturer && <span className="mut" style={{ fontSize: 11 }}>{p.manufacturer}{p.mfrPartNumber ? ` ${p.mfrPartNumber}` : ""}</span>}
@@ -262,10 +262,9 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
                 ? <>on <Link href={`/instruments/${a.instrumentId}`} style={{ fontWeight: 600 }}>{instOf.get(a.instrumentId) ?? `system ${a.instrumentId}`}</Link></>
                 : <span className="mut">on the shelf</span>}
             </span>
-            <span className="pill" style={{
+            <span className={`pill ${a.status === "Down" ? "bad" : a.status === "Decommissioned" ? "neutral" : "good"}`}
+              style={{
               marginLeft: "auto", fontSize: 10,
-              background: a.status === "Down" ? "#FBE9E9" : a.status === "Decommissioned" ? "#EEF1F5" : "#E5F3E5",
-              color: a.status === "Down" ? "#A32D2D" : a.status === "Decommissioned" ? "#64748B" : "#2E6B2E",
             }}>{a.status}</span>
           </div>
         ))}
