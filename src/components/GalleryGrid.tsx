@@ -83,9 +83,9 @@ export default function GalleryGrid({ photos }: { photos: GalleryPhoto[] }) {
                 width="100%" aspect={4 / 3} />
             </a>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
-              {p.isCover && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>cover</span>}
+              {p.isCover && <span className="pill info">cover</span>}
               {p.places.map((q) => (
-                <span key={q.attachmentId} className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>
+                <span key={q.attachmentId} className="pill neutral">
                   {q.kind === "shelf" ? "shelf"
                     : q.kind === "system" ? <Link href={`/instruments/${q.id}`} style={{ textDecoration: "none" }}>{q.label}</Link>
                       : <Link href={`/assets/${q.id}`} style={{ textDecoration: "none" }}>{q.label}</Link>}
