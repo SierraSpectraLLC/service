@@ -58,7 +58,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
 
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#EEF1F5", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", marginBottom: 12 }}>
-          <span className="pill" style={{ background: "#E2E8F0", color: "#475569" }}>Frozen record</span>
+          <span className="pill neutral">Frozen record</span>
           <span className="mut" style={{ fontSize: 12 }}>
             {handoff
               ? `Handed on ${shopTime(rec.revokedAt)}. Your tenure as it stood that day - it never updates, and the live system has moved on without it.`
@@ -79,8 +79,8 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
           <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
             {d.label || <span className="mut" style={{ fontWeight: 400, fontSize: 15 }}>No assets were listed</span>}
           </div>
-          {d.system.category && <span className="pill" style={{ background: "#E7F2FA", color: "#1D6396" }}>{d.system.category}</span>}
-          {d.system.stages.map((s) => <span key={s} className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{s}</span>)}
+          {d.system.category && <span className="pill info">{d.system.category}</span>}
+          {d.system.stages.map((s) => <span key={s} className="pill neutral">{s}</span>)}
         </div>
         {d.system.location && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{d.system.location}</div>}
         {d.system.notes && <div className="mut" style={{ fontSize: 13, marginTop: 6, whiteSpace: "pre-wrap" }}>{d.system.notes}</div>}
@@ -104,7 +104,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
             <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>Gases</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {d.gases.map((g, i) => (
-                <span key={i} className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>
+                <span key={i} className="pill neutral">
                   {g.gas} · {g.status}{g.note ? ` · ${g.note}` : ""}
                 </span>
               ))}
@@ -120,7 +120,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
             <div key={i} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
                 <b style={{ fontSize: 13 }}>{t.title}</b>
-                <span className="pill" style={{ background: t.state === "Done" ? "#E5F3E5" : "#EEF1F5", color: t.state === "Done" ? "#2E6B2E" : "#475569" }}>{t.state}</span>
+                <span className={`pill ${t.state === "Done" ? "good" : "neutral"}`}>{t.state}</span>
                 {t.assignee && <span className="mut" style={{ fontSize: 12 }}>{t.assignee}</span>}
                 {t.dueDate && <span className="mut" style={{ fontSize: 12 }}>due {t.dueDate}</span>}
                 <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{when(t.createdAt)}</span>
@@ -150,7 +150,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
               <b>{p.name}</b>
               {p.partNumber && <span className="mono mut"> {p.partNumber}</span>}
               {p.serial && <span className="mono mut"> SN {p.serial}</span>}
-              <span className="pill" style={{ marginLeft: 6, background: "#EEF1F5", color: "#475569" }}>{p.status}</span>
+              <span className="pill neutral" style={{ marginLeft: 6 }}>{p.status}</span>
               <div className="mut" style={{ fontSize: 12 }}>
                 {[p.vendor, p.qty && `qty ${p.qty}`, p.installedAt && `installed ${p.installedAt}`, p.removedAt && `removed ${p.removedAt}`].filter(Boolean).join(" · ")}
               </div>
@@ -169,7 +169,7 @@ export default async function RecordPage({ params }: { params: Promise<{ id: str
           {d.attachments.map((a, i) => (
             <div key={i} style={{ padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "baseline" }}>
               <a href={a.url} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>{a.fileName}</a>
-              <span className="pill" style={{ background: "#EEF1F5", color: "#475569" }}>{a.kind}</span>
+              <span className="pill neutral">{a.kind}</span>
               {a.description && <span className="mut" style={{ fontSize: 12 }}>{a.description}</span>}
               <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{fmtSize(a.size)} · {when(a.createdAt)}</span>
             </div>
