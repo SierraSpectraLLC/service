@@ -13,8 +13,19 @@ import { formatCents } from "@/lib/money";
 import { addDays } from "@/lib/pm";
 import { shopToday } from "@/lib/shopday";
 import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
+import { Panel } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
+
+/** A quiet horizontal bar: the value against the column's maximum, in a tone. */
+function Bar({ value, max, tone = "info" }: { value: number; max: number; tone?: string }) {
+  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  return (
+    <div aria-hidden style={{ height: 5, borderRadius: 999, background: "var(--t-neutral-bg)", overflow: "hidden", marginTop: 3 }}>
+      <div style={{ width: `${pct}%`, height: "100%", background: `var(--t-${tone}-fg)`, opacity: 0.75 }} />
+    </div>
+  );
+}
 
 const WINDOWS = [30, 90] as const;
 
@@ -100,6 +111,24 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
     })
     .filter((x): x is { stage: string; avg: number; n: number } => x !== null);
 
+  // The window at a glance, before any panel.
+  const pmPct = Math.round((pm.onTime / Math.max(1, pm.onTime + pm.late + pm.openOverdue)) * 100);
+  const totalMinutes = hoursByClient.reduce((n, [, min]) => n + min, 0);
+  const totalSpend = spend.reduce((n, [, v]) => n + v.cents, 0);
+  const tiles: [string, string, string | undefined][] = [
+    ["PM on time", pmTotal === 0 ? "—" : `${pmPct}%`,
+      pmTotal === 0 ? undefined : pmPct >= 80 ? "good" : pmPct >= 50 ? "warn" : "bad"],
+    ["Avg turnaround", turnaround.length ? `${avgTurn}d` : "—", undefined],
+    ["Hours logged", totalMinutes ? formatHours(totalMinutes) : "—", undefined],
+    ["Parts spend", totalSpend ? formatCents(totalSpend) : "—", undefined],
+    ["Active systems", String(active.length), undefined],
+  ];
+
+  const maxClientMin = Math.max(0, ...hoursByClient.map(([, m]) => m));
+  const maxPersonMin = Math.max(0, ...hoursByPerson.map(([, m]) => m));
+  const maxSpend = Math.max(0, ...spend.map(([, v]) => v.cents));
+  const maxAvgStage = Math.max(0, ...avgRows.map((r) => r.avg));
+
   return (
     <div className="container wide">
       <div className="crumb">Operations › <b>Metrics</b></div>
@@ -109,8 +138,8 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           <span className="mut" style={{ fontSize: 12 }}>Last</span>
           <div className="seg" role="group" aria-label="Report window">
             {WINDOWS.map((w) => (
-              <Link key={w} href={w === 30 ? "/metrics" : `/metrics?days=${w}`} aria-pressed={days === w}
-                className={days === w ? "btn sm accent" : "btn sm"} style={{ textDecoration: "none", border: "none" }}>
+              <Link key={w} href={w === 30 ? "/metrics" : `/metrics?days=${w}`}
+                aria-current={days === w ? "true" : undefined}>
                 {w} days
               </Link>
             ))}
@@ -118,22 +147,34 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         </span>
       </div>
 
+      <div className="metric-grid" style={{ marginBottom: 12 }}>
+        {tiles.map(([label, n, tone]) => (
+          <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
+            <div style={{ fontSize: 12 }} className="mut">{label}</div>
+            <div className="t-page" style={{ fontWeight: 700, color: tone ? `var(--t-${tone}-fg)` : "var(--navy)" }}>{n}</div>
+          </div>
+        ))}
+      </div>
 
       {/* Two independent stacks from 1200px up - six stacked cards made a
           short report read as a long page. Stacks flatten in DOM order on
           narrow screens. */}
       <div className="panel-cols">
         <div>
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>PM compliance</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Scheduled maintenance that fell due in the window. A task reopened after being done counts as open -
-          the work is not done.
-        </div>
+      <Panel title="PM compliance"
+        hint="Scheduled maintenance that fell due in the window. A task reopened after being done counts as open - the work is not done.">
         {pmTotal === 0 ? (
           <div className="mut" style={{ fontSize: 13 }}>No scheduled maintenance fell due in this window.</div>
         ) : (
           <>
+            {/* The distribution as one bar, in the same tones as the pills. */}
+            <div aria-hidden style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", marginBottom: 8, background: "var(--t-neutral-bg)" }}>
+              {([["good", pm.onTime], ["warn", pm.late], ["bad", pm.openOverdue], ["neutral", pm.openNotDue]] as const)
+                .filter(([, n]) => n > 0)
+                .map(([tone, n]) => (
+                  <div key={tone} style={{ width: `${(n / pmTotal) * 100}%`, background: `var(--t-${tone}-fg)`, opacity: 0.8 }} />
+                ))}
+            </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
               <span className="pill good">{pm.onTime} on time</span>
               <span className="pill warn">{pm.late} done late</span>
@@ -141,18 +182,14 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
               <span className="pill neutral">{pm.openNotDue} due soon</span>
             </div>
             <div style={{ fontSize: 13 }}>
-              <b>{Math.round((pm.onTime / Math.max(1, pm.onTime + pm.late + pm.openOverdue)) * 100)}%</b>
+              <b>{pmPct}%</b>
               <span className="mut"> of due maintenance was done on time.</span>
             </div>
           </>
         )}
-      </div>
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Hours</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or
-          unit where they happened.
-        </div>
+      </Panel>
+      <Panel title="Hours"
+        hint="Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or unit where they happened.">
         {hoursByClient.length === 0 ? (
           <div className="mut" style={{ fontSize: 13 }}>No hours logged in this window.</div>
         ) : (
@@ -160,31 +197,34 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>By client</div>
               {hoursByClient.map(([k, min]) => (
-                <div key={k} style={{ display: "flex", gap: 8, padding: "4px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
-                  <b>{formatHours(min)}</b>
+                <div key={k} style={{ padding: "4px 0", borderTop: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", gap: 8, fontSize: 13 }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
+                    <b>{formatHours(min)}</b>
+                  </div>
+                  <Bar value={min} max={maxClientMin} />
                 </div>
               ))}
             </div>
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>By person</div>
               {hoursByPerson.map(([k, min]) => (
-                <div key={k} style={{ display: "flex", gap: 8, padding: "4px 0", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
-                  <b>{formatHours(min)}</b>
+                <div key={k} style={{ padding: "4px 0", borderTop: "1px solid var(--line)" }}>
+                  <div style={{ display: "flex", gap: 8, fontSize: 13 }}>
+                    <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{k}</span>
+                    <b>{formatHours(min)}</b>
+                  </div>
+                  <Bar value={min} max={maxPersonMin} />
                 </div>
               ))}
             </div>
           </div>
         )}
-      </div>
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Time in stage</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Active systems, longest-parked first. Ages count from when the stage was added
-          (systems that predate stage tracking count from their creation).
-        </div>
-        {active.map((i) => (
+      </Panel>
+      <Panel title="Time in stage" count={active.length}
+        hint="Active systems, longest-parked first. Ages count from when the stage was added (systems that predate stage tracking count from their creation)."
+        empty="No active systems">
+        {active.length === 0 ? null : <>{active.map((i) => (
           <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 4px", borderTop: "1px solid var(--line)", textDecoration: "none", color: "inherit", flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)" }}>{i.externalId}</span>
@@ -197,18 +237,12 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
               ))}
             </span>
           </Link>
-        ))}
-        {active.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No active systems.</div>}
-      </div>
+        ))}</>}
+      </Panel>
         </div>
         <div>
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Turnaround</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          Days from a system entering the shop to its first Shipped. Days it spent in
-          another organization&apos;s queue are shown separately - the client waited for
-          them, but nobody here could have shortened them.
-        </div>
+      <Panel title="Turnaround"
+        hint="Days from a system entering the shop to its first Shipped. Days it spent in another organization's queue are shown separately - the client waited for them, but nobody here could have shortened them.">
         {turnaround.length === 0 ? (
           <div className="mut" style={{ fontSize: 13 }}>Nothing shipped in this window.</div>
         ) : (
@@ -227,41 +261,41 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
             )}
           </div>
         )}
-      </div>
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Parts spend</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          By client, from parts recorded in the window whose cost parsed as money. Free-text costs
-          (&quot;call for quote&quot;) are counted but not summed, so this is a floor.
-        </div>
+      </Panel>
+      <Panel title="Parts spend"
+        hint={<>By client, from parts recorded in the window whose cost parsed as money. Free-text costs
+          (&quot;call for quote&quot;) are counted but not summed, so this is a floor.</>}>
         {spend.length === 0 ? (
           <div className="mut" style={{ fontSize: 13 }}>No parts recorded in this window.</div>
         ) : (
           spend.map(([k, v]) => (
-            <div key={k} style={{ display: "flex", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", fontSize: 13, flexWrap: "wrap" }}>
-              <span style={{ flex: 1, minWidth: 0 }}>{k}</span>
-              <b>{formatCents(v.cents)}</b>
-              <span className="mut" style={{ fontSize: 11 }}>
-                {v.counted} priced{v.unpriced ? ` · ${v.unpriced} unpriced` : ""}
-              </span>
+            <div key={k} style={{ padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+              <div style={{ display: "flex", gap: 8, fontSize: 13, flexWrap: "wrap" }}>
+                <span style={{ flex: 1, minWidth: 0 }}>{k}</span>
+                <b>{formatCents(v.cents)}</b>
+                <span className="mut" style={{ fontSize: 11 }}>
+                  {v.counted} priced{v.unpriced ? ` · ${v.unpriced} unpriced` : ""}
+                </span>
+              </div>
+              <Bar value={v.cents} max={maxSpend} tone="accent" />
             </div>
           ))
         )}
-      </div>
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}>Average days per stage</div>
-        <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-          From completed stage transitions (a stage added and later removed). Builds up as systems move through the shop.
-        </div>
+      </Panel>
+      <Panel title="Average days per stage"
+        hint="From completed stage transitions (a stage added and later removed). Builds up as systems move through the shop.">
         {avgRows.map((r) => (
-          <div key={r.stage} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 4px", borderTop: "1px solid var(--line)", fontSize: 13 }}>
-            <span className="pill" style={{ background: color(r.stage).bg, color: color(r.stage).fg }}>{r.stage}</span>
-            <b style={{ marginLeft: "auto" }}>{r.avg < 1 ? "<1" : Math.round(r.avg)} day{Math.round(r.avg) === 1 ? "" : "s"}</b>
-            <span className="mut" style={{ fontSize: 11 }}>({r.n} completion{r.n === 1 ? "" : "s"})</span>
+          <div key={r.stage} style={{ padding: "7px 4px", borderTop: "1px solid var(--line)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <span className="pill" style={{ background: color(r.stage).bg, color: color(r.stage).fg }}>{r.stage}</span>
+              <b style={{ marginLeft: "auto" }}>{r.avg < 1 ? "<1" : Math.round(r.avg)} day{Math.round(r.avg) === 1 ? "" : "s"}</b>
+              <span className="mut" style={{ fontSize: 11 }}>({r.n} completion{r.n === 1 ? "" : "s"})</span>
+            </div>
+            <Bar value={r.avg} max={maxAvgStage} tone="neutral" />
           </div>
         ))}
         {avgRows.length === 0 && <div className="mut" style={{ fontSize: 13 }}>No completed stage transitions recorded yet.</div>}
-      </div>
+      </Panel>
         </div>
       </div>
     </div>

@@ -136,6 +136,16 @@ const FIXTURE = `
     (1, 'rita@labzen.test', 'Rita Alvarez', 'Could we do Thursday morning for the sign-off?'),
     (1, '${OWNER}', 'Dev Owner', 'Thursday 9am works. I will bring the packet.');
 
+  INSERT INTO time_entries (instrument_id, person, date, minutes, note, logged_by, work_order_id) VALUES
+    (1, 'Dev Owner', to_char(now() - interval '2 days', 'YYYY-MM-DD'), 180, 'Tune and verify', '${OWNER}', NULL),
+    (2, 'Dev Owner', to_char(now() - interval '5 days', 'YYYY-MM-DD'), 420, 'Turbo replacement', '${OWNER}', 2),
+    (2, 'Sam Ortiz', to_char(now() - interval '4 days', 'YYYY-MM-DD'), 240, 'Pump-down watch', '${OWNER}', 2),
+    (4, 'Sam Ortiz', to_char(now() - interval '9 days', 'YYYY-MM-DD'), 120, 'Intake inspection', '${OWNER}', NULL);
+  INSERT INTO parts (instrument_id, name, part_number, vendor, cost, cost_cents, status, installed_at) VALUES
+    (2, 'Turbo pump', 'EXT255H', 'Edwards', '$4,850.00', 485000, 'Installed', to_char(now() - interval '5 days', 'YYYY-MM-DD')),
+    (1, 'Capillary kit', 'G7100-60001', 'Agilent', '$210.00', 21000, 'Installed', to_char(now() - interval '2 days', 'YYYY-MM-DD')),
+    (5, 'HED supply', '05971-80059', 'Agilent', 'call for quote', NULL, 'Ordered', '');
+
   INSERT INTO folders (org_id, name) VALUES (NULL, 'Manuals');
   INSERT INTO attachments (org_id, instrument_id, asset_id, folder_id, file_name, kind, description, url, size, uploaded_by) VALUES
     (NULL, NULL, NULL, NULL, 'Site prep checklist.pdf', 'Reference', 'What a lab needs ready before install day', 'https://blob.local/site-prep.pdf', 482133, '${OWNER}'),
