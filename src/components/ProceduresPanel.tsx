@@ -14,6 +14,7 @@ import { QUALIFICATIONS, QUAL_LABEL } from "@/lib/gxp";
 import ProvenanceChip from "./ProvenanceChip";
 import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
 import type { Tone } from "@/lib/tones";
+import Dialog from "@/components/ui/Dialog";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 
@@ -176,7 +177,6 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
   const listRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const drag = useRef<{ listKey: string; assetType: string; ids: number[]; itemId: number; dirty: boolean } | null>(null);
-  const sheetRef = useRef<HTMLDivElement>(null);
 
   // System first - instrument-level procedures run once per system. Types with
   // rows but no catalog entry still render, so nothing predating the catalog
@@ -242,24 +242,6 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
     const at = (id: number) => { const i = order.indexOf(id); return i === -1 ? Number.MAX_SAFE_INTEGER : i; };
     return [...list].sort((a, b) => at(a.id) - at(b.id));
   };
-
-  // Sheet lifecycle: escape closes, focus moves in and stays trapped.
-  useEffect(() => {
-    if (!sheet) return;
-    const el = sheetRef.current;
-    el?.querySelector<HTMLElement>("input, button, select")?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setSheet(null); return; }
-      if (e.key !== "Tab" || !el) return;
-      const focusables = [...el.querySelectorAll<HTMLElement>("button, input, select, textarea, [tabindex]")].filter((f) => !f.hasAttribute("disabled"));
-      if (!focusables.length) return;
-      const first = focusables[0], last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [sheet]);
 
   // Brief highlight on the row that just changed, and keep it in view.
   useEffect(() => {
@@ -609,18 +591,25 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       {/* Copy one procedure onto other module types. Several at once, because
           "this belongs on the stack and the detector too" is one thought. */}
       {copying && (
-        <>
-          <div className="scrim" onClick={() => setCopying(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label={`Copy ${copying.name}`}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Copy &ldquo;{copying.name}&rdquo;</div>
-              <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
-                onClick={() => setCopying(null)}>close</button>
-            </div>
-            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-              From {copying.assetType === "system" ? "System" : copying.assetType}. The timing, parts and notes
-              come across; the model scope does not, since models belong to one type.
-            </div>
+        <Dialog open onClose={() => setCopying(null)} title={`Copy “${copying.name}”`}
+          context={`From ${copying.assetType === "system" ? "System" : copying.assetType}. The timing, parts and notes come across; the model scope does not, since models belong to one type.`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setCopying(null)} disabled={pending}>Cancel</button>
+              <button className="btn primary" disabled={pending || !copyTo.length}
+                onClick={() => {
+                  setError("");
+                  startTransition(async () => {
+                    const res = await copyProcedureToTypes(copying.id, copyTo);
+                    if (res?.error) { setError(res.error); return; }
+                    const skipped = res.skipped?.length ? ` (already on ${res.skipped.join(", ")})` : "";
+                    setSaved(`Copied to ${res.copied} type${res.copied === 1 ? "" : "s"}${skipped}`);
+                    setCopying(null);
+                  });
+                }}>{pending ? "Copying..." : "Copy procedure"}</button>
+            </>
+          }>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
               {["system", ...assetTypes].filter((t) => t !== copying.assetType).map((t) => (
                 <button key={t} type="button" className="pill"
@@ -632,49 +621,19 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                   }}>{t === "system" ? "System" : t}</button>
               ))}
             </div>
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setCopying(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm primary" disabled={pending || !copyTo.length}
-                onClick={() => {
-                  setError("");
-                  startTransition(async () => {
-                    const res = await copyProcedureToTypes(copying.id, copyTo);
-                    if (res?.error) { setError(res.error); return; }
-                    const skipped = res.skipped?.length ? ` (already on ${res.skipped.join(", ")})` : "";
-                    setSaved(`Copied to ${res.copied} type${res.copied === 1 ? "" : "s"}${skipped}`);
-                    setCopying(null);
-                  });
-                }}>{pending ? "Copying..." : "Copy"}</button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
 
       {/* Filed under the wrong system type. The models and their makers stay
           exactly as they are - only the tag that decides where they appear moves. */}
       {moving && (
-        <>
-          <div className="scrim" onClick={() => setMoving(null)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label={`Move ${moving.assetType}`}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Move {moving.assetType}</div>
-              <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
-                onClick={() => setMoving(null)}>close</button>
-            </div>
-            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
-              Out of {moving.from}, into another system type. Every {moving.assetType} model keeps its name and
-              its manufacturer; only where it is filed changes.
-            </div>
-            <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="Move to system type"
-              style={{ marginBottom: 10, fontSize: 13 }}>
-              <option value="">Choose a system type...</option>
-              {categories.filter((c) => c !== moving.from).map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setMoving(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm primary" disabled={pending || !moveTo}
+        <Dialog open onClose={() => setMoving(null)} title={`Move ${moving.assetType}`}
+          context={`Out of ${moving.from}, into another system type. Every ${moving.assetType} model keeps its name and its manufacturer; only where it is filed changes.`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setMoving(null)} disabled={pending}>Cancel</button>
+              <button className="btn primary" disabled={pending || !moveTo}
                 onClick={() => {
                   setError("");
                   startTransition(async () => {
@@ -683,10 +642,15 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                     setSaved(`${moving.assetType} moved to ${moveTo} - ${res.moved} model${res.moved === 1 ? "" : "s"} retagged`);
                     setMoving(null);
                   });
-                }}>{pending ? "Moving..." : "Move"}</button>
-            </div>
-          </div>
-        </>
+                }}>{pending ? "Moving..." : `Move ${moving.assetType}`}</button>
+            </>
+          }>
+            <select value={moveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="Move to system type"
+              style={{ marginBottom: 10, fontSize: 13 }}>
+              <option value="">Choose a system type...</option>
+              {categories.filter((c) => c !== moving.from).map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+        </Dialog>
       )}
 
       {/* Remove-from-one-place. The row serves several system types; deleting
@@ -712,31 +676,27 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
           });
         };
         return (
-          <>
-            <div className="scrim" onClick={() => setRemoving(null)} />
-            <div className="sheet" role="dialog" aria-modal="true" aria-label={`Remove ${row.name}`}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>Remove &ldquo;{row.name}&rdquo;</div>
-                <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }}
-                  onClick={() => setRemoving(null)}>close</button>
-              </div>
-              <div className="mut" style={{ fontSize: 12, marginBottom: 12 }}>
-                This procedure applies under {effective.join(" and ")}. Tasks and schedules
-                already on units stay either way.
-              </div>
-              {error && <div style={{ fontSize: 12, color: "#A32D2D", marginBottom: 8 }}>{error}</div>}
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                <button className="btn sm" onClick={() => setRemoving(null)} disabled={pending}>Cancel</button>
-                <button className="btn sm" disabled={pending} style={{ color: "#A32D2D" }}
+          <Dialog open size="sm" onClose={() => setRemoving(null)} title={`Remove “${row.name}”`}
+            context={`This procedure applies under ${effective.join(" and ")}. Tasks and schedules already on units stay either way.`}
+            footer={
+              <>
+                <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+                <button className="btn" onClick={() => setRemoving(null)} disabled={pending}>Cancel</button>
+                <button className="btn link danger" disabled={pending}
                   onClick={() => {
-                    startTransition(async () => { await deleteProcedure(row.id); setRemoving(null); });
+                    startTransition(async () => {
+                      await deleteProcedure(row.id);
+                      toast({ message: `Deleted "${row.name}"` });
+                      setRemoving(null);
+                    });
                   }}>Delete from all of them</button>
-                <button className="btn sm primary" onClick={narrow} disabled={pending}>
+                <button className="btn primary" onClick={narrow} disabled={pending}>
                   {pending ? "Saving..." : `Remove from ${band} only`}
                 </button>
-              </div>
-            </div>
-          </>
+              </>
+            }>
+            <span />
+          </Dialog>
         );
       })()}
 
@@ -830,21 +790,23 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
       })}
 
       {sheet && (
-        <>
-          <div className="scrim" onClick={() => setSheet(null)} />
-          <div className="sheet" ref={sheetRef} role="dialog" aria-modal="true"
-            aria-label={`${sheet.id ? "Edit" : "New"} procedure`}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--navy)" }}>
-                {sheet.id ? "Edit" : "New"} · {isSystem ? "System" : sheet.assetType}
-              </div>
-              <div className="seg" role="group" aria-label="Procedure kind" style={{ marginLeft: "auto" }}>
-                {(["task", "test"] as const).map((k) => (
-                  <button key={k} type="button" aria-pressed={draft.kind === k} onClick={() => setDraft({ ...draft, kind: k })}>
-                    {k === "task" ? "☐ Task" : "◎ Test"}
-                  </button>
-                ))}
-              </div>
+        <Dialog open onClose={() => setSheet(null)}
+          title={`${sheet.id ? "Edit" : "New"} · ${isSystem ? "System" : sheet.assetType}`}
+          footer={
+            <>
+              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <button className="btn" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
+              <button className="btn accent" onClick={save} disabled={pending || !draft.name.trim()}>
+                {pending ? "Saving..." : "Save procedure"}
+              </button>
+            </>
+          }>
+            <div className="seg" role="group" aria-label="Procedure kind" style={{ marginBottom: 12 }}>
+              {(["task", "test"] as const).map((k) => (
+                <button key={k} type="button" aria-pressed={draft.kind === k} onClick={() => setDraft({ ...draft, kind: k })}>
+                  {k === "task" ? "☐ Task" : "◎ Test"}
+                </button>
+              ))}
             </div>
 
             <label>Name *</label>
@@ -1184,16 +1146,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, categ
                 </div>
               </div>
             )}
-            {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-
-            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
-              <button className="btn sm" onClick={() => setSheet(null)} disabled={pending}>Cancel</button>
-              <button className="btn sm accent" onClick={save} disabled={pending || !draft.name.trim()}>
-                {pending ? "Saving..." : "Save procedure"}
-              </button>
-            </div>
-          </div>
-        </>
+        </Dialog>
       )}
     </div>
   );
