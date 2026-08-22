@@ -122,6 +122,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   background: transparent;
 }
 .empty b { color: var(--ink); display: block; font-size: 14px; margin-bottom: 4px; }
+.empty .empty-act { margin-top: 10px; display: flex; justify-content: center; }
 
 /* Two independent stacks, so cards pack tightly instead of aligning into rows
    with gaps (CSS grid has no masonry yet). Below the breakpoint the wrappers
@@ -671,6 +672,13 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .row-reveal:hover .row-acts .btn.link,
 .row-reveal:focus-within .row-acts .btn.link { opacity: 1; }
 @media (hover: none) { .row-reveal .row-acts .btn.link { opacity: 1; } }
+/* A destructive entry says so in red, in a row or in a menu. */
+.btn.link.danger { color: var(--t-bad-fg); }
+.menu-panel a.danger, .menu-panel button.danger { color: var(--t-bad-fg); }
+
+/* The count beside a tab's label; warn when the section wants attention. */
+.tab .tab-n { font-size: 11px; color: var(--mut); margin-left: 4px; font-weight: 600; }
+.tab .tab-n.warn { color: var(--t-warn-fg); }
 
 /* A labelled form field: label, control, then a hint or an error - never
    both, the error takes the hint's place while it stands. */
