@@ -18,6 +18,8 @@ import { getModules } from "@/lib/flags";
 import { parseModelSpecs, specNameSuggestions } from "@/lib/modelSpecs";
 import ProceduresPanel from "@/components/ProceduresPanel";
 import ReferencePanel from "@/components/ReferencePanel";
+import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
+import { stockSrc } from "@/lib/photos";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +34,14 @@ export const dynamic = "force-dynamic";
  * asks whether the change goes to every covered model or forks off a version
  * for this one - see actions.forkProcedureForModel.
  */
-export default async function ModelPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ModelPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
   const { id } = await params;
+  const sp = await searchParams;
   const termId = parseInt(id);
   if (isNaN(termId)) notFound();
   const tenant = readTenant(user);
@@ -112,20 +118,57 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
     : [];
   const instOf = new Map(instRows.map((i) => [i.id, i.externalId]));
 
+  // Hoisted so the tab counts and the panels read the same slice.
+  const specs = parseModelSpecs(term.specs);
+  const modelRefs = refsForUnits(
+    refRows.map((r) => ({
+      id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
+      title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
+      provenance: r.provenance,
+      when: shopDay(r.createdAt),
+    })),
+    [{ kind: term.assetType, model: term.name }],
+  );
+
+  const tab = ["procedures", "parts", "reference", "fleet"].includes(sp.tab ?? "") ? sp.tab! : "overview";
+  const tabs: TabItem[] = [
+    { key: "overview", label: "Overview", href: `/catalog/${term.id}` },
+    { key: "procedures", label: "Maintenance", count: covering.length, href: `/catalog/${term.id}?tab=procedures` },
+    { key: "parts", label: "Parts", count: modelParts.length, href: `/catalog/${term.id}?tab=parts` },
+    { key: "reference", label: "Reference", count: modelRefs.length, href: `/catalog/${term.id}?tab=reference` },
+    { key: "fleet", label: "Fleet", count: mine.length, href: `/catalog/${term.id}?tab=fleet` },
+  ];
+
+  const heroStats: HeroStat[] = [
+    { value: mine.length, label: mine.length === 1 ? "unit in the fleet" : "units in the fleet" },
+    { value: covering.length, label: "procedures", tone: covering.length === 0 ? "warn" : undefined },
+    { value: modelParts.length, label: "parts" },
+    { value: specs.length, label: "specs", tone: specs.length === 0 ? "warn" : undefined },
+  ];
+
   return (
     <div className="container page">
       <div className="crumb">
         Settings › <Link href="/settings/catalog" style={{ textDecoration: "none", color: "inherit" }}>Catalog</Link> › <b>{term.name}</b>
       </div>
-      <ModelHeaderCard
-        termId={term.id} name={term.name} assetType={term.assetType}
-        manufacturer={term.manufacturer} categories={term.categories} gases={term.gases}
-        hasPhoto={!!term.photoUrl} unitCount={mine.length}
+
+      <RecordHero
+        image={term.photoUrl ? stockSrc(term.id) : undefined}
+        imageAlt={term.name}
+        eyebrow={term.manufacturer || term.assetType}
+        title={term.name}
+        meta={[term.assetType, ...term.categories, ...term.gases].join(" · ")}
+        stats={heroStats}
       />
+
+      <Tabs items={tabs} active={tab} ariaLabel="Model sections" />
+
+      {tab === "overview" && <>
+      <ModelHeaderCard termId={term.id} name={term.name} hasPhoto={!!term.photoUrl} />
 
       <ModelSpecsCard
         termId={term.id} modelName={term.name}
-        specs={parseModelSpecs(term.specs)}
+        specs={specs}
         // Copy sources: same-type siblings that actually have a sheet.
         siblings={terms
           .filter((t) => t.kind === "model" && t.id !== term.id
@@ -150,8 +193,9 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
         })}
         siteUrl={appUrl()}
       />}
+      </>}
 
-      <ProceduresPanel
+      {tab === "procedures" && <ProceduresPanel
         focus={{ assetType: term.assetType, model: term.name }}
         // Siblings worth copying from, counted by exactly what the action would
         // actually create: procedures the sibling has, that this model does not
@@ -185,9 +229,9 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
           parts: parseProcParts(r.parts), modelScope: r.modelScope, checklist: r.checklist,
           provenance: r.provenance,
         }))}
-      />
+      />}
 
-      <div className="card">
+      {tab === "parts" && <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
           <div className="card-title">Parts &amp; consumables</div>
           <Link href="/settings/parts" className="btn link" style={{ fontSize: 11, marginLeft: "auto" }}>Open the parts book</Link>
@@ -230,26 +274,18 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      <ReferencePanel canEdit
+      {tab === "reference" && <ReferencePanel canEdit
         sub={`Manuals, links and field notes for ${term.name} - and for any ${term.assetType.toLowerCase()}. Filed here, they show on every unit.`}
         scopes={[
           { assetType: term.assetType, model: term.name, label: `${term.name} (every unit)` },
           { assetType: term.assetType, model: "", label: `any ${term.assetType.toLowerCase()}` },
         ]}
-        refs={refsForUnits(
-          refRows.map((r) => ({
-            id: r.id, assetType: r.assetType, model: r.model, kind: r.kind,
-            title: r.title, url: r.url, body: r.body, createdBy: r.createdBy,
-            provenance: r.provenance,
-            when: shopDay(r.createdAt),
-          })),
-          [{ kind: term.assetType, model: term.name }],
-        )}
-      />
+        refs={modelRefs}
+      />}
 
-      <div className="card">
+      {tab === "fleet" && <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}>Fleet</div>
         <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
           Every {term.name} on the books, and where it sits.
@@ -271,7 +307,7 @@ export default async function ModelPage({ params }: { params: Promise<{ id: stri
           </div>
         ))}
         {mine.length === 0 && <div className="mut" style={{ fontSize: 12 }}>No unit of this model is recorded yet.</div>}
-      </div>
+      </div>}
     </div>
   );
 }

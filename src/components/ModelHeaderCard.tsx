@@ -8,20 +8,15 @@ import { stockSrc } from "@/lib/photos";
 import { fmtBytes } from "@/lib/storage";
 
 /**
- * The top of a model's page: what it is and what it looks like. The photo is
- * the catalog's stock photo - the same one every unit of the model falls back
+ * The model's stock photo - the same one every unit of the model falls back
  * to - so adding it here is adding it everywhere, exactly like the photos card
- * in Settings does.
+ * in Settings does. Identity lives in the RecordHero above; this card only
+ * holds the photo and its upload affordance.
  */
-export default function ModelHeaderCard({ termId, name, assetType, manufacturer, categories, gases, hasPhoto, unitCount }: {
+export default function ModelHeaderCard({ termId, name, hasPhoto }: {
   termId: number;
   name: string;
-  assetType: string;
-  manufacturer: string;
-  categories: string[];
-  gases: string[];
   hasPhoto: boolean;
-  unitCount: number;
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -46,6 +41,7 @@ export default function ModelHeaderCard({ termId, name, assetType, manufacturer,
 
   return (
     <div className="card">
+      <div className="card-title" style={{ marginBottom: 8 }}>Photo</div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ flexShrink: 0 }}>
           {hasPhoto ? (
@@ -66,19 +62,8 @@ export default function ModelHeaderCard({ termId, name, assetType, manufacturer,
             onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ""; }} />
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
-          <div className="eyebrow">{assetType}</div>
-          <h1 style={{ margin: "2px 0 2px", fontSize: 24 }}>{name}</h1>
-          <div className="mut" style={{ fontSize: 13, marginBottom: 8 }}>
-            {manufacturer || "Maker not recorded"}
-            {` · ${unitCount} unit${unitCount === 1 ? "" : "s"} in the fleet`}
-          </div>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {(categories.length ? categories : ["Any system type"]).map((c) => (
-              <span key={c} className="pill info">{c}</span>
-            ))}
-            {gases.map((g) => (
-              <span key={g} className="pill warn" title="Gas requirement from the catalog">{g}</span>
-            ))}
+          <div className="mut" style={{ fontSize: 12 }}>
+            The catalog&apos;s stock photo for {name}: it shows on every unit that has no photo of its own.
           </div>
           {hasPhoto && (
             <button className="btn link" style={{ fontSize: 11, marginTop: 8 }} onClick={() => input.current?.click()} disabled={!!busy}>
