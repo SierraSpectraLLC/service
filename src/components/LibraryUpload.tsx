@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
 import { recordLibraryFiles } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { fmtBytes } from "@/lib/storage";
 import { isFileDrag } from "@/lib/dropFiles";
@@ -114,11 +114,11 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
 
       {open && (
         <Dialog open size="sm" title="Upload files" onClose={() => { if (!busy) setOpen(false); }}
+          context={folderName ? `Into ${folderName}` : "Into your storage"}
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : ""}`}>
-                {error || (busy ? `Uploading ${done + 1} of ${total} · ${busy}` : "")}
-              </span>
+              <DialogStatus error={error} problem={full ? "storage is full" : null}
+                ok={busy ? `Uploading ${done + 1} of ${total} · ${busy}` : ""} />
               <button className="btn" onClick={() => setOpen(false)} disabled={!!busy}>Cancel</button>
               <button className="btn accent" disabled={!!busy || full} onClick={() => ref.current?.click()}>
                 {busy ? "Uploading..." : "Choose files"}

@@ -7,7 +7,7 @@ import {
   addCatalogRef, addPhotos, clearCoverPhoto, deleteAttachment, removePhotos, setCoverPhoto, setPhotoFraming,
   type WorkTarget,
 } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { fmtBytes } from "@/lib/storage";
@@ -274,7 +274,7 @@ export default function PhotosPanel({
                 {catalogScopes.length > 0 && (
                   <button className="btn sm" disabled={pending}
                     title="File this to the catalog so every unit like this one sees it"
-                    onClick={() => { setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: lead.id, fileName: lead.fileName }); }}>
+                    onClick={() => { setError(""); setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: lead.id, fileName: lead.fileName }); }}>
                     To catalog
                   </button>
                 )}
@@ -297,7 +297,7 @@ export default function PhotosPanel({
                       {catalogScopes.length > 0 && (
                         <button className="btn link" disabled={pending}
                           title="File this to the catalog so every unit like this one sees it"
-                          onClick={() => { setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: p.id, fileName: p.fileName }); }}>
+                          onClick={() => { setError(""); setFileDraft({ scope: 0, title: "", body: "" }); setFiling({ id: p.id, fileName: p.fileName }); }}>
                           Catalog
                         </button>
                       )}
@@ -321,9 +321,11 @@ export default function PhotosPanel({
           context="The photo stays on this record; the catalog points at it. Everyone working on equipment like this sees it under Reference."
           footer={
             <>
-              <span className="dialog-status" />
+              <DialogStatus error={error}
+                problem={fileDraft.body.trim() ? null : "say what the next engineer needs to know"}
+                ok={`Files under ${catalogScopes[fileDraft.scope]?.label ?? "the catalog"}`} />
               <button className="btn" onClick={() => setFiling(null)} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending}
+              <button className="btn accent" disabled={pending || !fileDraft.body.trim()}
                 onClick={() => {
                   const sc = catalogScopes[fileDraft.scope];
                   if (!sc) return;
@@ -339,9 +341,10 @@ export default function PhotosPanel({
                     toast({ message: "Filed the photo to the catalog" });
                     router.refresh();
                   });
-                }}>{pending ? "Filing..." : "File it"}</button>
+                }}>{pending ? "Filing..." : `File ${fileDraft.title || filing.fileName}`}</button>
             </>
           }>
+            <div className="dialog-section">The photo</div>
             <PhotoThumb src={fileSrc(filing.id)} framing="" alt={filing.fileName}
               width={160} height={110} radius={8} />
             <div style={{ marginTop: 10 }}>
@@ -357,6 +360,7 @@ export default function PhotosPanel({
               <input value={fileDraft.title} placeholder="e.g. H-ESI probe removal"
                 onChange={(e) => setFileDraft({ ...fileDraft, title: e.target.value })}
                 style={{ marginBottom: 8 }} />
+              <div className="dialog-section">What it shows</div>
               <label>What the next engineer needs to know</label>
               <textarea value={fileDraft.body} rows={3} style={{ width: "100%", marginBottom: 8 }}
                 placeholder="The trick this photo shows"

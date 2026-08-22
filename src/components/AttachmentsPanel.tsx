@@ -6,7 +6,7 @@ import { upload } from "@vercel/blob/client";
 import { ATTACH_KINDS, ATTACH_META } from "@/lib/stages";
 import { daysUntil, expiryLabel } from "@/lib/gxp";
 import { recordAttachments, deleteAttachment, updateAttachment, setAttachmentListed, setAttachmentTask, attachLibraryFile, listLibraryFiles, type WorkTarget } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { uploadWithRetry, UploadStalledError, type UploadMode } from "@/lib/uploadWithRetry";
 import PdfCombiner from "@/components/PdfCombiner";
@@ -311,6 +311,11 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
   };
 
   const pendingCount = staged.filter((s) => s.state !== "done").length;
+  const failed = staged.filter((s) => s.state === "failed");
+  // What the staged files land on, for the dialog's context line. The combine
+  // title is the record's label with a suffix; strip the suffix rather than
+  // thread a new prop through every mount.
+  const recordLabel = combineTitle.replace(/\s*(report\s+)?packet$/i, "");
 
   return (
     <div className="card">
@@ -372,11 +377,21 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       )}
 
       {staged.length > 0 && (
-        <div className="dash-form" style={{ marginBottom: 12 }}>
-          <div className="panel-head" style={{ marginBottom: 8 }}>
-            <span className="card-title" style={{ fontSize: 14 }}>Ready to upload</span>
-            <span className="pill neutral">{staged.length}</span>
-          </div>
+        <Dialog open onClose={() => { if (!uploading) setStaged([]); }}
+          title={`Upload ${staged.length} file${staged.length === 1 ? "" : "s"}`}
+          context={recordLabel ? `Filed onto ${recordLabel}` : "Filed onto this record"}
+          footer={
+            <>
+              <DialogStatus
+                error={failed.length ? `${failed.length} failed - ${failed[0].error}` : ""}
+                ok={uploading ? "Uploading..." : ""} />
+              <button className="btn" onClick={() => setStaged([])} disabled={uploading}>Clear</button>
+              <button className="btn accent" onClick={uploadAll} disabled={uploading || pendingCount === 0}>
+                {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount === 1 ? "" : "s"}`}
+              </button>
+            </>
+          }>
+          <div className="dialog-section">Files</div>
           {staged.map((s) => (
             <div key={s.key} style={{ marginBottom: 10, borderBottom: "1px solid var(--line)", paddingBottom: 8 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -416,15 +431,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
               {s.state === "failed" && <div className="t-meta" style={{ marginTop: 3, color: "var(--t-bad-fg)" }}>Failed: {s.error}</div>}
             </div>
           ))}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button className="btn sm accent" onClick={uploadAll} disabled={uploading || pendingCount === 0}>
-              {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount === 1 ? "" : "s"}`}
-            </button>
-            {!uploading && (
-              <button className="btn sm" onClick={() => setStaged([])}>Clear</button>
-            )}
-          </div>
-        </div>
+        </Dialog>
       )}
 
       {docs.length === 0 && staged.length === 0 && (

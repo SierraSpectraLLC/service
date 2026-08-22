@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
   coverZoom, frameStyle, NO_FRAME, parseFrame, serializeFrame, turned, ZOOM_MAX, ZOOM_MIN, type Frame,
 } from "@/lib/photoFrame";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 
 /** The preview, and every tile a framed photo lands in, are this shape. */
 const BOX_ASPECT = 4 / 3;
@@ -47,13 +48,6 @@ export default function PhotoFramer({ src, framing, alt, save, onDone }: {
   // measured from its own start rather than accumulating rounding as it goes.
   const drag = useRef<{ x: number; y: number; from: Frame } | null>(null);
 
-  // Esc closes, as it does everywhere else a panel covers the page.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onDone(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onDone]);
-
   /**
    * The shape of the photograph, straight off the loaded image.
    *
@@ -96,11 +90,16 @@ export default function PhotoFramer({ src, framing, alt, save, onDone }: {
   };
 
   return (
-    <div role="dialog" aria-label={`Frame ${alt}`}
-      style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(15,23,42,.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onClick={(e) => { if (e.target === e.currentTarget) onDone(); }}>
-      <div className="card" style={{ maxWidth: 420, width: "100%", margin: 0 }}>
-        <div className="card-title" style={{ marginBottom: 6 }}>Frame this photo</div>
+    <Dialog open size="sm" title="Frame this photo" context={alt} onClose={onDone}
+      footer={
+        <>
+          <DialogStatus error={error} />
+          <button className="btn" onClick={onDone} disabled={pending}>Cancel</button>
+          <button className="btn accent" onClick={commit} disabled={pending}>
+            {pending ? "Saving..." : "Save framing"}
+          </button>
+        </>
+      }>
         <div className="mut t-small" style={{ marginBottom: 8 }}>
           Drag to move it, turn it upright, zoom in or out. Zoom out past the edges to see the whole
           photo. The file itself is unchanged.
@@ -136,16 +135,6 @@ export default function PhotoFramer({ src, framing, alt, save, onDone }: {
           <button className="btn sm" disabled={pending}
             onClick={() => setFrame({ ...NO_FRAME, aspect, zoom: coverZoom(aspect, BOX_ASPECT) })}>Reset</button>
         </div>
-
-        {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
-
-        <div className="row-2" style={{ marginTop: 12, justifyContent: "flex-end" }}>
-          <button className="btn sm" onClick={onDone} disabled={pending}>Cancel</button>
-          <button className="btn sm primary" onClick={commit} disabled={pending}>
-            {pending ? "Saving..." : "Save framing"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }
