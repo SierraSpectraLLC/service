@@ -18,11 +18,8 @@ type Member = { email: string; name: string; orgName: string; left: boolean };
  * rather than as a stack of identical labels. Opening the page marks it read;
  * the composer keeps focus so a reply is a keystroke away.
  */
-export default function ThreadPanel({ threadId, title, named, me, members, messages, addable }: {
+export default function ThreadPanel({ threadId, me, members, messages, addable }: {
   threadId: number;
-  title: string;
-  /** True when somebody named the group; false when it is named by its people. */
-  named: boolean;
   me: string;
   members: Member[];
   messages: Msg[];
@@ -59,13 +56,8 @@ export default function ThreadPanel({ threadId, title, named, me, members, messa
 
   return (
     <div className="card">
+      {/* Identity lives in the RecordHero above; this row is just the actions. */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-        <div className="card-title">{title}</div>
-        {named && active.length > 1 && (
-          <span className="mut" style={{ fontSize: 11 }}>
-            {active.map((m) => m.name).join(", ")}
-          </span>
-        )}
         <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           {addable.length > 0 && (
             <button className="btn sm" onClick={() => { setAdding((v) => !v); setError(""); }}>
@@ -96,7 +88,9 @@ export default function ThreadPanel({ threadId, title, named, me, members, messa
               onClick={() => startTransition(async () => {
                 const res = await addToThread(threadId, p.email);
                 if (res?.error) { setError(res.error); return; }
-                setAdding(false); router.refresh();
+                setAdding(false);
+                toast({ message: `Added ${p.name}` });
+                router.refresh();
               })}>
               {p.name} <span className="mut">· {p.org}</span>
             </button>
@@ -131,6 +125,7 @@ export default function ThreadPanel({ threadId, title, named, me, members, messa
                       onClick={() => startTransition(async () => {
                         const res = await deleteMessage(m.id);
                         if (res?.error) { setError(res.error); return; }
+                        toast({ message: "Took the message back" });
                         router.refresh();
                       })}>×</button>
                   )}

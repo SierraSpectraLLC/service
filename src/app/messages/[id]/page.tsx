@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/authz";
 import { visibleDirectory } from "@/lib/directory";
 import { messageableFrom, threadTitle } from "@/lib/messages";
 import ThreadPanel from "@/components/ThreadPanel";
+import { RecordHero, type HeroStat } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -33,17 +34,29 @@ export default async function ThreadPage({ params }: { params: Promise<{ id: str
   const directory = messageableFrom(await visibleDirectory(user), user.email);
   const here = new Set(mem.filter((m) => !m.leftAt).map((m) => m.email));
 
+  const title = threadTitle(thread.title, mem.map((m) => ({
+    email: m.email, name: m.name, orgName: m.orgName, leftAt: m.leftAt?.toISOString() ?? null,
+  })), me);
+  const active = mem.filter((m) => !m.leftAt);
+  const said = msgs.filter((m) => !m.deletedAt);
+  const heroStats: HeroStat[] = [
+    { value: active.length, label: active.length === 1 ? "person" : "people" },
+    { value: said.length, label: said.length === 1 ? "message" : "messages" },
+  ];
+
   return (
     <div className="container page">
       <div className="crumb no-print">
         <Link href="/messages" style={{ textDecoration: "none", color: "inherit" }}>Messages</Link> › <b>Thread</b>
       </div>
+      <RecordHero
+        eyebrow="Conversation"
+        title={title}
+        meta={active.map((m) => (m.orgName ? `${m.name || m.email} (${m.orgName})` : m.name || m.email)).join(", ")}
+        stats={heroStats}
+      />
       <ThreadPanel
         threadId={threadId}
-        title={threadTitle(thread.title, mem.map((m) => ({
-          email: m.email, name: m.name, orgName: m.orgName, leftAt: m.leftAt?.toISOString() ?? null,
-        })), me)}
-        named={!!thread.title.trim()}
         me={me}
         members={mem.map((m) => ({
           email: m.email, name: m.name || m.email, orgName: m.orgName,
