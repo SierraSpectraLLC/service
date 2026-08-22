@@ -5,26 +5,32 @@ import { sheetDiffs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { getModules } from "@/lib/flags";
 import ParityList from "@/components/ParityList";
+import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function ParityPage() {
+export default async function ParityPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
   try { await requireStaff(); } catch { redirect("/"); }
+  const { show = "" } = await searchParams;
   if (!(await getModules()).sheetSync) redirect("/");
   // Open diffs first, newest first within each group.
   const diffs = await db.select().from(sheetDiffs).orderBy(asc(sheetDiffs.resolved), desc(sheetDiffs.runAt)).limit(100);
   const openCount = diffs.filter((d) => !d.resolved).length;
+  const resolved = diffs.length - openCount;
   return (
     <div className="container wide">
-      <div className="crumb">Operations › <b>Sheet parity</b></div>
-      <div className="page-head">
-        <h1 className="page-title">Google Sheet parity</h1>
-        <span className="mut" style={{ fontSize: 12 }}>
-          {openCount ? `${openCount} open mismatch${openCount === 1 ? "" : "es"}` : "everything matches"}
-        </span>
-        <p className="page-sub">Polled hourly. Nothing is auto-applied - you decide which record wins.</p>
-      </div>
-      <ParityList diffs={diffs.map((d) => ({ ...d, runAt: d.runAt.toISOString() }))} />
+      <PageHead
+        crumb={<>Operations › <b>Sheet parity</b></>}
+        title="Google Sheet parity"
+        sub="Polled hourly. Nothing is auto-applied - you decide which record wins."
+      />
+      <Toolbar facets={
+        <FacetStrip facets={[
+          { key: "open", label: "Open", count: openCount || undefined, on: show !== "history", href: "/parity" },
+          { key: "history", label: "History", count: resolved || undefined, on: show === "history", href: "/parity?show=history" },
+        ]} />
+      } />
+      <ParityList diffs={diffs.map((d) => ({ ...d, runAt: d.runAt.toISOString() }))} showHistory={show === "history"} />
     </div>
   );
 }

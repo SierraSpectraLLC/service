@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import { resolveDiff } from "@/app/actions";
 import { fmtWhen } from "@/lib/when";
+import { DataTable, Id, Pill } from "@/components/ui";
+import { toast } from "@/components/ui/Toast";
 
 type Diff = {
   id: number; externalId: string; field: string; sheetValue: string; dbValue: string;
@@ -18,16 +20,20 @@ const RESOLUTION_LABEL: Record<string, string> = {
 
 const when = (iso: string) => fmtWhen(iso);
 
-export default function ParityList({ diffs }: { diffs: Diff[] }) {
+export default function ParityList({ diffs, showHistory = false }: { diffs: Diff[]; showHistory?: boolean }) {
   const [pending, startTransition] = useTransition();
   const [errors, setErrors] = useState<Record<number, string>>({});
-  const [showHistory, setShowHistory] = useState(false);
 
   const resolve = (id: number, resolution: "kept_ours" | "accepted_sheet" | "kept_ours_pushed") =>
     startTransition(async () => {
       setErrors((e) => ({ ...e, [id]: "" }));
       const res = await resolveDiff(id, resolution);
       if (res?.error) setErrors((e) => ({ ...e, [id]: res.error! }));
+      else toast({
+        message: resolution === "kept_ours" ? "Kept our value"
+          : resolution === "accepted_sheet" ? "Accepted the sheet's value"
+          : "Kept ours and updated the sheet",
+      });
     });
 
   const open = diffs.filter((d) => !d.resolved);
@@ -47,13 +53,13 @@ export default function ParityList({ diffs }: { diffs: Diff[] }) {
 
   return (
     <>
-      {open.length === 0 && (
+      {!showHistory && open.length === 0 && (
         <div className="card" style={{ padding: 14 }}>
           <span style={{ fontSize: 13, color: "#2E6B2E", fontWeight: 700 }}>✓ No open mismatches.</span>
         </div>
       )}
 
-      {groups.map((g) => (
+      {!showHistory && groups.map((g) => (
         <div key={g.externalId} className="card" style={{ padding: 14 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span className="mono" style={{ fontWeight: 700, fontSize: 13, color: "var(--navy)" }}>{g.externalId}</span>
@@ -89,30 +95,29 @@ export default function ParityList({ diffs }: { diffs: Diff[] }) {
         </div>
       ))}
 
-      {history.length > 0 && (
-        <div className="card" style={{ padding: 14 }}>
-          <button onClick={() => setShowHistory((v) => !v)}
-            style={{ cursor: "pointer", width: "100%", textAlign: "left", background: "none", border: "none", padding: 0, display: "flex", alignItems: "center", gap: 8 }}>
-            <span className="mut" style={{ fontSize: 12 }}>{showHistory ? "▾" : "▸"}</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--slate)" }}>History</span>
-            <span className="pill neutral">{history.length}</span>
-          </button>
-          {showHistory && (
-            <div style={{ marginTop: 8 }}>
-              {history.map((d) => (
-                <div key={d.id} title={`Sheet: ${d.sheetValue}\nOurs: ${d.dbValue}`}
-                  style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 0", borderTop: "1px solid var(--line)", fontSize: 12 }}>
-                  <span className="mono" style={{ fontWeight: 700, color: "var(--navy)" }}>{d.externalId}</span>
-                  <span>{d.field === "Row" ? "Row presence" : d.field}</span>
-                  <span className={`pill ${d.resolution === "auto_cleared" ? "neutral" : "good"}`}>
-                    {RESOLUTION_LABEL[d.resolution] || "resolved"}
-                  </span>
-                  <span className="mut" style={{ marginLeft: "auto" }}>{when(d.runAt)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      {showHistory && (
+        <DataTable
+          cols={[
+            { key: "id", label: "System", width: "90px" },
+            { key: "field", label: "Field", width: "minmax(110px, 1fr)" },
+            { key: "how", label: "Resolved", width: "130px" },
+            { key: "when", label: "When", width: "110px", align: "right" },
+          ]}
+          rows={history.map((d) => ({
+            key: d.id,
+            cells: {
+              id: <Id>{d.externalId}</Id>,
+              field: <span title={`Sheet: ${d.sheetValue}\nOurs: ${d.dbValue}`}>{d.field === "Row" ? "Row presence" : d.field}</span>,
+              how: (
+                <Pill tone={d.resolution === "auto_cleared" ? "neutral" : "good"}>
+                  {RESOLUTION_LABEL[d.resolution] || "resolved"}
+                </Pill>
+              ),
+              when: <span className="mut">{when(d.runAt)}</span>,
+            },
+          }))}
+          empty="Nothing resolved yet"
+        />
       )}
     </>
   );

@@ -22,6 +22,9 @@ const OWNER = "dev@local.test";
 
 const FIXTURE = `
   INSERT INTO app_settings (id, client_access_enabled) VALUES (1, true);
+  UPDATE app_settings SET sheet_sync_enabled = true, eod_enabled = true,
+    digest_enabled = true, remote_enabled = true, public_catalog_enabled = true
+    WHERE id = 1;
 
   INSERT INTO orgs (name, kind) VALUES
     ('Lab Zen', 'client'),
