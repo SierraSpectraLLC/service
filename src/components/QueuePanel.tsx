@@ -59,9 +59,7 @@ export default function QueuePanel({
         {/* Only worth a chip when someone else is holding it - "ours" is the
             default state of every system on the board and says nothing. */}
         {!isMine && (
-          <span className="pill" style={{
-            background: parked ? "#FAF0DC" : "#E7EFF8", color: parked ? "#8A5410" : "#1D6396", fontWeight: 700,
-          }}>
+          <span className={`pill ${parked ? "warn" : "info"}`}>
             With {holderName}
           </span>
         )}
