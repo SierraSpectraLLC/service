@@ -14,18 +14,21 @@ import { toast } from "@/components/ui/Toast";
  * re-wording an existing reason. The server demands it too - see
  * actions.toggleStage.
  */
-const askBlockReason = (action: string, existing = "") => inputDialog({
+const askBlockReason = (action: string, existing = "", context?: string) => inputDialog({
   title: "Why is this system blocked?",
+  context,
   body: 'What is it waiting on, and what would clear it? Shown on the system and in the daily digest until it is unblocked - e.g. "waiting on LabZen to approve the quote for the HED supply".',
   action, label: "Reason", initial: existing,
 });
 
 export type StageDefLite = { name: string; bg: string; fg: string };
 
-export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, blockedReason = "" }: {
+export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, blockedReason = "", systemLabel }: {
   instrumentId: number; stages: string[]; stageDefs: StageDefLite[]; canEdit: boolean;
   /** Why this system is blocked. Only meaningful while the blocked stage is on. */
   blockedReason?: string;
+  /** What the block-reason dialog acts on, e.g. the system's external id. */
+  systemLabel?: string;
 }) {
   const [, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -42,7 +45,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
     let reason = "";
     const blocking = s === BLOCKED_STAGE && !optimisticStages.includes(s);
     if (blocking) {
-      const answer = await askBlockReason("Block system");
+      const answer = await askBlockReason("Block system", "", systemLabel);
       if (answer === null) return;
       reason = answer;
     }
@@ -56,7 +59,7 @@ export default function StagePanel({ instrumentId, stages, stageDefs, canEdit, b
   };
 
   const editReason = async () => {
-    const answer = await askBlockReason("Save reason", blockedReason);
+    const answer = await askBlockReason("Save reason", blockedReason, systemLabel);
     if (answer === null) return;
     startTransition(async () => {
       setError("");

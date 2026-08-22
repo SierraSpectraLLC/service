@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
@@ -48,6 +48,10 @@ export default function WorkOrderControls({
   // Resolving has a form, so it is not one of the plain buttons.
   const moves = woMoves(state, mover).filter((s) => s !== "resolved");
   const canResolve = woMoves(state, mover).includes("resolved");
+
+  // The first unmet requirement per form, live in the dialog footer.
+  const resolveProblem = summary.trim().length < 3 ? "say what was done" : null;
+  const editProblem = !form.title.trim() ? "say what the job is" : null;
 
   const run = (fn: () => Promise<{ error?: string } | void>, done?: string) => {
     setError("");
@@ -114,12 +118,12 @@ export default function WorkOrderControls({
       </div>
 
       {mode === "resolve" && (
-        <Dialog open onClose={() => setMode("")} title={`Resolve ${number}`}
+        <Dialog open onClose={() => setMode("")} title={`Resolve ${number}`} context={title}
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <DialogStatus error={error} problem={resolveProblem} />
               <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending || summary.trim().length < 3}
+              <button className="btn accent" disabled={pending || !!resolveProblem}
                 onClick={() => run(() => resolveWorkOrder(id, summary), `Resolved ${number}`)}>
                 {pending ? "Saving..." : `Resolve ${number}`}
               </button>
@@ -137,23 +141,25 @@ export default function WorkOrderControls({
       )}
 
       {mode === "edit" && (
-        <Dialog open onClose={() => setMode("")} title={`Edit ${number}`}
+        <Dialog open onClose={() => setMode("")} title={`Edit ${number}`} context={title}
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <DialogStatus error={error} problem={editProblem} />
               <button className="btn" onClick={() => setMode("")} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending || !form.title.trim()}
+              <button className="btn accent" disabled={pending || !!editProblem}
                 onClick={() => run(() => updateWorkOrder(id, form), `Saved ${number}`)}>
-                {pending ? "Saving..." : "Save changes"}
+                {pending ? "Saving..." : `Save ${number}`}
               </button>
             </>
           }>
+          <div className="dialog-section">The job</div>
           <label>What is the job?</label>
           <input value={form.title} maxLength={160} style={{ marginBottom: 8 }}
             onChange={(e) => setForm({ ...form, title: e.target.value })} />
           <label>Detail</label>
           <textarea value={form.body} rows={3} style={{ width: "100%", marginBottom: 8 }}
             onChange={(e) => setForm({ ...form, body: e.target.value })} />
+          <div className="dialog-section">Severity and assignee</div>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>How urgent</label>

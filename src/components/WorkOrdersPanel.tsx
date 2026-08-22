@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { logPastWorkOrder, openWorkOrder } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { WO_LABEL, WO_SEVERITIES, WO_TONE, woLine, woOpen } from "@/lib/workOrders";
 
@@ -58,6 +58,15 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
 
   const live = orders.filter((o) => woOpen(o.state) || o.state === "resolved");
   const filed = orders.filter((o) => !live.includes(o));
+
+  // What the dialogs act on - all this panel is handed is the target ids.
+  const targetLine = target.instrumentId != null ? `System #${target.instrumentId}`
+    : target.assetId != null ? `Asset #${target.assetId}` : undefined;
+  // The first unmet requirement, in plain words, live in the footer.
+  const openProblem = !title.trim() ? "say briefly what the job is" : null;
+  const pastProblem = !pastDraft.title.trim() ? "say briefly what the job was"
+    : !pastDraft.summary.trim() ? "say what was done"
+    : !pastDraft.date ? "pick the date it was done" : null;
 
   const file = () => {
     if (!title.trim()) { setError("Say briefly what the job is"); return; }
@@ -114,9 +123,9 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
           context="Filed already closed, on the date it was done."
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <DialogStatus error={error} problem={pastProblem} />
               <button className="btn" onClick={() => setPast(false)} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending || !pastDraft.title.trim() || !pastDraft.summary.trim() || !pastDraft.date}
+              <button className="btn accent" disabled={pending || !!pastProblem}
                 onClick={() => startTransition(async () => {
                   const res = await logPastWorkOrder(target, pastDraft);
                   if (res?.error) { setError(res.error); return; }
@@ -127,6 +136,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
               </button>
             </>
           }>
+          <div className="dialog-section">The job</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div style={{ flex: "2 1 180px" }}>
               <label>What was the job? *</label>
@@ -139,9 +149,11 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
                 onChange={(e) => setPastDraft({ ...pastDraft, date: e.target.value })} style={{ width: "auto" }} />
             </div>
           </div>
+          <div className="dialog-section">The close-out</div>
           <label>What was done *</label>
           <textarea value={pastDraft.summary} onChange={(e) => setPastDraft({ ...pastDraft, summary: e.target.value })}
             rows={3} placeholder="The close-out, as it would have been written that day" style={{ width: "100%", marginBottom: 8 }} />
+          <div className="dialog-section">Paper trail</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <div style={{ flex: "1 1 140px" }}>
               <label>Reference #</label>
@@ -158,22 +170,24 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
       )}
 
       {open && (
-        <Dialog open onClose={() => setOpen(false)} title="Open a work order"
+        <Dialog open onClose={() => setOpen(false)} title="Open a work order" context={targetLine}
           footer={
             <>
-              <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+              <DialogStatus error={error} problem={openProblem} />
               <button className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancel</button>
-              <button className="btn accent" onClick={file} disabled={pending || !title.trim()}>
+              <button className="btn accent" onClick={file} disabled={pending || !!openProblem}>
                 {pending ? "Opening..." : assignee ? `Open & dispatch to ${assignee}` : "Open work order"}
               </button>
             </>
           }>
+          <div className="dialog-section">The job</div>
           <label>What is the job? *</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={160}
             placeholder="Lamp won't ignite" style={{ marginBottom: 8 }} />
           <label>Anything else</label>
           <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3}
             placeholder="Error code, when it started, what was running" style={{ width: "100%", marginBottom: 8 }} />
+          <div className="dialog-section">How urgent</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             {WO_SEVERITIES.map((s) => (
               <button key={s.key} type="button" onClick={() => setSeverity(s.key)}
@@ -185,6 +199,8 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
               known - filing and assigning in two screens was two too many.
               Optional, because triage-later is also a real workflow. */}
           {people.length > 0 && (
+            <>
+            <div className="dialog-section">Who takes it</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
               <label style={{ margin: 0 }}>Dispatch to</label>
               <select value={assignee} onChange={(e) => setAssignee(e.target.value)}
@@ -194,6 +210,7 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
               </select>
               {assignee && <span className="mut t-meta">{assignee} gets notified the moment it files.</span>}
             </div>
+            </>
           )}
         </Dialog>
       )}
