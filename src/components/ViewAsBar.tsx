@@ -23,12 +23,12 @@ export default function ViewAsBar({ orgs, active }: {
 
   if (active) {
     return (
-      <div style={{ background: "#FAF0DC", borderBottom: "1px solid #EAD9B0", color: "#8A5410" }}>
-        <div className="container" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", paddingTop: 7, paddingBottom: 7 }}>
-          <span style={{ fontSize: 12, fontWeight: 700 }}>
+      <div style={{ background: "var(--t-warn-bg)", borderBottom: "1px solid #EAD9B0", color: "var(--t-warn-fg)" }}>
+        <div className="container row-3" style={{ paddingTop: 7, paddingBottom: 7 }}>
+          <span className="t-small" style={{ fontWeight: 700 }}>
             Viewing as {active.orgName} · {active.role === "client_viewer" ? "read-only" : "editor"}
           </span>
-          <span style={{ fontSize: 11, opacity: 0.85 }}>Anything you change is still recorded as you.</span>
+          <span className="t-meta" style={{ opacity: 0.85 }}>Anything you change is still recorded as you.</span>
           <button className="btn sm" style={{ marginLeft: "auto" }} disabled={pending} onClick={exit}>
             {pending ? "Leaving..." : "Back to superuser"}
           </button>
@@ -44,9 +44,9 @@ export default function ViewAsBar({ orgs, active }: {
       {!open ? (
         <button className="btn sm" onClick={() => setOpen(true)}>View as...</button>
       ) : (
-        <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+        <span className="row-2" style={{ display: "inline-flex" }}>
           <select value={mode} onChange={(e) => setMode(e.target.value as "editor" | "viewer")}
-            aria-label="Permission level to view as" style={{ width: "auto", fontSize: 12 }}>
+            aria-label="Permission level to view as" className="t-small" style={{ width: "auto" }}>
             <option value="editor">as editor</option>
             <option value="viewer">as read-only</option>
           </select>
