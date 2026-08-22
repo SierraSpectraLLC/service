@@ -65,7 +65,7 @@ export default function SignoffPanel({ target, ready, blockers, signatures, canS
           <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "Georgia, serif", color: "var(--navy)" }}>{s.signerName}</span>
             {s.signerTitle && <span className="mut" style={{ fontSize: 12 }}>{s.signerTitle}</span>}
-            <span className="pill" style={{ background: "#E5F3E5", color: "#2E6B2E" }}>{s.meaning}</span>
+            <span className="pill good">{s.meaning}</span>
             <span className="mut" style={{ fontSize: 11, marginLeft: "auto" }}>{s.when}</span>
           </div>
           <div className="mut mono" style={{ fontSize: 11 }}>{s.signedBy}</div>
