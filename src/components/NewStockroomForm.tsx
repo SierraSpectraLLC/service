@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createStockroom } from "@/app/actions";
 import { KIND_LABEL, STOCK_KINDS } from "@/lib/stock";
+import Dialog from "@/components/ui/Dialog";
+import { toast } from "@/components/ui/Toast";
 
 export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
   orgOptions: { id: number; name: string }[];
@@ -21,14 +23,22 @@ export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
   return (
     <>
       <button className="btn sm primary" onClick={() => setOpen(!open)}>+ New stockroom</button>
-      {open && (
-        <>
-          <div className="scrim" onClick={() => setOpen(false)} />
-          <div className="sheet" role="dialog" aria-modal="true" aria-label="New stockroom">
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--navy)" }}>New stockroom</div>
-            <button className="btn link" style={{ marginLeft: "auto", fontSize: 12 }} onClick={() => setOpen(false)}>close</button>
-          </div>
+      <Dialog open={open} onClose={() => setOpen(false)} title="New stockroom"
+        footer={
+          <>
+            <span className={`dialog-status${error ? " err" : ""}`}>{error}</span>
+            <button className="btn" onClick={() => setOpen(false)}>Cancel</button>
+            <button className="btn accent" disabled={pending || !draft.name.trim()}
+              onClick={() => startTransition(async () => {
+                const res = await createStockroom({ ...draft, orgId: draft.orgId || null });
+                if (res?.error) { setError(res.error); return; }
+                setOpen(false);
+                setDraft({ name: "", kind: "shop", orgId: 0, keeper: "", location: "" });
+                toast({ message: `Created ${draft.name.trim()}` });
+                if (res.id) router.push(`/stock/${res.id}`);
+              })}>{pending ? "Creating..." : "Create stockroom"}</button>
+          </>
+        }>
           <div className="pf2" style={{ marginBottom: 8 }}>
             <div>
               <label>Name *</label>
@@ -66,18 +76,7 @@ export default function NewStockroomForm({ orgOptions, isHouse, myOrgName }: {
               <input value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="Bay 2 / client site" />
             </div>
           </div>
-          <button className="btn sm accent" disabled={pending || !draft.name.trim()}
-            onClick={() => startTransition(async () => {
-              const res = await createStockroom({ ...draft, orgId: draft.orgId || null });
-              if (res?.error) { setError(res.error); return; }
-              setOpen(false);
-              setDraft({ name: "", kind: "shop", orgId: 0, keeper: "", location: "" });
-              if (res.id) router.push(`/stock/${res.id}`);
-            })}>{pending ? "Creating..." : "Create"}</button>
-          {error && <div style={{ fontSize: 12, color: "#A32D2D", marginTop: 8 }}>{error}</div>}
-          </div>
-        </>
-      )}
+      </Dialog>
     </>
   );
 }
