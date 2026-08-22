@@ -405,11 +405,11 @@ const pill = (text: string, bg: string, fg: string) =>
   `<span style="display:inline-block;font-size:11px;font-weight:bold;padding:2px 8px;border-radius:999px;background:${bg};color:${fg};font-family:${EMAIL.font};">${esc(text)}</span>`;
 
 const stagePill = (s: string) => {
-  const c = STAGE_COLOR[s] || { bg: "#EEF1F5", fg: "#475569" };
+  const c = STAGE_COLOR[s] || TONE_HEX.neutral;
   return pill(s, c.bg, c.fg);
 };
 
-const card = (inner: string, border = EMAIL.border, bg = "#FFFFFF") =>
+const card = (inner: string, border = EMAIL.border, bg = EMAIL.card) =>
   `<div style="border:1px solid ${border};background:${bg};border-radius:10px;padding:12px 14px;margin:10px 0;font-family:${EMAIL.font};font-size:13px;color:${EMAIL.ink};">${inner}</div>`;
 
 const groupHead = (label: string, n: number, color: string) =>
@@ -435,17 +435,17 @@ function renderPending(section: DigestSection, internal: boolean, operatorName: 
     const head = !internal ? `Waiting for ${section.name} intervention`
       : section.orgId === null ? "Waiting on others" : `Waiting on ${section.name}`;
     const expected = section.orgId === null ? "" : section.name;
-    groups.push(groupHead(head, c.partner.length, "#8A5410")
+    groups.push(groupHead(head, c.partner.length, TONE_HEX.warn.fg)
       + c.partner.map((x) => line(x, expected)).join(""));
   }
   if (c.us.length) {
     // Partner voice drops the first person: the email is FROM the operator
     // but READ by the partner, and "us" makes them stop to work out who.
-    groups.push(groupHead(internal ? "Waiting on us" : `With ${operatorName}`, c.us.length, "#A32D2D")
+    groups.push(groupHead(internal ? "Waiting on us" : `With ${operatorName}`, c.us.length, TONE_HEX.bad.fg)
       + c.us.map((x) => line(x, operatorName)).join(""));
   }
   if (c.supplier.length) {
-    groups.push(groupHead("With suppliers", c.supplier.length, "#475569")
+    groups.push(groupHead("With suppliers", c.supplier.length, TONE_HEX.neutral.fg)
       + c.supplier.map((x) => line(x, "supplier")).join(""));
   }
   return card(`<div style="font-weight:bold;margin-bottom:2px;">Blocked &amp; pending</div>${groups.join("")}`);
@@ -456,9 +456,9 @@ function renderFollowUps(section: DigestSection): string {
   if (!section.followUps.length) return "";
   const lines = section.followUps.map((f) =>
     `<div style="margin:2px 0;">${sysId(f.externalId)} &nbsp;${esc(f.text)}</div>`).join("");
-  return card(`<b style="color:#8A5410;">Follow up today (${section.followUps.length})</b>
+  return card(`<b style="color:${TONE_HEX.warn.fg};">Follow up today (${section.followUps.length})</b>
     <div style="font-size:12px;color:${EMAIL.muted};margin:2px 0 4px;">Repeats every morning until the record that clears it exists.</div>${lines}`,
-    "#EAD9B8", "#FDF8EE");
+    TONE_HEX.warn.fg, TONE_HEX.warn.bg);
 }
 
 /** Handed-off systems: with the partner, out of our hands. Neutral on purpose. */
@@ -483,7 +483,7 @@ function renderGas(section: DigestSection): string {
   if (!section.gas.length) return "";
   const lines = section.gas.map((g) =>
     `<div style="margin:2px 0;">${sysId(g.externalId)} &nbsp;${esc(g.gas)}: ${esc(g.status)}${g.note ? ` <span style="color:${EMAIL.muted};">(${esc(g.note)})</span>` : ""}</div>`).join("");
-  return card(`<b style="color:#A32D2D;">Gas attention (${section.gas.length})</b>${lines}`, "#E8B4B4", "#FBE9E9");
+  return card(`<b style="color:${TONE_HEX.bad.fg};">Gas attention (${section.gas.length})</b>${lines}`, TONE_HEX.bad.fg, TONE_HEX.bad.bg);
 }
 
 function renderWork(section: DigestSection, internal: boolean, window: string): string {
@@ -551,7 +551,7 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
        </div>`
     : "";
   const quiet = !section.pending.length && !section.gas.length && !section.followUps.length
-    ? `<div style="font-family:${EMAIL.font};font-size:13px;color:#0F6E56;margin:8px 0;">Nothing blocked - every system is moving.</div>`
+    ? `<div style="font-family:${EMAIL.font};font-size:13px;color:${TONE_HEX.good.fg};margin:8px 0;">Nothing blocked - every system is moving.</div>`
     : "";
   return header
     + renderGas(section)
@@ -591,11 +591,11 @@ function summaryStrip(n: ReturnType<typeof digestCounts>): string {
     <table width="100%" border="0" cellspacing="6" cellpadding="0" style="margin-bottom:4px;">
       <tr>
         ${cell(String(n.systems), "in work")}
-        ${cell(String(n.us), "on us", n.us ? "#A32D2D" : EMAIL.faint)}
-        ${cell(String(n.partner), "on partners", n.partner ? "#8A5410" : EMAIL.faint)}
-        ${cell(String(n.followUps), "to chase", n.followUps ? "#8A5410" : EMAIL.faint)}
+        ${cell(String(n.us), "on us", n.us ? TONE_HEX.bad.fg : EMAIL.faint)}
+        ${cell(String(n.partner), "on partners", n.partner ? TONE_HEX.warn.fg : EMAIL.faint)}
+        ${cell(String(n.followUps), "to chase", n.followUps ? TONE_HEX.warn.fg : EMAIL.faint)}
         ${cell(String(n.handoffs), "handed off", EMAIL.muted)}
-        ${cell(String(n.gas), "gas issues", n.gas ? "#A32D2D" : EMAIL.faint)}
+        ${cell(String(n.gas), "gas issues", n.gas ? TONE_HEX.bad.fg : EMAIL.faint)}
       </tr>
     </table>`;
 }

@@ -21,6 +21,7 @@ export const EMAIL = {
   hairline: "#EDF1F6",
   ground: "#F4F6F9",
   panel: "#F7F9FC",
+  card: "#FFFFFF",
   link: "#1D6396",
   font: "Helvetica,Arial,sans-serif",
   mono: "Menlo,Consolas,monospace",

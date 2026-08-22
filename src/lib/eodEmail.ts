@@ -12,7 +12,7 @@ import { namedLogins } from "@/lib/directory";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
-import { emailShell, esc } from "@/lib/emailTheme";
+import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 
 const SEP = "-".repeat(50);
 
@@ -210,7 +210,7 @@ export async function composeEodEmail(
     const label = esc(e.label);
     const noun = e.kind === "system" ? "System" : "Unit";
     const heading = url
-      ? `<a href="${href}" style="color:#1D6396;">${noun} ${idx + 1}: ${label}</a>`
+      ? `<a href="${href}" style="color:${EMAIL.link};">${noun} ${idx + 1}: ${label}</a>`
       : `${noun} ${idx + 1}: ${label}`;
     return `${heading}\n\nSystem Update: ${esc(e.systemUpdate)}\nAction Item: ${esc(e.actionItem)}\n\n${SEP}`;
   });
@@ -222,9 +222,9 @@ export async function composeEodEmail(
     tagline: `Daily Updates · ${dateMDY}`,
     preheader: `${included.length} system${included.length === 1 ? "" : "s"} on today's report.`,
     width: 640,
-    body: `<pre style="font-family:Menlo,Consolas,monospace;font-size:13px;line-height:1.5;white-space:pre-wrap;color:#172A4A;margin:0;">${body}</pre>`,
+    body: `<pre style="font-family:${EMAIL.mono};font-size:13px;line-height:1.5;white-space:pre-wrap;color:${EMAIL.ink};margin:0;">${body}</pre>`,
     footer: url
-      ? `Questions on a system? Tap its heading and reply in the portal - it keeps everyone on the same page. General topics: <a href="${url}/discussions" style="color:#94A3B8;">${esc(url.replace(/^https?:\/\//, ""))}/discussions</a>`
+      ? `Questions on a system? Tap its heading and reply in the portal - it keeps everyone on the same page. General topics: <a href="${url}/discussions" style="color:${EMAIL.faint};">${esc(url.replace(/^https?:\/\//, ""))}/discussions</a>`
       : `Sent by ${esc(brand.operatorName)}.`,
   });
 
