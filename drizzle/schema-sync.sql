@@ -2730,3 +2730,122 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "billing_policy" jsonb;
 -- Sales tax on PARTS at the address the goods landed at, in basis points
 -- (775 = 7.75%). Tax belongs to the place, not the client. Zero draws no line.
 ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "tax_rate_bps" integer NOT NULL DEFAULT 0;
+
+-- ── Invoices: the bill, its lines, and the money that arrived ───────────────
+-- No balance column anywhere. What is owed is lines + fees - payments, summed
+-- at render by lib/billing.invoiceBalance. `status` is a lifecycle word (sent,
+-- voided, referred), not an arithmetic result.
+CREATE TABLE IF NOT EXISTS "invoices" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "work_order_id" integer,
+  "agreement_id" integer,
+  "number" text NOT NULL,
+  "status" text NOT NULL DEFAULT 'draft',
+  "issued_on" text NOT NULL DEFAULT '',
+  "due_on" text NOT NULL DEFAULT '',
+  "po_number" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "invoices_org_idx" ON "invoices" ("org_id");
+CREATE INDEX IF NOT EXISTS "invoices_wo_idx" ON "invoices" ("work_order_id");
+
+-- Two invoices filed in the same second both read the same highest number.
+-- This index is what makes that a failed insert rather than two bills called
+-- INV-0094; the action retries, exactly as fileWorkOrder does.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_number_unique') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoice_number_unique" UNIQUE ("tenant_org_id", "number");
+  END IF;
+END $$;
+
+-- qty is thousandths, so 4.5 hours is 4500 and nothing about a bill is ever a
+-- float. `covered` prices the line at zero while keeping its real quantity and
+-- unit price - that is what makes the $0 invoice readable.
+CREATE TABLE IF NOT EXISTS "invoice_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "invoice_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'part',
+  "description" text NOT NULL DEFAULT '',
+  "detail" text NOT NULL DEFAULT '',
+  "qty" integer NOT NULL DEFAULT 1000,
+  "unit_cents" integer NOT NULL DEFAULT 0,
+  "covered" boolean NOT NULL DEFAULT false,
+  "covered_by" text NOT NULL DEFAULT '',
+  "source_id" integer,
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "invoice_lines_invoice_idx" ON "invoice_lines" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "payments" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "method" text NOT NULL DEFAULT 'check',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "reference" text NOT NULL DEFAULT '',
+  "received_on" text NOT NULL DEFAULT '',
+  "recorded_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "payments_invoice_idx" ON "payments" ("invoice_id");
+
+-- A share link now knows what is on the other side of it, and remembers being
+-- opened. That open IS the Viewed signal on an invoice timeline: one answer to
+-- "did they see it", recorded where the link already lives.
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'files';
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "org_id" integer;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "invoice_id" integer;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "opened_at" timestamp;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "last_opened_at" timestamp;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "open_count" integer NOT NULL DEFAULT 0;
+
+-- Invoice numbering and the one cost input a margin needs. loaded_labor_cents
+-- at zero means nobody has said - the costing view reports that rather than a
+-- flattering 100% margin.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "invoice_prefix" text NOT NULL DEFAULT 'INV-';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "loaded_labor_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "billing_policy" jsonb;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_org_id_orgs_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_work_order_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_agreement_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_agreement_id_fk"
+      FOREIGN KEY ("agreement_id") REFERENCES "agreements"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_lines_invoice_id_fk') THEN
+    ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payments_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "payments" ADD CONSTRAINT "payments_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payments_invoice_id_fk') THEN
+    ALTER TABLE "payments" ADD CONSTRAINT "payments_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_org_id_orgs_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_invoice_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

@@ -1044,6 +1044,22 @@ export const shareLinks = pgTable("share_links", {
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   revokedAt: timestamp("revoked_at"),
+  /**
+   * What is on the other side: files (every share before billing existed),
+   * an invoice, or a quote. The viewer branches on this.
+   */
+  kind: text("kind").notNull().default("files"),
+  /** Which org the link speaks to. Money is fetched through THIS, never the URL. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  /**
+   * When it was first opened, and how many times. This IS the Viewed signal
+   * the invoice timeline reads - there is no second tracker, because a second
+   * tracker is a second answer to "did they see it".
+   */
+  openedAt: timestamp("opened_at"),
+  lastOpenedAt: timestamp("last_opened_at"),
+  openCount: integer("open_count").notNull().default(0),
 });
 
 // Cascades from both ends: a deleted file leaves every share it was in, and a
@@ -1993,6 +2009,74 @@ export const expenses = pgTable("expenses", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("expenses_wo_idx").on(t.workOrderId)]);
 
+/**
+ * A bill. Nothing here is a balance: what is owed is
+ * lines + fees - payments, summed at render by lib/billing.invoiceBalance, and
+ * the status column is a lifecycle word (has it been sent, was it voided), not
+ * an arithmetic result. `partial` and `paid` are written when a payment lands
+ * because a human wants to see them on a list without the sum; the sum is
+ * still the authority, and the two are reconciled by invoiceStanding.
+ *
+ * workOrderId and agreementId are both nullable: a statement-only invoice for
+ * a retainer belongs to neither, and a job invoice belongs to one job.
+ */
+export const invoices = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "set null" }),
+  number: text("number").notNull(),
+  // draft | sent | partial | paid | void | referred
+  status: text("status").notNull().default("draft"),
+  issuedOn: text("issued_on").notNull().default(""),   // YYYY-MM-DD, set at send
+  dueOn: text("due_on").notNull().default(""),         // issuedOn + the org's terms
+  poNumber: text("po_number").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("invoices_org_idx").on(t.orgId),
+  index("invoices_wo_idx").on(t.workOrderId),
+  unique("invoice_number_unique").on(t.tenantOrgId, t.number),
+]);
+
+/**
+ * One line. `covered` is the whole reason a $0 invoice exists: the line keeps
+ * its real quantity and unit price and prices out at zero, so the client can
+ * read what the contract just paid for. `sourceId` points back at the part,
+ * time entry or expense the line came from - that is how a redraft knows what
+ * it already billed.
+ */
+export const invoiceLines = pgTable("invoice_lines", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  // part | labor | travel | expense | tax | fee_ref
+  kind: text("kind").notNull().default("part"),
+  description: text("description").notNull().default(""),
+  detail: text("detail").notNull().default(""),        // the second, quieter line
+  qty: integer("qty").notNull().default(1000),          // thousandths, so 4.5 h is 4500
+  unitCents: integer("unit_cents").notNull().default(0),
+  covered: boolean("covered").notNull().default(false),
+  coveredBy: text("covered_by").notNull().default(""),  // the agreement number it burned
+  sourceId: integer("source_id"),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("invoice_lines_invoice_idx").on(t.invoiceId)]);
+
+/** Money that arrived. Never edited - a mistake is corrected by another row. */
+export const payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  method: text("method").notNull().default("check"),   // ach | card | check | other
+  amountCents: integer("amount_cents").notNull().default(0),
+  reference: text("reference").notNull().default(""),  // check number, Stripe id
+  receivedOn: text("received_on").notNull().default(""),
+  recordedBy: text("recorded_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("payments_invoice_idx").on(t.invoiceId)]);
+
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it
 // except the older checkout_rules seed migration that fills it.
@@ -2191,6 +2275,18 @@ export const appSettings = pgTable("app_settings", {
   // operator decides to be on the open web - and off means OFF: the pages 404
   // and the sitemap empties, not merely that the publish button is hidden.
   publicCatalogEnabled: boolean("public_catalog_enabled").notNull().default(false),
+  // Billing. The prefix is what invoice numbers are built on; the number
+  // itself is allocated by scanning the highest one in use, the same
+  // read-max-and-retry the work order numbers have always used.
+  invoicePrefix: text("invoice_prefix").notNull().default("INV-"),
+  /**
+   * Fully loaded cost of an hour of labor - wage, burden, van, insurance -
+   * used only to show margin beside a bill. Zero means "we have not told it",
+   * and the costing view says so rather than reporting a fake 100% margin.
+   */
+  loadedLaborCents: integer("loaded_labor_cents").notNull().default(0),
+  /** Platform-wide billing policy defaults; an org's own jsonb wins. */
+  billingPolicy: jsonb("billing_policy"),
 });
 
 /**
