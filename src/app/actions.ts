@@ -16,6 +16,7 @@ import {
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
+  expenses,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -42,6 +43,8 @@ import { parseProcParts, partQty, partsForModel, procedureTaskBody, schedulePart
 import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
+import { TIME_CATEGORIES } from "@/lib/rates";
+import { EXPENSE_KINDS } from "@/lib/billing";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -6619,7 +6622,7 @@ export async function removeClientAccess(id: number) {
 
 export async function logTime(
   target: WorkTarget,
-  data: { hours: string; person: string; date: string; note: string },
+  data: { hours: string; person: string; date: string; note: string; billable?: boolean; category?: string },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const minutes = parseHours(data.hours);
@@ -6633,13 +6636,68 @@ export async function logTime(
     tenantOrgId: t0.tenantOrgId,
     instrumentId: t0.instrumentId, assetId: t0.assetId,
     person, date, minutes, note: data.note.trim(), loggedBy: u.email,
+    // Unbillable hours are still hours: they stay on the record and in job
+    // costing, they just never reach an invoice line.
+    billable: data.billable ?? true,
+    category: (TIME_CATEGORIES as readonly string[]).includes(data.category ?? "") ? data.category! : "onsite",
     workOrderId: t0.workOrderId,
   }).returning();
   await audit({
     actor: u.email, instrumentId: t0.instrumentId, assetId: t0.assetId, entityType: "time", entityId: row.id,
-    action: `logged ${formatHours(minutes)} - ${person}${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}${row.note ? ` - ${row.note}` : ""}`,
+    action: `logged ${formatHours(minutes)} ${row.category}${row.billable ? "" : ", not billable"} - ${person}${t0.asset ? ` [${assetLabel(t0.asset)}]` : ""}${row.note ? ` - ${row.note}` : ""}`,
   });
   revWork(row);
+  return {};
+}
+
+/**
+ * Money on the job that is neither a part nor an hour: mileage, freight, a
+ * night in a motel. Against the work order, because that is what it bills and
+ * costs against.
+ */
+export async function logExpense(
+  workOrderId: number,
+  data: { kind: string; description: string; amount: string; incurredOn: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const cents = parseMoney(data.amount);
+  if (cents === null || cents <= 0) return { error: "Enter an amount like 43.00" };
+  const date = data.incurredOn.trim();
+  if (!isIsoDay(date)) return { error: "Pick the date it was incurred" };
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
+  if (!wo) return { error: "Not found" };
+  await assertWorkEditable(u, wo);
+  const kind = (EXPENSE_KINDS as readonly string[]).includes(data.kind) ? data.kind : "other";
+  const [row] = await db.insert(expenses).values({
+    tenantOrgId: wo.tenantOrgId, workOrderId,
+    kind, description: data.description.trim(), amountCents: cents,
+    incurredOn: date, loggedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+    entityType: "expense", entityId: row.id,
+    action: `logged a ${kind} expense of ${formatCents(cents)} on ${wo.number}${row.description ? ` - ${row.description}` : ""}`,
+  });
+  revalidatePath(`/work/${workOrderId}`);
+  return {};
+}
+
+export async function deleteExpense(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [row] = await db.select().from(expenses).where(eq(expenses.id, id));
+  if (!row) return {};
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId));
+  if (wo) await assertWorkEditable(u, wo);
+  await db.delete(expenses).where(eq(expenses.id, id));
+  await audit({
+    actor: u.email, instrumentId: wo?.instrumentId ?? null, assetId: wo?.assetId ?? null,
+    entityType: "expense", entityId: id,
+    action: `removed a ${row.kind} expense of ${formatCents(row.amountCents)} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath(`/work/${row.workOrderId}`);
   return {};
 }
 

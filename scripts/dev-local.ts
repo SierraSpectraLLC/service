@@ -85,6 +85,44 @@ const FIXTURE = `
   INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, visits_included, parts_allowance_cents, labor_included_minutes, value_cents, created_by) VALUES
     (1, 'contract', 'AGR-2026-01', 'Lab Zen full service', 'active', '2026-01-01', '2026-12-31', 6, 500000, 4800, 3600000, '${OWNER}');
 
+  -- ── Billing ───────────────────────────────────────────────────────────────
+  -- Three rungs of rate card so resolveRate's precedence is visible in the app:
+  -- the agreement wins for Lab Zen contract work, the org card covers Lab Zen's
+  -- uncovered hours, and the platform default (both ids null) catches everyone
+  -- else - Coastal Analytical bills off it.
+  INSERT INTO rate_cards (org_id, agreement_id, hourly_cents, after_hours_pct, travel_pct, min_increment_min, label, created_by) VALUES
+    (NULL, NULL, 16500, 150, 50, 15, 'Standard field service', '${OWNER}'),
+    (1, NULL, 15500, 150, 50, 15, 'Lab Zen negotiated', '${OWNER}'),
+    (1, 1, 14000, 125, 0, 30, 'AGR-2026-01 contract rate', '${OWNER}');
+
+  -- Expenses on the turbo job, one of each shape that reads differently on an
+  -- invoice: a mileage line, freight, and a bare "other" with the description
+  -- doing the work.
+  INSERT INTO expenses (work_order_id, kind, description, amount_cents, incurred_on, logged_by) VALUES
+    (2, 'mileage', '84 miles round trip at 0.67', 5628, to_char(now() - interval '5 days', 'YYYY-MM-DD'), '${OWNER}'),
+    (2, 'shipping', 'Overnight freight, turbo from Edwards', 21400, to_char(now() - interval '6 days', 'YYYY-MM-DD'), '${OWNER}'),
+    (2, 'other', 'Crane rental, half day', 45000, to_char(now() - interval '5 days', 'YYYY-MM-DD'), 'Sam Ortiz');
+
+  -- Lab Zen pays on paper and has a live PO with room on it. Coastal has no PO
+  -- at all and a punitive policy - short grace, a flat late fee, a hold that
+  -- trips early - so the credit-hold and dunning paths have something to fire
+  -- on without editing settings by hand.
+  UPDATE orgs SET terms_days = 30, ap_email = 'ap@labzen.test',
+    po_number = 'PO-88213', po_balance_cents = 1200000 WHERE id = 1;
+  UPDATE orgs SET terms_days = 15, ap_email = 'accounts@coastal.test',
+    po_number = '', po_balance_cents = 0,
+    billing_policy = '{"graceDays":3,"feeType":"flat","flatCents":7500,"appliesTo":"all","holdDays":20,"holdAmountCents":50000,"dunningAuto":true,"taxParts":true}'::jsonb
+    WHERE id = 2;
+
+  -- Two sites so parts tax has an address to belong to: Lab Zen's bench is in a
+  -- taxing county, Coastal's dock is not.
+  INSERT INTO org_sites (org_id, name, address, contact_name, created_by) VALUES
+    (1, 'Lab Zen - Building C', '1400 Harbor Way, Richmond, CA 94804', 'Rita Alvarez', '${OWNER}'),
+    (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', '${OWNER}');
+  UPDATE org_sites SET tax_rate_bps = 1025 WHERE org_id = 1;
+  UPDATE instruments SET site_id = 1 WHERE client = 'Lab Zen';
+  UPDATE instruments SET site_id = 2 WHERE client = 'Coastal Analytical';
+
   INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, archived, archived_at, archived_by) VALUES
     ('LZ-000', 'Lab Zen', 'Agilent 5975C GC-MSD', 'Agilent', 'US83221', 99, '{"Shipped"}', true, now() - interval '40 days', 'joe');
 
@@ -144,6 +182,13 @@ const FIXTURE = `
     (2, 'Dev Owner', to_char(now() - interval '5 days', 'YYYY-MM-DD'), 420, 'Turbo replacement', '${OWNER}', 2),
     (2, 'Sam Ortiz', to_char(now() - interval '4 days', 'YYYY-MM-DD'), 240, 'Pump-down watch', '${OWNER}', 2),
     (4, 'Sam Ortiz', to_char(now() - interval '9 days', 'YYYY-MM-DD'), 120, 'Intake inspection', '${OWNER}', NULL);
+
+  -- Hours that are not all alike: travel and remote next to onsite, and one
+  -- entry already marked not billable because the agreement covers it.
+  UPDATE time_entries SET category = 'travel', billable = true WHERE id = 3;
+  UPDATE time_entries SET category = 'onsite', billable = false WHERE id = 2;
+  UPDATE time_entries SET category = 'remote' WHERE id = 4;
+
   INSERT INTO parts (instrument_id, name, part_number, vendor, cost, cost_cents, status, installed_at) VALUES
     (2, 'Turbo pump', 'EXT255H', 'Edwards', '$4,850.00', 485000, 'Installed', to_char(now() - interval '5 days', 'YYYY-MM-DD')),
     (1, 'Capillary kit', 'G7100-60001', 'Agilent', '$210.00', 21000, 'Installed', to_char(now() - interval '2 days', 'YYYY-MM-DD')),

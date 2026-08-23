@@ -723,7 +723,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           ) },
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={{ instrumentId: inst.id, assetId: null }}
-              entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+              entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note, billable: t.billable, category: t.category }))}
               people={directoryNames(peopleRows)} defaultPerson={user.name}
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },

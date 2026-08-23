@@ -5,9 +5,11 @@ import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import { logTime, deleteTimeEntry, type WorkTarget } from "@/app/actions";
 import { formatHours } from "@/lib/hours";
+import { CATEGORY_LABEL, TIME_CATEGORIES } from "@/lib/rates";
 
 export type TimeRow = {
   id: number; person: string; date: string; minutes: number; note: string;
+  billable: boolean; category: string;
 };
 
 const mdy = (iso: string) => {
@@ -21,7 +23,10 @@ const mdy = (iso: string) => {
  * the person defaults to whoever's signed in but is editable, because the
  * person logging is often not the person who turned the wrench.
  */
-export default function HoursPanel({ target, entries, people, defaultPerson, today, canEdit, isStaff }: {
+export default function HoursPanel({
+  target, entries, people, defaultPerson, today, canEdit, isStaff,
+  defaultBillable = true, coveredBy = "",
+}: {
   target: WorkTarget;
   entries: TimeRow[];
   people: string[];
@@ -29,8 +34,20 @@ export default function HoursPanel({ target, entries, people, defaultPerson, tod
   today: string;
   canEdit: boolean;
   isStaff: boolean;
+  /**
+   * Whether an hour on this job starts billable. Defaulted from the agreement
+   * rather than from a preference: on a covered system the retainer has
+   * already been paid for these hours, and asking somebody to remember that
+   * every time is how a client gets billed twice.
+   */
+  defaultBillable?: boolean;
+  /** The paper doing the covering, named so the default is not a mystery. */
+  coveredBy?: string;
 }) {
-  const [draft, setDraft] = useState({ hours: "", person: defaultPerson, date: today, note: "" });
+  const [draft, setDraft] = useState({
+    hours: "", person: defaultPerson, date: today, note: "",
+    billable: defaultBillable, category: "onsite",
+  });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -71,9 +88,24 @@ export default function HoursPanel({ target, entries, people, defaultPerson, tod
           <input className="t-body" value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             placeholder="What was done (optional)" style={{ flex: "1 1 160px" }} />
+          <select className="t-body" value={draft.category} aria-label="Kind of hours"
+            onChange={(e) => setDraft({ ...draft, category: e.target.value })} style={{ width: "auto" }}>
+            {TIME_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}
+          </select>
+          <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 5, margin: 0, whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={draft.billable} style={{ width: 15, height: 15 }}
+              onChange={(e) => setDraft({ ...draft, billable: e.target.checked })} />
+            Billable
+          </label>
           <button className="btn sm accent" onClick={submit} disabled={pending || !draft.hours.trim()}>
             {pending ? "Logging..." : "Log"}
           </button>
+        </div>
+      )}
+      {canEdit && !defaultBillable && (
+        <div className="mut t-meta" style={{ margin: "-6px 0 10px" }}>
+          Hours here start unbillable{coveredBy ? ` - ${coveredBy} covers the labor` : " - the agreement covers the labor"}.
+          Tick Billable for work beyond the contract.
         </div>
       )}
 
@@ -82,6 +114,8 @@ export default function HoursPanel({ target, entries, people, defaultPerson, tod
           <span className="t-body" style={{ fontWeight: 700, width: 52 }}>{formatHours(e.minutes)}</span>
           <span className="t-body">{e.person}</span>
           <span className="mut t-small">{mdy(e.date)}</span>
+          {e.category !== "onsite" && <span className="pill neutral">{CATEGORY_LABEL[e.category] ?? e.category}</span>}
+          {!e.billable && <span className="pill faint">not billable</span>}
           {e.note && <span className="mut t-small">- {e.note}</span>}
           {isStaff && (
             <button className="btn link t-meta" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}

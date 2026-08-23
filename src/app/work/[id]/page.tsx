@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, parts, poLines,
-  purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes,
+  purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, readTenant } from "@/lib/tenancy";
@@ -28,6 +28,8 @@ import TasksPanel from "@/components/TasksPanel";
 import WorkOrderControls from "@/components/WorkOrderControls";
 import WorkOrderNotes from "@/components/WorkOrderNotes";
 import PartsPanel from "@/components/PartsPanel";
+import ExpensesPanel from "@/components/ExpensesPanel";
+import { coverageFor } from "@/lib/billing";
 import PhotosPanel from "@/components/PhotosPanel";
 import { isPhotoFile } from "@/lib/photos";
 import { procedures } from "@/db/schema";
@@ -95,7 +97,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await visitFlag(wo.orgId, wo.instrumentId).catch(() => "")
     : "";
 
-  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows] = await Promise.all([
+  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.workOrderId, woId))
       .orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(timeEntries).where(eq(timeEntries.workOrderId, woId))
@@ -111,6 +113,12 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       .orderBy(asc(workOrderNotes.createdAt), asc(workOrderNotes.id)),
     db.select().from(parts).where(eq(parts.workOrderId, woId))
       .orderBy(asc(parts.id)),
+    db.select().from(expenses).where(eq(expenses.workOrderId, woId))
+      .orderBy(desc(expenses.incurredOn), desc(expenses.id)),
+    // What paper, if any, answers for this work: it decides whether an hour
+    // logged here starts billable. lib/billing.coverageFor picks the paper;
+    // lib/agreements still owns what a paper covers.
+    wo.orgId === null ? Promise.resolve([]) : db.select().from(agreements).where(eq(agreements.orgId, wo.orgId)),
   ]);
 
   const taskIds = taskRows.map((t) => t.id);
@@ -166,6 +174,17 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   const tone = WO_TONE[wo.state] ?? WO_TONE.open;
   const askedBy = wo.orgId === null ? brand.operatorName : askedByRows[0]?.name ?? "an organization";
   const minutes = timeRows.reduce((n, t) => n + t.minutes, 0);
+  const coverage = coverageFor({
+    agreements: agreementRows.map((a) => ({
+      id: a.id, number: a.number, orgId: a.orgId, status: a.status,
+      startsOn: a.startsOn, endsOn: a.endsOn, instrumentIds: a.instrumentIds,
+      // A service contract carries the labor; parts pass through unless the
+      // paper carries an allowance for them.
+      laborCovered: a.kind === "contract",
+      partsCovered: a.kind === "contract" && (a.partsUnlimited || a.partsAllowanceCents > 0),
+    })),
+    orgId: wo.orgId, instrumentId: wo.instrumentId, today,
+  });
   const place = inst
     ? { href: `/instruments/${inst.id}`, label: `${inst.externalId}${systemLabel(inst, unitRows) ? ` - ${systemLabel(inst, unitRows)}` : ""}` }
     : { href: `/assets/${asset!.id}`, label: `${asset!.kind}${asset!.model ? ` - ${asset!.model}` : ""}${asset!.serial ? ` (SN ${asset!.serial})` : ""}` };
@@ -319,13 +338,19 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           canEdit={canAdd} isStaff={staff}
           showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
       )}
+      <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}
+        rows={expenseRows.map((e) => ({
+          id: e.id, kind: e.kind, description: e.description,
+          amountCents: e.amountCents, incurredOn: e.incurredOn,
+        }))} />
           </>
           ) }] : []),
           { key: "hours", label: "Hours", node: (
       <HoursPanel target={target}
-        entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+        entries={timeRows.map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note, billable: t.billable, category: t.category }))}
         people={directoryNames(people)} defaultPerson={user.name}
-        today={today} canEdit={canAdd} isStaff={staff} />
+        today={today} canEdit={canAdd} isStaff={staff}
+        defaultBillable={!coverage.labor} coveredBy={coverage.agreementNumber} />
           ) },
           { key: "files", label: "Files", node: (
       <AttachmentsPanel target={target} today={shopToday()}

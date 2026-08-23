@@ -21,6 +21,14 @@
 import { formatCents } from "@/lib/money";
 import { priceTime, type RateCard } from "@/lib/rates";
 
+/** What kind of out-of-pocket it was. Drives nothing but the label. */
+export const EXPENSE_KINDS = ["mileage", "shipping", "per_diem", "other"] as const;
+export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
+
+export const EXPENSE_LABEL: Record<string, string> = {
+  mileage: "Mileage", shipping: "Shipping", per_diem: "Per diem", other: "Other",
+};
+
 export const LINE_KINDS = ["part", "labor", "travel", "expense", "tax", "fee_ref"] as const;
 export type LineKind = (typeof LINE_KINDS)[number];
 
@@ -72,6 +80,41 @@ export type CoverageAnswer = {
 export const NO_COVERAGE: CoverageAnswer = {
   agreementNumber: "", agreementId: null, labor: false, parts: false, exhausted: false,
 };
+
+/**
+ * Which agreement, if any, is answering for this work today.
+ *
+ * The decision of what a paper covers belongs to lib/agreements; this picks
+ * the paper. In force, for this client, covering this system (an empty
+ * instrument list covers all of theirs) - and among several, the one that ends
+ * soonest, because that is the entitlement being spent first.
+ */
+export function coverageFor(input: {
+  agreements: {
+    id: number; number: string; orgId: number; status: string;
+    startsOn: string; endsOn: string; instrumentIds: number[];
+    laborCovered: boolean; partsCovered: boolean;
+  }[];
+  orgId: number | null;
+  instrumentId: number | null;
+  today: string;
+  /** True when the visit or parts allowance this paper carries is spent. */
+  exhausted?: boolean;
+}): CoverageAnswer {
+  if (input.orgId === null) return NO_COVERAGE;
+  const live = input.agreements
+    .filter((a) => a.orgId === input.orgId && a.status === "active")
+    .filter((a) => (!a.startsOn || a.startsOn <= input.today) && (!a.endsOn || a.endsOn >= input.today))
+    .filter((a) => a.instrumentIds.length === 0 || (input.instrumentId !== null && a.instrumentIds.includes(input.instrumentId)))
+    .sort((a, b) => (a.endsOn || "9999").localeCompare(b.endsOn || "9999"));
+  const a = live[0];
+  if (!a) return NO_COVERAGE;
+  return {
+    agreementNumber: a.number, agreementId: a.id,
+    labor: a.laborCovered, parts: a.partsCovered,
+    exhausted: input.exhausted ?? false,
+  };
+}
 
 export type PartRow = {
   id: number; name: string; partNumber: string; qty: number | null;
