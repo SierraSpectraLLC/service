@@ -71,7 +71,14 @@ export type PartnerDigestView = {
   portalUrl: string;
   needs: PartnerAsk[];
   blocked: PartnerAsk[];
+  /** Handed back since the last edition went out. The news. */
   handedBack: PartnerHandback[];
+  /**
+   * Everything handed back BEFORE this window and still sitting with them.
+   * One line, not a list: it is a standing fact, and a fact repeated as a
+   * table every morning is the thing a reader learns to skip past.
+   */
+  standingHandback: { count: number; oldestAge: string };
   inWork: PartnerSystem[];
   /** Rows dropped by the size caps, so the mail can say so out loud. */
   moreHandedBack: number;
@@ -160,6 +167,22 @@ const moreLine = (n: number, what: string, href: string) => n <= 0 ? "" : `
   </div>`;
 
 /**
+ * The systems still sitting with them from before this window - one sentence,
+ * with the count and how old the oldest is.
+ *
+ * A standing list relisted every morning is the part of the mail a reader
+ * learns to scroll past, and once they do, the system that came back on
+ * Thursday goes past with it. The count keeps the obligation visible; the
+ * portal holds the names.
+ */
+const standingLine = (s: { count: number; oldestAge: string }, href: string) => s.count <= 0 ? "" : `
+  <div style="font-size:12px;color:${EMAIL.muted};margin-top:8px;">
+    ${s.count} more ${s.count === 1 ? "system is" : "systems are"} still with you from earlier${
+      s.oldestAge ? `, the oldest ${esc(s.oldestAge)} ago` : ""
+    }${href ? ` - <a href="${esc(href)}" style="color:${EMAIL.link};">see them in the portal</a>` : ""}.
+  </div>`;
+
+/**
  * The whole email. Subject lives with the composer; this renders the body a
  * client actually opens.
  */
@@ -177,15 +200,20 @@ export function renderPartnerDigest(v: PartnerDigestView, preheader: string): st
   const sections = [
     v.needs.length ? section(sectionHead(needsLabel, v.needs.length, TONE_HEX.warn.fg) + table(askRows(v.needs))) : "",
     v.blocked.length ? section(sectionHead(blockedLabel, v.blocked.length, TONE_HEX.bad.fg) + table(askRows(v.blocked))) : "",
-    v.handedBack.length ? section(
+    v.handedBack.length || v.standingHandback.count ? section(
       sectionHead(`Handed back to ${v.clientName}`, v.handedBack.length, TONE_HEX.good.fg,
-        "Nothing pending from our side. Ready for the next step on your end.")
-      + table(v.handedBack.map((h, i) => `
+        v.handedBack.length
+          ? "Finished since the last of these went out. Nothing pending from our side."
+          : "Nothing new came back to you since the last of these went out.")
+      + (v.handedBack.length
+        ? table(v.handedBack.map((h, i) => `
         <tr>${idCell(h.externalId, i === 0, "7px")}
             <td style="padding:7px 0;border-top:1px solid ${LINE};font-size:13px;color:${BODY_INK};">${
               esc([h.label, h.what].filter(Boolean).join(" · "))
             } <span style="color:${EMAIL.faint};">&middot; ${esc(h.age)}</span></td></tr>`).join(""))
-      + moreLine(v.moreHandedBack, "handed back", plain)) : "",
+        : "")
+      + moreLine(v.moreHandedBack, "handed back", plain)
+      + standingLine(v.standingHandback, plain)) : "",
     v.inWork.length ? section(
       sectionHead(`In work at ${v.operatorName}`, v.inWork.length, TONE_HEX.neutral.fg,
         "One line per system: where it is and what's next.")
@@ -276,12 +304,16 @@ export function renderPartnerDigestText(v: PartnerDigestView, preheader: string)
     v.needs.flatMap((x) => [`  ${x.externalId}  ${x.ask}`, ...(x.why ? [`          ${x.why}`] : [])]));
   block(`Blocked with ${v.operatorName} (${v.blocked.length})`,
     v.blocked.flatMap((x) => [`  ${x.externalId}  ${x.ask}`, ...(x.why ? [`          ${x.why}`] : [])]));
-  block(`Handed back to ${v.clientName} (${v.handedBack.length + v.moreHandedBack})`,
+  block(`Handed back to ${v.clientName} (${v.handedBack.length})`,
     [
       ...v.handedBack.map((h) => `  ${h.externalId}  ${[h.label, h.what].filter(Boolean).join(" - ")} (${h.age})`),
       ...(v.moreHandedBack ? [`  ...and ${v.moreHandedBack} more in the portal.`] : []),
+      ...(v.standingHandback.count ? [
+        `  ${v.standingHandback.count} more ${v.standingHandback.count === 1 ? "system is" : "systems are"} still with you`
+        + ` from earlier${v.standingHandback.oldestAge ? `, the oldest ${v.standingHandback.oldestAge} ago` : ""}.`,
+      ] : []),
     ],
-    "Nothing pending from our side.");
+    "Finished since the last of these went out. Nothing pending from our side.");
   block(`In work at ${v.operatorName} (${v.inWork.length + v.moreInWork})`,
     [
       ...v.inWork.map((s) => {
@@ -433,6 +465,12 @@ export function partnerView(opts: {
   dateLabel: string;
   portalUrl: string;
   blockedStage: string;
+  /**
+   * How many days back this edition reaches - the same gap the internal
+   * edition's window uses. A handback inside it is news; anything older was
+   * already sent and is summarised instead of relisted.
+   */
+  gapDays: number;
   stageHex: (stage: string) => { bg: string; fg: string };
   gasBlocking: (status: string) => boolean;
 }): PartnerDigestView {
@@ -470,11 +508,27 @@ export function partnerView(opts: {
   // "Handed back" means back to THEM. A system parked with a third party is
   // not handed back to this client and is not advertised as though it were.
   const handedBackAll = section.handoffs.filter((h) => h.holder === clientName);
-  const handedBack: PartnerHandback[] = handedBackAll.slice(0, MAX_HANDED_BACK).map((h) => ({
+
+  // Only what moved since the last edition. Yesterday we told them these six
+  // systems are theirs to move; sending the same six today, and tomorrow, is
+  // how a list stops being read - and the one that gets handed back on
+  // Thursday is then lost inside it.
+  //
+  // The boundary is inclusive: a system handed back ON the day of the last
+  // send may have gone back after the mail left, so it is repeated rather
+  // than risked. A repeat is noise; an omission is a system the client never
+  // hears about at all.
+  const fresh = handedBackAll.filter((h) => h.days <= Math.max(1, opts.gapDays));
+  const older = handedBackAll.filter((h) => h.days > Math.max(1, opts.gapDays));
+  const handedBack: PartnerHandback[] = fresh.slice(0, MAX_HANDED_BACK).map((h) => ({
     externalId: h.externalId, label: h.label,
     what: internalRemark(h.reason) ? "" : h.reason,
     age: age(h.days),
   }));
+  const standingHandback = {
+    count: older.length,
+    oldestAge: older.length ? age(Math.max(...older.map((h) => h.days))) : "",
+  };
 
   const above = new Map<string, string>();
   for (const m of sayable) {
@@ -503,8 +557,8 @@ export function partnerView(opts: {
 
   return {
     operatorName, clientName, dateLabel: opts.dateLabel, portalUrl: opts.portalUrl,
-    needs, blocked, handedBack, inWork,
-    moreHandedBack: Math.max(0, handedBackAll.length - handedBack.length),
+    needs, blocked, handedBack, standingHandback, inWork,
+    moreHandedBack: Math.max(0, fresh.length - handedBack.length),
     moreInWork: Math.max(0, section.board.length - inWork.length),
   };
 }
@@ -514,7 +568,11 @@ export function partnerPreheader(v: PartnerDigestView): string {
   const parts = [
     `${v.needs.length} thing${v.needs.length === 1 ? " needs" : "s need"} ${v.clientName}`,
     `${v.blocked.length} blocked with us`,
-    `${v.handedBack.length + v.moreHandedBack} handed back`,
+    // The news, not the standing total: the inbox line should change on the
+    // morning something actually came back.
+    v.handedBack.length || !v.standingHandback.count
+      ? `${v.handedBack.length + v.moreHandedBack} handed back`
+      : `${v.standingHandback.count} still with you`,
     `${v.inWork.length + v.moreInWork} in work`,
   ];
   return parts.join(" · ");

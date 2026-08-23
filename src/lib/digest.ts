@@ -795,6 +795,9 @@ export async function composePartnerDigest(
     dateLabel: dayLabel(new Date()),
     portalUrl: appUrl(),
     blockedStage: BLOCKED_STAGE,
+    // The same window the work section uses. Handbacks inside it are news;
+    // older ones were in a previous edition and are counted, not relisted.
+    gapDays: gap,
     stageHex: (s) => STAGE_COLOR[s] ?? TONE_HEX.neutral,
     gasBlocking: gasAttention,
   });
