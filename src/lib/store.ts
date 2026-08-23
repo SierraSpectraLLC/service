@@ -28,6 +28,11 @@ export type StorePart = {
   fitsYours: boolean;
   /** What it suits, for the card's quiet line. */
   fitsLabel: string;
+  /** On our shelf right now - orders ship immediately. A yes/no on purpose:
+      the count is shop information, the availability is the client's. */
+  inStock: boolean;
+  /** Sourcing estimate in days when not on the shelf. Null = special order. */
+  etaDays: number | null;
 };
 
 const lc = (s: string) => s.trim().toLowerCase();
@@ -43,38 +48,75 @@ export function buildStore(
     id: number; partNumber: string; name: string; manufacturer: string;
     kind: string; assetTypes: string[]; models: string[]; archived: boolean;
   }[],
-  bestCostByPn: Map<string, number>,
-  markupBps: number,
-  yours: { models: string[]; types: string[] },
-  photoByCatalogId: Map<number, string> = new Map(),
+  opts: {
+    bestCostByPn: Map<string, number>;
+    markupBps: number;
+    yours: { models: string[]; types: string[] };
+    photoByCatalogId?: Map<number, string>;
+    /** On-hand across the house's own rooms, keyed by lowercased PN. */
+    stockByPn?: Map<string, number>;
+    /** Fastest door-to-door days per PN, for the not-on-the-shelf estimate. */
+    etaByPn?: Map<string, number>;
+  },
 ): StorePart[] {
-  const myModels = new Set(yours.models.map(lc).filter(Boolean));
-  const myTypes = new Set(yours.types.map(lc).filter(Boolean));
+  const myModels = new Set(opts.yours.models.map(lc).filter(Boolean));
+  const myTypes = new Set(opts.yours.types.map(lc).filter(Boolean));
+  const photos = opts.photoByCatalogId ?? new Map<number, string>();
+  const stock = opts.stockByPn ?? new Map<string, number>();
+  const eta = opts.etaByPn ?? new Map<string, number>();
   return catalog
     .filter((c) => !c.archived && c.partNumber.trim())
     .map((c) => {
-      const cost = bestCostByPn.get(lc(c.partNumber));
+      const cost = opts.bestCostByPn.get(lc(c.partNumber));
       const fits = c.models.some((m) => myModels.has(lc(m)))
         || c.assetTypes.some((t) => myTypes.has(lc(t)));
+      const inStock = (stock.get(lc(c.partNumber)) ?? 0) > 0;
       return {
         id: c.id,
         partNumber: c.partNumber,
         name: c.name || c.partNumber,
         manufacturer: c.manufacturer,
         kind: c.kind,
-        photoUrl: photoByCatalogId.get(c.id) ?? "",
-        priceCents: cost !== undefined && cost > 0 ? sellPrice(cost, markupBps) : null,
+        photoUrl: photos.get(c.id) ?? "",
+        priceCents: cost !== undefined && cost > 0 ? sellPrice(cost, opts.markupBps) : null,
         fitsYours: fits,
         fitsLabel: c.models.length
           ? `Fits ${c.models.slice(0, 3).join(", ")}${c.models.length > 3 ? ` +${c.models.length - 3}` : ""}`
           : c.assetTypes.length
             ? `For ${c.assetTypes.slice(0, 3).join(", ")}`
             : "",
+        inStock,
+        etaDays: inStock ? null : eta.get(lc(c.partNumber)) ?? null,
       };
     })
     .sort((a, b) =>
       Number(b.fitsYours) - Number(a.fitsYours)
+      || Number(b.inStock) - Number(a.inStock)
       || a.name.localeCompare(b.name));
+}
+
+/** The card's availability line, in the client's language. */
+export const availabilityLabel = (i: Pick<StorePart, "inStock" | "etaDays">): string =>
+  i.inStock ? "In stock - ships now"
+  : i.etaDays !== null ? `Sourced for you - about ${i.etaDays}d`
+  : "Special order - quoted first";
+
+/**
+ * The checkout split. What is on the shelf becomes an ORDER and can be
+ * invoiced immediately; what is not becomes a QUOTE for the client to approve
+ * once availability and price are confirmed - nothing is ever charged without
+ * them acting on a sent invoice, and no card is stored anywhere to charge.
+ */
+export function splitCart(cart: CartLine[], items: StorePart[]): {
+  now: CartLine[]; quoted: CartLine[];
+} {
+  const now: CartLine[] = [], quoted: CartLine[] = [];
+  for (const line of cart) {
+    const item = items.find((i) => lc(i.partNumber) === lc(line.partNumber));
+    if (!item || line.qty <= 0) continue;
+    (item.inStock ? now : quoted).push(line);
+  }
+  return { now, quoted };
 }
 
 export type StoreFacet = "all" | "yours" | "part" | "consumable" | "kit";

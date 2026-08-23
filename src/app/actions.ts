@@ -12109,17 +12109,20 @@ export async function changePersonEmail(oldEmail: string, newEmail: string): Pro
 }
 
 /**
- * A client's order from the parts store. It lands as a DRAFT INVOICE - the one
- * shape money already has here - priced at the same resale the store showed
- * (best cost times the org's parts markup, frozen at order time). Staff
- * confirm availability on the draft and Send is what commits the price and
- * opens the pay link; nothing is charged at order time, and the client is told
- * so. A part with no price on file still orders - its line lands at $0 marked
- * "price to follow" for staff to set before sending.
+ * A client's order from the parts store, split by the shelf - decided HERE,
+ * on the server's own count, never on what the browser claimed.
+ *
+ * What is on the house's shelves becomes a DRAFT INVOICE at the resale the
+ * store showed (best cost times the org's parts markup, frozen now): staff
+ * confirm and Send opens the pay link. What is not becomes a DRAFT QUOTE for
+ * the same lines: staff confirm sourcing and lead time, send it, and the
+ * client approves it on their portal. Neither path charges anything by
+ * itself - no card is stored anywhere to charge - and a part with no price
+ * on file lands at $0 marked "price to follow" for staff to set.
  */
 export async function placePartsOrder(
   lines: { partNumber: string; qty: number }[], note: string,
-): Promise<{ error?: string; number?: string }> {
+): Promise<{ error?: string; number?: string; quoteNumber?: string }> {
   const u = await requireUser();
   if (u.orgId === null) return { error: "Ordering happens from a client login - staff order through Purchasing." };
   const [org] = await db.select().from(orgs).where(eq(orgs.id, u.orgId));
@@ -12156,9 +12159,43 @@ export async function placePartsOrder(
     });
   }
 
+  // The shelf's answer: on-hand across the house's own unarchived rooms.
+  // A line ships now only when the whole quantity is there - a partial fill
+  // is a sourcing conversation, so it quotes instead.
+  const houseRooms = await db.select({ id: stockrooms.id }).from(stockrooms)
+    .where(and(forTenant(stockrooms.tenantOrgId, tenant),
+      isNull(stockrooms.orgId), eq(stockrooms.archived, false)));
+  const onHand = new Map<string, number>();
+  if (houseRooms.length) {
+    const stockRows = await db.select({ partNumber: stockItems.partNumber, qty: stockItems.qty })
+      .from(stockItems).where(inArray(stockItems.stockroomId, houseRooms.map((r) => r.id)));
+    for (const s of stockRows) {
+      const key = s.partNumber.trim().toLowerCase();
+      onHand.set(key, (onHand.get(key) ?? 0) + s.qty);
+    }
+  }
+  const nowLines = ordered.filter((o) => (onHand.get(o.part.partNumber.trim().toLowerCase()) ?? 0) >= o.qty);
+  const quoteLinesWanted = ordered.filter((o) => !nowLines.includes(o));
+
   const why = note.trim().slice(0, 300);
+  const lineValues = (o: typeof ordered[number], i: number) => ({
+    kind: "part",
+    description: o.part.name || o.part.partNumber,
+    detail: `PN ${o.part.partNumber}${o.unitCents === null ? " - price to follow" : ""}`,
+    qty: o.qty * 1000, unitCents: o.unitCents ?? 0, position: i,
+  });
+  const describe = (set: typeof ordered) => {
+    const priced = set.filter((o) => o.unitCents !== null);
+    const total = priced.reduce((n, o) => n + o.unitCents! * o.qty, 0);
+    const unpriced = set.length - priced.length;
+    return `${formatCents(total)}` + (unpriced ? ` plus ${unpriced} line${unpriced === 1 ? "" : "s"} to be priced` : "");
+  };
+
+  let invoiceNumber: string | undefined;
+  let quoteNumber: string | undefined;
+  const today = shopToday();
   let last: unknown;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 4 && nowLines.length && !invoiceNumber; attempt++) {
     const used = await db.select({ number: invoices.number }).from(invoices)
       .where(forTenant(invoices.tenantOrgId, tenant));
     const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
@@ -12168,28 +12205,47 @@ export async function placePartsOrder(
         poNumber: org.poNumber ?? "", createdBy: u.email,
         note: ["Parts order from the portal", why].filter(Boolean).join(" - "),
       }).returning();
-      await db.insert(invoiceLines).values(ordered.map((o, i) => ({
-        invoiceId: inv.id, kind: "part",
-        description: o.part.name || o.part.partNumber,
-        detail: `PN ${o.part.partNumber}${o.unitCents === null ? " - price to follow" : ""}`,
-        qty: o.qty * 1000, unitCents: o.unitCents ?? 0, position: i,
-      })));
-      const priced = ordered.filter((o) => o.unitCents !== null);
-      const total = priced.reduce((n, o) => n + o.unitCents! * o.qty, 0);
-      const unpriced = ordered.length - priced.length;
+      await db.insert(invoiceLines).values(nowLines.map((o, i) => ({ invoiceId: inv.id, ...lineValues(o, i) })));
       await audit({
         actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: tenant,
-        action: `${org.name} ordered ${ordered.length} part${ordered.length === 1 ? "" : "s"} from the store`
-          + ` on ${number}: ${formatCents(total)}`
-          + (unpriced ? ` plus ${unpriced} line${unpriced === 1 ? "" : "s"} to be priced` : ""),
+        action: `${org.name} ordered ${nowLines.length} in-stock part${nowLines.length === 1 ? "" : "s"} from the store`
+          + ` on ${number}: ${describe(nowLines)}`,
       });
       revInvoice(inv);
-      revalidatePath("/money/invoices");
-      revalidatePath("/store");
-      return { number };
+      invoiceNumber = number;
     } catch (e) {
       last = e;
     }
   }
-  throw last;
+  if (nowLines.length && !invoiceNumber) throw last;
+
+  for (let attempt = 0; attempt < 4 && quoteLinesWanted.length && !quoteNumber; attempt++) {
+    const used = await db.select({ number: quotes.number }).from(quotes)
+      .where(forTenant(quotes.tenantOrgId, tenant));
+    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    try {
+      const [q] = await db.insert(quotes).values({
+        tenantOrgId: tenant, orgId: org.id, number, status: "draft",
+        title: `Parts to source - ${quoteLinesWanted.length} item${quoteLinesWanted.length === 1 ? "" : "s"}`,
+        expiresOn: addDays(today, 30), depositPct: 0, createdBy: u.email,
+      }).returning();
+      await db.insert(quoteLines).values(quoteLinesWanted.map((o, i) => ({ quoteId: q.id, ...lineValues(o, i) })));
+      await audit({
+        actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: tenant,
+        action: `${org.name} asked the store to source ${quoteLinesWanted.length} part${quoteLinesWanted.length === 1 ? "" : "s"}`
+          + ` on ${number}: ${describe(quoteLinesWanted)}`
+          + (why ? ` - ${why}` : ""),
+      });
+      revQuote(q);
+      quoteNumber = number;
+    } catch (e) {
+      last = e;
+    }
+  }
+  if (quoteLinesWanted.length && !quoteNumber) throw last;
+
+  revalidatePath("/money/invoices");
+  revalidatePath("/money/quotes");
+  revalidatePath("/store");
+  return { number: invoiceNumber, quoteNumber };
 }

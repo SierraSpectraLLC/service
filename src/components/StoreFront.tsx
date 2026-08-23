@@ -3,15 +3,15 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { placePartsOrder } from "@/app/actions";
-import { cartTotals, filterStore, type CartLine, type StoreFacet, type StorePart } from "@/lib/store";
+import { availabilityLabel, cartTotals, filterStore, splitCart, type CartLine, type StoreFacet, type StorePart } from "@/lib/store";
 import { formatCents } from "@/lib/money";
 import { toast } from "@/components/ui/Toast";
 import { FacetStrip, Panel, Pill, Toolbar } from "@/components/ui";
 import type { Tone } from "@/lib/tones";
 
 export type OrderRow = {
-  number: string; label: string; tone: Tone; totalCents: number;
-  placedOn: string; token: string;
+  number: string; kind: "invoice" | "quote"; label: string; tone: Tone;
+  totalCents: number; placedOn: string; token: string;
 };
 
 const CART_KEY = "ridgeline-store-cart";
@@ -45,7 +45,7 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
   const [facet, setFacet] = useState<StoreFacet>(hasYours ? "yours" : "all");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [note, setNote] = useState("");
-  const [placed, setPlaced] = useState("");
+  const [placed, setPlaced] = useState<{ number?: string; quoteNumber?: string } | null>(null);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -72,8 +72,10 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
     setError("");
     startTransition(async () => {
       const res = await placePartsOrder(cart, note);
-      if (res.error || !res.number) { setError(res.error ?? "That didn't go through"); return; }
-      setPlaced(res.number);
+      if (res.error || (!res.number && !res.quoteNumber)) {
+        setError(res.error ?? "That didn't go through"); return;
+      }
+      setPlaced({ number: res.number, quoteNumber: res.quoteNumber });
       setNote("");
       update([]);
     });
@@ -126,6 +128,11 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
                     {i.fitsYours ? "Fits your equipment" : i.fitsLabel}
                   </div>
                 )}
+                <div className="t-meta" style={{ marginTop: 2 }}>
+                  {i.inStock
+                    ? <span className="pill good">In stock - ships now</span>
+                    : <span className="mut">{availabilityLabel(i)}</span>}
+                </div>
                 <div className="row-2" style={{ marginTop: "auto", paddingTop: 8, alignItems: "center" }}>
                   <b className="t-body">{i.priceCents !== null ? formatCents(i.priceCents) : <span className="mut" style={{ fontWeight: 400 }}>Priced on request</span>}</b>
                   <span className="sp" />
@@ -155,7 +162,7 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
               <b className="t-body">{formatCents(o.totalCents)}</b>
               {o.token && (
                 <Link className="btn sm" href={`/share/${o.token}`} style={{ textDecoration: "none" }}>
-                  View / pay
+                  {o.kind === "quote" ? "Review / approve" : "View / pay"}
                 </Link>
               )}
             </div>
@@ -167,26 +174,57 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
         <div className="card-title" style={{ marginBottom: 8 }}>Cart{totals.count > 0 ? ` · ${totals.count}` : ""}</div>
         {placed && (
           <div className="t-body" style={{ marginBottom: 10 }}>
-            Order <b className="mono">{placed}</b> placed. {orgName ? `${orgName}'s` : "Your"} invoice
-            arrives once availability is confirmed - nothing is charged yet.
+            {placed.number && (
+              <div>Order <b className="mono">{placed.number}</b> placed for the in-stock items -
+                the invoice follows shortly.</div>
+            )}
+            {placed.quoteNumber && (
+              <div style={{ marginTop: placed.number ? 6 : 0 }}>
+                Quote <b className="mono">{placed.quoteNumber}</b> opened for the items we source
+                to order - you approve it before anything moves.</div>
+            )}
+            <div className="mut t-meta" style={{ marginTop: 6 }}>
+              Nothing is charged now, and no card is on file to charge.
+            </div>
           </div>
         )}
         {cart.length === 0 && !placed && <div className="mut t-body">Nothing in it yet.</div>}
-        {cart.map((l) => {
-          const item = items.find((i) => i.partNumber.toLowerCase() === l.partNumber.toLowerCase());
-          if (!item) return null;
+        {(() => {
+          const { now, quoted } = splitCart(cart, items);
+          const row = (l: CartLine) => {
+            const item = items.find((i) => i.partNumber.toLowerCase() === l.partNumber.toLowerCase());
+            if (!item) return null;
+            return (
+              <div key={l.partNumber} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+                <span className="t-small" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                <span className="mut t-small">× {l.qty}</span>
+                <span className="t-small" style={{ width: 70, textAlign: "right" }}>
+                  {item.priceCents !== null ? formatCents(item.priceCents * l.qty) : "TBD"}
+                </span>
+                <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }}
+                  aria-label={`Remove ${item.name}`} onClick={() => setQty(l.partNumber, 0)}>×</button>
+              </div>
+            );
+          };
           return (
-            <div key={l.partNumber} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-              <span className="t-small" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
-              <span className="mut t-small">× {l.qty}</span>
-              <span className="t-small" style={{ width: 70, textAlign: "right" }}>
-                {item.priceCents !== null ? formatCents(item.priceCents * l.qty) : "TBD"}
-              </span>
-              <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }}
-                aria-label={`Remove ${item.name}`} onClick={() => setQty(l.partNumber, 0)}>×</button>
-            </div>
+            <>
+              {now.length > 0 && (
+                <>
+                  <div className="t-meta" style={{ color: "var(--t-good-fg)", marginTop: 2 }}>Ships now</div>
+                  {now.map(row)}
+                </>
+              )}
+              {quoted.length > 0 && (
+                <>
+                  <div className="mut t-meta" style={{ marginTop: now.length ? 8 : 2 }}>
+                    Quoted first - sourced to order, you approve before anything moves
+                  </div>
+                  {quoted.map(row)}
+                </>
+              )}
+            </>
           );
-        })}
+        })()}
         {cart.length > 0 && (
           <>
             <div className="row-2" style={{ alignItems: "baseline", padding: "8px 0 0", borderTop: "2px solid var(--line)" }}>
@@ -199,7 +237,11 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything we should know? (optional)"
               className="t-small" style={{ margin: "8px 0" }} aria-label="Order note" />
             <button className="btn accent" style={{ width: "100%" }} disabled={pending} onClick={place}>
-              {pending ? "Placing..." : "Place order"}
+              {pending ? "Placing..." : (() => {
+                const { now, quoted } = splitCart(cart, items);
+                return now.length && quoted.length ? "Place order + request quote"
+                  : quoted.length ? "Request quote" : "Place order";
+              })()}
             </button>
             <div className="mut t-meta" style={{ marginTop: 6 }}>
               We confirm availability, then send the invoice with its payment link. Nothing is charged now.
