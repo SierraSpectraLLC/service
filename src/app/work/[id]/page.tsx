@@ -4,7 +4,8 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, parts, poLines,
-  purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements
+  purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements,
+  rateCards,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, readTenant } from "@/lib/tenancy";
@@ -29,7 +30,12 @@ import WorkOrderControls from "@/components/WorkOrderControls";
 import WorkOrderNotes from "@/components/WorkOrderNotes";
 import PartsPanel from "@/components/PartsPanel";
 import ExpensesPanel from "@/components/ExpensesPanel";
+import CreditHoldPanel from "@/components/CreditHoldPanel";
+import CoveragePanel from "@/components/CoveragePanel";
 import { coverageFor } from "@/lib/billing";
+import { asStatementRow, billingContext, creditFor, invoicesForOrg } from "@/lib/invoiceData";
+import { invoiceView, isOpen } from "@/lib/statement";
+import { resolveRate } from "@/lib/rates";
 import PhotosPanel from "@/components/PhotosPanel";
 import { isPhotoFile } from "@/lib/photos";
 import { procedures } from "@/db/schema";
@@ -185,6 +191,32 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     })),
     orgId: wo.orgId, instrumentId: wo.instrumentId, today,
   });
+  // Where this client stands on credit, and what it would take to clear it.
+  // Computed at render like everything else about money - there is no stored
+  // hold flag to go stale after somebody pays.
+  const credit = staff ? await creditFor(wo.orgId, today).catch(() => null) : null;
+  const holdInvoices = credit && (credit.onHold || credit.override) && wo.orgId !== null
+    ? (await invoicesForOrg(wo.orgId))
+        .map((f) => ({ f, v: invoiceView(asStatementRow(f), today) }))
+        .filter(({ v }) => isOpen(v))
+        .sort((a, b) => b.v.daysLate - a.v.daysLate)
+        .map(({ f, v }) => ({
+          id: f.row.id, number: f.row.number, title: f.row.note || "",
+          balanceCents: v.balanceCents, daysLate: v.daysLate,
+        }))
+    : [];
+  const creditPolicy = credit && (credit.onHold || credit.override)
+    ? (await billingContext(wo.orgId)).policy : null;
+
+  // What this job bills at when it is not covered, and whether AP has a PO to
+  // quote. Both are cheap questions before dispatch and expensive ones at day
+  // forty-five.
+  const rateCardRows = staff ? await db.select().from(rateCards) : [];
+  const orgBilling = staff && wo.orgId !== null
+    ? await db.select().from(orgs).where(eq(orgs.id, wo.orgId)).then((r) => r[0] ?? null)
+    : null;
+  const rate = resolveRate(rateCardRows, { orgId: wo.orgId, agreementId: coverage.agreementId });
+
   const place = inst
     ? { href: `/instruments/${inst.id}`, label: `${inst.externalId}${systemLabel(inst, unitRows) ? ` - ${systemLabel(inst, unitRows)}` : ""}` }
     : { href: `/assets/${asset!.id}`, label: `${asset!.kind}${asset!.model ? ` - ${asset!.model}` : ""}${asset!.serial ? ` (SN ${asset!.serial})` : ""}` };
@@ -266,6 +298,28 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         }
         kebab={<HeroKebab arrange menuLabel={`Actions for ${wo.number}`} />}
       />
+
+      {/* Before the job itself, because the moment that matters is the one
+          where somebody is deciding whether to load the van. */}
+      {credit && creditPolicy && wo.orgId !== null && (
+        <CreditHoldPanel
+          standing={credit}
+          invoices={holdInvoices}
+          policy={creditPolicy}
+          orgId={wo.orgId}
+          orgName={askedBy}
+          canOverride={user.role === "owner"}
+        />
+      )}
+
+      {staff && (
+        <CoveragePanel
+          coverage={coverage}
+          rateCents={coverage.labor && !coverage.exhausted ? 0 : rate.hourlyCents}
+          poNumber={orgBilling?.poNumber ?? ""}
+          orgName={askedBy}
+        />
+      )}
 
       <PanelLayout
         viewKey="workorder"

@@ -74,7 +74,11 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
     startTransition(async () => {
       const res = await openWorkOrder(target, { title, body, severity, assignee });
       if (res?.error) { setError(res.error); return; }
-      setFlag(res?.flag ?? "");
+      // Two things can ride the answer: a visit spent beyond the contract, and
+      // a client on credit hold. Both are said out loud; neither refused the
+      // job, because the instrument is down either way.
+      setFlag([res?.flag, res?.hold].filter(Boolean).join(" "));
+      if (res?.hold) toast({ message: "Opened on credit hold", tone: "bad" });
       setOpen(false); setTitle(""); setBody(""); setSeverity("Degraded"); setAssignee("");
     });
   };

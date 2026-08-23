@@ -8,10 +8,12 @@ import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopToday, shopMonthDay } from "@/lib/shopday";
 import { jobCost, poCheck } from "@/lib/billing";
-import { asStatementRow, draftSourceFor, invoiceById, qtyOf } from "@/lib/invoiceData";
+import { feeFor } from "@/lib/dunning";
+import { asStatementRow, billingContext, draftSourceFor, invoiceById, qtyOf } from "@/lib/invoiceData";
 import { invoiceView, METHOD_LABEL, STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
 import InvoiceActions from "@/components/InvoiceActions";
 import InvoiceLineList from "@/components/InvoiceLineList";
+import InvoiceCollections from "@/components/InvoiceCollections";
 import { Id, Panel, Pill, RecordHero } from "@/components/ui";
 import type { HeroStat } from "@/components/ui";
 
@@ -64,11 +66,24 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       })
     : null;
 
+  // What may be charged today, and the sentence saying why not when nothing
+  // may. Computed the same way postFee computes it, so the button and the
+  // action cannot disagree about whether there is a fee to post.
+  const { policy } = await billingContext(row.orgId);
+  const quote = feeFor({
+    policy, dueOn: row.dueOn, today,
+    payableCents: v.payableCents,
+    partsCents: full.lines.filter((l) => l.kind === "part" && !l.covered)
+      .reduce((n, l) => n + Math.round(qtyOf(l) * l.unitCents), 0),
+    postedOn: full.fees.filter((f) => !f.waived).map((f) => f.postedOn),
+  });
+
   const stats: HeroStat[] = [
     { label: "total", value: formatCents(total) },
     ...(v.paidCents > 0 ? [{ label: "paid", value: formatCents(v.paidCents), tone: "good" as const }] : []),
     ...(v.balanceCents > 0 ? [{ label: "open", value: formatCents(v.balanceCents), tone: v.daysLate > 0 ? "bad" as const : undefined }] : []),
     ...(v.daysLate > 0 ? [{ label: "days late", value: v.daysLate, tone: "bad" as const }] : []),
+    ...(v.disputedCents > 0 ? [{ label: "paused by a dispute", value: formatCents(v.disputedCents), tone: "warn" as const }] : []),
     ...(link?.openCount ? [{ label: `viewed${link.openCount > 1 ? ` ${link.openCount}x` : ""}`, value: link.openedAt ? shopMonthDay(link.openedAt) : "yes" }] : []),
   ];
 
@@ -170,6 +185,30 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           </div>
         ))}
       </Panel>
+
+      {row.status !== "draft" && row.status !== "void" && (
+        <InvoiceCollections
+          invoiceId={id}
+          number={row.number}
+          today={today}
+          canPostFee={quote.amountCents > 0}
+          feeHint={quote.blocked}
+          fees={full.fees.map((f) => ({
+            id: f.id, amountCents: f.amountCents, basis: f.basis,
+            postedOn: f.postedOn, waived: f.waived, waivedReason: f.waivedReason,
+          }))}
+          promises={full.promises.map((p) => ({
+            id: p.id, promisedOn: p.promisedOn, byName: p.byName, note: p.note, keptOn: p.keptOn,
+          }))}
+          disputes={full.disputes.map((d) => ({
+            id: d.id, lineId: d.lineId, reason: d.reason, openedOn: d.openedOn,
+            resolvedOn: d.resolvedOn, resolution: d.resolution,
+            lineLabel: full.lines.find((l) => l.id === d.lineId)?.description ?? "",
+          }))}
+          lines={full.lines.filter((l) => !l.covered && l.kind !== "tax")
+            .map((l) => ({ id: l.id, label: l.description }))}
+        />
+      )}
 
       <Panel title="History" count={history.length} hint="Every step on this invoice is an audit row." empty="Nothing yet.">
         {history.length > 0 && history.map((a) => (

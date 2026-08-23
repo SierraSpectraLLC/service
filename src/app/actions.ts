@@ -16,7 +16,8 @@ import {
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  expenses, invoices, invoiceLines, payments,
+  expenses, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
+  dunningEvents, creditOverrides,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -45,8 +46,10 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
 import { EXPENSE_KINDS, linesTotal } from "@/lib/billing";
-import { asStatementRow, draftSourceFor, dueFor, invoiceById } from "@/lib/invoiceData";
-import { invoiceView, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
+import { asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById } from "@/lib/invoiceData";
+import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
+import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
+import type { BillingPolicy } from "@/lib/billingPolicy";
 import { brandForTenant } from "@/lib/brand";
 import { btn, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
@@ -5607,7 +5610,7 @@ async function fileWorkOrder(opts: {
 export async function openWorkOrder(
   target: WorkTarget,
   data: { title: string; body: string; severity: string; assignee?: string },
-): Promise<{ error?: string; id?: number; number?: string; flag?: string }> {
+): Promise<{ error?: string; id?: number; number?: string; flag?: string; hold?: string }> {
   const u = await requireEditor();
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say briefly what the job is" };
@@ -5644,7 +5647,16 @@ export async function openWorkOrder(
   // instrument is down either way, but a visit spent beyond the contract must
   // not be spent silently. Failure to compute = no flag, not no work order.
   const flag = await visitFlag(orgId, t0.instrumentId).catch(() => "");
-  return { id: wo.id, number: wo.number, flag: flag || undefined };
+  // Same posture for the credit check, and for a stronger reason: a client's
+  // instrument is DOWN. Refusing to record that because their AP is slow is a
+  // worse failure than the debt. The job opens ON HOLD - said here, drawn on
+  // the record, and read by whoever is deciding whether to load the van.
+  const credit = await creditFor(orgId, shopToday()).catch(() => null);
+  return {
+    id: wo.id, number: wo.number,
+    flag: flag || undefined,
+    hold: credit?.onHold ? credit.line : undefined,
+  };
 }
 
 /**
@@ -10594,6 +10606,396 @@ export async function voidInvoice(id: number, reason: string): Promise<{ error?:
   await audit({
     actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
     action: `voided ${inv.number} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+// ---------------- Collections ----------------
+// Fees, promises, disputes, the ladder, and the decision to work for somebody
+// who owes money anyway. Nothing here stores a balance either: a fee is its
+// own row, a waiver flags that row, and what is owed is still summed at render.
+
+/**
+ * Post the late charge this invoice has earned.
+ *
+ * The amount is computed here, not posted from the form: what somebody was
+ * shown and what gets charged come from one function, so a page left open
+ * cannot charge last week's interest. The basis sentence is stored with it -
+ * "1.50% per month on $3,900 undisputed, 31 days past the 10-day grace
+ * period" - because a year from now that is the only thing that can explain
+ * the number.
+ */
+export async function postFee(invoiceId: number): Promise<{ error?: string; amountCents?: number }> {
+  const u = await requireStaff();
+  const full = await invoiceById(invoiceId);
+  if (!full) return { error: "Not found" };
+  const today = shopToday();
+  const view = invoiceView(asStatementRow(full), today);
+  const { policy } = await billingContext(full.row.orgId);
+
+  const quote = feeFor({
+    policy, dueOn: full.row.dueOn, today,
+    payableCents: view.payableCents,
+    partsCents: full.lines.filter((l) => l.kind === "part" && !l.covered)
+      .reduce((n, l) => n + Math.round((l.qty / 1000) * l.unitCents), 0),
+    postedOn: full.fees.filter((f) => !f.waived).map((f) => f.postedOn),
+  });
+  if (quote.amountCents <= 0) return { error: quote.blocked || "There is no fee to post." };
+
+  const [row] = await db.insert(invoiceFees).values({
+    tenantOrgId: full.row.tenantOrgId, invoiceId,
+    amountCents: quote.amountCents, basis: quote.basis,
+    postedOn: today, postedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: full.row.tenantOrgId,
+    action: `posted a late fee of ${formatCents(row.amountCents)} on ${full.row.number} - ${row.basis}`,
+  });
+  revInvoice(full.row);
+  return { amountCents: row.amountCents };
+}
+
+/**
+ * Take a fee back off.
+ *
+ * The row stays and gets flagged, because expecting to waive more than you
+ * charge is the honest posture, and the record of having charged and then
+ * waived is the part that is worth anything - in a dispute, and in deciding
+ * whether the policy is set right at all.
+ */
+export async function waiveFee(feeId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [fee] = await db.select().from(invoiceFees).where(eq(invoiceFees.id, feeId));
+  if (!fee) return { error: "Not found" };
+  if (fee.waived) return {};
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, fee.invoiceId));
+  await db.update(invoiceFees).set({ waived: true, waivedBy: u.email, waivedReason: why })
+    .where(eq(invoiceFees.id, feeId));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: fee.invoiceId, tenantOrgId: fee.tenantOrgId,
+    action: `waived the ${formatCents(fee.amountCents)} late fee on ${inv?.number ?? "the invoice"} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  if (inv) revInvoice(inv);
+  return {};
+}
+
+/**
+ * "The check goes out Friday." Worth a row for one reason: the morning after
+ * it is broken is when the conversation changes, and nobody remembers the
+ * date without one.
+ */
+export async function logPromise(
+  invoiceId: number, data: { promisedOn: string; byName: string; note: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const day = data.promisedOn.trim();
+  if (!isIsoDay(day)) return { error: "Pick the day they said" };
+  const who = data.byName.trim();
+  if (!who) return { error: "Who said it? A promise with no name on it is a note." };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+  if (!inv) return { error: "Not found" };
+  const [row] = await db.insert(promises).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId, promisedOn: day,
+    byName: who, note: data.note.trim(), loggedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: `logged a promise on ${inv.number}: ${who} says by ${day}${row.note ? ` - ${row.note}` : ""}`,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/** They paid it. Closes the promise so the ladder stops escalating on it. */
+export async function keepPromise(promiseId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(promises).where(eq(promises.id, promiseId));
+  if (!row) return { error: "Not found" };
+  if (row.keptOn) return {};
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, row.invoiceId));
+  const today = shopToday();
+  await db.update(promises).set({ keptOn: today }).where(eq(promises.id, promiseId));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: row.invoiceId, tenantOrgId: row.tenantOrgId,
+    action: `${row.byName || "The client"} kept the promise on ${inv?.number ?? "the invoice"} (${row.promisedOn})`,
+  });
+  if (inv) revInvoice(inv);
+  return {};
+}
+
+/**
+ * The client has questioned a line.
+ *
+ * It pauses what the reminders ASK for on that line alone. The undisputed
+ * remainder keeps aging and keeps being chased, because a fair question about
+ * one cartridge must not buy ninety quiet days on the rest of the bill - and
+ * quoting the whole number at somebody who raised a real question is how the
+ * rest of the invoice stops getting paid too.
+ */
+export async function openDispute(
+  invoiceId: number, data: { lineId: number | null; reason: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(data.reason);
+  if (typeof why !== "string") return why;
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+  if (!inv) return { error: "Not found" };
+  let line: typeof invoiceLines.$inferSelect | undefined;
+  if (data.lineId !== null) {
+    [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, data.lineId));
+    if (!line || line.invoiceId !== invoiceId) return { error: "That line is not on this invoice" };
+  }
+  const [row] = await db.insert(disputes).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId, lineId: line?.id ?? null,
+    reason: why, openedOn: shopToday(), openedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: `opened a dispute on ${inv.number}${line ? `, line "${line.description}"` : ""} - ${row.reason}`,
+    field: "reason", newValue: row.reason,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/**
+ * Settle it, one of two ways.
+ *
+ * "kept" means the line stands and the pause lifts. "credited" issues a
+ * NEGATIVE line rather than editing the disputed one, so the invoice still
+ * reconciles against the copy in the client's inbox and both facts - what was
+ * charged and what was given back - stay on the record.
+ */
+export async function resolveDispute(
+  disputeId: number, resolution: "kept" | "credited", note: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [d] = await db.select().from(disputes).where(eq(disputes.id, disputeId));
+  if (!d) return { error: "Not found" };
+  if (d.resolvedOn) return {};
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, d.invoiceId));
+  if (!inv) return { error: "Not found" };
+  const today = shopToday();
+
+  let credited = 0;
+  if (resolution === "credited") {
+    const [line] = d.lineId === null ? [undefined]
+      : await db.select().from(invoiceLines).where(eq(invoiceLines.id, d.lineId));
+    if (!line) return { error: "There is no line to credit - resolve it as kept, or credit by hand." };
+    credited = Math.round((line.qty / 1000) * line.unitCents);
+    const [last] = await db.select({ position: invoiceLines.position }).from(invoiceLines)
+      .where(eq(invoiceLines.invoiceId, d.invoiceId)).orderBy(desc(invoiceLines.position)).limit(1);
+    await db.insert(invoiceLines).values({
+      invoiceId: d.invoiceId, kind: "fee_ref",
+      description: `Credit memo - ${line.description}`,
+      detail: note.trim() || `dispute opened ${d.openedOn}`,
+      qty: 1000, unitCents: -credited, covered: false,
+      sourceId: line.id, position: (last?.position ?? 0) + 1,
+    });
+  }
+
+  await db.update(disputes).set({
+    resolvedOn: today, resolution, resolvedBy: u.email,
+    reason: note.trim() ? `${d.reason} | resolved: ${note.trim()}` : d.reason,
+  }).where(eq(disputes.id, disputeId));
+
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: d.invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: resolution === "credited"
+      ? `resolved a dispute on ${inv.number} with a credit of ${formatCents(credited)}${note.trim() ? ` - ${note.trim()}` : ""}`
+      : `resolved a dispute on ${inv.number}: the line stands${note.trim() ? ` - ${note.trim()}` : ""}`,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/**
+ * Work for somebody who owes money anyway.
+ *
+ * The reason is required BY THE ACTION, not by the form - the same rule
+ * toggleStage's blocked-reason follows, and for the same reason: a check that
+ * lives only in the UI is a check that is not there.
+ */
+export async function overrideCreditHold(
+  orgId: number, data: { reason: string; untilOn: string },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(data.reason);
+  if (typeof why !== "string") return why;
+  const until = data.untilOn.trim();
+  if (until && !isIsoDay(until)) return { error: "Pick a date, or leave it open-ended" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  await db.insert(creditOverrides).values({
+    tenantOrgId: myTenantOrgId(u), orgId, reason: why,
+    untilOn: until, grantedBy: u.email,
+  });
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: myTenantOrgId(u),
+    action: `overrode the credit hold on ${org.name}${until ? ` until ${until}` : ""} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/money");
+  revalidatePath("/work");
+  return {};
+}
+
+/** Put the hold back on before its date runs out. */
+export async function liftCreditOverride(id: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(creditOverrides).where(eq(creditOverrides.id, id));
+  if (!row || row.liftedAt !== null) return {};
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, row.orgId));
+  await db.update(creditOverrides).set({ liftedAt: new Date() }).where(eq(creditOverrides.id, id));
+  await audit({
+    actor: u.email, entityType: "org", entityId: row.orgId, tenantOrgId: row.tenantOrgId,
+    action: `ended the credit-hold override on ${org?.name ?? "the client"}`,
+  });
+  revalidatePath("/money");
+  revalidatePath("/work");
+  return {};
+}
+
+/**
+ * Climb one rung: send it, and write the row that says it was sent.
+ *
+ * Shared by the cron and the "Send now" button, so an automatic reminder and a
+ * hand-pressed one are the same thing on the record. Reminders thread under
+ * the invoice's original send, so a client's inbox holds one conversation per
+ * bill instead of six lookalike messages.
+ */
+export async function sendDunningRung(
+  invoiceId: number, opts: { actor?: string } = {},
+): Promise<{ error?: string; rung?: string }> {
+  const actor = opts.actor ?? (await requireStaff()).email;
+  const full = await invoiceById(invoiceId);
+  if (!full) return { error: "Not found" };
+  const today = shopToday();
+  const view = invoiceView(asStatementRow(full), today);
+  if (!isOpen(view)) return { error: `${full.row.number} is not open.` };
+  if (isReferred(full.dunning.map((d) => ({ rung: d.rung, sentOn: d.sentOn })))) {
+    return { error: `${full.row.number} has been referred - it is off the ladder.` };
+  }
+
+  const { policy } = await billingContext(full.row.orgId);
+  const brokenPromise = full.promises.some((p) => promiseBroken(
+    { promisedOn: p.promisedOn, byName: p.byName, keptOn: p.keptOn }, today,
+  ));
+  const step = nextAction({
+    dueOn: full.row.dueOn, today, policy,
+    log: full.dunning.map((d) => ({ rung: d.rung, sentOn: d.sentOn })),
+    promiseBroken: brokenPromise,
+  });
+  if (!step) return { error: "Nothing is due on this invoice today." };
+
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, full.row.orgId));
+  const to = [
+    step.contact?.email?.trim(),
+    // Past the first rung the AP desk is the destination; before it, whoever
+    // has been getting the mail.
+    step.rung.contactIndex >= 0 ? org?.apEmail?.trim() : "",
+    ...(await orgRecipients(full.row.orgId)),
+  ].filter(Boolean) as string[];
+
+  const warning = to.length
+    ? await mailDunning({ full, org: org ?? null, step, view, policy })
+        .then(() => "").catch(() => "sent, but the email did not go out")
+    : "nobody to send it to";
+
+  await db.insert(dunningEvents).values({
+    tenantOrgId: full.row.tenantOrgId, invoiceId,
+    rung: step.rung.key,
+    toName: step.contact?.name ?? org?.name ?? "",
+    toEmail: to[0] ?? "",
+    sentBy: opts.actor ? "auto" : actor,
+    note: warning, sentOn: today,
+  });
+  await audit({
+    actor, entityType: "invoice", entityId: invoiceId, tenantOrgId: full.row.tenantOrgId,
+    action: `${step.rung.action.toLowerCase()} on ${full.row.number}`
+      + `${step.contact ? ` to ${step.contact.name}, ${step.contact.role.toLowerCase()}` : ""}`
+      + ` - ${formatCents(view.payableCents)} outstanding`
+      + (brokenPromise ? " (escalated: a promise was broken)" : "")
+      + (warning ? ` [${warning}]` : ""),
+  });
+  revInvoice(full.row);
+  return { rung: step.rung.key };
+}
+
+/** The reminder itself, threaded under the invoice's original send. */
+async function mailDunning(opts: {
+  full: NonNullable<Awaited<ReturnType<typeof invoiceById>>>;
+  org: typeof orgs.$inferSelect | null;
+  step: NonNullable<ReturnType<typeof nextAction>>;
+  view: ReturnType<typeof invoiceView>;
+  policy: BillingPolicy;
+}): Promise<void> {
+  const { full, org, step, view } = opts;
+  const base = appUrl();
+  const brand = await brandForTenant(full.row.tenantOrgId);
+  const [link] = await db.select().from(shareLinks)
+    .where(and(eq(shareLinks.invoiceId, full.row.id), isNull(shareLinks.revokedAt)));
+  const href = base && link ? `${base}/share/${link.token}` : "";
+
+  // The reminder quotes what is actually being ASKED for. On an invoice with a
+  // disputed line that is the undisputed remainder, and saying the whole
+  // number at somebody who raised a fair question is how the rest stops
+  // getting paid too.
+  const asking = formatCents(view.payableCents);
+  const disputedNote = view.disputedCents > 0
+    ? `<p style="margin:0 0 12px;">${esc(formatCents(view.disputedCents))} is paused while we sort out the line you asked about. The figure above is the rest.</p>`
+    : "";
+  const to = [
+    step.contact?.email?.trim(),
+    step.rung.contactIndex >= 0 ? org?.apEmail?.trim() : "",
+    ...(await orgRecipients(full.row.orgId)),
+  ].filter(Boolean) as string[];
+
+  const html = emailShell({
+    brand: brand.operatorName || brand.name,
+    logoUrl: brand.operatorLogoUrl || undefined,
+    tagline: brand.tagline || undefined,
+    preheader: `${full.row.number} - ${asking}${view.daysLate > 0 ? `, ${view.daysLate} days past due` : ""}`,
+    body: `<p style="margin:0 0 12px;"><strong>Invoice ${esc(full.row.number)}</strong></p>`
+      + `<p style="margin:0 0 12px;">${esc(asking)} ${view.daysLate > 0
+        ? `is ${view.daysLate} day${view.daysLate === 1 ? "" : "s"} past due (due ${esc(full.row.dueOn)}).`
+        : `is due ${esc(full.row.dueOn)}.`}</p>`
+      + disputedNote
+      + (href ? btn(href, "View the invoice") : ""),
+    footer: "Question a line? Reply and we will pause that line while we sort it out; the rest stays due.",
+  });
+  const root = threadRootId(`invoice-org-${full.row.orgId}`, mailHost(process.env.EMAIL_FROM));
+  await sendEmail([...new Set(to)], `${brand.operatorName || brand.name}: invoice ${full.row.number}`, html, {
+    headers: threadHeaders(root),
+    text: `Invoice ${full.row.number} - ${asking}${view.daysLate > 0 ? `, ${view.daysLate} days past due` : ""}.`
+      + (href ? `\n${href}` : ""),
+  });
+}
+
+/**
+ * Mark it referred: off the ladder, out of the reminders, into a packet
+ * somebody exports and hands to an agency or a small-claims filing.
+ */
+export async function referInvoice(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  if (!inv) return { error: "Not found" };
+  if (inv.status === "referred") return {};
+  await db.update(invoices).set({ status: "referred", updatedAt: new Date() }).where(eq(invoices.id, id));
+  await db.insert(dunningEvents).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId: id, rung: "refer",
+    toName: "", toEmail: "", sentBy: u.email, note: why, sentOn: shopToday(),
+  });
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
+    action: `referred ${inv.number} for collection - reason: ${why}`,
     field: "reason", newValue: why,
   });
   revInvoice(inv);

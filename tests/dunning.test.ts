@@ -80,6 +80,26 @@ describe("ladderFor / nextAction", () => {
     expect(after?.contact?.name).toBe("K. Osei");
   });
 
+  it("never re-opens a rung that has already been sent", () => {
+    // The bug this catches: a broken promise promoted the next rung without
+    // checking whether it had been climbed, so the cron sent the owner letter
+    // again every hour it ran.
+    const log = [
+      { rung: "nudge", sentOn: "2026-07-05" }, { rung: "due", sentOn: "2026-07-12" },
+      { rung: "statement", sentOn: "2026-07-27" }, { rung: "owner", sentOn: "2026-08-23" },
+    ];
+    const step = nextAction({ ...base, today: "2026-08-23", log, promiseBroken: true });
+    expect(step).toBeNull();
+  });
+
+  it("skips past a sent rung to the next unsent one", () => {
+    const log = [{ rung: "statement", sentOn: "2026-07-27" }];
+    // Without the promise the fee rung is due; with it, the skip has to land
+    // on `owner` rather than back on the statement already sent.
+    expect(nextAction({ ...base, today: "2026-08-23", log })?.rung.key).toBe("fee");
+    expect(nextAction({ ...base, today: "2026-08-23", log, promiseBroken: true })?.rung.key).toBe("owner");
+  });
+
   it("knows a referred invoice is off the ladder", () => {
     expect(isReferred([{ rung: "owner", sentOn: "x" }])).toBe(false);
     expect(isReferred([{ rung: "refer", sentOn: "x" }])).toBe(true);

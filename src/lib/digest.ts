@@ -45,6 +45,8 @@ import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import { digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel } from "@/lib/digestDays";
+import { moneyDigest } from "@/lib/invoiceData";
+import { renderMoneySection } from "@/lib/digestMoney";
 import {
   dayLabel, partnerPreheader, partnerView, renderPartnerDigest, renderPartnerDigestText,
 } from "@/lib/digestPartner";
@@ -752,7 +754,12 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
   const today = todayLabel();
   const url = appUrl();
 
-  const body = renderDigestBody(sections, true, operatorName, window);
+  // The money section. Internal edition only - composePartnerDigest never
+  // calls this, and tests/digestMoney.test.ts asserts the partner output
+  // carries no currency at all, because that rule is one bad merge away from
+  // being untrue.
+  const money = await moneyDigest(shopToday()).then(renderMoneySection).catch(() => "");
+  const body = renderDigestBody(sections, true, operatorName, window) + money;
 
   const busy = n.partner + n.us + n.followUps + n.gas + n.failed;
   // Constant on purpose: a subject carrying the date or the day's counts

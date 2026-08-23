@@ -15,17 +15,22 @@ import { and, eq, inArray } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/db";
 import {
-  agreements, appSettings, expenses, instruments, invoiceLines, invoices,
-  orgs, orgSites, partPrices, parts, payments, rateCards, timeEntries, workOrders,
+  agreements, appSettings, creditOverrides, disputes, dunningEvents, expenses,
+  instruments, invoiceFees, invoiceLines, invoices, orgs, orgSites, partPrices,
+  parts, payments, promises, rateCards, timeEntries, workOrders,
 } from "@/db/schema";
 import {
   buildInvoiceLines, coverageFor, coveredValue, linesTotal, sellPrice,
   type DraftLine, type ExpenseRow, type PartRow, type TimeRow,
 } from "@/lib/billing";
-import { resolvePolicy, type BillingPolicy } from "@/lib/billingPolicy";
+import { resolvePolicy } from "@/lib/billingPolicy";
 import { bestPrice } from "@/lib/priceBook";
 import { resolveRate, type RateCard } from "@/lib/rates";
-import { dueDate, type InvoiceRow } from "@/lib/statement";
+import { dueDate, invoiceView, isOpen, type InvoiceRow } from "@/lib/statement";
+import { CLEAR, creditStanding, type CreditStanding } from "@/lib/credit";
+import { nextAction, promiseBroken } from "@/lib/dunning";
+import type { BillingPolicy } from "@/lib/billingPolicy";
+import type { MoneyInput } from "@/lib/digestMoney";
 import { shopToday } from "@/lib/shopday";
 
 /** Cached per request: three pages on one render all want the settings row. */
@@ -148,12 +153,34 @@ export async function draftSourceFor(woId: number): Promise<DraftSource | null> 
   };
 }
 
-/** An invoice with its lines and payments attached, in statement shape. */
+/** An invoice with everything hanging off it, in statement shape. */
 export type FullInvoice = {
   row: typeof invoices.$inferSelect;
   lines: (typeof invoiceLines.$inferSelect)[];
   payments: (typeof payments.$inferSelect)[];
+  fees: (typeof invoiceFees.$inferSelect)[];
+  promises: (typeof promises.$inferSelect)[];
+  disputes: (typeof disputes.$inferSelect)[];
+  dunning: (typeof dunningEvents.$inferSelect)[];
 };
+
+/**
+ * What is under dispute right now: the open disputes' own lines, at their line
+ * amount. A dispute with no line on it pauses nothing - it is a question about
+ * the invoice, not a refusal of a charge - and says so rather than quietly
+ * pausing the whole bill.
+ */
+export function disputedCents(f: FullInvoice): number {
+  const open = f.disputes.filter((d) => d.resolvedOn === null && d.lineId !== null);
+  return open.reduce((n, d) => {
+    const line = f.lines.find((l) => l.id === d.lineId);
+    return n + (line && !line.covered ? Math.round(qtyOf(line) * line.unitCents) : 0);
+  }, 0);
+}
+
+/** Fees that are actually owed - a waived one keeps its row and charges nothing. */
+export const liveFees = (f: FullInvoice): number[] =>
+  f.fees.filter((x) => !x.waived).map((x) => x.amountCents);
 
 /** qty is stored in thousandths; the arithmetic wants the real number. */
 export const qtyOf = (l: { qty: number }): number => l.qty / 1000;
@@ -162,20 +189,30 @@ export const asStatementRow = (f: FullInvoice): InvoiceRow => ({
   id: f.row.id, number: f.row.number, orgId: f.row.orgId, status: f.row.status,
   issuedOn: f.row.issuedOn, dueOn: f.row.dueOn,
   lines: f.lines.map((l) => ({ qty: qtyOf(l), unitCents: l.unitCents, covered: l.covered })),
+  feeCents: liveFees(f),
   paidCents: f.payments.map((p) => p.amountCents),
+  disputedCents: disputedCents(f),
 });
 
 async function hydrate(rows: (typeof invoices.$inferSelect)[]): Promise<FullInvoice[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const [lineRows, payRows] = await Promise.all([
+  const [lineRows, payRows, feeRows, promiseRows, disputeRows, dunningRows] = await Promise.all([
     db.select().from(invoiceLines).where(inArray(invoiceLines.invoiceId, ids)),
     db.select().from(payments).where(inArray(payments.invoiceId, ids)),
+    db.select().from(invoiceFees).where(inArray(invoiceFees.invoiceId, ids)),
+    db.select().from(promises).where(inArray(promises.invoiceId, ids)),
+    db.select().from(disputes).where(inArray(disputes.invoiceId, ids)),
+    db.select().from(dunningEvents).where(inArray(dunningEvents.invoiceId, ids)),
   ]);
   return rows.map((row) => ({
     row,
     lines: lineRows.filter((l) => l.invoiceId === row.id).sort((a, b) => a.position - b.position || a.id - b.id),
     payments: payRows.filter((p) => p.invoiceId === row.id).sort((a, b) => a.receivedOn.localeCompare(b.receivedOn)),
+    fees: feeRows.filter((x) => x.invoiceId === row.id).sort((a, b) => a.postedOn.localeCompare(b.postedOn)),
+    promises: promiseRows.filter((x) => x.invoiceId === row.id).sort((a, b) => a.promisedOn.localeCompare(b.promisedOn)),
+    disputes: disputeRows.filter((x) => x.invoiceId === row.id).sort((a, b) => a.id - b.id),
+    dunning: dunningRows.filter((x) => x.invoiceId === row.id).sort((a, b) => a.sentOn.localeCompare(b.sentOn)),
   }));
 }
 
@@ -270,4 +307,127 @@ export async function unbilledJobs(limit = 25): Promise<UnbilledJob[]> {
     });
   }
   return out;
+}
+
+/**
+ * Where one client stands on credit, computed from their open invoices.
+ *
+ * Three places ask this - the work order page, the dispatch list, and the
+ * action that opens a job - and they must not be able to disagree, so all
+ * three come through here. lib/credit does the deciding; this only fetches.
+ */
+export async function creditFor(orgId: number | null, today: string): Promise<CreditStanding> {
+  if (orgId === null) return CLEAR;
+  const [full, ctx, overrideRows] = await Promise.all([
+    invoicesForOrg(orgId),
+    billingContext(orgId),
+    db.select().from(creditOverrides).where(eq(creditOverrides.orgId, orgId)),
+  ]);
+  const open = full
+    .map((f) => invoiceView(asStatementRow(f), today))
+    .filter(isOpen);
+  return creditStanding({
+    policy: ctx.policy,
+    openInvoices: open.map((v) => ({ balanceCents: v.balanceCents, daysLate: v.daysLate })),
+    overrides: overrideRows.map((r) => ({
+      reason: r.reason, grantedBy: r.grantedBy, untilOn: r.untilOn, lifted: r.liftedAt !== null,
+    })),
+    today,
+  });
+}
+
+/** Credit standing for several clients at once, for a list page. */
+export async function creditForMany(orgIds: number[], today: string): Promise<Map<number, CreditStanding>> {
+  const ids = [...new Set(orgIds.filter((n) => Number.isInteger(n)))];
+  const out = new Map<number, CreditStanding>();
+  await Promise.all(ids.map(async (id) => out.set(id, await creditFor(id, today))));
+  return out;
+}
+
+/** Every open invoice in the workspace that has a rung due today. */
+export async function collectionsBoard(today: string): Promise<{
+  invoice: FullInvoice;
+  view: ReturnType<typeof invoiceView>;
+  step: ReturnType<typeof nextAction>;
+  policy: BillingPolicy;
+  brokenPromise: boolean;
+}[]> {
+  const all = await allInvoices();
+  const out = [];
+  for (const f of all) {
+    const view = invoiceView(asStatementRow(f), today);
+    if (!isOpen(view)) continue;
+    const { policy } = await billingContext(f.row.orgId);
+    const brokenPromise = f.promises.some((p) => promiseBroken(
+      { promisedOn: p.promisedOn, byName: p.byName, keptOn: p.keptOn }, today,
+    ));
+    const step = nextAction({
+      dueOn: f.row.dueOn, today, policy,
+      log: f.dunning.map((d) => ({ rung: d.rung, sentOn: d.sentOn })),
+      promiseBroken: brokenPromise,
+    });
+    out.push({ invoice: f, view, step, policy, brokenPromise });
+  }
+  return out;
+}
+
+/**
+ * The internal digest's money section, gathered.
+ *
+ * Internal only, and the function says so where somebody would look: there is
+ * no per-org variant of this, because a client sees their own money through
+ * their own portal token and nowhere else.
+ */
+export async function moneyDigest(today: string): Promise<MoneyInput> {
+  const [board, jobs, orgRows] = await Promise.all([
+    collectionsBoard(today),
+    unbilledJobs(12),
+    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+  ]);
+  const name = (id: number) => orgRows.find((o) => o.id === id)?.name ?? "";
+  const days = (from: string) => Math.max(0, Math.round(
+    (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000,
+  ));
+
+  const brokenPromises = [];
+  const openDisputes = [];
+  const overdue = [];
+  for (const { invoice: f, view } of board) {
+    const orgName = name(f.row.orgId);
+    for (const p of f.promises) {
+      if (p.keptOn || !p.promisedOn || p.promisedOn >= today) continue;
+      brokenPromises.push({
+        number: f.row.number, orgName, byName: p.byName,
+        promisedOn: p.promisedOn, daysPast: days(p.promisedOn), payableCents: view.payableCents,
+      });
+    }
+    for (const d of f.disputes) {
+      if (d.resolvedOn) continue;
+      openDisputes.push({
+        number: f.row.number, orgName, reason: d.reason,
+        daysOpen: days(d.openedOn), disputedCents: view.disputedCents, restCents: view.payableCents,
+      });
+    }
+    if (view.daysLate > 0) {
+      overdue.push({
+        number: f.row.number, orgName,
+        daysLate: view.daysLate, balanceCents: view.balanceCents,
+      });
+    }
+  }
+
+  const holdOrgIds = [...new Set(board.map((b) => b.invoice.row.orgId))];
+  const standings = await creditForMany(holdOrgIds, today);
+  const onHold = [...standings.entries()]
+    .filter(([, s]) => s.onHold)
+    .map(([id, s]) => ({
+      orgName: name(id), balanceCents: s.balanceCents, oldestDaysLate: s.oldestDaysLate,
+    }));
+
+  return {
+    unbilled: jobs.map((j) => ({
+      number: j.number, orgName: j.orgName, daysClosed: j.daysClosed, valueCents: j.valueCents,
+    })).filter((j) => j.valueCents > 0),
+    brokenPromises, openDisputes, overdue, onHold,
+  };
 }

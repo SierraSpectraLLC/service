@@ -157,6 +157,40 @@ const FIXTURE = `
     ('devinvoicetoken12345', 'invoice', 1, 2, 'Invoice INV-0092',
       to_char(now() + interval '300 days', 'YYYY-MM-DD'), '${OWNER}',
       now() - interval '8 days', now() - interval '6 days', 2);
+
+  -- Collections: the Coastal invoice is 42 days past due, has been up three
+  -- rungs of the ladder, carries a posted fee, a promise that was broken, and
+  -- a disputed line on the Lab Zen invoice so the pause is visible somewhere.
+  INSERT INTO dunning_events (invoice_id, rung, to_name, to_email, sent_by, sent_on) VALUES
+    (3, 'nudge', 'K. Osei', 'k.osei@coastal.test', 'auto', to_char(now() - interval '49 days', 'YYYY-MM-DD')),
+    (3, 'due', 'K. Osei', 'k.osei@coastal.test', 'auto', to_char(now() - interval '42 days', 'YYYY-MM-DD')),
+    (3, 'statement', 'K. Osei', 'accounts@coastal.test', 'auto', to_char(now() - interval '27 days', 'YYYY-MM-DD'));
+  INSERT INTO invoice_fees (invoice_id, amount_cents, basis, posted_on, posted_by) VALUES
+    (3, 5800, '1.50% per month on $3,900 undisputed, 39 days past the 3-day grace period.',
+      to_char(now() - interval '11 days', 'YYYY-MM-DD'), '${OWNER}');
+  INSERT INTO promises (invoice_id, promised_on, by_name, note, logged_by) VALUES
+    (3, to_char(now() - interval '2 days', 'YYYY-MM-DD'), 'K. Osei', 'Check going out Friday', '${OWNER}');
+  INSERT INTO disputes (invoice_id, line_id, reason, opened_on, opened_by) VALUES
+    (2, 6, 'Adam: thought the crane was inside the retainer',
+      to_char(now() - interval '3 days', 'YYYY-MM-DD'), '${OWNER}');
+
+  -- Coastal's escalation contacts, so the ladder names a new person at each
+  -- rung instead of mailing the same desk seven times.
+  UPDATE orgs SET billing_policy = jsonb_set(billing_policy, '{escalation}', '[
+    {"name":"K. Osei","role":"Lab manager","email":"k.osei@coastal.test"},
+    {"name":"R. Chen","role":"Purchasing director","email":"r.chen@coastal.test"},
+    {"name":"M. Vance","role":"Controller","email":"m.vance@coastal.test"}
+  ]'::jsonb) WHERE id = 2;
+
+  -- What an hour costs the shop, so the job-cost panel has a margin to show
+  -- instead of saying nobody has told it.
+  UPDATE app_settings SET loaded_labor_cents = 9500 WHERE id = 1;
+
+  -- Coastal's reminders go out THIS hour, so the dunning cron can be run by
+  -- hand the moment the harness boots instead of at seven tomorrow morning.
+  -- Everyone else keeps the ordinary 7am.
+  UPDATE orgs SET digest_hour = EXTRACT(hour FROM now() AT TIME ZONE 'America/Los_Angeles')::int
+    WHERE id = 2;
   UPDATE instruments SET site_id = 1 WHERE client = 'Lab Zen';
   UPDATE instruments SET site_id = 2 WHERE client = 'Coastal Analytical';
 
@@ -290,6 +324,9 @@ async function main() {
       AUTH_SECRET: process.env.AUTH_SECRET || "dev-local-secret-not-for-production",
       STAFF_EMAILS: process.env.STAFF_EMAILS || OWNER,
       EMAIL_FROM: process.env.EMAIL_FROM || OWNER,
+      // So the cron routes can be run by hand against the throwaway database:
+      //   curl -H "Authorization: Bearer dev-local-cron" localhost:3100/api/cron/dunning
+      CRON_SECRET: process.env.CRON_SECRET || "dev-local-cron",
     },
   });
   child.on("exit", (code) => process.exit(code ?? 0));

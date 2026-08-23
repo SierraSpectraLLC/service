@@ -160,9 +160,19 @@ export function ladderFor(input: {
   // would change nothing, because the furthest one is still what gets sent.
   let last = -1;
   for (let i = 0; i < steps.length; i++) if (steps[i].state === "now") last = i;
-  if (last >= 0 && last + 1 < steps.length) {
-    steps[last] = { ...steps[last], state: "ahead" };
-    steps[last + 1] = { ...steps[last + 1], state: "now" };
+  if (last < 0) return steps;
+
+  // The skip escalates by exactly ONE rung, and only onto a rung that has not
+  // already been climbed. Promoting blindly re-opened a rung whose
+  // dunning_events row already existed, and the cron sent the owner letter
+  // every hour for the rest of the month. Hunting further up the ladder is no
+  // better: if the next rung is already sent then there is nothing to escalate
+  // to today, and the answer is to wait for the calendar rather than to leap
+  // to a final notice three weeks early.
+  const next = last + 1;
+  steps[last] = { ...steps[last], state: "ahead" };
+  if (next < steps.length && steps[next].state !== "done") {
+    steps[next] = { ...steps[next], state: "now" };
   }
   return steps;
 }
