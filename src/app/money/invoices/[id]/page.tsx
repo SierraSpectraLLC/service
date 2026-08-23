@@ -191,8 +191,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           invoiceId={id}
           number={row.number}
           today={today}
-          canPostFee={quote.amountCents > 0}
-          feeHint={quote.blocked}
+          feeQuote={{ amountCents: quote.amountCents, basis: quote.basis, blocked: quote.blocked }}
           fees={full.fees.map((f) => ({
             id: f.id, amountCents: f.amountCents, basis: f.basis,
             postedOn: f.postedOn, waived: f.waived, waivedReason: f.waivedReason,

@@ -22,14 +22,18 @@ export type DisputeRow = { id: number; lineId: number | null; lineLabel: string;
  * person on the phone ends up quoting the wrong number.
  */
 export default function InvoiceCollections({
-  invoiceId, number, today, canPostFee, feeHint, fees, promises, disputes, lines,
+  invoiceId, number, today, feeQuote, fees, promises, disputes, lines,
 }: {
   invoiceId: number;
   number: string;
   today: string;
-  canPostFee: boolean;
-  /** Why no fee may be posted, when none may. */
-  feeHint: string;
+  /**
+   * What may be charged today and the sentence explaining it - or, when
+   * nothing may, why not. Shown on the button itself: an operator about to
+   * charge a client interest should be able to see the amount before pressing,
+   * not discover it in the row afterwards.
+   */
+  feeQuote: { amountCents: number; basis: string; blocked: string };
   fees: FeeRow[];
   promises: PromiseRow[];
   disputes: DisputeRow[];
@@ -80,16 +84,20 @@ export default function InvoiceCollections({
       <Panel
         title="Late fees"
         count={fees.length}
-        actions={canPostFee
+        actions={feeQuote.amountCents > 0
           ? <button className="btn sm" disabled={pending}
               onClick={() => run(async () => {
                 const res = await postFee(invoiceId);
                 return res.error ? { error: res.error } : {};
-              }, "Posted the late fee")}>
-              Post the fee
+              }, `Posted a ${formatCents(feeQuote.amountCents)} late fee`)}>
+              Post {formatCents(feeQuote.amountCents)}
             </button>
           : undefined}
-        hint={feeHint || "A fee is its own row and never edits the invoice it belongs to."}
+        hint={
+          feeQuote.amountCents > 0
+            ? `${feeQuote.basis} A fee is its own row and never edits the invoice it belongs to.`
+            : feeQuote.blocked || "A fee is its own row and never edits the invoice it belongs to."
+        }
         empty="No fee has been charged."
       >
         {fees.length > 0 && fees.map((f) => (

@@ -48,6 +48,16 @@ export type BillingPolicy = {
    * and that is a per-client fact.
    */
   partsMarkupBps: number;
+  /**
+   * What a card payment costs the client, if the operator passes it on.
+   * Disclosed on the pay page before they confirm - a card fee somebody
+   * discovers on their statement is a chargeback, and in several states an
+   * undisclosed one is also illegal. Zero means the operator absorbs it.
+   */
+  cardSurchargeBps: number;
+  cardSurchargeFlatCents: number;
+  /** Offer a card at all. ACH is the default for labs and costs a tenth as much. */
+  cardsEnabled: boolean;
 };
 
 /**
@@ -70,6 +80,9 @@ export const DEFAULT_POLICY: BillingPolicy = {
   escalation: [],
   taxParts: true,
   partsMarkupBps: 3000,
+  cardSurchargeBps: 290,
+  cardSurchargeFlatCents: 30,
+  cardsEnabled: true,
 };
 
 const int = (v: unknown, fallback: number): number => {
@@ -113,6 +126,9 @@ function merge(base: BillingPolicy, raw: unknown): BillingPolicy {
     escalation: v.escalation === undefined ? base.escalation : contacts(v.escalation),
     taxParts: typeof v.taxParts === "boolean" ? v.taxParts : base.taxParts,
     partsMarkupBps: int(v.partsMarkupBps, base.partsMarkupBps),
+    cardSurchargeBps: int(v.cardSurchargeBps, base.cardSurchargeBps),
+    cardSurchargeFlatCents: int(v.cardSurchargeFlatCents, base.cardSurchargeFlatCents),
+    cardsEnabled: typeof v.cardsEnabled === "boolean" ? v.cardsEnabled : base.cardsEnabled,
   };
 }
 

@@ -3055,3 +3055,16 @@ DO $$ BEGIN
       FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ── Payments: the operator's own Stripe account, and the platform's cut ────
+-- The connected account belongs to the SERVICE COMPANY, not to Ridgeline.
+-- Money moves bank to bank; the platform never holds funds and never sees a
+-- card number. Blank means nobody has connected one and the pay buttons do
+-- not render at all.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_account_id" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_ready" boolean NOT NULL DEFAULT false;
+
+-- Zero, and it stays zero until somebody decides otherwise: a platform that
+-- silently starts taking a percentage of an operator's revenue is a platform
+-- they leave.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_fee_bps" integer NOT NULL DEFAULT 0;

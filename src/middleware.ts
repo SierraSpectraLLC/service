@@ -39,5 +39,10 @@ export const config = {
   // explicitly published, and reads nothing that depends on who is asking -
   // see app/equipment and lib/publicCatalog. api/catalog serves the stock
   // photos those pages show.
-  matcher: ["/((?!api/auth|api/cron|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|equipment|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).*)"],
+  //
+  // api/stripe is the same pattern with a different credential: Stripe holds
+  // no session, and the request's SIGNATURE is what authenticates it. The
+  // route verifies that against the webhook secret on the raw body before
+  // parsing a byte, and answers an unverified request with a bare 400.
+  matcher: ["/((?!api/auth|api/cron|api/stripe|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|equipment|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).*)"],
 };

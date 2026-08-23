@@ -66,10 +66,22 @@ function valueImports(src: string): string[] {
  */
 const isServerModule = (src: string) => /^\s*["']use server["']/.test(src);
 
-/** Every `node:` builtin a module imports for its value. */
+/**
+ * Every `node:` builtin a module reaches for, statically OR dynamically.
+ *
+ * The dynamic half was added after `await import("node:crypto")` inside a
+ * webhook-signature helper rode into the browser graph on one arithmetic
+ * function the client portal wanted. Only the static form was matched, so this
+ * guard passed and the dev build died instead - which is exactly backwards
+ * from what the test is for. A deferred import is still an import.
+ */
 function nodeImports(src: string): string[] {
-  return [...src.matchAll(/import\s+(type\s+)?[\s\S]*?from\s+"(node:[^"]+)"/g)]
-    .filter((m) => !m[1]).map((m) => m[2]);
+  return [
+    ...[...src.matchAll(/import\s+(type\s+)?[\s\S]*?from\s+"(node:[^"]+)"/g)]
+      .filter((m) => !m[1]).map((m) => m[2]),
+    ...[...src.matchAll(/import\s*\(\s*["'](node:[^"']+)["']\s*\)/g)].map((m) => m[1]),
+    ...[...src.matchAll(/require\s*\(\s*["'](node:[^"']+)["']\s*\)/g)].map((m) => m[1]),
+  ];
 }
 
 /**

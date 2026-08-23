@@ -10,6 +10,7 @@ import {
   quoteForOrg, quoteTotal,
 } from "@/lib/invoiceData";
 import { quoteStanding } from "@/lib/quotes";
+import { stripeMode } from "@/lib/stripe";
 import { feeClause } from "@/lib/billingPolicy";
 import { statementFor } from "@/lib/statement";
 import ClientInvoice from "@/components/ClientInvoice";
@@ -123,6 +124,17 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
   const today = shopToday();
   const statement = statementFor({ orgId, invoices: all.map(asStatementRow), today });
 
+  // Whether this client can pay online at all. Three things have to be true -
+  // keys on the instance, a connected account, and Stripe having finished its
+  // checks - and any of them being false is a supported state, not an error.
+  const [operator, ctx] = await Promise.all([
+    full.row.tenantOrgId === null ? Promise.resolve(null)
+      : db.select().from(orgs).where(eq(orgs.id, full.row.tenantOrgId)).then((r) => r[0] ?? null),
+    billingContext(orgId),
+  ]);
+  const mode = stripeMode();
+  const canPay = mode !== "absent" && Boolean(operator?.stripeAccountId) && Boolean(operator?.stripeReady);
+
   return (
     <PublicShell brandName={name} tagline={brand.tagline} width={640}>
       <ClientInvoice
@@ -137,6 +149,15 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
             qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
           })),
           paidCents: full.payments.reduce((n, p) => n + p.amountCents, 0),
+        }}
+        pay={{
+          token: link.token,
+          enabled: canPay,
+          cardsEnabled: ctx.policy.cardsEnabled,
+          cardSurchargeBps: ctx.policy.cardSurchargeBps,
+          cardSurchargeFlatCents: ctx.policy.cardSurchargeFlatCents,
+          testMode: canPay && mode === "test",
+          checkTo: name,
         }}
         statement={{
           openCents: statement.openCents,

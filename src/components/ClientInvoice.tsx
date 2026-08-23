@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { startPayment } from "@/app/actions";
 import { formatCents } from "@/lib/money";
+import { payAmount } from "@/lib/stripe";
 import { Id, Tabs } from "@/components/ui";
 
 export type ClientLine = {
@@ -18,10 +20,24 @@ export type ClientLine = {
  * stage; with no keys configured there is nothing here that pretends to take
  * money, which is the honest state to ship in.
  */
-export default function ClientInvoice({ brandName, orgName, apEmail, invoice, statement }: {
+export default function ClientInvoice({ brandName, orgName, apEmail, invoice, statement, pay }: {
   brandName: string;
   orgName: string;
   apEmail: string;
+  /**
+   * How this client may pay online, if at all. Absent keys or an unverified
+   * account is a supported state, not an error: the buttons do not render and
+   * the page says how to send a check, which is how most of these get paid.
+   */
+  pay: {
+    token: string;
+    enabled: boolean;
+    cardsEnabled: boolean;
+    cardSurchargeBps: number;
+    cardSurchargeFlatCents: number;
+    testMode: boolean;
+    checkTo: string;
+  };
   invoice: {
     id: number; number: string; issuedOn: string; dueOn: string;
     poNumber: string; note: string; lines: ClientLine[]; paidCents: number;
@@ -32,9 +48,23 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
   };
 }) {
   const [tab, setTab] = useState<"invoice" | "account">("invoice");
+  const [pending, startTransition] = useTransition();
+  const [payError, setPayError] = useState("");
   const total = invoice.lines.reduce((n, l) => n + (l.covered ? 0 : Math.round(l.qty * l.unitCents)), 0);
   const covered = invoice.lines.filter((l) => l.covered).reduce((n, l) => n + Math.round(l.qty * l.unitCents), 0);
   const due = Math.max(0, total - invoice.paidCents);
+  const cardLine = payAmount({
+    balanceCents: due, method: "card",
+    cardSurchargeBps: pay.cardSurchargeBps,
+    cardSurchargeFlatCents: pay.cardSurchargeFlatCents,
+  }).line;
+
+  const go = (method: "ach" | "card") => startTransition(async () => {
+    setPayError("");
+    const res = await startPayment(pay.token, invoice.id, method);
+    if (res.error) { setPayError(res.error); return; }
+    if (res.url) window.location.href = res.url;
+  });
 
   return (
     <>
@@ -89,6 +119,45 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
             </div>
           )}
           {invoice.note && <div className="t-small" style={{ marginTop: 8 }}>{invoice.note}</div>}
+
+          {due > 0 && (
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              {pay.testMode && (
+                <div className="pill warn" style={{ marginBottom: 8 }}>
+                  Test mode - no money moves
+                </div>
+              )}
+              {pay.enabled ? (
+                <>
+                  <div className="row-2">
+                    <button className="btn sm accent" disabled={pending}
+                      onClick={() => go("ach")}>
+                      Pay {formatCents(due)} by bank transfer
+                    </button>
+                    {pay.cardsEnabled && (
+                      <button className="btn sm" disabled={pending} onClick={() => go("card")}>
+                        Pay by card
+                      </button>
+                    )}
+                  </div>
+                  {pay.cardsEnabled && cardLine && (
+                    <div className="mut t-small" style={{ marginTop: 6 }}>{cardLine}</div>
+                  )}
+                  <div className="mut t-meta" style={{ marginTop: 6 }}>
+                    Payment is handled by Stripe on their own page. No card number reaches us.
+                  </div>
+                </>
+              ) : (
+                <div className="mut t-small">
+                  {`Please send a check for ${formatCents(due)} referencing ${invoice.number}`}
+                  {pay.checkTo ? `, payable to ${pay.checkTo}` : ""}. Reply to the email this link came in
+                  if you would rather pay by bank transfer and we will send details.
+                </div>
+              )}
+              {payError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{payError}</div>}
+            </div>
+          )}
+
           <div className="mut t-meta" style={{ marginTop: 10 }}>
             Question a line? Reply to the email this link came in. We pause that line while we sort it out,
             and the rest stays due.

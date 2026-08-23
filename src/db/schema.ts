@@ -208,6 +208,15 @@ export const orgs = pgTable("orgs", {
    */
   billingPolicy: jsonb("billing_policy"),
   /**
+   * The operator's own Stripe Connect account - THEIRS, not the platform's.
+   * Money moves bank to bank between the client and the service company;
+   * Ridgeline never holds funds and never sees a card number. Blank means
+   * nobody has connected one, and the pay buttons simply do not render.
+   */
+  stripeAccountId: text("stripe_account_id").notNull().default(""),
+  /** Whether Stripe has finished its checks on that account. */
+  stripeReady: boolean("stripe_ready").notNull().default(false),
+  /**
    * The hour (0-23, shop time) this organization's digest goes out. On the
    * operator's own row it is the internal edition's hour.
    *
@@ -2437,6 +2446,13 @@ export const appSettings = pgTable("app_settings", {
   // itself is allocated by scanning the highest one in use, the same
   // read-max-and-retry the work order numbers have always used.
   invoicePrefix: text("invoice_prefix").notNull().default("INV-"),
+  /**
+   * The platform's cut of ACH volume, in basis points, taken as Stripe's
+   * application fee. Zero by default and it must stay zero until somebody
+   * decides otherwise: a platform that silently starts taking a percentage of
+   * an operator's revenue is a platform they leave.
+   */
+  platformFeeBps: integer("platform_fee_bps").notNull().default(0),
   /**
    * Fully loaded cost of an hour of labor - wage, burden, van, insurance -
    * used only to show margin beside a bill. Zero means "we have not told it",

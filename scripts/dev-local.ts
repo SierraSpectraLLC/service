@@ -28,7 +28,12 @@ const FIXTURE = `
 
   INSERT INTO orgs (name, kind) VALUES
     ('Lab Zen', 'client'),
-    ('Coastal Analytical', 'client');
+    ('Coastal Analytical', 'client'),
+    -- The company that does the work. Its own organization, like any other -
+    -- that is what makes an invoice carry ITS name rather than the platform's.
+    ('Sierra Spectra', 'provider');
+  UPDATE orgs SET is_operator = true WHERE id = 3;
+  UPDATE app_settings SET operator_org_id = 3 WHERE id = 1;
 
   INSERT INTO users (id, name, email, role, onboarded_at) VALUES
     ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now()),
@@ -210,10 +215,34 @@ const FIXTURE = `
     (1, 'part', 'G7100-60001 Capillary kit', 'price book, 30% markup', 1000, 27300, 0),
     (1, 'labor', 'Labor, on site', 'estimated 6.0 h at the Lab Zen rate card', 6000, 15500, 1),
     (1, 'travel', 'Travel', 'half rate', 1000, 7750, 2);
+  -- The overdue Coastal bill, as the client sees it: three reminders have
+  -- pointed at this link, and its view receipts are what the demand letter
+  -- cites when it says the invoice was opened.
+  INSERT INTO share_links (token, kind, org_id, invoice_id, label, expires_on, created_by, opened_at, last_opened_at, open_count) VALUES
+    ('devoverduetoken12345', 'invoice', 2, 3, 'Invoice INV-0087',
+      to_char(now() + interval '250 days', 'YYYY-MM-DD'), '${OWNER}',
+      now() - interval '71 days', now() - interval '27 days', 4);
+
   INSERT INTO share_links (token, kind, org_id, quote_id, label, expires_on, created_by, opened_at, last_opened_at, open_count) VALUES
     ('devquotetoken123456', 'quote', 1, 1, 'Quote Q-1001',
       to_char(now() + interval '35 days', 'YYYY-MM-DD'), '${OWNER}',
       now() - interval '4 days', now() - interval '2 days', 2);
+
+  -- Everything billing belongs to the operator's workspace, which is what lets
+  -- an invoice resolve THEIR letterhead and THEIR Stripe account.
+  UPDATE invoices SET tenant_org_id = 3;
+  UPDATE quotes SET tenant_org_id = 3;
+  UPDATE payments SET tenant_org_id = 3;
+  UPDATE invoice_fees SET tenant_org_id = 3;
+  UPDATE promises SET tenant_org_id = 3;
+  UPDATE disputes SET tenant_org_id = 3;
+  UPDATE dunning_events SET tenant_org_id = 3;
+  UPDATE share_links SET tenant_org_id = 3 WHERE kind <> 'files';
+
+  -- A Stripe account in TEST MODE, so the portal's pay buttons render against
+  -- the harness. Fixture only, and obviously fake: nothing here can move money.
+  UPDATE orgs SET stripe_account_id = 'acct_devlocaltest0001', stripe_ready = true
+    WHERE id = 3;
   UPDATE instruments SET site_id = 1 WHERE client = 'Lab Zen';
   UPDATE instruments SET site_id = 2 WHERE client = 'Coastal Analytical';
 
@@ -338,7 +367,7 @@ async function seed() {
   const seeded = await pg.query("SELECT 1 FROM orgs LIMIT 1");
   if (seeded.rows.length === 0) {
     await pg.exec(FIXTURE);
-    console.log("[dev:local] seeded fixture (2 orgs, 6 systems, 10 assets, 7 WOs, 1 PO, 1 stockroom, 3 invoices, 1 quote)");
+    console.log("[dev:local] seeded fixture (1 operator + 2 clients, 6 systems, 10 assets, 7 WOs, 1 PO, 1 stockroom, 3 invoices, 1 quote)");
   } else {
     console.log("[dev:local] existing data kept - delete the data dir to reseed");
   }
@@ -361,6 +390,11 @@ async function main() {
       // So the cron routes can be run by hand against the throwaway database:
       //   curl -H "Authorization: Bearer dev-local-cron" localhost:3100/api/cron/dunning
       CRON_SECRET: process.env.CRON_SECRET || "dev-local-cron",
+      // Stripe, if the shell has it. Absent is the ordinary case and a
+      // supported one: the pay buttons do not render and the portal explains
+      // how to send a check. Set a TEST key to exercise the other path.
+      ...(process.env.STRIPE_SECRET_KEY ? { STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY } : {}),
+      ...(process.env.STRIPE_WEBHOOK_SECRET ? { STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET } : {}),
     },
   });
   child.on("exit", (code) => process.exit(code ?? 0));

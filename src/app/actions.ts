@@ -46,17 +46,21 @@ import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
 import { EXPENSE_KINDS, linesTotal } from "@/lib/billing";
-import { asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById } from "@/lib/invoiceData";
+import {
+  asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
+} from "@/lib/invoiceData";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
-import { feeClause } from "@/lib/billingPolicy";
+import { feeClause, resolvePolicy } from "@/lib/billingPolicy";
 import { linkState } from "@/lib/dropShare";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import { brandForTenant } from "@/lib/brand";
 import { btn, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import { appUrl } from "@/lib/appUrl";
+import { payAmount, stripeConfigured, stripeMode } from "@/lib/stripe";
+import { accountReady, checkoutSession, createConnectAccount, onboardingLink } from "@/lib/stripeApi";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -11320,4 +11324,260 @@ export async function askAboutQuote(
   });
   revQuote(q);
   return {};
+}
+
+// ---------------- Billing settings ----------------
+
+/**
+ * The workspace's billing defaults. Owner only, every field audited by name -
+ * "changed the late-fee rate" is the line somebody needs a year later, not
+ * "updated settings".
+ */
+export async function saveBillingDefaults(data: {
+  policy: Record<string, unknown>;
+  invoicePrefix?: string;
+  loadedLabor?: string;
+  platformFeeBps?: number;
+}): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const before = resolvePolicy(row?.billingPolicy ?? null, null);
+  const after = resolvePolicy(row?.billingPolicy ?? null, data.policy);
+
+  const patch: Partial<typeof appSettings.$inferInsert> = { billingPolicy: after };
+  const changes: string[] = [];
+  for (const key of Object.keys(after) as (keyof typeof after)[]) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes.push(String(key));
+  }
+  if (data.invoicePrefix !== undefined) {
+    const prefix = data.invoicePrefix.trim().slice(0, 12);
+    if (prefix && prefix !== row?.invoicePrefix) { patch.invoicePrefix = prefix; changes.push("invoice prefix"); }
+  }
+  if (data.loadedLabor !== undefined) {
+    const cents = parseMoney(data.loadedLabor) ?? 0;
+    if (cents !== row?.loadedLaborCents) { patch.loadedLaborCents = cents; changes.push("loaded labor rate"); }
+  }
+  if (data.platformFeeBps !== undefined) {
+    const bps = Math.max(0, Math.min(500, Math.round(data.platformFeeBps)));
+    if (bps !== row?.platformFeeBps) { patch.platformFeeBps = bps; changes.push("platform fee"); }
+  }
+  if (!changes.length) return {};
+
+  await db.update(appSettings).set(patch).where(eq(appSettings.id, 1));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "billing",
+    action: `changed the billing defaults: ${changes.join(", ")}`,
+  });
+  revalidatePath("/settings/billing");
+  revalidatePath("/money");
+  return {};
+}
+
+/**
+ * One client's overrides. The same shape, one level down - defaults in
+ * app_settings, per-org wins, exactly the layering the digest schedule uses,
+ * so there is one place to say "what we do" and one per client to say
+ * "except them".
+ */
+export async function saveOrgBilling(orgId: number, data: {
+  policy?: Record<string, unknown>;
+  termsDays?: number;
+  apEmail?: string;
+  poNumber?: string;
+  poBalance?: string;
+}): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+
+  const patch: Partial<typeof orgs.$inferInsert> = {};
+  const changes: string[] = [];
+  if (data.policy !== undefined) {
+    const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+    const before = resolvePolicy(settings?.billingPolicy ?? null, org.billingPolicy ?? null);
+    const after = resolvePolicy(settings?.billingPolicy ?? null, data.policy);
+    for (const key of Object.keys(after) as (keyof typeof after)[]) {
+      if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes.push(String(key));
+    }
+    patch.billingPolicy = after;
+  }
+  if (data.termsDays !== undefined) {
+    const n = Math.max(0, Math.min(180, Math.round(data.termsDays)));
+    if (n !== org.termsDays) { patch.termsDays = n; changes.push(`terms to net ${n}`); }
+  }
+  if (data.apEmail !== undefined && data.apEmail.trim().toLowerCase() !== org.apEmail) {
+    patch.apEmail = data.apEmail.trim().toLowerCase().slice(0, 200);
+    changes.push("AP contact");
+  }
+  if (data.poNumber !== undefined && data.poNumber.trim() !== org.poNumber) {
+    patch.poNumber = data.poNumber.trim().slice(0, 80);
+    changes.push(patch.poNumber ? `PO ${patch.poNumber}` : "PO cleared");
+  }
+  if (data.poBalance !== undefined) {
+    const cents = parseMoney(data.poBalance) ?? 0;
+    if (cents !== org.poBalanceCents) { patch.poBalanceCents = cents; changes.push("PO balance"); }
+  }
+  if (!changes.length) return {};
+
+  await db.update(orgs).set(patch).where(eq(orgs.id, orgId));
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: myTenantOrgId(u),
+    action: `changed ${org.name}'s billing: ${changes.join(", ")}`,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  revalidatePath("/money");
+  return {};
+}
+
+/**
+ * Start Stripe Connect onboarding for this workspace.
+ *
+ * Express, so Stripe does the identity checks on the operator rather than this
+ * platform collecting bank details it has no business holding. The account is
+ * THEIRS: money moves bank to bank and Ridgeline never holds funds.
+ */
+export async function connectStripe(returnUrl: string): Promise<{ error?: string; url?: string }> {
+  const u = await requireOwner();
+  if (!stripeConfigured()) {
+    return { error: "This instance has no Stripe keys set. Add STRIPE_SECRET_KEY and try again." };
+  }
+  const orgId = myTenantOrgId(u);
+  if (orgId === null) return { error: "This workspace has no organization to connect an account to." };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+
+  try {
+    const accountId = org.stripeAccountId || await createConnectAccount(u.email);
+    if (!org.stripeAccountId) {
+      await db.update(orgs).set({ stripeAccountId: accountId }).where(eq(orgs.id, orgId));
+      await audit({
+        actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+        action: `started Stripe Connect onboarding (${stripeMode()} mode)`,
+      });
+    }
+    return { url: await onboardingLink(accountId, returnUrl) };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+/** Ask Stripe whether the account may actually be paid into yet. */
+export async function refreshStripeStatus(): Promise<{ error?: string; ready?: boolean }> {
+  const u = await requireOwner();
+  const orgId = myTenantOrgId(u);
+  if (orgId === null) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org?.stripeAccountId) return { ready: false };
+  const ready = await accountReady(org.stripeAccountId).catch(() => false);
+  if (ready !== org.stripeReady) {
+    await db.update(orgs).set({ stripeReady: ready }).where(eq(orgs.id, orgId));
+    await audit({
+      actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+      action: ready ? "Stripe finished its checks - the account can take payments" : "the Stripe account is no longer able to take payments",
+    });
+    revalidatePath("/settings/billing");
+  }
+  return { ready };
+}
+
+/**
+ * The client presses Pay. Token-gated: the share link is the credential and
+ * the org on its row is the authorization, exactly as the rest of the portal
+ * works. No card number touches this server - Stripe hosts the page.
+ */
+export async function startPayment(
+  token: string, invoiceId: number, method: "ach" | "card",
+): Promise<{ error?: string; url?: string }> {
+  if (!token || token.length < 12) return { error: "This link is not valid." };
+  const [link] = await db.select().from(shareLinks).where(eq(shareLinks.token, token));
+  if (!link || link.orgId === null || link.invoiceId !== invoiceId) return { error: "This link is not valid." };
+  if (linkState(link, shopToday()) !== "active") return { error: "This link is no longer active." };
+  if (!stripeConfigured()) return { error: "Card and bank payments are not set up. Please send a check." };
+
+  const full = await invoiceForOrg(invoiceId, link.orgId);
+  if (!full) return { error: "Not found" };
+  const view = invoiceView(asStatementRow(full), shopToday());
+  if (view.payableCents <= 0) return { error: "There is nothing outstanding on this invoice." };
+
+  const [operator] = await db.select().from(orgs).where(eq(orgs.id, full.row.tenantOrgId ?? -1));
+  if (!operator?.stripeAccountId || !operator.stripeReady) {
+    return { error: "Online payment is not available yet. Please send a check." };
+  }
+  const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const { policy } = await billingContext(full.row.orgId);
+  if (method === "card" && !policy.cardsEnabled) return { error: "Card payments are not offered on this account." };
+
+  const amount = payAmount({
+    balanceCents: view.payableCents, method,
+    cardSurchargeBps: policy.cardSurchargeBps,
+    cardSurchargeFlatCents: policy.cardSurchargeFlatCents,
+  });
+  const base = appUrl() || "";
+  try {
+    const url = await checkoutSession({
+      accountId: operator.stripeAccountId,
+      invoiceId, invoiceNumber: full.row.number,
+      amountCents: amount.amountCents, method,
+      platformFeeBps: settings?.platformFeeBps ?? 0,
+      successUrl: `${base}/share/${token}?paid=1`,
+      cancelUrl: `${base}/share/${token}`,
+    });
+    await audit({
+      actor: "client", entityType: "invoice", entityId: invoiceId, tenantOrgId: full.row.tenantOrgId,
+      action: `opened a ${method === "ach" ? "bank transfer" : "card"} payment for ${formatCents(amount.amountCents)}`
+        + ` on ${full.row.number} (${stripeMode()} mode)`,
+    });
+    return { url };
+  } catch (e) {
+    // Stripe's own message names configuration - a bad key, a capability that
+    // was never requested - and none of that is a client's problem or their
+    // business. They get a sentence they can act on; the real reason goes to
+    // the audit log where an operator will find it.
+    await audit({
+      actor: "client", entityType: "invoice", entityId: invoiceId, tenantOrgId: full.row.tenantOrgId,
+      action: `a payment could not be started on ${full.row.number}: ${(e as Error).message}`,
+    });
+    return { error: "We could not start the payment just now. Please try again, or send a check referencing this invoice." };
+  }
+}
+
+/**
+ * Stripe says the money arrived. Called only by the webhook, which has already
+ * verified the signature - this records the payment, lets the credit hold
+ * recompute itself, and writes the audit row.
+ */
+export async function recordStripePayment(input: {
+  invoiceId: number; amountCents: number; reference: string; method: string;
+}): Promise<void> {
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId));
+  if (!inv) return;
+  const already = await db.select().from(payments)
+    .where(and(eq(payments.invoiceId, input.invoiceId), eq(payments.reference, input.reference)));
+  if (already.length) return;   // Stripe retries; a payment is not recorded twice.
+
+  await db.insert(payments).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId: input.invoiceId,
+    method: input.method === "card" ? "card" : "ach",
+    amountCents: input.amountCents, reference: input.reference,
+    receivedOn: shopToday(), recordedBy: "stripe",
+  });
+
+  const full = await invoiceById(input.invoiceId);
+  const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
+  if (view && inv.status !== "void" && inv.status !== "referred") {
+    const next = view.balanceCents <= 0 ? "paid" : "partial";
+    if (next !== inv.status) {
+      await db.update(invoices).set({ status: next, updatedAt: new Date() }).where(eq(invoices.id, input.invoiceId));
+    }
+  }
+  // The hold is computed, never stored, so paying the balance lifts it by
+  // arithmetic the next time anybody looks. Nothing to un-set here.
+  const credit = await creditFor(inv.orgId, shopToday()).catch(() => null);
+  await audit({
+    actor: "stripe", entityType: "invoice", entityId: input.invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: `received ${formatCents(input.amountCents)} by ${input.method === "card" ? "card" : "bank transfer"} on ${inv.number}`
+      + (view ? ` - ${view.balanceCents <= 0 ? "paid in full" : `${formatCents(view.balanceCents)} still open`}` : "")
+      + (credit && !credit.onHold ? "; the credit hold has cleared" : ""),
+  });
+  revInvoice(inv);
 }
