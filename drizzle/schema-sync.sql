@@ -2671,3 +2671,62 @@ ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "usage_unit" text NOT NULL DEF
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "internal" boolean NOT NULL DEFAULT false;
 UPDATE "eod_updates" SET "internal" = true
  WHERE "internal" = false AND "updated_by" IN ('sheet-sync', 'parity');
+
+-- ═══ BILLING ═══════════════════════════════════════════════════════════════
+-- Additive only, like everything else in this file. Nothing here stores a
+-- balance: invoice totals, drawdown, aging and hold status are all summed from
+-- rows at render time by the pure functions in src/lib (see lib/billing).
+
+-- What an hour costs. Three rungs, most specific first: agreement, then org,
+-- then the platform default with both ids null. Multipliers are integer
+-- percentages of the base rate - 150 is time-and-a-half, 50 is half - because
+-- a float multiplier on money is how a $160 hour becomes $239.99999997.
+CREATE TABLE IF NOT EXISTS "rate_cards" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer,
+  "agreement_id" integer,
+  "hourly_cents" integer NOT NULL DEFAULT 0,
+  "after_hours_pct" integer NOT NULL DEFAULT 150,
+  "travel_pct" integer NOT NULL DEFAULT 50,
+  "min_increment_min" integer NOT NULL DEFAULT 15,
+  "label" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "rate_cards_org_idx" ON "rate_cards" ("org_id");
+
+-- Money on a job that is neither a part nor an hour: mileage, freight, a night
+-- in a motel. Against the work order, because that is what it bills against.
+CREATE TABLE IF NOT EXISTS "expenses" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "work_order_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'other',
+  "description" text NOT NULL DEFAULT '',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "incurred_on" text NOT NULL DEFAULT '',
+  "logged_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "expenses_wo_idx" ON "expenses" ("work_order_id");
+
+-- Is this hour billable, and which kind of hour is it. Billable defaults true
+-- and is defaulted again at the panel from the agreement's coverage, so hours
+-- on a covered system arrive unticked without anybody remembering.
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "billable" boolean NOT NULL DEFAULT true;
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "category" text NOT NULL DEFAULT 'onsite';
+
+-- How a client is billed, and who the paper goes to. billing_policy overrides
+-- the platform defaults in app_settings, the same layering the digest schedule
+-- uses. A blank po_number is one of the two silent AP rejections (the other is
+-- an exhausted one) - both are warned about at draft, never blocked.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "terms_days" integer NOT NULL DEFAULT 30;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "ap_email" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "po_number" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "po_balance_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "billing_policy" jsonb;
+
+-- Sales tax on PARTS at the address the goods landed at, in basis points
+-- (775 = 7.75%). Tax belongs to the place, not the client. Zero draws no line.
+ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "tax_rate_bps" integer NOT NULL DEFAULT 0;

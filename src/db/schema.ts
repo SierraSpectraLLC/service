@@ -188,6 +188,25 @@ export const orgs = pgTable("orgs", {
   // the machine, and opting a client into one must never opt them into the
   // other. Blank = the digest stays internal for this organization.
   digestRecipients: text("digest_recipients").notNull().default(""),
+  /** Days from issue to due. 30 unless their paper says otherwise. */
+  termsDays: integer("terms_days").notNull().default(30),
+  /** Where invoices and statements go. Blank falls back to the digest list. */
+  apEmail: text("ap_email").notNull().default(""),
+  /**
+   * The blanket PO an invoice must reference, and what is left on it. Both
+   * blank/zero means no PO on file - which is one of the two silent rejections
+   * (the other is an exhausted PO), so a draft invoice checks and WARNS rather
+   * than blocking. See lib/billing.poCheck.
+   */
+  poNumber: text("po_number").notNull().default(""),
+  poBalanceCents: integer("po_balance_cents").notNull().default(0),
+  /**
+   * This client's billing rules, overriding the platform defaults in
+   * app_settings - the same defaults-then-per-org layering the digest schedule
+   * uses. Shape and parsing live in lib/billingPolicy; jsonb so the fields can
+   * grow without a migration per knob.
+   */
+  billingPolicy: jsonb("billing_policy"),
   /**
    * The hour (0-23, shop time) this organization's digest goes out. On the
    * operator's own row it is the internal edition's hour.
@@ -316,6 +335,12 @@ export const orgSites = pgTable("org_sites", {
   accessNotes: text("access_notes").notNull().default(""),
   contactName: text("contact_name").notNull().default(""),
   contactPhone: text("contact_phone").notNull().default(""),
+  /**
+   * Sales tax on PARTS at this address, in basis points (775 = 7.75%). Tax is
+   * a property of where the goods landed, not of the client, which is why it
+   * lives on the site. Zero means no tax line is drawn at all.
+   */
+  taxRateBps: integer("tax_rate_bps").notNull().default(0),
   // Archived rather than deleted: a closed lab is still where an instrument was,
   // and systems still point at it.
   archived: boolean("archived").notNull().default(false),
@@ -1198,6 +1223,15 @@ export const timeEntries = pgTable("time_entries", {
   minutes: integer("minutes").notNull().default(0),
   note: text("note").notNull().default(""),
   loggedBy: text("logged_by").notNull().default(""),
+  /**
+   * Whether these hours reach an invoice. Defaults true and is defaulted AGAIN
+   * at the panel from the agreement's coverage, so hours on a covered system
+   * arrive unticked without anybody having to remember. Unbillable hours are
+   * still hours: they stay on the record and in job costing.
+   */
+  billable: boolean("billable").notNull().default(true),
+  /** onsite | remote | travel - travel prices at the card's travel percent. */
+  category: text("category").notNull().default("onsite"),
   // Which job these hours went into. This is the column an invoice is built
   // from, so it is set null on delete for the same reason as tasks: the hours
   // were worked whatever happens to the paperwork around them.
@@ -1904,6 +1938,60 @@ export const partPrices = pgTable("part_prices", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// Billing. Nothing here stores a balance - see lib/billing and lib/agreements:
+// every figure a person reads is summed from rows at render time.
+// ---------------------------------------------------------------------------
+
+/**
+ * What an hour costs, and how the odd hours are priced.
+ *
+ * Three rungs, most specific first: a card written against one AGREEMENT beats
+ * one written for the ORG, which beats the platform default (both ids null).
+ * That is the same layering the digest schedule uses, and lib/rates.resolveRate
+ * is the only place that decides it.
+ *
+ * The multipliers are integer PERCENTAGES, not floats: 150 is time-and-a-half,
+ * 50 is travel at half rate. A float multiplier on money is how a $160 hour
+ * becomes $239.99999997, and this codebase keeps money in integer cents for
+ * exactly that reason.
+ */
+export const rateCards = pgTable("rate_cards", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Null = the platform default for this workspace. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /** Null = not tied to one paper. Set, it beats the org's card. */
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "cascade" }),
+  hourlyCents: integer("hourly_cents").notNull().default(0),
+  /** Percent of the base rate for after-hours work. 150 = time and a half. */
+  afterHoursPct: integer("after_hours_pct").notNull().default(150),
+  /** Percent of the base rate for travel time. 50 = half rate. */
+  travelPct: integer("travel_pct").notNull().default(50),
+  /** Rounding granularity, in minutes. 15 bills a 7-minute call as a quarter hour. */
+  minIncrementMin: integer("min_increment_min").notNull().default(15),
+  label: text("label").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("rate_cards_org_idx").on(t.orgId)]);
+
+/**
+ * Money spent on a job that is neither a part nor an hour: mileage, freight,
+ * a night in a motel. Recorded against the work order because that is what it
+ * gets billed and costed against.
+ */
+export const expenses = pgTable("expenses", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  workOrderId: integer("work_order_id").notNull().references((): AnyPgColumn => workOrders.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("other"), // mileage | shipping | per_diem | other
+  description: text("description").notNull().default(""),
+  amountCents: integer("amount_cents").notNull().default(0),
+  incurredOn: text("incurred_on").notNull().default(""), // YYYY-MM-DD in shop time
+  loggedBy: text("logged_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("expenses_wo_idx").on(t.workOrderId)]);
 
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it
