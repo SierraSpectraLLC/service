@@ -11899,3 +11899,98 @@ export async function removeQuoteLine(lineId: number, reason: string): Promise<{
   revQuote(q);
   return {};
 }
+
+/** Is this address in the caller's own directory? The gate on profile edits. */
+async function directoryHas(u: SessionUser, email: string): Promise<boolean> {
+  const dir = await visibleDirectory(u);
+  return dir.some((p) => p.email.trim().toLowerCase() === email);
+}
+
+/**
+ * An owner edits somebody's profile: the structured name, their title, and
+ * which site they sit at. `name` is rewritten from first/last whenever either
+ * is set, so the display name and its halves cannot disagree - and the copy
+ * on house_members follows, because that column is display-only and stale
+ * display copies are how two screens argue about somebody's name.
+ */
+export async function updatePersonProfile(email: string, data: {
+  firstName: string; lastName: string; title: string; siteId: number | null;
+}): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const addr = email.trim().toLowerCase();
+  if (!addr || !(await directoryHas(u, addr))) return { error: "Not found" };
+
+  const first = data.firstName.trim().slice(0, 60);
+  const last = data.lastName.trim().slice(0, 60);
+  const title = data.title.trim().slice(0, 80);
+  let siteId: number | null = null;
+  if (data.siteId !== null) {
+    const [site] = await db.select().from(orgSites).where(eq(orgSites.id, data.siteId));
+    if (!site) return { error: "That site no longer exists" };
+    const [siteOrg] = await db.select().from(orgs).where(eq(orgs.id, site.orgId));
+    if (!siteOrg || !mayAdminOrg(tenantViewer(u), siteOrg)) return { error: "Not found" };
+    siteId = site.id;
+  }
+
+  const [existing] = await db.select().from(users).where(eq(users.email, addr));
+  const display = [first, last].filter(Boolean).join(" ");
+  const patch = {
+    firstName: first, lastName: last, title, siteId,
+    ...(display ? { name: display } : {}),
+  };
+  if (existing) {
+    await db.update(users).set(patch).where(eq(users.id, existing.id));
+  } else {
+    // Somebody added but never signed in: give the profile a row to live on.
+    // Their first sign-in finds it by address, exactly as it would have.
+    await db.insert(users).values({ email: addr, ...patch });
+  }
+  if (display) {
+    await db.update(houseMembers).set({ name: display }).where(eq(houseMembers.email, addr));
+  }
+  await audit({
+    actor: u.email, entityType: "user", entityId: addr, tenantOrgId: myTenantOrgId(u),
+    action: `edited ${addr}'s profile: ${[display || null, title || null,
+      siteId !== null ? "site set" : null].filter(Boolean).join(", ") || "cleared"}`,
+    field: "profile",
+    oldValue: existing ? `${existing.name ?? ""} | ${existing.title} | site ${existing.siteId ?? "-"}` : "",
+    newValue: `${display || (existing?.name ?? "")} | ${title} | site ${siteId ?? "-"}`,
+  });
+  revalidatePath("/settings/organizations");
+  return {};
+}
+
+/**
+ * Move somebody's login to a new address. The address IS the identity here -
+ * the users row, the allowlist entries and the house-members row all key on
+ * it - so all three move together, and the person signs in with the new one
+ * from the next code onward. Sessions ride on the user id and survive.
+ */
+export async function changePersonEmail(oldEmail: string, newEmail: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const from = oldEmail.trim().toLowerCase();
+  const to = newEmail.trim().toLowerCase();
+  if (!from || !(await directoryHas(u, from))) return { error: "Not found" };
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return { error: "That does not read as an email address" };
+  if (to === from) return {};
+
+  const [taken, allowTaken, houseTaken] = await Promise.all([
+    db.select().from(users).where(eq(users.email, to)),
+    db.select().from(clientAllowlist).where(eq(clientAllowlist.entry, to)),
+    db.select().from(houseMembers).where(eq(houseMembers.email, to)),
+  ]);
+  if (taken.length || allowTaken.length || houseTaken.length) {
+    return { error: `${to} already has a login.` };
+  }
+
+  await db.update(users).set({ email: to, emailVerified: null }).where(eq(users.email, from));
+  await db.update(clientAllowlist).set({ entry: to }).where(eq(clientAllowlist.entry, from));
+  await db.update(houseMembers).set({ email: to }).where(eq(houseMembers.email, from));
+  await audit({
+    actor: u.email, entityType: "user", entityId: to, tenantOrgId: myTenantOrgId(u),
+    action: `moved ${from}'s login to ${to}`,
+    field: "email", oldValue: from, newValue: to,
+  });
+  revalidatePath("/settings/organizations");
+  return {};
+}

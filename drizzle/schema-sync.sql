@@ -3068,3 +3068,18 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_ready" boolean NOT NULL DEFA
 -- silently starts taking a percentage of an operator's revenue is a platform
 -- they leave.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_fee_bps" integer NOT NULL DEFAULT 0;
+
+-- ── People: the structured profile an owner can edit ───────────────────────
+-- first/last are the structured halves of "name" (which stays the display
+-- name everywhere); title is who they are at their company; site_id is which
+-- of their organization's sites they sit at.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "first_name" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_name" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "site_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_site_id_fk') THEN
+    ALTER TABLE "users" ADD CONSTRAINT "users_site_id_fk"
+      FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

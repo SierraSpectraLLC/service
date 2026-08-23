@@ -60,6 +60,17 @@ export const users = pgTable("users", {
    * costs eight writes rather than eight hundred.
    */
   lastSeenAt: timestamp("last_seen_at"),
+  /**
+   * The structured halves of `name`, plus who this person is at their company.
+   * Editable by an owner in Settings > Organizations; `name` stays the one
+   * display name everywhere, rewritten from these whenever they are set so the
+   * two can never disagree.
+   */
+  firstName: text("first_name").notNull().default(""),
+  lastName: text("last_name").notNull().default(""),
+  title: text("title").notNull().default(""),
+  /** Which of their organization's sites this person sits at. */
+  siteId: integer("site_id").references((): AnyPgColumn => orgSites.id, { onDelete: "set null" }),
 });
 
 export const accounts = pgTable("accounts", {

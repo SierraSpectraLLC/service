@@ -42,6 +42,15 @@ const FIXTURE = `
     ('devtoken', 'dev-user', now() + interval '30 days'),
     ('newtoken', 'dev-new', now() + interval '30 days');
 
+  -- The directory is assembled from these, never typed in: staff are house
+  -- members of the operator, clients are allowlist rows on their org.
+  INSERT INTO house_members (email, org_id, role, name) VALUES
+    ('${OWNER}', 3, 'owner', 'Dev Owner'),
+    ('sam@sierraspectra.test', 3, 'staff', 'Sam Ortiz');
+  INSERT INTO client_allowlist (entry, org_id, can_edit) VALUES
+    ('maria@labzen.test', 1, true),
+    ('accounts@coastal.test', 2, false);
+
   INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, notes) VALUES
     ('LZ-001', 'Lab Zen', 'Agilent 6495C LC-MS', 'Agilent', 'US2405111', 1, '{"Checkout"}', 'Reserpine test and tune.'),
     ('LZ-002', 'Lab Zen', 'Thermo ISQ 7000 GC-MS', 'Thermo', 'ISQ70233', 2, '{"Refurbishment","System setup"}', 'Turbo replaced, pumping down.'),
