@@ -206,7 +206,7 @@ function PaperPicker({ lib, onPick, onFiles, disabled, note }: {
   );
 }
 
-export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, papers = [], title = "Agreements" }: {
+export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, papers = [], title = "Agreements", extra }: {
   rows: AgreementRow[];
   today: string;
   /** The signed documents filed against these agreements. */
@@ -217,6 +217,8 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   systems?: { id: number; ownerOrgId: number | null; externalId: string; label: string }[];
   canEdit: boolean;
   title?: string;
+  /** One quiet line per agreement id - a renewal figure, a billing note. */
+  extra?: Record<number, string>;
 }) {
   const [sheet, setSheet] = useState<null | { id?: number; orgId: number }>(null);
   // The parts book, for naming an included kit instead of typing its number.
@@ -344,8 +346,9 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
     <div className="card">
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <div className="card-title">{title}</div>
-        {canEdit && orgs.length === 1 && (
-          <button className="btn sm primary" style={{ marginLeft: "auto" }} onClick={() => openAdd(orgs[0].id)}>
+        {canEdit && orgs.length > 0 && (
+          <button className="btn sm primary" style={{ marginLeft: "auto" }}
+            onClick={() => openAdd(orgs.length === 1 ? orgs[0].id : 0)}>
             ＋ Agreement
           </button>
         )}
@@ -394,6 +397,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               )}
             </div>
             <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{renewalLine(r, today)}</div>
+            {extra?.[r.id] && <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{extra[r.id]}</div>}
 
             {/* The signed paper itself, beside the terms it contains. */}
             {(() => {
@@ -491,16 +495,13 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
       })}
 
       {rows.length === 0 && (
-        <div className="mut t-body">
-          Nothing on file. An agreement is what a renewal date, a visit count and a parts
-          allowance hang off - and what makes those numbers answerable on the phone.
-        </div>
+        <div className="mut t-body">Nothing on file.</div>
       )}
 
       {sheet && (() => {
         const orgName = orgs.find((o) => o.id === sheet.orgId)?.name
           ?? rows.find((r) => r.id === sheet.id)?.orgName ?? "";
-        const problem = firstProblem(draft);
+        const problem = !sheet.id && !sheet.orgId ? "pick the client" : firstProblem(draft);
         // done = the step's fields are valid AND somebody touched it or it
         // already holds something; warn = it has a live problem right now.
         const hasPaper = heldFiles.length > 0 || heldLib.length > 0
@@ -555,6 +556,20 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
 
             <div ref={section("terms")}>
               <div className="dialog-section">Terms</div>
+              {!sheet.id && orgs.length > 1 && (
+                <div style={{ marginBottom: 8 }}>
+                  <label>Client</label>
+                  <select value={sheet.orgId || ""}
+                    onChange={(e) => {
+                      // A new client means their systems, not the last one's.
+                      setDraft({ ...draft, instrumentIds: [] });
+                      setSheet({ orgId: parseInt(e.target.value) || 0 });
+                    }}>
+                    <option value="">Pick the client</option>
+                    {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div className="seg" role="group" aria-label="Kind" style={{ marginBottom: 8 }}>
                 {AGREEMENT_KINDS.map((k) => (
                   <button key={k} type="button" aria-pressed={draft.kind === k}

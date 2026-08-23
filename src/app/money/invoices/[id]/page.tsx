@@ -134,6 +134,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
       <InvoiceLineList
         editable={row.status === "draft"}
+        target={{ kind: "invoice", id }}
         lines={full.lines.map((l) => ({
           id: l.id, kind: l.kind, description: l.description, detail: l.detail,
           qty: qtyOf(l), unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,

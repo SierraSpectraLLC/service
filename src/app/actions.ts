@@ -11738,3 +11738,164 @@ export async function deleteQuote(id: number, reason: string): Promise<{ error?:
   if (q.workOrderId) revalidatePath(`/work/${q.workOrderId}`);
   return {};
 }
+
+/** What a hand-typed line may be. Tax and fee_ref rows come from the system. */
+const MANUAL_LINE_KINDS = ["part", "labor", "travel", "expense"] as const;
+
+function cleanManualLine(data: { kind: string; description: string; qty: number; unitCents: number }):
+  { error: string } | { kind: string; description: string; qty: number; unitCents: number } {
+  const description = data.description.trim();
+  if (!description) return { error: "Say what the charge is for" };
+  if (!(MANUAL_LINE_KINDS as readonly string[]).includes(data.kind)) {
+    return { error: "Pick what kind of charge it is" };
+  }
+  const qty = Number(data.qty);
+  if (!Number.isFinite(qty) || qty <= 0 || qty > 100000) return { error: "Quantity must be above zero" };
+  const unitCents = Math.round(Number(data.unitCents));
+  if (!Number.isFinite(unitCents) || unitCents < 0) return { error: "The price cannot be negative" };
+  return { kind: data.kind, description, qty, unitCents };
+}
+
+/**
+ * A bill with no job behind it: a deposit, a shipment, a stocking fee, a
+ * correction. Starts empty; the lines are typed onto the draft.
+ */
+export async function createBlankInvoice(orgId: number): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  const { invoicePrefix } = await billingContext(orgId);
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: invoices.number }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, tenant));
+    const number = nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: tenant, orgId, number, status: "draft",
+        poNumber: org.poNumber ?? "", createdBy: u.email,
+      }).returning();
+      await audit({
+        actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: tenant,
+        action: `drafted ${number} for ${org.name}, no job behind it`,
+      });
+      revInvoice(inv);
+      revalidatePath("/money/invoices");
+      return { id: inv.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** A priced offer with no job behind it yet. Lines are typed onto the draft. */
+export async function createBlankQuote(
+  orgId: number, data: { title: string; expiresOn: string; depositPct: number },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  const title = data.title.trim();
+  if (!title) return { error: "Say what the quote is for" };
+  const expires = data.expiresOn.trim();
+  if (!isIsoDay(expires)) return { error: "Pick the day it stops being good for" };
+  const pct = Math.max(0, Math.min(100, Math.round(data.depositPct)));
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: quotes.number }).from(quotes)
+      .where(forTenant(quotes.tenantOrgId, tenant));
+    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    try {
+      const [q] = await db.insert(quotes).values({
+        tenantOrgId: tenant, orgId, number, status: "draft",
+        title, expiresOn: expires, depositPct: pct, createdBy: u.email,
+      }).returning();
+      await audit({
+        actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: tenant,
+        action: `drafted ${number} for ${org.name}: ${title}`
+          + (pct > 0 ? `, ${pct}% deposit on approval` : "") + `, good to ${expires}`,
+      });
+      revQuote(q);
+      revalidatePath("/money/quotes");
+      return { id: q.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** Type a line onto a draft invoice. Sent invoices stay as sent. */
+export async function addInvoiceLine(
+  invoiceId: number, data: { kind: string; description: string; qty: number; unitCents: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+  if (!inv) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has been sent - post a fee or draft a new invoice instead.` };
+  const clean = cleanManualLine(data);
+  if ("error" in clean) return clean;
+  const existing = await db.select({ position: invoiceLines.position }).from(invoiceLines)
+    .where(eq(invoiceLines.invoiceId, invoiceId));
+  await db.insert(invoiceLines).values({
+    invoiceId, kind: clean.kind, description: clean.description,
+    qty: Math.round(clean.qty * 1000), unitCents: clean.unitCents,
+    position: existing.length ? Math.max(...existing.map((l) => l.position)) + 1 : 0,
+  });
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: `added a line to ${inv.number}: ${clean.description}, ${formatCents(Math.round(clean.qty * clean.unitCents))}`,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/** Type a line onto a draft quote. */
+export async function addQuoteLine(
+  quoteId: number, data: { kind: string; description: string; qty: number; unitCents: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  if (q.status !== "draft") return { error: `${q.number} has gone out - it reads as sent.` };
+  const clean = cleanManualLine(data);
+  if ("error" in clean) return clean;
+  const existing = await db.select({ position: quoteLines.position }).from(quoteLines)
+    .where(eq(quoteLines.quoteId, quoteId));
+  await db.insert(quoteLines).values({
+    quoteId, kind: clean.kind, description: clean.description,
+    qty: Math.round(clean.qty * 1000), unitCents: clean.unitCents,
+    position: existing.length ? Math.max(...existing.map((l) => l.position)) + 1 : 0,
+  });
+  await audit({
+    actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
+    action: `added a line to ${q.number}: ${clean.description}, ${formatCents(Math.round(clean.qty * clean.unitCents))}`,
+  });
+  revQuote(q);
+  return {};
+}
+
+/** Take a line off a draft quote, with the reason on the record. */
+export async function removeQuoteLine(lineId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [line] = await db.select().from(quoteLines).where(eq(quoteLines.id, lineId));
+  if (!line) return {};
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, line.quoteId));
+  if (!q) return { error: "Not found" };
+  if (q.status !== "draft") return { error: `${q.number} has gone out - the client is reading these lines.` };
+  await db.delete(quoteLines).where(eq(quoteLines.id, lineId));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+    action: `removed a line from ${q.number}: ${line.description} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revQuote(q);
+  return {};
+}

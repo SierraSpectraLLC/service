@@ -9,6 +9,7 @@ import { shopToday } from "@/lib/shopday";
 import { allInvoices, asStatementRow } from "@/lib/invoiceData";
 import { invoiceView, STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
 import MoneyTabs from "@/components/MoneyTabs";
+import { NewInvoiceButton } from "@/components/NewMoneyButtons";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
 
@@ -26,7 +27,7 @@ export default async function InvoicesPage({ searchParams }: {
   const today = shopToday();
   const [full, orgRows] = await Promise.all([
     allInvoices(),
-    db.select({ id: orgs.id, name: orgs.name }).from(orgs),
+    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs),
   ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
 
@@ -78,6 +79,7 @@ export default async function InvoicesPage({ searchParams }: {
         crumb={<><Link href="/money">Billing</Link> › <b>Invoices</b></>}
         title="Invoices"
         sub=""
+        actions={<NewInvoiceButton clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />}
       />
       <MoneyTabs active="invoices" counts={{ invoices: full.filter((f) => f.row.status !== "void").length }} />
       <Toolbar
