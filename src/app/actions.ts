@@ -45,7 +45,7 @@ import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
-import { EXPENSE_KINDS, linesTotal } from "@/lib/billing";
+import { sellPrice, EXPENSE_KINDS, linesTotal } from "@/lib/billing";
 import {
   asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
   invoicesForOrg,
@@ -8664,6 +8664,8 @@ export async function createPurchaseOrder(data: {
   vendor: string; stockroomId: number; reference?: string; note?: string; expectedAt?: string;
   urgent?: boolean;
   lines: PoLineInput[];
+  /** A deliberately blank draft, lines typed on the order itself. Send still refuses empty. */
+  allowEmpty?: boolean;
 }): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
   const acc = await roomAccess(u, data.stockroomId);
@@ -8672,7 +8674,7 @@ export async function createPurchaseOrder(data: {
   const vendor = data.vendor.trim().slice(0, 80);
   if (!vendor) return { error: "Vendor required" };
   const usable = data.lines.filter((l) => l.partNumber.trim());
-  if (!usable.length) return { error: "An order needs at least one line" };
+  if (!usable.length && !data.allowEmpty) return { error: "An order needs at least one line" };
   if (usable.length > 200) return { error: "200 lines at a time" };
 
   const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
@@ -12104,4 +12106,90 @@ export async function changePersonEmail(oldEmail: string, newEmail: string): Pro
   });
   revalidatePath("/settings/organizations");
   return {};
+}
+
+/**
+ * A client's order from the parts store. It lands as a DRAFT INVOICE - the one
+ * shape money already has here - priced at the same resale the store showed
+ * (best cost times the org's parts markup, frozen at order time). Staff
+ * confirm availability on the draft and Send is what commits the price and
+ * opens the pay link; nothing is charged at order time, and the client is told
+ * so. A part with no price on file still orders - its line lands at $0 marked
+ * "price to follow" for staff to set before sending.
+ */
+export async function placePartsOrder(
+  lines: { partNumber: string; qty: number }[], note: string,
+): Promise<{ error?: string; number?: string }> {
+  const u = await requireUser();
+  if (u.orgId === null) return { error: "Ordering happens from a client login - staff order through Purchasing." };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, u.orgId));
+  if (!org || org.kind !== "client") return { error: "Not found" };
+  const tenant = orgTenant(org);
+
+  // Dedupe by part number, clamp quantities, and cap the order at a size a
+  // human meant: forty distinct lines is a stocking order, not a typo.
+  const wanted = new Map<string, number>();
+  for (const l of lines) {
+    const pn = l.partNumber.trim().toLowerCase();
+    const qty = Math.floor(Number(l.qty));
+    if (!pn || !Number.isFinite(qty) || qty <= 0) continue;
+    wanted.set(pn, Math.min(999, (wanted.get(pn) ?? 0) + qty));
+  }
+  if (!wanted.size) return { error: "The cart is empty" };
+  if (wanted.size > 40) return { error: "Forty lines at a time - split the order" };
+
+  const [catalogRows, priceRows, ctx] = await Promise.all([
+    db.select().from(partCatalog).where(and(
+      forTenant(partCatalog.tenantOrgId, tenant), eq(partCatalog.archived, false))),
+    db.select().from(partPrices).where(forTenant(partPrices.tenantOrgId, tenant)),
+    billingContext(org.id),
+  ]);
+  const byPn = new Map(catalogRows.map((c) => [c.partNumber.trim().toLowerCase(), c]));
+  const ordered: { part: typeof partCatalog.$inferSelect; qty: number; unitCents: number | null }[] = [];
+  for (const [pn, qty] of wanted) {
+    const part = byPn.get(pn);
+    if (!part) return { error: `PN ${pn.toUpperCase()} is no longer in the catalog - remove it from the cart.` };
+    const best = bestPrice(priceRows, part.partNumber);
+    ordered.push({
+      part, qty,
+      unitCents: best && best.priceCents > 0 ? sellPrice(best.priceCents, ctx.policy.partsMarkupBps) : null,
+    });
+  }
+
+  const why = note.trim().slice(0, 300);
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: invoices.number }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, tenant));
+    const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: tenant, orgId: org.id, number, status: "draft",
+        poNumber: org.poNumber ?? "", createdBy: u.email,
+        note: ["Parts order from the portal", why].filter(Boolean).join(" - "),
+      }).returning();
+      await db.insert(invoiceLines).values(ordered.map((o, i) => ({
+        invoiceId: inv.id, kind: "part",
+        description: o.part.name || o.part.partNumber,
+        detail: `PN ${o.part.partNumber}${o.unitCents === null ? " - price to follow" : ""}`,
+        qty: o.qty * 1000, unitCents: o.unitCents ?? 0, position: i,
+      })));
+      const priced = ordered.filter((o) => o.unitCents !== null);
+      const total = priced.reduce((n, o) => n + o.unitCents! * o.qty, 0);
+      const unpriced = ordered.length - priced.length;
+      await audit({
+        actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: tenant,
+        action: `${org.name} ordered ${ordered.length} part${ordered.length === 1 ? "" : "s"} from the store`
+          + ` on ${number}: ${formatCents(total)}`
+          + (unpriced ? ` plus ${unpriced} line${unpriced === 1 ? "" : "s"} to be priced` : ""),
+      });
+      revInvoice(inv);
+      revalidatePath("/money/invoices");
+      revalidatePath("/store");
+      return { number };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
 }

@@ -50,6 +50,11 @@ const FIXTURE = `
   INSERT INTO client_allowlist (entry, org_id, can_edit) VALUES
     ('maria@labzen.test', 1, true),
     ('accounts@coastal.test', 2, false);
+  -- Role and org resolve at session time from the allowlist row above.
+  INSERT INTO users (id, name, email, role, onboarded_at) VALUES
+    ('dev-maria', 'Maria Chen', 'maria@labzen.test', 'client_editor', now());
+  INSERT INTO sessions (session_token, user_id, expires) VALUES
+    ('clienttoken', 'dev-maria', now() + interval '30 days');
 
   INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, notes) VALUES
     ('LZ-001', 'Lab Zen', 'Agilent 6495C LC-MS', 'Agilent', 'US2405111', 1, '{"Checkout"}', 'Reserpine test and tune.'),
@@ -148,6 +153,16 @@ const FIXTURE = `
 
   -- Two sites so parts tax has an address to belong to: Lab Zen's bench is in a
   -- taxing county, Coastal's dock is not.
+  -- The parts book the store sells from. Models match Lab Zen's bench so the
+  -- "For your systems" facet has something to say; one row has no price so
+  -- "priced on request" renders too.
+  INSERT INTO part_catalog (part_number, name, manufacturer, kind, asset_types, models, created_by) VALUES
+    ('5188-5365', 'Septa, 11 mm, 50/pk',      'Agilent', 'consumable', '{"GC"}', '{"7890B"}', 'dev@local.test'),
+    ('G1960-80039', 'Oil mist filter',        'Agilent', 'part', '{"Vacuum pump"}', '{}', 'dev@local.test'),
+    ('WAT271066', 'ESI capillary',            'Waters',  'part', '{"Mass spec"}', '{"6495C"}', 'dev@local.test'),
+    ('ED-A72401', 'nXDS tip seal kit',        'Edwards', 'kit',  '{"Vacuum pump"}', '{"Edwards nXDS10i"}', 'dev@local.test'),
+    ('228-45703-91', 'LC-30 plunger seal',    'Shimadzu','consumable', '{"Pump"}', '{"LC-30AD"}', 'dev@local.test');
+
   -- Vendor offers with the sourcing facts, arranged so cheapest and fastest
   -- disagree: the OEM is quick but must cross-dock; the reseller drop-ships.
   INSERT INTO part_prices (part_number, vendor, is_oem, price_cents, lead_days, drop_ships, expedite_ok, url, updated_by) VALUES
