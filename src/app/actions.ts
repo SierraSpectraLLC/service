@@ -55,6 +55,7 @@ import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
 import { feeClause, resolvePolicy } from "@/lib/billingPolicy";
 import { linkState } from "@/lib/dropShare";
 import type { BillingPolicy } from "@/lib/billingPolicy";
+import { holdRefusal, type HeldAction } from "@/lib/credit";
 import { brandForTenant } from "@/lib/brand";
 import { btn, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
@@ -5611,6 +5612,29 @@ async function fileWorkOrder(opts: {
 }
 
 /**
+ * Refuse the two moves that commit somebody to a drive, while the client is on
+ * credit hold and nobody has overridden it.
+ *
+ * ENFORCED HERE, not in the form. The panel on the work order and the column
+ * in the queue are courtesies; this is the authority. An override written by
+ * an owner - with its reason - is what clears it, which is what makes the
+ * reason worth demanding in the first place.
+ *
+ * Failure to compute is not a refusal: if the credit check itself throws, the
+ * work goes ahead. A billing lookup that falls over must not become the reason
+ * a down instrument goes unattended.
+ */
+async function creditRefusal(
+  orgId: number | null, action: HeldAction,
+): Promise<string> {
+  if (orgId === null) return "";
+  const standing = await creditFor(orgId, shopToday()).catch(() => null);
+  if (!standing) return "";
+  const [org] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
+  return holdRefusal(standing, action, org?.name ?? "this client");
+}
+
+/**
  * Somebody at the shop opens a job. The other way in is a client asking - see
  * reportIssue and requestPm, which land in the same place.
  */
@@ -5630,6 +5654,14 @@ export async function openWorkOrder(
     ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
         .where(eq(instruments.id, t0.instrumentId)))[0]?.o ?? null
     : t0.asset?.ownerOrgId ?? null;
+
+  // Dispatching at intake is a dispatch like any other. The job itself is
+  // never refused - the instrument is down either way - so a held client's
+  // order is filed unassigned and says why.
+  if ((data.assignee ?? "").trim()) {
+    const refusal = await creditRefusal(orgId, "dispatch");
+    if (refusal) return { error: refusal };
+  }
 
   const wo = await fileWorkOrder({
     actorEmail: u.email,
@@ -5740,6 +5772,13 @@ export async function updateWorkOrder(
     title, body: data.body.trim().slice(0, 4000),
     severity: severityOf(data.severity).key, assignee: data.assignee.trim(),
   };
+  // Naming an engineer is the moment a van and a day get committed. Only the
+  // change is gated: an order that already has somebody on it can still have
+  // its title fixed while the account is held.
+  if (next.assignee && next.assignee !== wo.assignee) {
+    const refusal = await creditRefusal(wo.orgId, "dispatch");
+    if (refusal) return { error: refusal };
+  }
   await db.update(workOrders).set(next).where(eq(workOrders.id, woId));
 
   // One line per field that moved, because "edited WO-1042" answers nothing
@@ -5790,6 +5829,15 @@ export async function setWorkOrderState(woId: number, state: string): Promise<{ 
 
   const move = woMove(wo.state, state, mover);
   if (!move.ok) return { error: move.error };
+
+  // Starting is the other commitment. Every other move stays open on a held
+  // account - a job still has to be able to wait, resolve, close and be
+  // cancelled, and blocking those would corrupt the record rather than
+  // protect the money.
+  if (move.next === "active" && wo.state !== "active") {
+    const refusal = await creditRefusal(wo.orgId, "start");
+    if (refusal) return { error: refusal };
+  }
 
   await db.update(workOrders).set({
     state: move.next,

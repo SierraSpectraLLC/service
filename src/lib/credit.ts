@@ -9,9 +9,17 @@
 // past $X. Nothing clever, because the person reading it is about to drive two
 // hours and needs to know before they load the van, not a risk score.
 //
-// A hold is never a refusal. The owner can override it with a written reason,
-// and the reason is the point - "they are good for it, the PO is stuck in
-// their AP system" is a decision somebody made and can be asked about later.
+// A hold is never a refusal to RECORD. The owner can override it with a
+// written reason, and the reason is the point - "they are good for it, the PO
+// is stuck in their AP system" is a decision somebody made and can be asked
+// about later.
+//
+// What a hold does refuse is narrow and deliberate, and holdRefusal below is
+// the whole of it: you may not put a named engineer on the job and you may not
+// start it. Everything else stays open, because the alternatives are all worse
+// than the debt - refusing to file a job means a client's instrument is down
+// and unrecorded, and refusing to close one means work that really happened
+// has no close-out.
 
 import { formatCents } from "@/lib/money";
 import type { BillingPolicy } from "@/lib/billingPolicy";
@@ -112,4 +120,52 @@ export function depositToClear(input: {
     ? Math.max(0, balance - input.policy.holdAmountCents + 1)
     : 0;
   return Math.max(byAge, byAmount);
+}
+
+// ---------------------------------------------------------------------------
+// What a hold actually refuses.
+// ---------------------------------------------------------------------------
+
+/**
+ * The two moments that commit somebody to a drive.
+ *
+ *   dispatch - putting a named engineer on the job. This is the one that costs
+ *              money the moment it happens: a van, a day, and a person who
+ *              could have been somewhere else.
+ *   start    - moving the job into work.
+ *
+ * Filing the job, adding notes, ordering parts, resolving and closing are all
+ * deliberately absent. A job that cannot be recorded is a client's instrument
+ * down with nothing on the record, and a job that cannot be closed is work
+ * that really happened with no close-out. Both are worse failures than the
+ * debt this is protecting against.
+ */
+export const HELD_ACTIONS = ["dispatch", "start"] as const;
+export type HeldAction = (typeof HELD_ACTIONS)[number];
+
+const HELD_VERB: Record<HeldAction, string> = {
+  dispatch: "assign somebody to",
+  start: "start",
+};
+
+/**
+ * Why this action cannot happen, or "" when it can.
+ *
+ * Pure, so the button and the server reach the same answer - but the SERVER is
+ * the one that matters. A check that lives only in the UI is a check that is
+ * not there, which is the same rule the blocked-reason on a stage change
+ * follows.
+ *
+ * An override in force clears it. That is what the reason was written for; if
+ * an override did not actually let the work proceed, demanding a reason for it
+ * would be theatre.
+ */
+export function holdRefusal(
+  standing: Pick<CreditStanding, "onHold" | "line">,
+  action: HeldAction,
+  orgName = "this client",
+): string {
+  if (!standing.onHold) return "";
+  return `Cannot ${HELD_VERB[action]} this job while ${orgName} is on credit hold. `
+    + `${standing.line} An owner can override the hold with a reason, and then this will go through.`;
 }

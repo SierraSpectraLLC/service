@@ -193,11 +193,28 @@ waiting on the client's answer sits in `waiting`; approval moves it to
 `active`, which is what Ready meant.
 
 **7. GATE 3 says "hold blocks a WO open"; the prototype says "New work opens on
-hold."** I followed the prototype. A client's instrument is down either way,
-and refusing to record that because their AP is slow is a worse failure than
-the debt. The job is created, visibly held, and the hold is quoted back at
-creation. **If you want it to actually refuse, that is a small change to
-`openWorkOrder` and I would rather you decide it.**
+hold."** I followed the prototype on *filing*: the job is created, visibly
+held, because a client's instrument is down either way and refusing to record
+that is a worse failure than the debt.
+
+But the hold now REFUSES the two moves that commit somebody to a drive -
+putting a named engineer on the job, and starting it - in the actions
+themselves. See `lib/credit.holdRefusal` and `creditRefusal` in `app/actions`,
+enforced from `openWorkOrder`, `updateWorkOrder` and `setWorkOrderState`.
+Filing, notes, parts, hours, resolving and closing all stay open on a held
+account: a job that cannot be recorded is a down instrument nobody knows
+about, and one that cannot be closed is work that really happened with no
+close-out.
+
+This was corrected after the fact. In the first pass every read of `onHold`
+was display: the panel said "On hold", the queue showed a column, the owner
+override demanded a written reason and wrote an audited row - and nothing read
+any of it to refuse anything. The engineer still got assigned and still drove.
+The override gated a banner. Three test files now cover it: the rule
+(`credit.test.ts`), the wiring (`creditEnforcement.test.ts`, a source scan in
+the style of `tenantStamp.test.ts`, because the failure it catches compiles and
+renders perfectly), and the data path against a real Postgres
+(`creditHoldDb.test.ts`).
 
 **8. The renewal quote's bundled line uses kind `fee_ref`, not `labor`.**
 Rendering a year of scheduled service as labour printed "1 h" beside it. The
@@ -246,6 +263,14 @@ possible.
 **Fixtures had no `owner_org_id` on instruments or parts**, so
 `lib/agreementUsage` counted nothing and the entire entitlement half of the app
 read empty. Not a product bug, but it had been hiding one from view.
+
+**The credit hold enforced nothing.** Every consumption of `onHold` was
+display. `credit_overrides` rows were written, audited and read by no
+enforcement path, so the reason the override demanded was protecting a pill.
+Now refused at dispatch and at start, in the action rather than the form -
+verified live: starting a held client's job was refused and the state stayed
+`Waiting`; the override demanded a reason; the same start then went through and
+was audited.
 
 ---
 

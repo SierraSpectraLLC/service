@@ -2,7 +2,7 @@
 // would take. Pure, no DB.
 import { describe, expect, it } from "vitest";
 import { DEFAULT_POLICY, type BillingPolicy } from "@/lib/billingPolicy";
-import { activeOverride, creditStanding, depositToClear } from "@/lib/credit";
+import { activeOverride, creditStanding, depositToClear, HELD_ACTIONS, holdRefusal } from "@/lib/credit";
 
 const policy = (over: Partial<BillingPolicy> = {}): BillingPolicy => ({ ...DEFAULT_POLICY, ...over });
 const today = "2026-08-22";
@@ -127,5 +127,56 @@ describe("depositToClear", () => {
       policy: policy({ holdDays: 30, holdAmountCents: 150000 }),
       openInvoices: [{ balanceCents: 45000, daysLate: 1 }],
     })).toBe(0);
+  });
+});
+
+describe("holdRefusal - what a hold actually refuses", () => {
+  const held = creditStanding({
+    policy: policy({ holdDays: 30 }), today,
+    openInvoices: [{ balanceCents: 395800, daysLate: 41 }],
+  });
+  const clear = creditStanding({
+    policy: policy(), today,
+    openInvoices: [{ balanceCents: 45000, daysLate: 2 }],
+  });
+
+  it("refuses both moves that commit somebody to a drive", () => {
+    for (const action of HELD_ACTIONS) {
+      expect(holdRefusal(held, action, "Coastal")).not.toBe("");
+    }
+    expect(holdRefusal(held, "dispatch", "Coastal"))
+      .toContain("Cannot assign somebody to this job while Coastal is on credit hold");
+    expect(holdRefusal(held, "start", "Coastal"))
+      .toContain("Cannot start this job while Coastal is on credit hold");
+  });
+
+  it("says why, and says an override will clear it", () => {
+    const why = holdRefusal(held, "dispatch", "Coastal");
+    expect(why).toContain("41 days past due");
+    expect(why).toContain("An owner can override the hold with a reason");
+  });
+
+  it("refuses nothing when the account is clear", () => {
+    for (const action of HELD_ACTIONS) expect(holdRefusal(clear, action)).toBe("");
+  });
+
+  it("refuses nothing once an override is in force", () => {
+    // This is the whole reason the reason is worth demanding. An override that
+    // did not let the work proceed would be theatre.
+    const overridden = creditStanding({
+      policy: policy({ holdDays: 30 }), today,
+      openInvoices: [{ balanceCents: 395800, daysLate: 41 }],
+      overrides: [{ reason: "PO stuck in their AP", grantedBy: "joe", untilOn: "", lifted: false }],
+    });
+    expect(overridden.onHold).toBe(false);
+    for (const action of HELD_ACTIONS) expect(holdRefusal(overridden, action)).toBe("");
+  });
+
+  it("covers exactly two actions - filing and closing are deliberately absent", () => {
+    // A job that cannot be recorded is a down instrument nobody knows about,
+    // and one that cannot be closed is work with no close-out. Both are worse
+    // failures than the debt. If somebody adds a third action here, they
+    // should have to change this line and think about which it is.
+    expect([...HELD_ACTIONS]).toEqual(["dispatch", "start"]);
   });
 });
