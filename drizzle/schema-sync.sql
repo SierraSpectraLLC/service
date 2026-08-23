@@ -2849,3 +2849,127 @@ DO $$ BEGIN
       FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ── Collections: fees, promises, disputes, the ladder log, hold overrides ───
+-- A fee is its own row and never edits the invoice it belongs to: an invoice
+-- that changed after it was sent is one nobody can reconcile against the copy
+-- in their inbox. Waiving keeps the row - the record of having charged and
+-- then waived is the part worth anything.
+CREATE TABLE IF NOT EXISTS "invoice_fees" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "basis" text NOT NULL DEFAULT '',
+  "posted_on" text NOT NULL DEFAULT '',
+  "posted_by" text NOT NULL DEFAULT '',
+  "waived" boolean NOT NULL DEFAULT false,
+  "waived_by" text NOT NULL DEFAULT '',
+  "waived_reason" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "invoice_fees_invoice_idx" ON "invoice_fees" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "promises" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "promised_on" text NOT NULL DEFAULT '',
+  "by_name" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "kept_on" text,
+  "logged_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "promises_invoice_idx" ON "promises" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "disputes" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "line_id" integer,
+  "reason" text NOT NULL DEFAULT '',
+  "opened_on" text NOT NULL DEFAULT '',
+  "opened_by" text NOT NULL DEFAULT '',
+  "resolved_on" text,
+  "resolution" text NOT NULL DEFAULT '',
+  "resolved_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "disputes_invoice_idx" ON "disputes" ("invoice_id");
+
+-- Which rungs have actually been climbed. The ladder is data in lib/dunning;
+-- this is the log nextAction reads, and what the demand letter cites when it
+-- says "we have since sent 3 reminders and a statement".
+CREATE TABLE IF NOT EXISTS "dunning_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "rung" text NOT NULL DEFAULT '',
+  "to_name" text NOT NULL DEFAULT '',
+  "to_email" text NOT NULL DEFAULT '',
+  "sent_by" text NOT NULL DEFAULT 'auto',
+  "note" text NOT NULL DEFAULT '',
+  "sent_on" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "dunning_events_invoice_idx" ON "dunning_events" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "credit_overrides" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "reason" text NOT NULL DEFAULT '',
+  "until_on" text NOT NULL DEFAULT '',
+  "granted_by" text NOT NULL DEFAULT '',
+  "lifted_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "credit_overrides_org_idx" ON "credit_overrides" ("org_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_fees_invoice_id_fk') THEN
+    ALTER TABLE "invoice_fees" ADD CONSTRAINT "invoice_fees_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_fees_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "invoice_fees" ADD CONSTRAINT "invoice_fees_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'promises_invoice_id_fk') THEN
+    ALTER TABLE "promises" ADD CONSTRAINT "promises_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'promises_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "promises" ADD CONSTRAINT "promises_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_invoice_id_fk') THEN
+    ALTER TABLE "disputes" ADD CONSTRAINT "disputes_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_line_id_fk') THEN
+    ALTER TABLE "disputes" ADD CONSTRAINT "disputes_line_id_fk"
+      FOREIGN KEY ("line_id") REFERENCES "invoice_lines"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "disputes" ADD CONSTRAINT "disputes_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dunning_events_invoice_id_fk') THEN
+    ALTER TABLE "dunning_events" ADD CONSTRAINT "dunning_events_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dunning_events_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "dunning_events" ADD CONSTRAINT "dunning_events_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'credit_overrides_org_id_orgs_id_fk') THEN
+    ALTER TABLE "credit_overrides" ADD CONSTRAINT "credit_overrides_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'credit_overrides_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "credit_overrides" ADD CONSTRAINT "credit_overrides_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

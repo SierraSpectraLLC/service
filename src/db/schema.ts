@@ -2077,6 +2077,110 @@ export const payments = pgTable("payments", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("payments_invoice_idx").on(t.invoiceId)]);
 
+/**
+ * A late charge, as its own row.
+ *
+ * It never edits the invoice it belongs to. An invoice that changed after it
+ * was sent is one nobody can reconcile against the copy in their inbox, and a
+ * fee quietly folded into a line is the kind of thing a client finds and never
+ * trusts you about again. `basis` records what it was computed on, so the
+ * arithmetic can be explained a year later.
+ *
+ * Waiving keeps the row. Expect to waive more than you charge; the record of
+ * having charged and then waived is the part that is worth anything.
+ */
+export const invoiceFees = pgTable("invoice_fees", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  amountCents: integer("amount_cents").notNull().default(0),
+  /** "1.5%/mo on $3,900 undisputed, 41 days past due" - the sentence, kept. */
+  basis: text("basis").notNull().default(""),
+  postedOn: text("posted_on").notNull().default(""),
+  postedBy: text("posted_by").notNull().default(""),
+  waived: boolean("waived").notNull().default(false),
+  waivedBy: text("waived_by").notNull().default(""),
+  waivedReason: text("waived_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("invoice_fees_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * "The check goes out Friday." Worth writing down for one reason: the morning
+ * after it is broken is the moment the conversation changes, and nobody
+ * remembers that date without a row for it.
+ */
+export const promises = pgTable("promises", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  promisedOn: text("promised_on").notNull().default(""),  // the day they said
+  byName: text("by_name").notNull().default(""),          // who said it
+  note: text("note").notNull().default(""),
+  /** Set when the money arrived. Null and past promisedOn = broken. */
+  keptOn: text("kept_on"),
+  loggedBy: text("logged_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("promises_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * A line the client has questioned. It pauses what the reminders ASK for on
+ * that line alone: the undisputed remainder keeps aging and keeps being
+ * chased, because a question about one cartridge must not buy ninety quiet
+ * days on the rest of the bill.
+ */
+export const disputes = pgTable("disputes", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  lineId: integer("line_id").references((): AnyPgColumn => invoiceLines.id, { onDelete: "set null" }),
+  reason: text("reason").notNull().default(""),
+  openedOn: text("opened_on").notNull().default(""),
+  openedBy: text("opened_by").notNull().default(""),
+  resolvedOn: text("resolved_on"),
+  /** "kept" (the line stands) or "credited" (a negative line was issued). */
+  resolution: text("resolution").notNull().default(""),
+  resolvedBy: text("resolved_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("disputes_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * A rung of the ladder that has actually been climbed. The ladder itself is
+ * data in lib/dunning; this is the log of what was sent, which is what
+ * nextAction reads to decide what comes next - and what the demand letter
+ * cites when it says "we have since sent 3 reminders and a statement".
+ */
+export const dunningEvents = pgTable("dunning_events", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  /** The rung key from lib/dunning.LADDER. */
+  rung: text("rung").notNull().default(""),
+  /** Who it went to, by name and address, as sent. */
+  toName: text("to_name").notNull().default(""),
+  toEmail: text("to_email").notNull().default(""),
+  /** "auto" from the cron, or the email of whoever pressed the button. */
+  sentBy: text("sent_by").notNull().default("auto"),
+  note: text("note").notNull().default(""),
+  sentOn: text("sent_on").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("dunning_events_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * The owner's decision to work for somebody who owes money anyway, with the
+ * reason they gave. Enforced in the action, not the form.
+ */
+export const creditOverrides = pgTable("credit_overrides", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull().default(""),
+  /** Blank = until it is lifted by hand. YYYY-MM-DD otherwise. */
+  untilOn: text("until_on").notNull().default(""),
+  grantedBy: text("granted_by").notNull().default(""),
+  liftedAt: timestamp("lifted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("credit_overrides_org_idx").on(t.orgId)]);
+
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it
 // except the older checkout_rules seed migration that fills it.
