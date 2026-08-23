@@ -109,6 +109,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           <InvoiceActions
             id={id} number={row.number} status={row.status}
             balanceCents={v.balanceCents} today={today} poWarning={warning}
+            canDelete={user.role === "owner"}
           />
         }
       />

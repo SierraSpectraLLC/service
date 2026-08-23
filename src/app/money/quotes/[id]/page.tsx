@@ -77,7 +77,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
           </>
         }
         stats={stats}
-        actions={<QuoteActions id={id} number={row.number} status={row.status} />}
+        actions={<QuoteActions id={id} number={row.number} status={row.status} canDelete={user.role === "owner"} />}
       />
 
       <div className="row-2" style={{ marginBottom: 10 }}>

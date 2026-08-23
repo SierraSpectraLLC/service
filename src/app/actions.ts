@@ -11694,3 +11694,47 @@ export async function requestDeposit(orgId: number, note: string): Promise<{ err
   }
   throw last;
 }
+
+/**
+ * Delete an invoice outright. Owner only, reason required, audited - the row
+ * and its lines, fees, payments and share links go with it. Void remains the
+ * lighter option when the number should stay on the books.
+ */
+export async function deleteInvoice(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  if (!inv) return {};
+  const paid = await db.select().from(payments).where(eq(payments.invoiceId, id));
+  const total = paid.reduce((n, p) => n + p.amountCents, 0);
+  await db.delete(invoices).where(eq(invoices.id, id));   // children cascade
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
+    action: `deleted ${inv.number}${total > 0 ? ` (had ${formatCents(total)} in payments)` : ""} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/money");
+  revalidatePath("/money/invoices");
+  if (inv.workOrderId) revalidatePath(`/work/${inv.workOrderId}`);
+  return {};
+}
+
+/** Delete a quote. Owner only, reason required, audited. */
+export async function deleteQuote(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) return {};
+  await db.delete(quotes).where(eq(quotes.id, id));
+  await audit({
+    actor: u.email, entityType: "quote", entityId: id, tenantOrgId: q.tenantOrgId,
+    action: `deleted ${q.number} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/money");
+  revalidatePath("/money/quotes");
+  if (q.workOrderId) revalidatePath(`/work/${q.workOrderId}`);
+  return {};
+}

@@ -2,17 +2,37 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { sendQuote } from "@/app/actions";
+import { deleteQuote, sendQuote } from "@/app/actions";
 
 /** Sending is the only thing the shop does to a quote; the client does the rest. */
-export default function QuoteActions({ id, number, status }: {
-  id: number; number: string; status: string;
+export default function QuoteActions({ id, number, status, canDelete = false }: {
+  id: number; number: string; status: string; canDelete?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  if (status !== "draft") return null;
+
+  const remove = async () => {
+    const why = await confirmReason({
+      title: `Delete ${number}?`,
+      body: "Removes the quote and its lines.",
+      action: "Delete", tone: "bad",
+    });
+    if (!why) return;
+    startTransition(async () => {
+      const res = await deleteQuote(id, why);
+      if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+      toast({ message: `Deleted ${number}` });
+      router.push("/money/quotes");
+    });
+  };
+
+  if (status !== "draft") {
+    return canDelete
+      ? <button className="btn sm danger" disabled={pending} onClick={remove}>Delete</button>
+      : null;
+  }
 
   const send = async () => {
     const ok = await confirmDialog({
@@ -29,5 +49,12 @@ export default function QuoteActions({ id, number, status }: {
     });
   };
 
-  return <button className="btn sm accent" disabled={pending} onClick={send}>Send quote</button>;
+  return (
+    <>
+      <button className="btn sm accent" disabled={pending} onClick={send}>Send quote</button>
+      {canDelete && (
+        <button className="btn sm danger" disabled={pending} onClick={remove}>Delete</button>
+      )}
+    </>
+  );
 }

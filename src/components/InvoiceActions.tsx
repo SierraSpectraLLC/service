@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
-import { recordPayment, sendInvoice, voidInvoice } from "@/app/actions";
+import { deleteInvoice, recordPayment, sendInvoice, voidInvoice } from "@/app/actions";
 import { PAYMENT_METHODS, METHOD_LABEL } from "@/lib/statement";
 import { formatCents } from "@/lib/money";
 
@@ -16,13 +16,14 @@ import { formatCents } from "@/lib/money";
  * bill leaves the building - and because the PO warning, if there is one, is
  * the last chance anybody has to read it.
  */
-export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning }: {
+export default function InvoiceActions({ id, number, status, balanceCents, today, poWarning, canDelete = false }: {
   id: number;
   number: string;
   status: string;
   balanceCents: number;
   today: string;
   poWarning: string;
+  canDelete?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -84,6 +85,22 @@ export default function InvoiceActions({ id, number, status, balanceCents, today
         )}
         {status !== "void" && (
           <button className="btn sm" disabled={pending} onClick={kill}>Void</button>
+        )}
+        {canDelete && (
+          <button className="btn sm danger" disabled={pending} onClick={async () => {
+            const why = await confirmReason({
+              title: `Delete ${number}?`,
+              body: "Removes the invoice and everything on it - lines, fees, payments, links.",
+              action: "Delete", tone: "bad",
+            });
+            if (!why) return;
+            startTransition(async () => {
+              const res = await deleteInvoice(id, why);
+              if (res.error) { toast({ message: res.error, tone: "bad" }); return; }
+              toast({ message: `Deleted ${number}` });
+              router.push("/money/invoices");
+            });
+          }}>Delete</button>
         )}
       </div>
 
