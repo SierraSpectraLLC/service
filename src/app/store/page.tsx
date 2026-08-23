@@ -59,10 +59,16 @@ export default async function StorePage() {
   const [settingsRow] = await db.select({ crossDockDays: appSettings.crossDockDays })
     .from(appSettings).where(eq(appSettings.id, 1));
   const crossDockDays = settingsRow?.crossDockDays ?? 1;
-  const bestCost = new Map<string, number>();
+  // Best cost per CLASS: the genuine article and the best equivalent priced
+  // separately, because that is the one sourcing choice the client makes.
+  const oemCost = new Map<string, number>();
+  const altCost = new Map<string, number>();
   const etaByPn = new Map<string, number>();
   for (const [pn, offers] of groupByPn(priceRows)) {
-    bestCost.set(pn, offers[0].priceCents);
+    const oem = offers.find((o) => o.isOem);
+    const alt = offers.find((o) => !o.isOem);
+    if (oem) oemCost.set(pn, oem.priceCents);
+    if (alt) altCost.set(pn, alt.priceCents);
     const days = offers
       .map((o) => effectiveDays(o, crossDockDays))
       .filter((d): d is number => d !== null);
@@ -93,7 +99,8 @@ export default async function StorePage() {
   for (const p of photoRows) if (!photoByCatalogId.has(p.catalogId)) photoByCatalogId.set(p.catalogId, p.url);
 
   const items = buildStore(catalog, {
-    bestCostByPn: bestCost,
+    oemCostByPn: oemCost,
+    altCostByPn: altCost,
     markupBps: ctx.policy.partsMarkupBps,
     yours: {
       models: [...myInstruments.map((i) => i.model), ...myAssets.map((a) => a.model)],

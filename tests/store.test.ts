@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityLabel, buildStore, cartTotals, filterStore, splitCart } from "@/lib/store";
+import { availabilityLabel, buildStore, cartTotals, filterStore, hasChoice, linePrice, sourceTag, splitCart } from "@/lib/store";
 
 const cat = (over: Record<string, unknown>) => ({
   id: 1, partNumber: "PN-1", name: "Widget", manufacturer: "Maker",
@@ -10,7 +10,7 @@ describe("buildStore", () => {
   it("prices at resale, never at cost, and unknown stays unknown", () => {
     const [a, b] = buildStore(
       [cat({ id: 1, partNumber: "A" }), cat({ id: 2, partNumber: "B" })],
-      { bestCostByPn: new Map([["a", 10000]]), markupBps: 3000, yours: { models: [], types: [] } },
+      { oemCostByPn: new Map(), altCostByPn: new Map([["a", 10000]]), markupBps: 3000, yours: { models: [], types: [] } },
     ).sort((x, y) => x.partNumber.localeCompare(y.partNumber));
     expect(a.priceCents).toBe(13000);
     expect(b.priceCents).toBeNull();
@@ -18,9 +18,9 @@ describe("buildStore", () => {
 
   it("carries nothing a client may not read - no vendor, no cost, no margin", () => {
     const [item] = buildStore([cat({})],
-      { bestCostByPn: new Map([["pn-1", 5000]]), markupBps: 2500, yours: { models: [], types: [] } });
+      { oemCostByPn: new Map(), altCostByPn: new Map([["pn-1", 5000]]), markupBps: 2500, yours: { models: [], types: [] } });
     const keys = Object.keys(item).join(" ").toLowerCase();
-    expect(keys).not.toMatch(/vendor|cost|margin|lead|drop|oem/);
+    expect(keys).not.toMatch(/vendor|cost|margin|lead|drop/);
   });
 
   it("knows the client's own bench: model or module-type match, case-insensitive", () => {
@@ -30,7 +30,7 @@ describe("buildStore", () => {
         cat({ id: 2, partNumber: "FILTER", assetTypes: ["Vacuum pump"] }),
         cat({ id: 3, partNumber: "OTHER", models: ["SQ Detector 2"] }),
       ],
-      { bestCostByPn: new Map(), markupBps: 3000, yours: { models: ["lcms-8060"], types: ["vacuum PUMP"] } },
+      { oemCostByPn: new Map(), altCostByPn: new Map(), markupBps: 3000, yours: { models: ["lcms-8060"], types: ["vacuum PUMP"] } },
     );
     expect(items.find((i) => i.partNumber === "SEAL")?.fitsYours).toBe(true);
     expect(items.find((i) => i.partNumber === "FILTER")?.fitsYours).toBe(true);
@@ -42,7 +42,7 @@ describe("buildStore", () => {
   it("keeps archived and numberless rows off the shelf", () => {
     const items = buildStore(
       [cat({ archived: true }), cat({ id: 2, partNumber: "  " })],
-      { bestCostByPn: new Map(), markupBps: 3000, yours: { models: [], types: [] } },
+      { oemCostByPn: new Map(), altCostByPn: new Map(), markupBps: 3000, yours: { models: [], types: [] } },
     );
     expect(items).toHaveLength(0);
   });
@@ -55,7 +55,7 @@ describe("filterStore and cartTotals", () => {
       cat({ id: 2, partNumber: "KIT-9", name: "PM kit", kind: "kit" }),
     ],
     {
-      bestCostByPn: new Map([["seal", 4000]]), markupBps: 5000,
+      oemCostByPn: new Map(), altCostByPn: new Map([["seal", 4000]]), markupBps: 5000,
       yours: { models: ["LC-20AD"], types: [] },
       stockByPn: new Map([["seal", 3]]),
       etaByPn: new Map([["kit-9", 4]]),
@@ -88,7 +88,7 @@ describe("availability and the checkout split", () => {
       cat({ id: 3, partNumber: "ODD", name: "Odd bracket" }),
     ],
     {
-      bestCostByPn: new Map(), markupBps: 3000, yours: { models: [], types: [] },
+      oemCostByPn: new Map(), altCostByPn: new Map(), markupBps: 3000, yours: { models: [], types: [] },
       stockByPn: new Map([["seal", 2]]),
       etaByPn: new Map([["cap", 3]]),
     },
@@ -110,5 +110,54 @@ describe("availability and the checkout split", () => {
     );
     expect(now.map((l) => l.partNumber)).toEqual(["seal"]);
     expect(quoted.map((l) => l.partNumber)).toEqual(["CAP"]);
+  });
+});
+
+describe("the genuine-or-equivalent choice", () => {
+  const items = buildStore(
+    [cat({ id: 1, partNumber: "CAP", name: "Capillary", manufacturer: "Waters" })],
+    {
+      oemCostByPn: new Map([["cap", 70000]]),
+      altCostByPn: new Map([["cap", 60000]]),
+      markupBps: 3000, yours: { models: [], types: [] },
+    },
+  );
+  const [cap] = items;
+
+  it("prices each class at its own resale, and 'from' is the better one", () => {
+    expect(cap.oemCents).toBe(91000);
+    expect(cap.altCents).toBe(78000);
+    expect(cap.priceCents).toBe(78000);
+    expect(hasChoice(cap)).toBe(true);
+  });
+
+  it("a chosen line prices as chosen, and the tags name the classes", () => {
+    expect(linePrice(cap, "oem")).toBe(91000);
+    expect(linePrice(cap, "alt")).toBe(78000);
+    expect(sourceTag(cap, "oem")).toBe("Genuine Waters");
+    expect(sourceTag(cap, "alt")).toBe("OEM-equivalent");
+    const t2 = cartTotals([{ partNumber: "CAP", qty: 1, source: "oem" }], items);
+    expect(t2.subtotalCents).toBe(91000);
+  });
+
+  it("no choice on the shelf: an in-stock box is whatever it is", () => {
+    const [stocked] = buildStore(
+      [cat({ id: 1, partNumber: "CAP" })],
+      {
+        oemCostByPn: new Map([["cap", 70000]]), altCostByPn: new Map([["cap", 60000]]),
+        markupBps: 3000, yours: { models: [], types: [] },
+        stockByPn: new Map([["cap", 1]]),
+      },
+    );
+    expect(hasChoice(stocked)).toBe(false);
+  });
+
+  it("one class on file gets a tag, not a choice", () => {
+    const [only] = buildStore(
+      [cat({ id: 1, partNumber: "X", manufacturer: "Edwards" })],
+      { oemCostByPn: new Map([["x", 20000]]), altCostByPn: new Map(), markupBps: 3000, yours: { models: [], types: [] } },
+    );
+    expect(hasChoice(only)).toBe(false);
+    expect(sourceTag(only)).toBe("Genuine Edwards");
   });
 });

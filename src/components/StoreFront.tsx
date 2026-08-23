@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { placePartsOrder } from "@/app/actions";
-import { availabilityLabel, cartTotals, filterStore, splitCart, type CartLine, type StoreFacet, type StorePart } from "@/lib/store";
+import { availabilityLabel, cartTotals, filterStore, hasChoice, linePrice, sourceTag, splitCart, type CartLine, type StoreFacet, type StorePart } from "@/lib/store";
 import { formatCents } from "@/lib/money";
 import { toast } from "@/components/ui/Toast";
 import { FacetStrip, Panel, Pill, Toolbar } from "@/components/ui";
@@ -54,19 +54,23 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
 
   const shown = useMemo(() => filterStore(items, facet, q), [items, facet, q]);
   const totals = cartTotals(cart, items);
-  const inCart = (pn: string) => cart.find((l) => l.partNumber.toLowerCase() === pn.toLowerCase());
+  // A line's identity is part number PLUS chosen class: genuine and
+  // equivalent of the same PN are two lines, deliberately.
+  const same = (l: CartLine, pn: string, source?: "oem" | "alt") =>
+    l.partNumber.toLowerCase() === pn.toLowerCase() && (l.source ?? "") === (source ?? "");
+  const inCart = (pn: string, source?: "oem" | "alt") => cart.find((l) => same(l, pn, source));
 
-  const add = (item: StorePart) => {
-    const line = inCart(item.partNumber);
+  const add = (item: StorePart, source?: "oem" | "alt") => {
+    const line = inCart(item.partNumber, source);
     update(line
       ? cart.map((l) => (l === line ? { ...l, qty: Math.min(999, l.qty + 1) } : l))
-      : [...cart, { partNumber: item.partNumber, qty: 1 }]);
-    toast({ message: `Added ${item.name}` });
+      : [...cart, { partNumber: item.partNumber, qty: 1, ...(source ? { source } : {}) }]);
+    toast({ message: `Added ${item.name}${source ? ` (${source === "oem" ? "genuine" : "equivalent"})` : ""}` });
   };
-  const setQty = (pn: string, qty: number) =>
+  const setQty = (pn: string, source: "oem" | "alt" | undefined, qty: number) =>
     update(qty <= 0
-      ? cart.filter((l) => l.partNumber !== pn)
-      : cart.map((l) => (l.partNumber === pn ? { ...l, qty: Math.min(999, qty) } : l)));
+      ? cart.filter((l) => !same(l, pn, source))
+      : cart.map((l) => (same(l, pn, source) ? { ...l, qty: Math.min(999, qty) } : l)));
 
   const place = () => {
     setError("");
@@ -133,19 +137,46 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
                     ? <span className="pill good">In stock - ships now</span>
                     : <span className="mut">{availabilityLabel(i)}</span>}
                 </div>
-                <div className="row-2" style={{ marginTop: "auto", paddingTop: 8, alignItems: "center" }}>
-                  <b className="t-body">{i.priceCents !== null ? formatCents(i.priceCents) : <span className="mut" style={{ fontWeight: 400 }}>Priced on request</span>}</b>
-                  <span className="sp" />
-                  {line ? (
-                    <span className="row-2" style={{ alignItems: "center", gap: 4 }}>
-                      <button className="btn sm" aria-label={`One less ${i.name}`} onClick={() => setQty(line.partNumber, line.qty - 1)}>−</button>
-                      <b className="t-body" style={{ minWidth: 20, textAlign: "center" }}>{line.qty}</b>
-                      <button className="btn sm" aria-label={`One more ${i.name}`} onClick={() => setQty(line.partNumber, line.qty + 1)}>+</button>
+                {hasChoice(i) ? (
+                  <div style={{ marginTop: "auto", paddingTop: 8 }}>
+                    {([["oem", `Genuine ${i.manufacturer}`.trim(), i.oemCents],
+                       ["alt", "OEM-equivalent", i.altCents]] as const).map(([src, label, cents]) => {
+                      const chosen = inCart(i.partNumber, src);
+                      return (
+                        <div key={src} className="row-2" style={{ alignItems: "center", padding: "3px 0" }}>
+                          <span className="t-small" style={{ flex: 1, minWidth: 0 }}>{label}</span>
+                          <b className="t-small">{formatCents(cents!)}</b>
+                          {chosen ? (
+                            <span className="row-2" style={{ alignItems: "center", gap: 4 }}>
+                              <button className="btn sm" aria-label={`One less ${label} ${i.name}`} onClick={() => setQty(i.partNumber, src, chosen.qty - 1)}>−</button>
+                              <b className="t-small" style={{ minWidth: 16, textAlign: "center" }}>{chosen.qty}</b>
+                              <button className="btn sm" aria-label={`One more ${label} ${i.name}`} onClick={() => setQty(i.partNumber, src, chosen.qty + 1)}>+</button>
+                            </span>
+                          ) : (
+                            <button className="btn sm accent" onClick={() => add(i, src)}>Add</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="row-2" style={{ marginTop: "auto", paddingTop: 8, alignItems: "center" }}>
+                    <span style={{ minWidth: 0 }}>
+                      <b className="t-body">{i.priceCents !== null ? formatCents(i.priceCents) : <span className="mut" style={{ fontWeight: 400 }}>Priced on request</span>}</b>
+                      {sourceTag(i) && <span className="mut t-meta" style={{ display: "block" }}>{sourceTag(i)}</span>}
                     </span>
-                  ) : (
-                    <button className="btn sm accent" onClick={() => add(i)}>Add</button>
-                  )}
-                </div>
+                    <span className="sp" />
+                    {line ? (
+                      <span className="row-2" style={{ alignItems: "center", gap: 4 }}>
+                        <button className="btn sm" aria-label={`One less ${i.name}`} onClick={() => setQty(line.partNumber, undefined, line.qty - 1)}>−</button>
+                        <b className="t-body" style={{ minWidth: 20, textAlign: "center" }}>{line.qty}</b>
+                        <button className="btn sm" aria-label={`One more ${i.name}`} onClick={() => setQty(line.partNumber, undefined, line.qty + 1)}>+</button>
+                      </span>
+                    ) : (
+                      <button className="btn sm accent" onClick={() => add(i)}>Add</button>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -194,15 +225,19 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
           const row = (l: CartLine) => {
             const item = items.find((i) => i.partNumber.toLowerCase() === l.partNumber.toLowerCase());
             if (!item) return null;
+            const cents = linePrice(item, l.source);
             return (
-              <div key={l.partNumber} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-                <span className="t-small" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+              <div key={`${l.partNumber}|${l.source ?? ""}`} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span className="t-small" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+                  {sourceTag(item, l.source) && <span className="mut t-meta">{sourceTag(item, l.source)}</span>}
+                </span>
                 <span className="mut t-small">× {l.qty}</span>
                 <span className="t-small" style={{ width: 70, textAlign: "right" }}>
-                  {item.priceCents !== null ? formatCents(item.priceCents * l.qty) : "TBD"}
+                  {cents !== null ? formatCents(cents * l.qty) : "TBD"}
                 </span>
                 <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }}
-                  aria-label={`Remove ${item.name}`} onClick={() => setQty(l.partNumber, 0)}>×</button>
+                  aria-label={`Remove ${item.name}`} onClick={() => setQty(l.partNumber, l.source, 0)}>×</button>
               </div>
             );
           };

@@ -24,6 +24,14 @@ export type StorePart = {
   photoUrl: string;
   /** Resale in cents, markup applied. Null = priced on request. */
   priceCents: number | null;
+  /**
+   * The genuine article vs the equivalent - the ONE sourcing fact a client
+   * gets to choose on, because it is a spec, not a supplier. Null = that
+   * class has no offer. When both exist and the part must be sourced, the
+   * store shows both and the choice rides the order line.
+   */
+  oemCents: number | null;
+  altCents: number | null;
   /** Matches a model or module type on this client's own systems. */
   fitsYours: boolean;
   /** What it suits, for the card's quiet line. */
@@ -49,7 +57,9 @@ export function buildStore(
     kind: string; assetTypes: string[]; models: string[]; archived: boolean;
   }[],
   opts: {
-    bestCostByPn: Map<string, number>;
+    /** Best COST per class per PN - staff data in, resale out, as ever. */
+    oemCostByPn: Map<string, number>;
+    altCostByPn: Map<string, number>;
     markupBps: number;
     yours: { models: string[]; types: string[] };
     photoByCatalogId?: Map<number, string>;
@@ -67,7 +77,10 @@ export function buildStore(
   return catalog
     .filter((c) => !c.archived && c.partNumber.trim())
     .map((c) => {
-      const cost = opts.bestCostByPn.get(lc(c.partNumber));
+      const oemCost = opts.oemCostByPn.get(lc(c.partNumber));
+      const altCost = opts.altCostByPn.get(lc(c.partNumber));
+      const oemCents = oemCost !== undefined && oemCost > 0 ? sellPrice(oemCost, opts.markupBps) : null;
+      const altCents = altCost !== undefined && altCost > 0 ? sellPrice(altCost, opts.markupBps) : null;
       const fits = c.models.some((m) => myModels.has(lc(m)))
         || c.assetTypes.some((t) => myTypes.has(lc(t)));
       const inStock = (stock.get(lc(c.partNumber)) ?? 0) > 0;
@@ -78,7 +91,10 @@ export function buildStore(
         manufacturer: c.manufacturer,
         kind: c.kind,
         photoUrl: photos.get(c.id) ?? "",
-        priceCents: cost !== undefined && cost > 0 ? sellPrice(cost, opts.markupBps) : null,
+        // The "from" price: the better of whatever classes exist.
+        priceCents: oemCents !== null && altCents !== null ? Math.min(oemCents, altCents)
+          : oemCents ?? altCents,
+        oemCents, altCents,
         fitsYours: fits,
         fitsLabel: c.models.length
           ? `Fits ${c.models.slice(0, 3).join(", ")}${c.models.length > 3 ? ` +${c.models.length - 3}` : ""}`
@@ -128,7 +144,28 @@ export function filterStore(items: StorePart[], facet: StoreFacet, q: string): S
     && (!q.trim() || matchesQuery(q, [i.partNumber, i.name, i.manufacturer, i.fitsLabel])));
 }
 
-export type CartLine = { partNumber: string; qty: number };
+export type CartLine = {
+  partNumber: string; qty: number;
+  /** Genuine or equivalent, when the client chose. Absent = no choice offered. */
+  source?: "oem" | "alt";
+};
+
+/** What one cart line costs, honoring the class the client picked. */
+export const linePrice = (item: StorePart, source?: "oem" | "alt"): number | null =>
+  source === "oem" ? item.oemCents : source === "alt" ? item.altCents : item.priceCents;
+
+/** Offer the genuine/equivalent choice only where it is real: both classes
+    priced, and the part not already sitting on the shelf as whatever it is. */
+export const hasChoice = (i: StorePart): boolean =>
+  !i.inStock && i.oemCents !== null && i.altCents !== null;
+
+/** The quiet tag beside a single price, naming which class it is. */
+export const sourceTag = (i: StorePart, source?: "oem" | "alt"): string =>
+  source === "oem" ? `Genuine ${i.manufacturer}`.trim()
+  : source === "alt" ? "OEM-equivalent"
+  : i.oemCents !== null && i.altCents === null ? `Genuine ${i.manufacturer}`.trim()
+  : i.altCents !== null && i.oemCents === null ? "OEM-equivalent"
+  : "";
 
 /** The cart's arithmetic: priced subtotal plus how many lines await a price. */
 export function cartTotals(cart: CartLine[], items: StorePart[]): {
@@ -139,8 +176,9 @@ export function cartTotals(cart: CartLine[], items: StorePart[]): {
     const item = items.find((i) => lc(i.partNumber) === lc(line.partNumber));
     if (!item || line.qty <= 0) continue;
     count += line.qty;
-    if (item.priceCents === null) unpriced++;
-    else subtotal += item.priceCents * line.qty;
+    const cents = linePrice(item, line.source);
+    if (cents === null) unpriced++;
+    else subtotal += cents * line.qty;
   }
   return { subtotalCents: subtotal, unpriced, count };
 }

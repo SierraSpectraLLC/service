@@ -12121,7 +12121,7 @@ export async function changePersonEmail(oldEmail: string, newEmail: string): Pro
  * on file lands at $0 marked "price to follow" for staff to set.
  */
 export async function placePartsOrder(
-  lines: { partNumber: string; qty: number }[], note: string,
+  lines: { partNumber: string; qty: number; source?: "oem" | "alt" }[], note: string,
 ): Promise<{ error?: string; number?: string; quoteNumber?: string }> {
   const u = await requireUser();
   if (u.orgId === null) return { error: "Ordering happens from a client login - staff order through Purchasing." };
@@ -12129,14 +12129,18 @@ export async function placePartsOrder(
   if (!org || org.kind !== "client") return { error: "Not found" };
   const tenant = orgTenant(org);
 
-  // Dedupe by part number, clamp quantities, and cap the order at a size a
-  // human meant: forty distinct lines is a stocking order, not a typo.
-  const wanted = new Map<string, number>();
+  // Dedupe by part number AND chosen class - genuine and equivalent are two
+  // different lines on purpose - clamp quantities, and cap the order at a
+  // size a human meant: forty distinct lines is a stocking order, not a typo.
+  const wanted = new Map<string, { pn: string; source?: "oem" | "alt"; qty: number }>();
   for (const l of lines) {
     const pn = l.partNumber.trim().toLowerCase();
     const qty = Math.floor(Number(l.qty));
     if (!pn || !Number.isFinite(qty) || qty <= 0) continue;
-    wanted.set(pn, Math.min(999, (wanted.get(pn) ?? 0) + qty));
+    const source = l.source === "oem" || l.source === "alt" ? l.source : undefined;
+    const key = `${pn}|${source ?? ""}`;
+    const cur = wanted.get(key);
+    wanted.set(key, { pn, source, qty: Math.min(999, (cur?.qty ?? 0) + qty) });
   }
   if (!wanted.size) return { error: "The cart is empty" };
   if (wanted.size > 40) return { error: "Forty lines at a time - split the order" };
@@ -12148,13 +12152,23 @@ export async function placePartsOrder(
     billingContext(org.id),
   ]);
   const byPn = new Map(catalogRows.map((c) => [c.partNumber.trim().toLowerCase(), c]));
-  const ordered: { part: typeof partCatalog.$inferSelect; qty: number; unitCents: number | null }[] = [];
-  for (const [pn, qty] of wanted) {
+  const ordered: {
+    part: typeof partCatalog.$inferSelect; qty: number; unitCents: number | null;
+    source?: "oem" | "alt";
+  }[] = [];
+  for (const { pn, source, qty } of wanted.values()) {
     const part = byPn.get(pn);
     if (!part) return { error: `PN ${pn.toUpperCase()} is no longer in the catalog - remove it from the cart.` };
-    const best = bestPrice(priceRows, part.partNumber);
+    // The class the client chose narrows the offer pool; no choice = best
+    // overall, exactly what the store's "from" price showed.
+    const pool = source === undefined ? priceRows
+      : priceRows.filter((r) => r.isOem === (source === "oem"));
+    const best = bestPrice(pool, part.partNumber);
+    if (source !== undefined && !best) {
+      return { error: `PN ${part.partNumber} is no longer offered as ${source === "oem" ? "genuine" : "an equivalent"} - re-add it from the store.` };
+    }
     ordered.push({
-      part, qty,
+      part, qty, source,
       unitCents: best && best.priceCents > 0 ? sellPrice(best.priceCents, ctx.policy.partsMarkupBps) : null,
     });
   }
@@ -12174,14 +12188,22 @@ export async function placePartsOrder(
       onHand.set(key, (onHand.get(key) ?? 0) + s.qty);
     }
   }
-  const nowLines = ordered.filter((o) => (onHand.get(o.part.partNumber.trim().toLowerCase()) ?? 0) >= o.qty);
+  // A line with a chosen class is a sourcing request by definition - the
+  // shelf's box is whatever it is, so only unchosen lines can ship from it.
+  const nowLines = ordered.filter((o) =>
+    o.source === undefined && (onHand.get(o.part.partNumber.trim().toLowerCase()) ?? 0) >= o.qty);
   const quoteLinesWanted = ordered.filter((o) => !nowLines.includes(o));
 
   const why = note.trim().slice(0, 300);
+  // The chosen class rides the line where staff (and the client's paperwork)
+  // read it - it is what tells sourcing which vendor pool this line allows.
   const lineValues = (o: typeof ordered[number], i: number) => ({
     kind: "part",
     description: o.part.name || o.part.partNumber,
-    detail: `PN ${o.part.partNumber}${o.unitCents === null ? " - price to follow" : ""}`,
+    detail: `PN ${o.part.partNumber}`
+      + (o.source === "oem" ? ` - genuine ${o.part.manufacturer || "OEM"}`.trimEnd()
+        : o.source === "alt" ? " - OEM-equivalent" : "")
+      + (o.unitCents === null ? " - price to follow" : ""),
     qty: o.qty * 1000, unitCents: o.unitCents ?? 0, position: i,
   });
   const describe = (set: typeof ordered) => {
