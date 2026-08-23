@@ -162,6 +162,17 @@ const FIXTURE = `
   INSERT INTO payments (invoice_id, method, amount_cents, reference, received_on, recorded_by) VALUES
     (1, 'check', 73800, '4417', to_char(now() - interval '12 days', 'YYYY-MM-DD'), '${OWNER}');
 
+  -- The $0 invoice, which is a feature: WO-0406's PM was covered end to end,
+  -- and the bill still goes out so the visit is on the record and the client
+  -- can see the contract working.
+  INSERT INTO invoices (org_id, work_order_id, agreement_id, number, status, issued_on, due_on, po_number, note, created_by) VALUES
+    (1, 6, 1, 'INV-0093', 'sent', to_char(now() - interval '2 days', 'YYYY-MM-DD'),
+      to_char(now() + interval '28 days', 'YYYY-MM-DD'), 'PO-88213',
+      'Covered under AGR-2026-01 - nothing to pay.', '${OWNER}');
+  INSERT INTO invoice_lines (invoice_id, kind, description, detail, qty, unit_cents, covered, covered_by, position) VALUES
+    (4, 'labor', 'Labor, on site - Dev Owner', 'Quarterly PM', 4000, 15500, true, 'AGR-2026-01', 0),
+    (4, 'part', 'SH-DL-8060 Desolvation line', 'drawn from the parts allowance', 1000, 83200, true, 'AGR-2026-01', 1);
+
   -- The live link the client reads INV-0092 through, already opened twice:
   -- the Viewed line on the invoice timeline comes off this row.
   INSERT INTO share_links (token, kind, org_id, invoice_id, label, expires_on, created_by, opened_at, last_opened_at, open_count) VALUES
@@ -367,7 +378,7 @@ async function seed() {
   const seeded = await pg.query("SELECT 1 FROM orgs LIMIT 1");
   if (seeded.rows.length === 0) {
     await pg.exec(FIXTURE);
-    console.log("[dev:local] seeded fixture (1 operator + 2 clients, 6 systems, 10 assets, 7 WOs, 1 PO, 1 stockroom, 3 invoices, 1 quote)");
+    console.log("[dev:local] seeded fixture (1 operator + 2 clients, 6 systems, 10 assets, 7 WOs, 1 PO, 1 stockroom, 4 invoices, 1 quote)");
   } else {
     console.log("[dev:local] existing data kept - delete the data dir to reseed");
   }
