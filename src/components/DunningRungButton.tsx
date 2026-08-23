@@ -23,7 +23,7 @@ export default function DunningRungButton({ invoiceId, number, action }: {
     const ok = await confirmDialog({
       title: action + "?",
       context: number,
-      body: "It threads under the original send, quotes only what is undisputed, and writes the rung to the record.",
+      body: "Emails the reminder and records it.",
       action: "Send now",
     });
     if (!ok) return;

@@ -138,9 +138,7 @@ export default async function DemandLetterPage({ params }: { params: Promise<{ i
         {user.name || user.email} - {brand.operatorName || brand.name}
       </p>
       <p className="mut t-meta no-print" style={{ marginTop: 16 }}>
-        Assembled from rows that already exist: the send log, the share link's open event, the promise,
-        the fee and its basis, the signed service report. Nothing here is typed twice, and any sentence
-        whose row is missing is left out rather than guessed at. Balance quoted: {formatCents(view.payableCents)}.
+        Generated from the record. Balance quoted: {formatCents(view.payableCents)}.
       </p>
     </div>
   );

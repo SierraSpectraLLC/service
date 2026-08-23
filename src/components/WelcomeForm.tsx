@@ -63,14 +63,14 @@ export default function WelcomeForm({ email, suggested, kinds, brandName }: {
       </p>
 
       <Field label="Your name" htmlFor="w-name" required
-        hint="What the rest of the shop sees on your tasks, your notes and your hours.">
+        hint="Shown on your tasks, notes and hours.">
         <input id="w-name" required autoFocus maxLength={60} value={name} disabled={pending}
           onChange={(e) => setName(e.target.value)} placeholder="Joe Harris"
           style={{ fontSize: 16 }} />
       </Field>
 
       <Field label="Email me about"
-        hint="All on to start with. Everything still reaches your inbox in here either way.">
+        hint="">
         <div>
           {kinds.map((k) => (
             <label key={k.kind} style={{

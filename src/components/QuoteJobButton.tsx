@@ -61,23 +61,15 @@ export default function QuoteJobButton({ workOrderId, number, title, today }: {
             <label htmlFor="q-expires">Good until</label>
             <input id="q-expires" type="date" value={form.expiresOn} min={today}
               onChange={(e) => setForm({ ...form, expiresOn: e.target.value })} />
-            <div className="field-hint">
-              After this it stops being answerable, and the digest starts asking about it a week out.
-            </div>
+
           </div>
           <div className="field">
             <label htmlFor="q-deposit">Deposit on approval (%)</label>
             <input id="q-deposit" inputMode="numeric" value={form.depositPct} style={{ width: 90 }}
               onChange={(e) => setForm({ ...form, depositPct: e.target.value })} />
-            <div className="field-hint">
-              Zero means nothing is owed until the work is done. Anything else is invoiced the moment
-              they approve, due immediately, and the portal says so before they press the button.
-            </div>
+            <div className="field-hint">Invoiced on approval, due immediately. 0 = none.</div>
           </div>
-          <div className="mut t-small">
-            The lines come from the parts and hours already on this job, priced at this client&apos;s rate
-            card - the same composer the invoice uses.
-          </div>
+          <div className="mut t-small">Lines come from the parts and hours on this job.</div>
         </Dialog>
       )}
     </>

@@ -105,9 +105,8 @@ export default function BillingDefaultsForm({
 
   return (
     <>
-      <Panel title="Late fees" hint="A late charge is only collectable if the terms rode the paper - this clause prints on every quote and invoice automatically.">
-        <Field label="Grace after the due date" htmlFor="grace"
-          hint="Days past due before a fee may be posted at all.">
+      <Panel title="Late fees" hint="Printed on every quote and invoice.">
+        <Field label="Grace after the due date" htmlFor="grace" hint="Days">
           <input id="grace" inputMode="numeric" style={{ width: 90 }} value={form.graceDays}
             onChange={(e) => set("graceDays", e.target.value)} />
         </Field>
@@ -118,14 +117,13 @@ export default function BillingDefaultsForm({
           </select>
         </Field>
         {form.feeType === "interest" && (
-          <Field label="Rate per month (%)" htmlFor="rate"
-            hint="1.5% is the usual ceiling in commercial terms. Simple, never compounding.">
+          <Field label="Rate per month (%)" htmlFor="rate" hint="Simple interest">
             <input id="rate" inputMode="decimal" style={{ width: 90 }} value={form.rateBpsMonthly}
               onChange={(e) => set("rateBpsMonthly", e.target.value)} />
           </Field>
         )}
         {form.feeType === "flat" && (
-          <Field label="Flat charge" htmlFor="flat" hint="Once per late month, not once per look.">
+          <Field label="Flat charge" htmlFor="flat" hint="Once per late month">
             <input id="flat" inputMode="decimal" style={{ width: 110 }} value={form.flatCents}
               onChange={(e) => set("flatCents", e.target.value)} />
           </Field>
@@ -137,24 +135,20 @@ export default function BillingDefaultsForm({
             <option value="parts">Parts only</option>
           </select>
         </Field>
-        <div className="mut t-small">
-          A fee posts as its own line and never edits the original invoice. Expect to waive more than
-          you charge; the waiver logs a reason, and the record is the point.
-        </div>
+
       </Panel>
 
-      <Panel title="Credit hold and escalation" hint="Checked when a job opens. It never refuses work - the job opens on hold and says so.">
+      <Panel title="Credit hold and escalation">
         <Field label="Hold when the oldest invoice is this many days past due" htmlFor="holddays"
-          hint="Zero switches this trigger off. Forty-five is deliberately loose: holding work at thirty catches a client whose AP simply runs slow.">
+          hint="0 = off">
           <input id="holddays" inputMode="numeric" style={{ width: 90 }} value={form.holdDays}
             onChange={(e) => set("holdDays", e.target.value)} />
         </Field>
-        <Field label="...or when the open balance passes" htmlFor="holdamt" hint="Zero switches this one off too.">
+        <Field label="...or when the open balance passes" htmlFor="holdamt" hint="0 = off">
           <input id="holdamt" inputMode="decimal" style={{ width: 130 }} value={form.holdAmount}
             onChange={(e) => set("holdAmount", e.target.value)} />
         </Field>
-        <Field label="Automatic reminders" htmlFor="auto"
-          hint="Off makes every rung of the ladder something somebody presses. Some clients are worth phoning rather than mailing.">
+        <Field label="Automatic reminders" htmlFor="auto">
           <label className="row-2" style={{ alignItems: "center" }}>
             <input id="auto" type="checkbox" checked={form.dunningAuto}
               onChange={(e) => set("dunningAuto", e.target.checked)} />
@@ -162,32 +156,28 @@ export default function BillingDefaultsForm({
           </label>
         </Field>
         <div className="mut t-small">
-          The ladder is {LADDER.length} rungs: {LADDER.map((r) => r.action.toLowerCase()).join(", ")}.
-          Rung two and up address a new person - per-client contacts live on the organization page,
-          because sending the fourth reminder to whoever ignored the first three is how an invoice ages out.
+          {LADDER.length} rungs: {LADDER.map((r) => r.action.toLowerCase()).join(", ")}. Per-client
+          contacts are on the organization page.
         </div>
       </Panel>
 
       <Panel title="Pricing and numbering">
-        <Field label="Parts markup (%)" htmlFor="markup"
-          hint="Over what a part landed at. A client on a retainer is often the client who negotiated this down - override it on their page.">
+        <Field label="Parts markup (%)" htmlFor="markup" hint="Over landed cost">
           <input id="markup" inputMode="decimal" style={{ width: 90 }} value={form.partsMarkup}
             onChange={(e) => set("partsMarkup", e.target.value)} />
         </Field>
-        <Field label="Sales tax on parts" htmlFor="tax"
-          hint="At the rate on the site the goods landed at. Tax belongs to the place, not the client.">
+        <Field label="Sales tax on parts" htmlFor="tax" hint="At the site's rate">
           <label className="row-2" style={{ alignItems: "center" }}>
             <input id="tax" type="checkbox" checked={form.taxParts}
               onChange={(e) => set("taxParts", e.target.checked)} />
             <span className="t-body">Draw the parts tax line</span>
           </label>
         </Field>
-        <Field label="Invoice prefix" htmlFor="prefix" hint="Numbers count on from the highest one in use.">
+        <Field label="Invoice prefix" htmlFor="prefix">
           <input id="prefix" style={{ width: 110 }} value={form.prefix}
             onChange={(e) => set("prefix", e.target.value)} />
         </Field>
-        <Field label="Loaded labor, per hour" htmlFor="loaded"
-          hint="Wage plus burden, van and insurance - what an hour actually costs the shop. Left at zero, the job-cost panel says nobody has told it rather than reporting a flattering margin.">
+        <Field label="Loaded labor, per hour" htmlFor="loaded" hint="Wage plus burden - used for margins">
           <input id="loaded" inputMode="decimal" style={{ width: 130 }} value={form.loadedLabor}
             onChange={(e) => set("loadedLabor", e.target.value)} />
         </Field>
@@ -202,10 +192,10 @@ export default function BillingDefaultsForm({
         }
         hint={
           stripe.mode === "absent"
-            ? "No Stripe keys on this instance. The pay buttons do not render, and the portal tells clients how to send a check - which is how most of these invoices get paid anyway."
+            ? "No Stripe keys set - pay buttons do not render."
             : stripe.mode === "test"
-              ? "TEST MODE. No money moves. Live keys are a launch decision, not a build one."
-              : "Live keys are configured. Money moves bank to bank into your own Stripe account."
+              ? "Test mode - no money moves."
+              : "Live."
         }
       >
         {stripe.mode !== "absent" && (
@@ -224,8 +214,7 @@ export default function BillingDefaultsForm({
                 <button className="btn sm" disabled={pending} onClick={refresh}>Re-check</button>
               )}
             </div>
-            <Field label="Offer card payments" htmlFor="cards"
-              hint="ACH is the default for labs and costs about a tenth as much.">
+            <Field label="Offer card payments" htmlFor="cards">
               <label className="row-2" style={{ alignItems: "center" }}>
                 <input id="cards" type="checkbox" checked={form.cardsEnabled}
                   onChange={(e) => set("cardsEnabled", e.target.checked)} />
@@ -234,8 +223,7 @@ export default function BillingDefaultsForm({
             </Field>
             {form.cardsEnabled && (
               <>
-                <Field label="Card surcharge (%)" htmlFor="surch"
-                  hint="Disclosed on the pay page before they confirm. Zero means you absorb it.">
+                <Field label="Card surcharge (%)" htmlFor="surch" hint="Shown on the pay page">
                   <input id="surch" inputMode="decimal" style={{ width: 90 }} value={form.cardSurcharge}
                     onChange={(e) => set("cardSurcharge", e.target.value)} />
                 </Field>
@@ -245,21 +233,16 @@ export default function BillingDefaultsForm({
                 </Field>
               </>
             )}
-            <Field label="Platform fee (%)" htmlFor="pfee"
-              hint="Ridgeline's cut of processed volume. Zero, and it stays zero until somebody decides otherwise.">
+            <Field label="Platform fee (%)" htmlFor="pfee" hint="Platform's cut of processed volume">
               <input id="pfee" inputMode="decimal" style={{ width: 90 }} value={form.platformFee}
                 onChange={(e) => set("platformFee", e.target.value)} />
             </Field>
-            <div className="mut t-small">
-              The account is yours, not the platform&apos;s. Stripe does the identity checks on you,
-              money moves bank to bank, and no card number ever reaches this server. Ridgeline never
-              holds funds.
-            </div>
+
           </>
         )}
       </Panel>
 
-      <Panel title="Exports" hint="Invoices, payments and fees as three files QuickBooks and Xero will both take. Drafts are left out - an invoice nobody has sent is not revenue.">
+      <Panel title="Exports" hint="CSV for QuickBooks / Xero. Drafts excluded.">
         {months.length === 0
           ? <div className="mut t-body">Nothing to export yet.</div>
           : months.slice(0, 12).map((m) => (

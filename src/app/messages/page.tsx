@@ -89,7 +89,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
       <PageHead
         title="Messages"
         actions={<NewMessageButton people={people} />}
-        sub="Direct and small-group conversations with the people you work with. Anything about a particular system is better said on that system, where whoever picks it up next will find it."
+        sub=""
       />
       <Toolbar
         search={
@@ -132,7 +132,7 @@ export default async function MessagesPage({ searchParams }: { searchParams: Pro
             when: <span className="mut t-meta">{r.when}</span>,
           },
         }))}
-        empty="No conversations yet - message anyone at your organization, or anyone you share a system with"
+        empty="No conversations yet."
       />
       <Legend items={[{ tone: "info", label: "unread" }]} />
     </div>

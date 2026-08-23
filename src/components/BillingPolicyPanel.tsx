@@ -86,17 +86,15 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
 
   return (
     <>
-      <Panel title="Terms and paperwork" hint="What AP needs to see before they will pay anything.">
-        <Field label="Terms" htmlFor="terms" hint="Days from the day an invoice is issued.">
+      <Panel title="Terms and paperwork">
+        <Field label="Terms" htmlFor="terms" hint="Days">
           <input id="terms" inputMode="numeric" style={{ width: 90 }} value={form.terms}
             onChange={(e) => set("terms", e.target.value)} />
         </Field>
-        <Field label="AP contact" htmlFor="ap"
-          hint="Reminders go here rather than to the lab. The desk that pays is rarely the desk that ordered.">
+        <Field label="AP contact" htmlFor="ap" hint="Reminders go here">
           <input id="ap" type="email" value={form.apEmail} onChange={(e) => set("apEmail", e.target.value)} />
         </Field>
-        <Field label="PO on file" htmlFor="po"
-          hint="A blank one is the first of the two silent AP rejections; an exhausted one is the second. Both are warned about at draft, never blocked.">
+        <Field label="PO on file" htmlFor="po">
           <input id="po" value={form.poNumber} onChange={(e) => set("poNumber", e.target.value)} />
         </Field>
         <Field label="Remaining on that PO" htmlFor="pobal">
@@ -128,7 +126,7 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
               onChange={(e) => set("flat", e.target.value)} />
           </Field>
         )}
-        <Field label="Hold at this many days past due" htmlFor="oholdd" hint="Zero switches it off.">
+        <Field label="Hold at this many days past due" htmlFor="oholdd" hint="0 = off">
           <input id="oholdd" inputMode="numeric" style={{ width: 90 }} value={form.holdDays}
             onChange={(e) => set("holdDays", e.target.value)} />
         </Field>
@@ -140,8 +138,7 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
           <input id="omarkup" inputMode="decimal" style={{ width: 90 }} value={form.partsMarkup}
             onChange={(e) => set("partsMarkup", e.target.value)} />
         </Field>
-        <Field label="Automatic reminders" htmlFor="oauto"
-          hint="Off makes every rung something somebody presses. Worth it for a client you would rather phone.">
+        <Field label="Automatic reminders" htmlFor="oauto">
           <label className="row-2" style={{ alignItems: "center" }}>
             <input id="oauto" type="checkbox" checked={form.dunningAuto}
               onChange={(e) => set("dunningAuto", e.target.checked)} />
@@ -159,10 +156,8 @@ export default function BillingPolicyPanel({ orgId, orgName, policy, terms, apEm
             Add a contact
           </button>
         }
-        hint={`Rung 1 goes to the billing contact. Rungs 2 and up go to these, in order - ${
-          LADDER.filter((r) => r.contactIndex >= 0).map((r) => r.action.toLowerCase()).join(", ")
-        }. Sending the fourth reminder to whoever ignored the first three is how an invoice ages out.`}
-        empty="Nobody named yet - every rung goes to the billing contact."
+        hint="Later rungs of the ladder go to these, in order."
+        empty="None - every rung goes to the billing contact."
       >
         {form.escalation.length > 0 && form.escalation.map((c, i) => (
           <div key={i} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>

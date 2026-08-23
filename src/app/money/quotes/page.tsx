@@ -81,7 +81,7 @@ export default async function QuotesPage({ searchParams }: {
       <PageHead
         crumb={<><Link href="/money">Billing</Link> › <b>Quotes</b></>}
         title="Quotes"
-        sub="Priced work waiting on a client's yes. Composed by the same function that composes the invoice, so the two cannot disagree."
+        sub=""
       />
       <MoneyTabs active="quotes" counts={{ quotes: awaiting.length }} />
       <Toolbar
@@ -110,7 +110,7 @@ export default async function QuotesPage({ searchParams }: {
           { key: "total", label: "Total", width: "110px" },
         ]}
         rows={shown.map(toRow)}
-        empty="No quotes yet. Price a job from its work order."
+        empty="No quotes."
       />
     </div>
   );

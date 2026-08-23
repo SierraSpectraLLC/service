@@ -17,7 +17,7 @@ export default function QuoteActions({ id, number, status }: {
   const send = async () => {
     const ok = await confirmDialog({
       title: `Send ${number}?`,
-      body: "The client gets a link they can approve, decline or ask a question on. Your fee terms print with it - a late charge is only collectable if they rode the paper.",
+      body: "Emails the client a link to approve or decline.",
       action: "Send quote",
     });
     if (!ok) return;

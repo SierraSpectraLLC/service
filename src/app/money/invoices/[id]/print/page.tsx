@@ -118,8 +118,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
       {row.note && <p className="t-body" style={{ marginTop: 14 }}>{row.note}</p>}
       {clause && <p className="mut t-small" style={{ marginTop: 14 }}>{clause}</p>}
       <p className="mut t-meta" style={{ marginTop: 10 }}>
-        {`Service by ${brand.operatorName || brand.name}. `}
-        Questions about a line? Reply and we will pause that line while we sort it out; the rest stays due.
+        {`Service by ${brand.operatorName || brand.name}.`}
       </p>
     </div>
   );

@@ -323,7 +323,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       )}
 
       {staff && quoteRows.length > 0 && (
-        <Panel title="Quotes" count={quoteRows.length} hint="What this job was priced at, and what the client said.">
+        <Panel title="Quotes" count={quoteRows.length}>
           {quoteRows.map((q) => (
             <div key={q.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
               <Link href={`/money/quotes/${q.id}`} className="t-body" style={{ textDecoration: "none", fontWeight: 600 }}>

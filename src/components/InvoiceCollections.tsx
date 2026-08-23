@@ -59,7 +59,7 @@ export default function InvoiceCollections({
     const why = await confirmReason({
       title: `Waive the ${formatCents(f.amountCents)} fee?`,
       context: number,
-      body: "The row stays and gets flagged. Expect to waive more than you charge - the record of having charged and then waived is the part worth keeping.",
+      body: "The fee stays on the record, marked waived.",
       action: "Waive the fee",
     });
     if (!why) return;
@@ -71,8 +71,8 @@ export default function InvoiceCollections({
       title: how === "credited" ? "Credit this line?" : "The line stands?",
       context: d.lineLabel || number,
       body: how === "credited"
-        ? "A negative line is added rather than the disputed one being edited, so the invoice still reconciles against the copy in their inbox."
-        : "The pause lifts and the full amount goes back to being asked for.",
+        ? "Adds a credit line for the disputed amount."
+        : "The full amount goes back to being due.",
       action: how === "credited" ? "Issue the credit" : "Keep the line",
     });
     if (!ok) return;
@@ -93,12 +93,8 @@ export default function InvoiceCollections({
               Post {formatCents(feeQuote.amountCents)}
             </button>
           : undefined}
-        hint={
-          feeQuote.amountCents > 0
-            ? `${feeQuote.basis} A fee is its own row and never edits the invoice it belongs to.`
-            : feeQuote.blocked || "A fee is its own row and never edits the invoice it belongs to."
-        }
-        empty="No fee has been charged."
+        hint={feeQuote.amountCents > 0 ? feeQuote.basis : feeQuote.blocked || undefined}
+        empty="No fees."
       >
         {fees.length > 0 && fees.map((f) => (
           <div key={f.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
@@ -125,8 +121,7 @@ export default function InvoiceCollections({
             Log a promise
           </button>
         }
-        hint="The morning after one breaks is when the conversation changes - and the ladder skips a rung."
-        empty="Nobody has promised anything."
+        empty="No promises."
       >
         {showPromise && (
           <div className="row-2" style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
@@ -173,8 +168,7 @@ export default function InvoiceCollections({
             Log a dispute
           </button>
         }
-        hint="A questioned line stops being asked for. The rest keeps aging, and reminders quote only that."
-        empty="Nothing has been questioned."
+        empty="No disputes."
       >
         {showDispute && (
           <div className="row-2" style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>

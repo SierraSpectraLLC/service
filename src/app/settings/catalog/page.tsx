@@ -118,7 +118,7 @@ export default async function CatalogPage() {
         id: t.id, kind: t.kind, assetType: t.assetType, name: t.name, docTypes: t.docTypes,
       }))} />
       <ReferencePanel canEdit
-        sub="Manuals, links and field notes per model or module type. Whatever is filed here shows up on every system and unit with that equipment."
+        sub="Reference material per model or module type."
         scopes={[
           ...models.map((m) => ({ assetType: m.assetType, model: m.name, label: `${m.name} (${m.assetType})` })),
           ...types.filter((t) => t.id !== null).map((t) => ({ assetType: t.name, model: "", label: `any ${t.name.toLowerCase()}` })),

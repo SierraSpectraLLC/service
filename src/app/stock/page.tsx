@@ -88,7 +88,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
     <div className="container wide">
       <PageHead
         title="Inventory"
-        sub="Shelves, vans and client cages. A room belongs to one organization and can be shared with others - that's how a provider draws from a client's spares, or a client sees what's held for them."
+        sub="Shelves, vans and client cages."
         actions={
           <>
             {/* Reachable for org editors too, who don't get the staff nav menu. */}

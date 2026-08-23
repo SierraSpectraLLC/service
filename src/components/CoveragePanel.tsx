@@ -21,15 +21,15 @@ export default function CoveragePanel({ coverage, rateCents, poNumber, orgName }
   const covered = (coverage.labor || coverage.parts) && !coverage.exhausted;
   const lines = [
     coverage.exhausted && coverage.agreementNumber
-      ? `The allowance on ${coverage.agreementNumber} is spent - this bills at the rate card, labelled "beyond contract". Say so before the work, not on the invoice.`
+      ? `Allowance on ${coverage.agreementNumber} is spent - bills at the rate card as "beyond contract".`
       : "",
     !covered && rateCents > 0
-      ? `Not covered - time and materials at ${formatCents(rateCents)} an hour.`
+      ? `Time and materials at ${formatCents(rateCents)}/h.`
       : "",
-    covered && coverage.labor && coverage.parts ? "Labor and parts both draw on the agreement." : "",
-    covered && coverage.labor && !coverage.parts ? "Labor is covered; parts pass through and bill." : "",
+    covered && coverage.labor && coverage.parts ? "Labor and parts covered." : "",
+    covered && coverage.labor && !coverage.parts ? "Labor covered; parts bill." : "",
     !poNumber.trim()
-      ? `No PO on file for ${orgName} - AP will bounce the invoice. Ask for one before dispatch, not after the work.`
+      ? `No PO on file for ${orgName}.`
       : "",
   ].filter(Boolean);
   if (!lines.length) return null;

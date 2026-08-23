@@ -41,7 +41,7 @@ export default async function CostingPage({ searchParams }: {
       <PageHead
         crumb={<><Link href="/money">Billing</Link> › <b>Costing</b></>}
         title="Job costing"
-        sub="Revenue against cost. The cost inputs are the ones the app already records - what parts landed at, hours at a loaded rate, and expenses."
+        sub="Revenue against cost."
         actions={
           <div className="seg" role="group" aria-label="Reporting window">
             {WINDOWS.map((d) => (
@@ -58,12 +58,8 @@ export default async function CostingPage({ searchParams }: {
       {loadedLaborCents <= 0 && (
         <div className="card" style={{ borderLeft: "3px solid var(--t-warn-fg)" }}>
           <div className="t-body">
-            No loaded labor rate is set, so the labour half of every cost is missing and no margin can
-            be honest about itself.
-          </div>
-          <div className="mut t-small" style={{ marginTop: 4 }}>
-            Set it in <Link href="/settings/billing">Billing settings</Link> - wage plus burden, van
-            and insurance, which is what an hour actually costs whether or not it was sold.
+            No loaded labor rate set - margins exclude labor. Set it in{" "}
+            <Link href="/settings/billing">Billing settings</Link>.
           </div>
         </div>
       )}
@@ -71,11 +67,9 @@ export default async function CostingPage({ searchParams }: {
       <Panel
         title="By work order"
         count={jobs.length}
-        hint={
-          loadedLaborCents > 0
-            ? `Closed in the last ${label}. Loaded labor at ${formatCents(loadedLaborCents)} an hour; covered visits roll up against their agreement instead of showing as a loss.`
-            : `Closed in the last ${label}.`
-        }
+        hint={loadedLaborCents > 0
+          ? `Closed in the last ${label} · loaded labor ${formatCents(loadedLaborCents)}/h`
+          : `Closed in the last ${label}`}
         empty={`Nothing closed in the last ${label}.`}
       >
         {jobs.length > 0 && jobs.map((j) => (
@@ -100,8 +94,8 @@ export default async function CostingPage({ searchParams }: {
       <Panel
         title="By client"
         count={clients.length}
-        hint={`Trailing ${label}, with what it cost to be owed the money. Days-to-pay is weighted by amount - a client who pays five small invoices at once and one large one at ninety days is a ninety-day client.`}
-        empty="Nothing to compare yet."
+        hint={`Trailing ${label}`}
+        empty="Nothing yet."
       >
         {clients.length > 0 && clients.map((c) => (
           <div key={c.orgId} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
@@ -129,16 +123,13 @@ export default async function CostingPage({ searchParams }: {
                   : <span className="mut t-small">nothing settled yet</span>}
               </span>
             </div>
-            {c.note && <div className="mut t-small" style={{ marginTop: 4 }}>{c.note}</div>}
+
           </div>
         ))}
       </Panel>
 
       {jobs.length === 0 && clients.length === 0 && (
-        <EmptyState
-          title="Nothing to cost yet"
-          body="Close a job and invoice it, and it appears here with what it actually cost to do."
-        />
+        <EmptyState title="Nothing closed in this window." />
       )}
     </div>
   );

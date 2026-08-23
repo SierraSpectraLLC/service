@@ -69,7 +69,7 @@ export default async function MoneyPage() {
     <div className="container wide">
       <PageHead
         title="Billing"
-        sub="Whose move is it, in money. Every number here is summed from the work and the payments when you load the page - nothing is stored."
+        sub="Whose move is it, in money."
       />
       <MoneyTabs active="overview" counts={{
         invoices: full.filter((f) => f.row.status !== "void").length,
@@ -92,8 +92,7 @@ export default async function MoneyPage() {
       <Panel
         title="Needs an invoice"
         count={unbilled.length}
-        hint="Closed work with nothing billed against it. A covered job still gets an invoice - at $0, naming the agreement - because the visit belongs on the record."
-        empty="Everything closed has been billed."
+        empty="Nothing to invoice."
       >
         {unbilled.length > 0 && unbilled.map((j) => (
           <div key={j.woId} className="row-2" style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
@@ -115,8 +114,7 @@ export default async function MoneyPage() {
       <Panel
         title="Waiting on clients"
         count={waiting.length}
-        hint="Sent and not yet settled, oldest first."
-        empty="Nothing is outstanding."
+        empty="Nothing outstanding."
       >
         {waiting.length > 0 && waiting.map((v) => {
           const row = byId.get(v.id);

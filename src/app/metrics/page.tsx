@@ -169,7 +169,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <div className="panel-cols">
         <div>
       <Panel title="PM compliance"
-        hint="Scheduled maintenance that fell due in the window. A task reopened after being done counts as open - the work is not done.">
+        hint="Maintenance due in the window">
         {pmTotal === 0 ? (
           <div className="mut t-body">No scheduled maintenance fell due in this window.</div>
         ) : (
@@ -196,7 +196,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         )}
       </Panel>
       <Panel title="Hours"
-        hint="Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or unit where they happened.">
+        hint="Logged labor">
         {hoursByClient.length === 0 ? (
           <div className="mut t-body">No hours logged in this window.</div>
         ) : (
@@ -235,7 +235,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         <Panel
           title="Days to pay"
           count={payDays.length}
-          hint="Weighted by amount, over invoices actually settled - a client who pays five small bills at once and one large one at ninety days is a ninety-day client. Costing has the margin beside it."
+          hint="Weighted by amount, over settled invoices"
         >
           {payDays.map((c) => (
             <div key={c.orgId} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
@@ -247,14 +247,13 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
             </div>
           ))}
           <div className="mut t-small" style={{ marginTop: 8 }}>
-            <Link href="/money/costing">Costing</Link> puts this beside each client&apos;s margin,
-            which is the pair the renewal conversation turns on.
+            <Link href="/money/costing">Costing →</Link>
           </div>
         </Panel>
       )}
 
       <Panel title="Time in stage" count={active.length}
-        hint="Active systems, longest-parked first. Ages count from when the stage was added (systems that predate stage tracking count from their creation)."
+        hint="Active systems, longest-parked first"
         empty="No active systems">
         {active.length === 0 ? null : <>{active.map((i) => (
           <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
@@ -274,7 +273,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         </div>
         <div>
       <Panel title="Turnaround"
-        hint="Days from a system entering the shop to its first Shipped. Days it spent in another organization's queue are shown separately - the client waited for them, but nobody here could have shortened them.">
+        hint="Intake to first Shipped">
         {turnaround.length === 0 ? (
           <div className="mut t-body">Nothing shipped in this window.</div>
         ) : (
@@ -315,7 +314,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         )}
       </Panel>
       <Panel title="Average days per stage"
-        hint="From completed stage transitions (a stage added and later removed). Builds up as systems move through the shop.">
+        hint="From completed stage transitions">
         {avgRows.map((r) => (
           <div key={r.stage} style={{ padding: "7px 4px", borderTop: "1px solid var(--line)" }}>
             <div className="t-body" style={{ display: "flex", alignItems: "center", gap: 8 }}>

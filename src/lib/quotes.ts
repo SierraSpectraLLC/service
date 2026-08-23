@@ -120,7 +120,7 @@ export function approvalConsequence(input: {
     // Said plainly rather than discovered when nobody turns up: the job is
     // recorded either way, and pretending otherwise is how the client finds
     // out on the day of the visit.
-    bits.push(`the job opens on credit hold while ${input.clientName}'s account is past due, so it will not be scheduled until that clears`);
+    bits.push(`the job opens on credit hold while ${input.clientName}'s account is past due`);
   }
   return `${bits.join("; ")}.`;
 }
@@ -130,8 +130,7 @@ export function approvalConsequence(input: {
  * engineer will see it, not into a field on the quote nobody opens again.
  */
 export const declineConsequence = (): string =>
-  "Declining closes the quote and posts your reason to the job, where the engineer will read it. "
-  + "Nothing is scheduled and nothing is charged.";
+  "Closes the quote. Your reason is passed to the engineer.";
 
 /**
  * Renewal pricing, from what the last term actually cost to serve.

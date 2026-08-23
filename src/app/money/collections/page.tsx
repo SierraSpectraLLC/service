@@ -46,12 +46,12 @@ export default async function CollectionsPage() {
       <PageHead
         crumb={<><Link href="/money">Billing</Link> › <b>Collections</b></>}
         title="Collections"
-        sub="Every invoice with a rung due, and who that rung is addressed to. Nothing here is sent by opening the page."
+        sub=""
       />
       <MoneyTabs active="collections" counts={{ collections: late.length }} />
 
       {late.length === 0
-        ? <EmptyState title="Nothing is in collections." body="Every open invoice is inside its terms." />
+        ? <EmptyState title="Nothing in collections." />
         : (
           <>
             <div className="mut t-body" style={{ margin: "10px 0" }}>
@@ -84,16 +84,13 @@ export default async function CollectionsPage() {
                 >
                   {broken && (
                     <div className="t-body" style={{ padding: "6px 0", color: "var(--t-bad-fg)" }}>
-                      {broken} The ladder skips a rung.
+                      {broken}
                     </div>
                   )}
                   {openDisputes.map((d) => (
                     <div key={d.id} className="t-body" style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
                       <span className="pill warn">Disputed</span>{" "}
                       {d.reason}
-                      <span className="mut t-meta" style={{ display: "block" }}>
-                        Reminders quote only the undisputed remainder until it is resolved.
-                      </span>
                     </div>
                   ))}
 
@@ -126,7 +123,7 @@ export default async function CollectionsPage() {
                               {s.contact
                                 ? `to ${s.contact.name}, ${s.contact.role.toLowerCase()}`
                                 : "to the billing contact"}
-                              {sent ? ` · sent ${sent.sentOn}` : ` · ${s.rung.why}`}
+                              {sent ? ` · sent ${sent.sentOn}` : ""}
                             </span>
                           </span>
                           <span className="mut t-meta" style={{ width: 74, flexShrink: 0 }}>
@@ -143,14 +140,9 @@ export default async function CollectionsPage() {
                   </div>
 
                   {!step && (
-                    <div className="mut t-small" style={{ marginTop: 6 }}>
-                      Nothing is due on the ladder today.
-                    </div>
+                    <div className="mut t-small" style={{ marginTop: 6 }}>Nothing due today.</div>
                   )}
-                  <div className="mut t-meta" style={{ marginTop: 6 }}>
-                    {feeClause(policy) || "No late fee under this client's policy."}
-                    {brokenPromise ? " A broken promise moves the conversation up one rung." : ""}
-                  </div>
+
                   <div className="row-2" style={{ marginTop: 8 }}>
                     <Link href={`/money/invoices/${f.row.id}`} className="btn sm" style={{ textDecoration: "none" }}>
                       Open the invoice

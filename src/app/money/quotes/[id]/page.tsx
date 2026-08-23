@@ -114,7 +114,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       )}
 
       {clause && (
-        <Panel title="Terms that ride the paper" hint="A late charge is only collectable if the client saw it before agreeing.">
+        <Panel title="Terms">
           <div className="t-body">{clause}</div>
         </Panel>
       )}

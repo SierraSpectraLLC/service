@@ -119,7 +119,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
       <PageHead
         crumb={<>Operations › <b>Purchasing</b></>}
         title="Purchasing"
-        sub="Orders are raised from a stockroom's reorder list, priced from the price book. Receiving here is what puts stock on the shelf, so the count and the paperwork can't drift apart."
+        sub="Orders and receiving."
         actions={<Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>}
       />
       <Toolbar
@@ -162,7 +162,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           { key: "when", label: "Raised", width: "70px", align: "right", hideMobile: true },
         ]}
         rows={[...open.map(toRow), ...closed.map(toRow)]}
-        empty="No orders yet - open a stockroom and use its Needs ordering list to raise the first one"
+        empty="No orders."
       />
       <Legend items={[
         { tone: "neutral", label: "draft" },

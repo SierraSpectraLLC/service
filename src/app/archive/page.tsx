@@ -49,7 +49,7 @@ export default async function ArchivePage({ searchParams }: { searchParams: Prom
       <PageHead
         crumb={<>Operations › <b>Archived</b></>}
         title="Archived systems"
-        sub="Retired from the active fleet, kept in full. Open one to restore it."
+        sub="Retired systems. Open one to restore it."
       />
       <Toolbar
         search={

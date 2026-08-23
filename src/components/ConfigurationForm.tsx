@@ -235,7 +235,7 @@ export default function ConfigurationForm(props: {
   return (
     <>
       <Panel title="This instance"
-        hint="The portal's name, who operates it, and which optional workflows are switched on.">
+        hint="">
         <div className="pf2">
           <Field label="Name">
             <input value={brandDraft.name} onChange={(e) => { clearBar(); setBrandDraft({ ...brandDraft, name: e.target.value }); }}
@@ -249,7 +249,7 @@ export default function ConfigurationForm(props: {
         {/* Names an operator the moment it's picked - who runs the instance is
             not a draft to sit unsaved behind a bar. */}
         <Field label="Operated by"
-          hint="The operator is named on sign-off packets and reports; systems staff create are shared with it."
+          hint="Named on sign-off packets and reports."
           error={opError || undefined}>
           <select value={props.operatorOrgId ?? ""} disabled={pending}
             onChange={(e) => {
@@ -342,7 +342,7 @@ export default function ConfigurationForm(props: {
           is the point, since nobody can pick a five-stop gradient from a list
           of hex codes. */}
       <Panel title="Appearance"
-        hint="The header bar and the spectrum above it. Organizations that set their own colour keep it - this is what everyone else sees.">
+        hint="Header colors.">
 
         <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: 12 }}>
           <div style={{ height: bandH, background: gradientCss(stops) }} />

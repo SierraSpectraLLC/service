@@ -84,8 +84,7 @@ describe("the sentences under the buttons", () => {
   });
 
   it("tells them where a declined reason goes", () => {
-    expect(declineConsequence()).toContain("posts your reason to the job");
-    expect(declineConsequence()).toContain("nothing is charged");
+    expect(declineConsequence()).toContain("reason is passed to the engineer");
   });
 });
 

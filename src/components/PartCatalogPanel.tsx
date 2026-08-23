@@ -238,7 +238,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
       <PageHead
         title="Parts book"
-        sub="What each number means, so a part fitted in March still has a name in December. Nothing here is required to record a part - an unknown number always works."
+        sub="What each part number means."
         actions={<button className="btn sm primary" onClick={() => openAdd()}>+ Part number</button>}
       />
       <Toolbar

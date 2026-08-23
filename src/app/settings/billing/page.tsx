@@ -44,7 +44,7 @@ export default async function BillingSettingsPage() {
     <>
       <PageHead
         title="Billing & payments"
-        sub="Platform defaults, overridden per client on the organization page. Every change is an audit row."
+        sub="Defaults. Override per client on the organization page."
       />
       <BillingDefaultsForm
         policy={policy}

@@ -22,7 +22,7 @@ export default async function ParityPage({ searchParams }: { searchParams: Promi
       <PageHead
         crumb={<>Operations › <b>Sheet parity</b></>}
         title="Google Sheet parity"
-        sub="Polled hourly. Nothing is auto-applied - you decide which record wins."
+        sub="Polled hourly. You decide which record wins."
       />
       <Toolbar facets={
         <FacetStrip facets={[

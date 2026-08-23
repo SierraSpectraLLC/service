@@ -114,8 +114,7 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
 
           {covered > 0 && (
             <div className="mut t-small" style={{ marginTop: 8 }}>
-              {formatCents(covered)} of this visit was covered by your agreement and bills at nothing.
-              The visit is on your service record either way.
+              {formatCents(covered)} covered by your agreement.
             </div>
           )}
           {invoice.note && <div className="t-small" style={{ marginTop: 8 }}>{invoice.note}</div>}
@@ -144,14 +143,13 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
                     <div className="mut t-small" style={{ marginTop: 6 }}>{cardLine}</div>
                   )}
                   <div className="mut t-meta" style={{ marginTop: 6 }}>
-                    Payment is handled by Stripe on their own page. No card number reaches us.
+                    Payment is handled by Stripe.
                   </div>
                 </>
               ) : (
                 <div className="mut t-small">
                   {`Please send a check for ${formatCents(due)} referencing ${invoice.number}`}
-                  {pay.checkTo ? `, payable to ${pay.checkTo}` : ""}. Reply to the email this link came in
-                  if you would rather pay by bank transfer and we will send details.
+                  {pay.checkTo ? `, payable to ${pay.checkTo}` : ""}.
                 </div>
               )}
               {payError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{payError}</div>}
@@ -159,8 +157,7 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
           )}
 
           <div className="mut t-meta" style={{ marginTop: 10 }}>
-            Question a line? Reply to the email this link came in. We pause that line while we sort it out,
-            and the rest stays due.
+            Question a line? Reply to the email this link arrived in.
           </div>
         </div>
       ) : (
@@ -183,8 +180,7 @@ export default function ClientInvoice({ brandName, orgName, apEmail, invoice, st
           ))}
           {statement.open.length === 0 && <div className="mut t-body">Nothing is outstanding. Thank you.</div>}
           <div className="mut t-small" style={{ marginTop: 10 }}>
-            Reminders go to {apEmail || "the contact on file"} rather than to the lab. Tell us if that
-            should change and we will point them at the right desk.
+            Reminders go to {apEmail || "the contact on file"}.
           </div>
         </div>
       )}

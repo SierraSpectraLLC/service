@@ -104,8 +104,7 @@ export default function HoursPanel({
       )}
       {canEdit && !defaultBillable && (
         <div className="mut t-meta" style={{ margin: "-6px 0 10px" }}>
-          Hours here start unbillable{coveredBy ? ` - ${coveredBy} covers the labor` : " - the agreement covers the labor"}.
-          Tick Billable for work beyond the contract.
+          Covered{coveredBy ? ` by ${coveredBy}` : ""} - hours start unbillable.
         </div>
       )}
 

@@ -77,7 +77,7 @@ export default async function InvoicesPage({ searchParams }: {
       <PageHead
         crumb={<><Link href="/money">Billing</Link> › <b>Invoices</b></>}
         title="Invoices"
-        sub="A balance here is a sum over lines, fees and payments taken as the page renders. No invoice stores what it is owed."
+        sub=""
       />
       <MoneyTabs active="invoices" counts={{ invoices: full.filter((f) => f.row.status !== "void").length }} />
       <Toolbar
@@ -106,7 +106,7 @@ export default async function InvoicesPage({ searchParams }: {
           { key: "balance", label: "Open", width: "110px" },
         ]}
         rows={shown.map(toRow)}
-        empty="No invoices yet. Close a job and draft one from Overview."
+        empty="No invoices."
       />
     </div>
   );

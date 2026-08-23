@@ -46,7 +46,7 @@ export default function InvoiceLineList({ lines, totalCents, editable }: {
     const why = await confirmReason({
       title: "Remove this line?",
       context: l.description,
-      body: "Only a draft can lose a line. Once the invoice is sent, money comes off by a credit line so both facts stay on the record.",
+      body: "Sent invoices keep their lines - use a credit instead.",
       action: "Remove line",
       tone: "bad",
     });
@@ -63,10 +63,8 @@ export default function InvoiceLineList({ lines, totalCents, editable }: {
     <Panel
       title="Lines"
       count={lines.length}
-      hint={coveredCents > 0
-        ? `${formatCents(coveredCents)} of this work is covered and prices at $0 - the visit is still on the record.`
-        : undefined}
-      empty="Nothing on this invoice."
+      hint={coveredCents > 0 ? `${formatCents(coveredCents)} covered at $0` : undefined}
+      empty="No lines."
     >
       {lines.length > 0 && (
         <>

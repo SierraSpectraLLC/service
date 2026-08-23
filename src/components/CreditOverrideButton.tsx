@@ -30,7 +30,7 @@ export default function CreditOverrideButton({ orgId, orgName, overridden, canOv
   const run = async () => {
     const why = await confirmReason({
       title: `Work for ${orgName} anyway?`,
-      body: "New jobs stop opening on hold until this is lifted. Say why - the reason is the record, and it is what somebody asks about later.",
+      body: "Lifts the hold. The reason is recorded.",
       action: "Override the hold",
     });
     if (!why) return;
@@ -45,9 +45,7 @@ export default function CreditOverrideButton({ orgId, orgName, overridden, canOv
   const ask = async () => {
     const ok = await confirmDialog({
       title: `Ask ${orgName} for ${formatCents(depositCents)}?`,
-      body: "It raises a real invoice due on receipt, because \"pay us this and we will come out\" is "
-        + "only an agreement once there is something to pay against. It does NOT lift the hold - "
-        + "recording the payment does that by arithmetic, and lifting it early is what the override is for.",
+      body: "Raises an invoice due on receipt. Recording its payment clears the hold.",
       action: "Raise the deposit",
     });
     if (!ok) return;

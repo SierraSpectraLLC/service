@@ -87,12 +87,12 @@ export default async function ContractsPage() {
       <PageHead
         crumb={<><Link href="/money">Billing</Link> › <b>Contracts</b></>}
         title="Contracts"
-        sub="What is on standing arrangement and how much of it is left - drawn down from the work itself, never from a stored balance."
+        sub=""
       />
       <MoneyTabs active="contracts" counts={{ contracts: live.length }} />
 
       {live.length === 0 && uncontracted.length === 0 && (
-        <EmptyState title="Nothing on contract yet" body="Agreements you write appear here with their burn-down." />
+        <EmptyState title="No contracts." />
       )}
 
       {cards_.map(({ a, d, used, visits, parts, rate, renewal }) => {
@@ -137,11 +137,11 @@ export default async function ContractsPage() {
                 )}
               </span>
             </div>
-            <div className="mut t-small" style={{ marginTop: 8 }}>
-              A renewal priced off this term&apos;s burn would come to{" "}
-              <b>{formatCents(renewal.valueCents)}</b> - {renewal.basis}. The renewals cron drafts it
-              inside the notice window and leaves it for somebody to read.
-            </div>
+            {renewal.valueCents > 0 && (
+              <div className="mut t-small" style={{ marginTop: 8 }}>
+                Renewal at this term&apos;s usage: <b>{formatCents(renewal.valueCents)}</b>
+              </div>
+            )}
           </Panel>
         );
       })}
@@ -150,7 +150,7 @@ export default async function ContractsPage() {
         <Panel
           title="No contract"
           count={uncontracted.length}
-          hint="What their time-and-materials has actually come to, and what a contract would be worth to both sides."
+          hint="Trailing time-and-materials"
         >
           {uncontracted.map(({ org, trailing, months, invoices: n, proposal }) => (
             <div key={org.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
@@ -162,10 +162,7 @@ export default async function ContractsPage() {
                 </span>
               </div>
               {proposal && (
-                <div className="mut t-small" style={{ marginTop: 4 }}>
-                  {proposal.line} That is {formatCents(proposal.savingCents)} a year cheaper for them and
-                  predictable for you - and it ends the collections conversation.
-                </div>
+                <div className="mut t-small" style={{ marginTop: 4 }}>{proposal.line}</div>
               )}
             </div>
           ))}

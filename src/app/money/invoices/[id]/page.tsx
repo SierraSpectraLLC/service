@@ -128,10 +128,6 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       {warning && row.status === "draft" && (
         <div className="card" style={{ borderLeft: "3px solid var(--t-warn-fg)" }}>
           <div className="t-body">{warning}</div>
-          <div className="mut t-small" style={{ marginTop: 4 }}>
-            A missing or exhausted PO is one of the two silent AP rejections. It is flagged here rather than
-            discovered at day 45 - and it never blocks the invoice, because the work is already done.
-          </div>
         </div>
       )}
 
@@ -148,8 +144,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <Panel
           title="Job cost"
           hint={cost
-            ? `Loaded labor at ${formatCents(src.context.loadedLaborCents)} an hour. Covered visits roll up against the agreement instead.`
-            : "Set the loaded labor rate in billing settings and this panel will show margin. Until then it would be reporting a number nobody has given it."}
+            ? `Loaded labor ${formatCents(src.context.loadedLaborCents)}/h`
+            : "Set the loaded labor rate in Billing settings to see margin."}
         >
           {cost && (
             <>
@@ -209,7 +205,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         />
       )}
 
-      <Panel title="History" count={history.length} hint="Every step on this invoice is an audit row." empty="Nothing yet.">
+      <Panel title="History" count={history.length} empty="Nothing yet.">
         {history.length > 0 && history.map((a) => (
           <div key={a.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
             <span className="mut t-small" style={{ width: 96 }}>{shopMonthDay(a.createdAt)}</span>

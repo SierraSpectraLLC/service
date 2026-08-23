@@ -236,9 +236,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
   return (
     <>
       <Panel title={<>People at {org.name}</>}
-        hint="Everyone here signs in with their email - no passwords. An editor can change records they have edit
-          access to; a viewer reads. A whole-domain entry lets anyone with that email address in, so only the
-          platform owner can add or change one.">
+        hint="Sign-in is by email code. Editors change; viewers read.">
         {people.map((r) => {
           const domain = r.entry.trim().startsWith("@");
           return (
@@ -476,7 +474,7 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
 
       {isOwner && (
         <Panel title="File storage">
-          <StorageMeter quota={org.quota} hint={`${org.name}'s own shelf plus the files on every system and unit they own.`} />
+          <StorageMeter quota={org.quota} hint="" />
           <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
             <select value={STORAGE_TIERS.some((t) => t.mb === limitMb) ? String(limitMb) : "custom"}
               aria-label={`File storage limit for ${org.name}`} className="t-small" style={{ width: "auto" }}
