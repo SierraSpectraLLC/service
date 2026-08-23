@@ -15,12 +15,18 @@ export const esc = (s: string) =>
 /** The app's palette, restated for mail. Keep in step with globals, not fashionable. */
 export const EMAIL = {
   ink: "#172A4A",
+  /**
+   * Body copy inside a row, one step lighter than the navy headings - the
+   * app's --ink. Navy on every line reads as a page of titles.
+   */
+  body: "#1E293B",
   muted: "#64748B",
   faint: "#94A3B8",
   border: "#E2E8F0",
   hairline: "#EDF1F6",
   ground: "#F4F6F9",
   panel: "#F7F9FC",
+  card: "#FFFFFF",
   link: "#1D6396",
   font: "Helvetica,Arial,sans-serif",
   mono: "Menlo,Consolas,monospace",

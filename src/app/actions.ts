@@ -3867,6 +3867,38 @@ export async function setEodSkip(
   revalidatePath("/eod");
 }
 
+/**
+ * Mark today's line as written for our own bench rather than for the client.
+ * The text is kept and still shows on the system and in the internal digest;
+ * the client's report and the partner digest simply never carry it.
+ */
+export async function setEodInternal(
+  target: { instrumentId: number | null; assetId: number | null }, internal: boolean,
+) {
+  const u = await requireStaff();
+  const date = shopToday();
+  if (target.instrumentId !== null) {
+    const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
+    if (!inst) throw new Error("Not found");
+    await db.insert(eodUpdates)
+      .values({ tenantOrgId: inst.tenantOrgId, instrumentId: target.instrumentId, date, ownerOrgId: inst.ownerOrgId, internal, updatedBy: u.name, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [eodUpdates.instrumentId, eodUpdates.date],
+        set: { internal, updatedBy: u.name, updatedAt: new Date() },
+      });
+  } else if (target.assetId !== null) {
+    const [a] = await db.select().from(assets).where(eq(assets.id, target.assetId));
+    if (!a) throw new Error("Not found");
+    await db.insert(eodUpdates)
+      .values({ tenantOrgId: a.tenantOrgId, assetId: target.assetId, date, ownerOrgId: a.ownerOrgId, internal, updatedBy: u.name, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [eodUpdates.assetId, eodUpdates.date],
+        set: { internal, updatedBy: u.name, updatedAt: new Date() },
+      });
+  } else throw new Error("Not found");
+  revalidatePath("/eod");
+}
+
 // ---------------- Discussions ----------------
 
 /**

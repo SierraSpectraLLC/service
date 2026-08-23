@@ -10,10 +10,15 @@
  * sends to land in one conversation - see lib/emailThread. `opts.from`
  * overrides the sending address for one KIND of mail; `opts.replyTo` says
  * where answers should go when that is not the address it was sent from.
+ *
+ * `opts.text` makes the message multipart/alternative: the same content as
+ * plain text, for clients that refuse HTML, for a screen reader in text mode,
+ * and for the spam scorers that treat an HTML-only mail as a smell. Generated
+ * from the same data as the HTML by the composer, never hand-kept.
  */
 export async function sendEmail(
   to: string[], subject: string, html: string,
-  opts: { headers?: Record<string, string>; from?: string; replyTo?: string } = {},
+  opts: { headers?: Record<string, string>; from?: string; replyTo?: string; text?: string } = {},
 ): Promise<void> {
   const headers = opts.headers;
   const res = await fetch("https://api.resend.com/emails", {
@@ -24,6 +29,7 @@ export async function sendEmail(
     },
     body: JSON.stringify({
       from: opts.from?.trim() || process.env.EMAIL_FROM, to, subject, html,
+      ...(opts.text?.trim() ? { text: opts.text } : {}),
       ...(opts.replyTo?.trim() ? { reply_to: opts.replyTo.trim() } : {}),
       ...(headers && Object.keys(headers).length ? { headers } : {}),
     }),
