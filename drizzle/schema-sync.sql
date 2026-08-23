@@ -3096,3 +3096,16 @@ ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "expedite_ok" boolean NOT NUL
 -- brand parts ship under (packing slips, blind-ship instructions).
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "cross_dock_days" integer NOT NULL DEFAULT 1;
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "parts_brand" text NOT NULL DEFAULT 'Ridgeline';
+
+-- ── Drop-ship and urgency on purchase orders ───────────────────────────────
+-- ship_to_site_id null = ships to the stockroom as always; set = the vendor
+-- ships straight to that client site under our paperwork (blind ship), and
+-- receiving confirms delivery instead of shelving. urgent = overnight it.
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "ship_to_site_id" integer;
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "urgent" boolean NOT NULL DEFAULT false;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'po_ship_to_site_fk') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "po_ship_to_site_fk"
+      FOREIGN KEY ("ship_to_site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

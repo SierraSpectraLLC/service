@@ -1931,6 +1931,15 @@ export const purchaseOrders = pgTable("purchase_orders", {
   reference: text("reference").notNull().default(""), // vendor quote or confirmation number
   note: text("note").notNull().default(""),
   expectedAt: text("expected_at").notNull().default(""), // free text, like parts.eta
+  /**
+   * Drop-ship destination. Null is the normal case - the vendor ships to the
+   * stockroom above. Set, it means the vendor ships straight to this client
+   * site under our paperwork: receiving confirms delivery instead of shelving,
+   * and the send step carries the blind-ship instruction.
+   */
+  shipToSiteId: integer("ship_to_site_id").references((): AnyPgColumn => orgSites.id, { onDelete: "set null" }),
+  /** Somebody is waiting on this. Overnight it and say so on the paperwork. */
+  urgent: boolean("urgent").notNull().default(false),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   sentAt: timestamp("sent_at"),

@@ -148,6 +148,17 @@ const FIXTURE = `
 
   -- Two sites so parts tax has an address to belong to: Lab Zen's bench is in a
   -- taxing county, Coastal's dock is not.
+  -- Vendor offers with the sourcing facts, arranged so cheapest and fastest
+  -- disagree: the OEM is quick but must cross-dock; the reseller drop-ships.
+  INSERT INTO part_prices (part_number, vendor, is_oem, price_cents, lead_days, drop_ships, expedite_ok, url, updated_by) VALUES
+    ('5188-5365', 'Agilent',        true,  5200, 2, false, false, '', 'dev@local.test'),
+    ('5188-5365', 'Frit & Ferrule', false, 3900, 3, true,  true,  '', 'dev@local.test'),
+    ('WAT271066', 'Waters',         true,  71000, 5, false, false, '', 'dev@local.test'),
+    ('WAT271066', 'Frit & Ferrule', false, 64000, 2, true,  true,  '', 'dev@local.test'),
+    ('ED-A72401', 'Edwards',        true,  23500, 10, false, false, '', 'dev@local.test');
+  -- One price nobody has confirmed in an age, for the stale pill.
+  UPDATE part_prices SET updated_at = now() - interval '120 days' WHERE part_number = 'ED-A72401';
+
   INSERT INTO org_sites (org_id, name, address, contact_name, created_by) VALUES
     (1, 'Lab Zen - Building C', '1400 Harbor Way, Richmond, CA 94804', 'Rita Alvarez', '${OWNER}'),
     (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', '${OWNER}');

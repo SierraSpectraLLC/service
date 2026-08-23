@@ -8662,6 +8662,7 @@ export type PoLineInput = { partNumber: string; name?: string; qty?: string; pri
  */
 export async function createPurchaseOrder(data: {
   vendor: string; stockroomId: number; reference?: string; note?: string; expectedAt?: string;
+  urgent?: boolean;
   lines: PoLineInput[];
 }): Promise<{ error?: string; id?: number }> {
   const u = await requireEditor();
@@ -8679,6 +8680,7 @@ export async function createPurchaseOrder(data: {
     tenantOrgId: acc.room.tenantOrgId ?? myTenantOrgId(u),
     number: nextPoNumber(existing.map((r) => r.number)),
     vendor, stockroomId: data.stockroomId, orgId: acc.room.orgId,
+    urgent: !!data.urgent,
     reference: (data.reference ?? "").trim().slice(0, 80),
     note: (data.note ?? "").trim().slice(0, 300),
     expectedAt: (data.expectedAt ?? "").trim().slice(0, 40),
@@ -8694,7 +8696,8 @@ export async function createPurchaseOrder(data: {
   }
   await audit({
     actor: u.email, entityType: "po", entityId: po.id,
-    action: `raised ${po.number} to ${vendor}: ${usable.length} line${usable.length === 1 ? "" : "s"} for "${acc.room.name}"`,
+    action: `raised ${po.number} to ${vendor}: ${usable.length} line${usable.length === 1 ? "" : "s"} for "${acc.room.name}"`
+      + (data.urgent ? " - URGENT" : ""),
   });
   revPo();
   return { id: po.id };
@@ -8720,6 +8723,46 @@ export async function updatePurchaseOrder(id: number, data: {
       action: `${po.number} vendor: ${po.vendor} -> ${vendor}`, field: "vendor", oldValue: po.vendor, newValue: vendor,
     });
   }
+  revPo(id);
+  return {};
+}
+
+/**
+ * How an order travels: to the shelf as always, or drop-shipped straight to a
+ * client site under our paperwork - plus whether somebody is waiting on it.
+ * Draft-only, like every other edit: once the vendor has the order, changing
+ * where it ships is a phone call, not a field.
+ */
+export async function setPoShipping(id: number, data: {
+  shipToSiteId: number | null; urgent: boolean;
+}): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const { po, manage, see } = await poAccess(u, id);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't change this order" : "Not found" };
+  if (!poEditable(po.status)) return { error: `${po.number} has already gone to the vendor` };
+
+  let site: typeof orgSites.$inferSelect | null = null;
+  if (data.shipToSiteId !== null) {
+    [site] = await db.select().from(orgSites).where(eq(orgSites.id, data.shipToSiteId));
+    if (!site || site.archived) return { error: "That site is gone" };
+    if (po.tenantOrgId !== null && site.tenantOrgId !== null && site.tenantOrgId !== po.tenantOrgId) {
+      return { error: "Not found" };
+    }
+  }
+  const changes: string[] = [];
+  if ((po.shipToSiteId ?? null) !== (data.shipToSiteId ?? null)) {
+    changes.push(site ? `drop-ship to ${site.name || "the site"}` : "ships to the stockroom");
+  }
+  if (po.urgent !== data.urgent) changes.push(data.urgent ? "URGENT" : "not urgent");
+  if (!changes.length) return {};
+  await db.update(purchaseOrders).set({ shipToSiteId: data.shipToSiteId, urgent: data.urgent })
+    .where(eq(purchaseOrders.id, id));
+  await audit({
+    actor: u.email, entityType: "po", entityId: id, tenantOrgId: po.tenantOrgId,
+    action: `${po.number}: ${changes.join(", ")}`,
+    field: "shipping", oldValue: String(po.shipToSiteId ?? ""), newValue: String(data.shipToSiteId ?? ""),
+  });
   revPo(id);
   return {};
 }
@@ -8790,7 +8833,8 @@ export async function sendPurchaseOrder(id: number): Promise<{ error?: string }>
     actor: u.email, entityType: "po", entityId: id,
     action: `sent ${po.number} to ${po.vendor} - ${totals.ordered} unit${totals.ordered === 1 ? "" : "s"}`
       + `${totals.priced ? `, ${formatCents(totals.cents)}` : ""}`
-      + `${totals.unpriced ? ` (${totals.unpriced} line${totals.unpriced === 1 ? "" : "s"} unpriced)` : ""}`,
+      + `${totals.unpriced ? ` (${totals.unpriced} line${totals.unpriced === 1 ? "" : "s"} unpriced)` : ""}`
+      + (po.shipToSiteId !== null ? " - drop-ship" : "") + (po.urgent ? " - URGENT" : ""),
     field: "status", oldValue: "draft", newValue: "sent",
   });
   revPo(id);
@@ -8814,19 +8858,30 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
   if (!poReceivable(po.status)) {
     return { error: po.status === "draft" ? `${po.number} hasn't been sent yet` : `${po.number} is ${PO_LABEL[po.status].toLowerCase()}` };
   }
-  if (po.stockroomId === null) return { error: "This order's stockroom is gone - receive it into a room instead" };
-  const item = await stockLineFor(po.stockroomId, line.partNumber, { name: line.name });
-  if (!item) return { error: "Not found" };
+  // A drop-shipped line never touches a shelf: the vendor delivered it to the
+  // client's site, so receiving here is confirming the delivery happened. The
+  // cost stays on the PO (and the job it names), not on any room's held cost -
+  // but everything else about arrival (the job's part rows, the PO's status)
+  // runs the same as a dock receipt below.
+  const dropSite = po.shipToSiteId === null ? null
+    : (await db.select().from(orgSites).where(eq(orgSites.id, po.shipToSiteId)))[0] ?? null;
+  if (po.shipToSiteId !== null) {
+    await db.update(poLines).set({ qtyReceived: line.qtyReceived + qty }).where(eq(poLines.id, lineId));
+  } else {
+    if (po.stockroomId === null) return { error: "This order's stockroom is gone - receive it into a room instead" };
+    const item = await stockLineFor(po.stockroomId, line.partNumber, { name: line.name });
+    if (!item) return { error: "Not found" };
 
-  await db.update(poLines).set({ qtyReceived: line.qtyReceived + qty }).where(eq(poLines.id, lineId));
-  await moveStock({
-    item, delta: qty, kind: "receive", actor: u.email,
-    reason: [`${po.number} from ${po.vendor}`, (note ?? "").trim()].filter(Boolean).join(" - "),
-  });
-  // What we actually paid becomes the shelf's held cost - later issues are
-  // valued at this rather than at whatever the price book says that week.
-  if (line.unitCents !== null) {
-    await db.update(stockItems).set({ unitCostCents: line.unitCents }).where(eq(stockItems.id, item.id));
+    await db.update(poLines).set({ qtyReceived: line.qtyReceived + qty }).where(eq(poLines.id, lineId));
+    await moveStock({
+      item, delta: qty, kind: "receive", actor: u.email,
+      reason: [`${po.number} from ${po.vendor}`, (note ?? "").trim()].filter(Boolean).join(" - "),
+    });
+    // What we actually paid becomes the shelf's held cost - later issues are
+    // valued at this rather than at whatever the price book says that week.
+    if (line.unitCents !== null) {
+      await db.update(stockItems).set({ unitCostCents: line.unitCents }).where(eq(stockItems.id, item.id));
+    }
   }
   // Any open request for this part on any work order is now satisfied - the
   // sticky-note gap between "ordered" and "it's here" is what this closes.
@@ -8889,6 +8944,8 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
   await audit({
     actor: u.email, entityType: "po", entityId: line.poId,
     action: `received ${qty} × PN ${line.partNumber} on ${po.number}`
+      + (dropSite !== null || po.shipToSiteId !== null
+        ? ` - delivered at ${dropSite?.name || "the client site"}` : "")
       + `${next === "received" ? " - order complete" : ""}`,
   });
   revPo(line.poId);

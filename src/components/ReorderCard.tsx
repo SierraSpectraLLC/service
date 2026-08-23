@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { createPurchaseOrder } from "@/app/actions";
@@ -16,9 +17,14 @@ export type VendorGroup = { vendor: string; lines: SuggestedLine[] };
  * don't know what this costs" is something to go find out, not a reason to let
  * the shelf run empty.
  */
-export default function ReorderCard({ stockroomId, groups }: {
+export default function ReorderCard({ stockroomId, groups, mode = "cheapest", urgent = false, baseHref = "" }: {
   stockroomId: number;
   groups: VendorGroup[];
+  /** How the vendor per part was picked - the strip reflects and switches it. */
+  mode?: "cheapest" | "fastest";
+  urgent?: boolean;
+  /** The room's URL, for the mode links. Empty hides the strip. */
+  baseHref?: string;
 }) {
   const router = useRouter();
   const [skip, setSkip] = useState<Set<string>>(new Set());
@@ -44,6 +50,7 @@ export default function ReorderCard({ stockroomId, groups }: {
       const res = await createPurchaseOrder({
         vendor: g.vendor || "TBD",
         stockroomId,
+        urgent,
         note: g.vendor ? "" : "Vendor not yet chosen - no price on file for these part numbers",
         lines: lines.map((l) => ({
           partNumber: l.partNumber, name: l.name, qty: String(l.qty),
@@ -58,10 +65,25 @@ export default function ReorderCard({ stockroomId, groups }: {
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 4 }}>Needs ordering</div>
+      <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
+        <div className="card-title">Needs ordering</div>
+        {baseHref && (
+          <span className="seg" role="group" aria-label="How to pick the vendor" style={{ marginLeft: "auto" }}>
+            <Link href={`${baseHref}${urgent ? "?rush=1" : ""}`} aria-current={mode === "cheapest" ? "true" : undefined}
+              className={`btn sm${mode === "cheapest" ? " primary" : ""}`} style={{ textDecoration: "none" }}>Cheapest</Link>
+            <Link href={`${baseHref}?buy=fastest${urgent ? "&rush=1" : ""}`} aria-current={mode === "fastest" ? "true" : undefined}
+              className={`btn sm${mode === "fastest" ? " primary" : ""}`} style={{ textDecoration: "none" }}>Fastest</Link>
+            <Link href={`${baseHref}${urgent ? (mode === "fastest" ? "?buy=fastest" : "") : `?${[mode === "fastest" ? "buy=fastest" : "", "rush=1"].filter(Boolean).join("&")}`}`}
+              className={`btn sm${urgent ? " danger" : ""}`} style={{ textDecoration: "none" }}
+              title="Only vendors who can overnight to the door">Urgent</Link>
+          </span>
+        )}
+      </div>
       <div className="mut t-small" style={{ marginBottom: 10 }}>
-        Grouped into the orders they&apos;d become, priced from the cheapest vendor on file
-        (OEM breaks ties). Untick anything you don&apos;t want on the order.
+        {mode === "fastest"
+          ? "Vendors picked by door-to-door days (cross-dock counted when they can't drop-ship)."
+          : "Priced from the cheapest vendor on file (OEM breaks ties)."}
+        {urgent ? " Urgent: only vendors who can overnight." : ""} Untick anything you don&apos;t want on the order.
       </div>
 
       {groups.map((g) => {
@@ -71,7 +93,7 @@ export default function ReorderCard({ stockroomId, groups }: {
         return (
           <div key={g.vendor || "__none"} style={{ borderTop: "1px solid var(--line)", padding: "8px 0" }}>
             <div className="row-2" style={{ alignItems: "baseline", marginBottom: 4 }}>
-              <b className="t-body">{g.vendor || "No vendor priced"}</b>
+              <b className="t-body">{g.vendor || (urgent ? "Nobody on file can overnight these" : "No vendor priced")}</b>
               {priced.length > 0 && <span className="mut t-small">{formatCents(total)}</span>}
               {kept.length > priced.length && (
                 <span className="mut t-meta">
