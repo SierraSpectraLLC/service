@@ -48,6 +48,7 @@ import { TIME_CATEGORIES } from "@/lib/rates";
 import { EXPENSE_KINDS, linesTotal } from "@/lib/billing";
 import {
   asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
+  invoicesForOrg,
 } from "@/lib/invoiceData";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
@@ -55,7 +56,7 @@ import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
 import { feeClause, resolvePolicy } from "@/lib/billingPolicy";
 import { linkState } from "@/lib/dropShare";
 import type { BillingPolicy } from "@/lib/billingPolicy";
-import { holdRefusal, type HeldAction } from "@/lib/credit";
+import { depositToClear, holdRefusal, type HeldAction } from "@/lib/credit";
 import { brandForTenant } from "@/lib/brand";
 import { btn, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
@@ -11628,4 +11629,68 @@ export async function recordStripePayment(input: {
       + (credit && !credit.onHold ? "; the credit hold has cleared" : ""),
   });
   revInvoice(inv);
+}
+
+/**
+ * Ask a held client for enough to get moving again.
+ *
+ * Raises a real invoice for the figure lib/credit.depositToClear computes, due
+ * immediately - not a note, not an email, an invoice, because "pay us $2,000
+ * and we will come out" is only an agreement once there is something to pay
+ * against. Recording the payment clears the hold by arithmetic; there is no
+ * flag to un-set.
+ *
+ * It does NOT lift the hold. That is still the owner's decision with a reason,
+ * and a deposit that lifted a hold on its own would be a way to work around
+ * the override without writing one.
+ */
+export async function requestDeposit(orgId: number, note: string): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const today = shopToday();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+
+  const [standing, ctx] = await Promise.all([creditFor(orgId, today), billingContext(orgId)]);
+  if (!standing.onHold && !standing.override) {
+    return { error: `${org.name} is not on credit hold - there is nothing to clear.` };
+  }
+  const full = await invoicesForOrg(orgId);
+  const open = full.map((f) => invoiceView(asStatementRow(f), today)).filter(isOpen);
+  const cents = depositToClear({
+    policy: ctx.policy,
+    openInvoices: open.map((v) => ({ balanceCents: v.balanceCents, daysLate: v.daysLate })),
+  });
+  if (cents <= 0) return { error: "Nothing would clear it - the hold is on something else." };
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: invoices.number }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, myTenantOrgId(u)));
+    const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: myTenantOrgId(u), orgId, number, status: "sent",
+        issuedOn: today, dueOn: today,          // a deposit that is net 30 is not a deposit
+        poNumber: org.poNumber,
+        note: note.trim() || `Deposit to clear the credit hold on ${org.name}.`,
+        createdBy: u.email,
+      }).returning();
+      await db.insert(invoiceLines).values({
+        invoiceId: inv.id, kind: "fee_ref",
+        description: "Deposit to resume service",
+        detail: `enough to clear the hold on ${org.name}, due on receipt`,
+        qty: 1000, unitCents: cents, covered: false, sourceId: null, position: 0,
+      });
+      await audit({
+        actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: myTenantOrgId(u),
+        action: `raised ${number}, a ${formatCents(cents)} deposit to clear ${org.name}'s credit hold`,
+      });
+      revInvoice(inv);
+      revalidatePath("/work");
+      return { id: inv.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
 }

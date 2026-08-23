@@ -102,7 +102,7 @@ check.
 
 ### Stage 6 - fixtures, captures, this file
 
-34 captures at 1280 and 375 under `docs/design/screens/billing/`, no horizontal
+38 captures at 1280 and 375 under `docs/design/screens/billing/`, no horizontal
 scroll at either width.
 
 ---
@@ -153,9 +153,10 @@ Stripe-recorded payment.
 
 ## Tests
 
-1545 passing across 115 files, up from 1407. New: `rates`, `billing`,
-`statement`, `invoiceIsolation` (DB-backed), `dunning`, `credit`, `quotes`,
-`digestMoney`, `stripe`, `accountingExport`.
+1582 passing across 118 files, up from 1407. New: `rates`, `billing`,
+`statement`, `invoiceIsolation` (DB-backed), `dunning`, `credit`,
+`creditEnforcement`, `creditHoldDb` (DB-backed), `quotes`, `digestMoney`,
+`stripe`, `accountingExport`, `costing`.
 
 ---
 
@@ -292,16 +293,34 @@ as the instructions said. Nothing here presumes them.
 question you asked separately: it now lists only what came back since the last
 edition and summarises the standing rest in one line. Six tests cover it.
 
-**Deliberate omissions from the prototype**, all in the same category - screens
-that describe work later stages own, or figures no row supports yet:
+**Deliberate omissions, four of five since closed.** A follow-on pass built
+them:
 
-- The Collections ladder shows rung state and contacts but not the mockup's
-  full seven-row timeline widget; the rungs and their dates are all present as
-  data.
-- "Request deposit to clear" on the hold panel is not wired; the amount that
-  would clear it is computed and shown.
-- The agency-packet export marks an invoice referred but does not zip the
-  exhibits.
-- Job costing appears on the invoice draft; there is no separate costing
-  sub-tab under /money Overview.
-- Metrics has no days-to-pay column yet.
+- **Job costing** is its own tab - `/money/costing`, with a 30/90/YTD window,
+  margin by work order and by client. A covered job reports "vs AGR-..." rather
+  than a percentage: its value belongs to the agreement, and counting a $0
+  invoice as a total loss would make the contract look like the worst work in
+  the shop. A job with no loaded labor rate, or nothing billed at all, says so
+  instead of dividing by zero.
+- **Days-to-pay** sits beside margin on Costing and has its own panel on
+  Metrics, from the same loader so the two cannot disagree. Weighted by amount,
+  not averaged: a client who pays five small invoices at once and one large one
+  at ninety days is a ninety-day client, and a plain mean would call them a
+  fifteen-day one. Only invoices actually settled count - an open one has an
+  age, which is what aging is for.
+- **"Request deposit to clear"** raises a real invoice due on receipt, because
+  "pay us this and we will come out" is only an agreement once there is
+  something to pay against. It deliberately does NOT lift the hold: recording
+  the payment does that by arithmetic, and a deposit that lifted a hold on its
+  own would be a way around the override without writing one.
+- **The Collections ladder** now draws all seven rungs - what was sent and
+  when, what is owed now, and who each remaining one goes to - because the
+  answer to "why is this still open" is usually three rungs back.
+
+Still open, and the one I would not half-build:
+
+- **The agency-packet export marks an invoice referred but does not zip the
+  exhibits.** `exhibitsFor` already computes what belongs in it and
+  `referInvoice` takes it off the ladder; assembling the documents needs the
+  PDF studio's own path, which is a separate subsystem. A manifest without the
+  documents would be worse than the honest gap.

@@ -30,13 +30,16 @@ import { resolveRate, type RateCard } from "@/lib/rates";
 import { dueDate, invoiceView, isOpen, type InvoiceRow } from "@/lib/statement";
 import { CLEAR, creditStanding, type CreditStanding } from "@/lib/credit";
 import { nextAction, promiseBroken } from "@/lib/dunning";
+import {
+  clientMargin, inWindow, jobMargin, type ClientMargin, type JobMargin,
+} from "@/lib/costing";
 import { daysToExpiry, stale } from "@/lib/quotes";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import type { MoneyInput } from "@/lib/digestMoney";
 import { shopToday } from "@/lib/shopday";
 
 /** Cached per request: three pages on one render all want the settings row. */
-const settings = cache(async () => {
+const settingsRow = cache(async () => {
   const [row] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
   return row ?? null;
 });
@@ -50,7 +53,7 @@ export type BillingContext = {
 /** The policy in force for one client, and the two numbers beside it. */
 export async function billingContext(orgId: number | null): Promise<BillingContext> {
   const [s, org] = await Promise.all([
-    settings(),
+    settingsRow(),
     orgId === null ? Promise.resolve(null) : db.select().from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0] ?? null),
   ]);
   return {
@@ -491,4 +494,108 @@ export async function quoteById(id: number): Promise<FullQuote | null> {
 export async function quoteForOrg(id: number, orgId: number): Promise<FullQuote | null> {
   const rows = await db.select().from(quotes).where(and(eq(quotes.id, id), eq(quotes.orgId, orgId)));
   return (await hydrateQuotes(rows))[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Job costing. Revenue against cost, and what it cost to be owed the money.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every closed job inside the window, costed, plus the same rolled up per
+ * client with days-to-pay beside the margin.
+ *
+ * The cost of a job is read from the rows that already exist - what its parts
+ * landed at, the hours logged against it, its expenses - and the revenue from
+ * the invoice actually raised against it. A job with no invoice bills nothing
+ * and says so; it is the leak the Overview names, seen from the other side.
+ */
+export async function costingBoard(today: string, windowDays: number): Promise<{
+  jobs: JobMargin[];
+  clients: ClientMargin[];
+  loadedLaborCents: number;
+}> {
+  const [woRows, orgRows, settings, full] = await Promise.all([
+    db.select().from(workOrders).where(eq(workOrders.state, "closed")),
+    db.select({ id: orgs.id, name: orgs.name, termsDays: orgs.termsDays }).from(orgs),
+    settingsRow(),
+    allInvoices(),
+  ]);
+  const loaded = settings?.loadedLaborCents ?? 0;
+  const orgName = (id: number | null) => orgRows.find((o) => o.id === id)?.name ?? "";
+
+  const closed = woRows.filter((w) => {
+    const on = w.closedAt ? w.closedAt.toISOString().slice(0, 10) : "";
+    return inWindow(on, today, windowDays);
+  });
+  const ids = closed.map((w) => w.id);
+  const [partRows, timeRows, expenseRows, agreementRows] = ids.length
+    ? await Promise.all([
+        db.select().from(parts).where(inArray(parts.workOrderId, ids)),
+        db.select().from(timeEntries).where(inArray(timeEntries.workOrderId, ids)),
+        db.select().from(expenses).where(inArray(expenses.workOrderId, ids)),
+        db.select().from(agreements),
+      ])
+    : [[], [], [], []];
+
+  const jobs: JobMargin[] = closed.map((w) => {
+    const billed = full
+      .filter((f) => f.row.workOrderId === w.id && f.row.status !== "void" && f.row.status !== "draft")
+      .reduce((n, f) => n + f.lines.reduce(
+        (m, l) => m + (l.covered ? 0 : Math.round(qtyOf(l) * l.unitCents)), 0), 0);
+    // Which paper answered for it, if any - the same picker the draft uses.
+    const cov = coverageFor({
+      agreements: agreementRows.map((a) => ({
+        id: a.id, number: a.number, orgId: a.orgId, status: a.status,
+        startsOn: a.startsOn, endsOn: a.endsOn, instrumentIds: a.instrumentIds,
+        laborCovered: a.kind === "contract",
+        partsCovered: a.kind === "contract" && (a.partsUnlimited || a.partsAllowanceCents > 0),
+      })),
+      orgId: w.orgId, instrumentId: w.instrumentId, today,
+    });
+    return jobMargin({
+      woId: w.id, number: w.number, title: w.title,
+      orgId: w.orgId, orgName: orgName(w.orgId),
+      closedOn: w.closedAt ? w.closedAt.toISOString().slice(0, 10) : "",
+      coveredBy: billed === 0 && cov.agreementNumber ? cov.agreementNumber : "",
+      billedCents: billed,
+      partsCostCents: partRows.filter((p) => p.workOrderId === w.id)
+        .reduce((n, p) => n + (p.costCents ?? 0), 0),
+      billedMinutes: timeRows.filter((t) => t.workOrderId === w.id && t.billable)
+        .reduce((n, t) => n + t.minutes, 0),
+      expensesCents: expenseRows.filter((e) => e.workOrderId === w.id)
+        .reduce((n, e) => n + e.amountCents, 0),
+    }, loaded);
+  }).sort((a, b) => b.closedOn.localeCompare(a.closedOn));
+
+  const byOrg = new Map<number, JobMargin[]>();
+  for (const w of closed) {
+    if (w.orgId === null) continue;
+    const j = jobs.find((x) => x.woId === w.id);
+    if (j) byOrg.set(w.orgId, [...(byOrg.get(w.orgId) ?? []), j]);
+  }
+
+  const clients: ClientMargin[] = [...byOrg.entries()].map(([orgId, theirJobs]) => {
+    const org = orgRows.find((o) => o.id === orgId);
+    const theirs = full.filter((f) => f.row.orgId === orgId);
+    // Paid in full, and when. An invoice still open has an age, not a
+    // days-to-pay - see lib/costing.
+    const paid = theirs.flatMap((f) => {
+      const view = invoiceView(asStatementRow(f), today);
+      if (view.standing !== "paid" || !f.row.issuedOn || !f.payments.length) return [];
+      const last = f.payments.map((p) => p.receivedOn).filter(Boolean).sort().at(-1) ?? "";
+      return last ? [{ issuedOn: f.row.issuedOn, paidOn: last, amountCents: view.linesCents + view.feesCents }] : [];
+    });
+    const open = theirs
+      .map((f) => invoiceView(asStatementRow(f), today))
+      .filter(isOpen)
+      .reduce((n, v) => n + v.balanceCents, 0);
+    const contract = agreementRows.find((a) => a.orgId === orgId && a.kind === "contract" && a.status === "active");
+    return clientMargin({
+      orgId, orgName: org?.name ?? "", 
+      terms: `${contract ? "contract" : "T&M"} · net ${org?.termsDays ?? 30}`,
+      jobs: theirJobs, paid, openCents: open,
+    });
+  }).sort((a, b) => b.billedCents - a.billedCents);
+
+  return { jobs, clients, loadedLaborCents: loaded };
 }

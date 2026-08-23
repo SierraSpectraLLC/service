@@ -29,6 +29,7 @@ export default function CreditHoldPanel({ standing, invoices, policy, orgId, org
   policy: BillingPolicy;
   orgId: number;
   orgName: string;
+  /** Only an owner may override; anybody on the bench may ask for the deposit. */
   canOverride: boolean;
 }) {
   if (!standing.onHold && !standing.override) return null;
@@ -55,20 +56,15 @@ export default function CreditHoldPanel({ standing, invoices, policy, orgId, org
       ))}
 
       <div className="row-2" style={{ marginTop: 10 }}>
-        {canOverride && (
-          <CreditOverrideButton
-            orgId={orgId} orgName={orgName}
-            overridden={standing.override !== null}
-          />
-        )}
+        <CreditOverrideButton
+          orgId={orgId} orgName={orgName}
+          overridden={standing.override !== null}
+          canOverride={canOverride}
+          depositCents={standing.onHold ? deposit : 0}
+        />
         <Link href="/money/collections" className="btn sm" style={{ textDecoration: "none" }}>
           Open in Collections
         </Link>
-        {deposit > 0 && (
-          <span className="mut t-small">
-            {formatCents(deposit)} would clear it.
-          </span>
-        )}
       </div>
     </Panel>
   );

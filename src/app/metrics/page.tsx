@@ -10,10 +10,12 @@ import { sinceByStage, completedDurations, ageDays } from "@/lib/stageAges";
 import { pmCompliance, shippedTurnaround, minutesBy, spendBy } from "@/lib/reports";
 import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
+import { costingBoard } from "@/lib/invoiceData";
+import { SLOW_PAY_DAYS } from "@/lib/costing";
 import { addDays } from "@/lib/pm";
 import { shopToday } from "@/lib/shopday";
 import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
-import { Panel } from "@/components/ui";
+import { Panel, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +131,11 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const maxSpend = Math.max(0, ...spend.map(([, v]) => v.cents));
   const maxAvgStage = Math.max(0, ...avgRows.map((r) => r.avg));
 
+  // What it costs to be owed the money, per client. Same loader Costing uses,
+  // so the two pages cannot disagree about it.
+  const payDays = (await costingBoard(shopToday(), days).catch(() => ({ clients: [] })))
+    .clients.filter((c) => c.daysToPay !== null);
+
   return (
     <div className="container wide">
       <div className="crumb">Operations › <b>Metrics</b></div>
@@ -221,6 +228,31 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           </div>
         )}
       </Panel>
+      {/* Days-to-pay, beside the work. A client's margin lives in Billing;
+          what it costs to be owed the money belongs next to how much of the
+          shop's time they take. */}
+      {payDays.length > 0 && (
+        <Panel
+          title="Days to pay"
+          count={payDays.length}
+          hint="Weighted by amount, over invoices actually settled - a client who pays five small bills at once and one large one at ninety days is a ninety-day client. Costing has the margin beside it."
+        >
+          {payDays.map((c) => (
+            <div key={c.orgId} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+              <span className="t-body" style={{ flex: 1, minWidth: 0 }}>{c.orgName}</span>
+              <span className="mut t-small">{c.terms}</span>
+              <Pill tone={c.daysToPay! >= SLOW_PAY_DAYS ? "bad" : c.daysToPay! > 20 ? "warn" : "good"}>
+                {c.daysToPay} d
+              </Pill>
+            </div>
+          ))}
+          <div className="mut t-small" style={{ marginTop: 8 }}>
+            <Link href="/money/costing">Costing</Link> puts this beside each client&apos;s margin,
+            which is the pair the renewal conversation turns on.
+          </div>
+        </Panel>
+      )}
+
       <Panel title="Time in stage" count={active.length}
         hint="Active systems, longest-parked first. Ages count from when the stage was added (systems that predate stage tracking count from their creation)."
         empty="No active systems">
