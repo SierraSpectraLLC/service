@@ -1970,7 +1970,18 @@ export const partPrices = pgTable("part_prices", {
   isOem: boolean("is_oem").notNull().default(false),
   priceCents: integer("price_cents").notNull(),
   url: text("url").notNull().default(""),   // where to order it
-  note: text("note").notNull().default(""), // "min order 5", "6wk lead time"
+  note: text("note").notNull().default(""), // "min order 5", "returns need an RMA"
+  /**
+   * Business days from order to THIS VENDOR shipping it. Null is "nobody has
+   * asked", which the picker treats as slower than any number - an honest
+   * unknown must never beat a known week. Structured here (not in the note)
+   * because "fastest supplier" is a sort, and you cannot sort prose.
+   */
+  leadDays: integer("lead_days"),
+  /** Will they ship to a client's site under our paperwork? */
+  dropShips: boolean("drop_ships").notNull().default(false),
+  /** Will they expedite/overnight on request (at a cost)? */
+  expediteOk: boolean("expedite_ok").notNull().default(false),
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -2464,6 +2475,18 @@ export const appSettings = pgTable("app_settings", {
    * an operator's revenue is a platform they leave.
    */
   platformFeeBps: integer("platform_fee_bps").notNull().default(0),
+  /**
+   * Days a part spends turning around at the shop when a vendor will not
+   * drop-ship: it lands on our dock and goes out again. Added to that route's
+   * lead time so "fastest" compares doors-to-door, not vendor promises.
+   */
+  crossDockDays: integer("cross_dock_days").notNull().default(1),
+  /**
+   * The name parts ship under. The client's parts relationship is with this
+   * brand - every packing slip, and the blind-ship instruction on drop-ship
+   * POs, carries it. Distinct from the operator's service brand on purpose.
+   */
+  partsBrand: text("parts_brand").notNull().default("Ridgeline"),
   /**
    * Fully loaded cost of an hour of labor - wage, burden, van, insurance -
    * used only to show margin beside a bill. Zero means "we have not told it",

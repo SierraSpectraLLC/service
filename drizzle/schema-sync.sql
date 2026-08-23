@@ -3083,3 +3083,16 @@ DO $$ BEGIN
       FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- ── Sourcing: the facts "cheapest or fastest" is decided on ────────────────
+-- lead_days is the vendor's business days to ship (null = nobody asked, which
+-- sorts slower than any number); drop_ships is whether they ship to a client
+-- site under our paperwork; expedite_ok is whether they overnight on request.
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "lead_days" integer;
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "drop_ships" boolean NOT NULL DEFAULT false;
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "expedite_ok" boolean NOT NULL DEFAULT false;
+
+-- Days a non-drop-shipped part spends turning around at the shop, and the
+-- brand parts ship under (packing slips, blind-ship instructions).
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "cross_dock_days" integer NOT NULL DEFAULT 1;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "parts_brand" text NOT NULL DEFAULT 'Ridgeline';
