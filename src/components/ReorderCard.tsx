@@ -83,7 +83,7 @@ export default function ReorderCard({ stockroomId, groups, mode = "cheapest", ur
         {mode === "fastest"
           ? "Vendors picked by door-to-door days (cross-dock counted when they can't drop-ship)."
           : "Priced from the cheapest vendor on file (OEM breaks ties)."}
-        {urgent ? " Urgent: only vendors who can overnight." : ""} Untick anything you don&apos;t want on the order.
+        {urgent ? " Urgent: verified blind-shippers overnight to the door (1d); everyone else overnights to us and goes back out same day under our paperwork (2d)." : ""} Untick anything you don&apos;t want on the order.
       </div>
 
       {groups.map((g) => {

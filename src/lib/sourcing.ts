@@ -48,18 +48,32 @@ export function effectiveDays(
   return offer.leadDays + (offer.dropShips ? 0 : Math.max(0, crossDockDays));
 }
 
-/** Can this offer plausibly arrive tomorrow if somebody pays for it? */
-export const canExpedite = (o: Pick<Offer, "expediteOk" | "dropShips">): boolean =>
-  o.expediteOk && o.dropShips;
+/**
+ * The urgent lanes. Ridgeline paperwork is non-negotiable, so there are only
+ * two ways a rush can travel: a vendor VERIFIED to blind-ship under our name
+ * overnights straight to the door (1 day), and everyone else overnights to
+ * our dock, where the box is turned around the same day under our packing
+ * slip and overnighted out (2 days). A vendor who cannot expedite at all has
+ * no urgent lane, whatever their standard lead time says.
+ */
+export const URGENT_DIRECT_DAYS = 1;
+export const URGENT_VIA_SHOP_DAYS = 2;
+
+export const canExpedite = (o: Pick<Offer, "expediteOk">): boolean => o.expediteOk;
+
+/** Door-to-door days for a rush, by whichever lane this vendor has. */
+export const urgentDays = (o: Pick<Offer, "expediteOk" | "dropShips">): number | null =>
+  !o.expediteOk ? null : o.dropShips ? URGENT_DIRECT_DAYS : URGENT_VIA_SHOP_DAYS;
 
 /**
  * Every offer for one part, ranked for the chosen mode.
  *
  * cheapest: price, OEM breaking ties (rankPrices' order), speed last.
  * fastest: door-to-door days first (unknown last), then price. Urgent
- * narrows to offers that can overnight to the site - if nothing can, the
- * list comes back empty and the caller says so instead of quietly booking
- * ground freight on an emergency.
+ * narrows to offers with an urgent lane at all (see urgentDays) and ranks
+ * blind-ship-to-the-door ahead of overnight-via-the-shop; if nothing can be
+ * rushed, the list comes back empty and the caller says so instead of
+ * quietly booking ground freight on an emergency.
  */
 export function rankOffers<T extends Offer>(
   offers: T[],
@@ -67,7 +81,7 @@ export function rankOffers<T extends Offer>(
 ): T[] {
   const pool = opts.urgent ? offers.filter(canExpedite) : offers;
   if (opts.mode === "cheapest" && !opts.urgent) return rankPrices(pool);
-  const days = (o: T) => effectiveDays(o, opts.crossDockDays);
+  const days = (o: T) => (opts.urgent ? urgentDays(o) : effectiveDays(o, opts.crossDockDays));
   return [...pool].sort((a, b) => {
     if (opts.mode === "fastest" || opts.urgent) {
       const da = days(a), db = days(b);
@@ -90,12 +104,12 @@ export function offersFor<T extends Offer>(
   return rankOffers(book.filter((r) => normalizePn(r.partNumber) === key), opts);
 }
 
-/** "$118 · ships in 3d · drop-ships · overnight ok" - the row under a vendor. */
+/** "$118 · 3d door to door · blind-ships · overnight ok" - a vendor's fine print. */
 export function offerSummary(o: Offer, crossDockDays: number): string {
   const d = effectiveDays(o, crossDockDays);
   return [
     d === null ? "lead time unknown" : `${d}d door to door`,
-    o.dropShips ? "drop-ships" : "via the shop",
+    o.dropShips ? "blind-ships" : "via the shop",
     o.expediteOk ? "overnight ok" : "",
   ].filter(Boolean).join(" · ");
 }

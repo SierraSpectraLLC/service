@@ -151,7 +151,7 @@ const FIXTURE = `
   -- Vendor offers with the sourcing facts, arranged so cheapest and fastest
   -- disagree: the OEM is quick but must cross-dock; the reseller drop-ships.
   INSERT INTO part_prices (part_number, vendor, is_oem, price_cents, lead_days, drop_ships, expedite_ok, url, updated_by) VALUES
-    ('5188-5365', 'Agilent',        true,  5200, 2, false, false, '', 'dev@local.test'),
+    ('5188-5365', 'Agilent',        true,  5200, 2, false, true,  '', 'dev@local.test'),
     ('5188-5365', 'Frit & Ferrule', false, 3900, 3, true,  true,  '', 'dev@local.test'),
     ('WAT271066', 'Waters',         true,  71000, 5, false, false, '', 'dev@local.test'),
     ('WAT271066', 'Frit & Ferrule', false, 64000, 2, true,  true,  '', 'dev@local.test'),

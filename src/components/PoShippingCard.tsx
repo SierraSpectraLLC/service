@@ -84,6 +84,15 @@ export default function PoShippingCard({ poId, editable, shipToSiteId, urgent, s
           {(editable ? rush : urgent) ? " Ship overnight." : ""}
         </div>
       )}
+      {(editable ? rush && siteId === null : urgent && shipToSiteId === null) && (
+        <div className="t-small" style={{
+          marginTop: 8, padding: "8px 10px", border: "1px solid var(--line)",
+          borderRadius: 8, background: "#FAFBFD",
+        }}>
+          <div className="mut t-meta" style={{ marginBottom: 3 }}>Goes to the vendor with the order:</div>
+          Ship overnight to our dock. It turns around the same day under {brand} paperwork.
+        </div>
+      )}
       {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{error}</div>}
     </div>
   );

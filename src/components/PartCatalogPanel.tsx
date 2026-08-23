@@ -546,7 +546,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   <span className="mono">{formatCents(p.priceCents)}</span>
                   <span className="mut t-meta">
                     {[p.leadDays !== null ? `${p.leadDays}d` : "lead ?",
-                      p.dropShips ? "drop-ships" : "via the shop",
+                      p.dropShips ? "blind-ships" : "via the shop",
                       p.expediteOk ? "overnight ok" : ""].filter(Boolean).join(" · ")}
                   </span>
                   {isStalePrice(`${p.updatedOn}T00:00:00Z`, today) && (
@@ -577,10 +577,10 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   OEM
                 </label>
                 <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--ink)" }}
-                  title="Ships to a client site under our paperwork">
+                  title="Verified: ships to a client site under OUR paperwork, none of theirs in the box">
                   <input type="checkbox" checked={vendorDraft.dropShips} style={{ width: 14, height: 14 }}
                     onChange={(e) => setVendorDraft({ ...vendorDraft, dropShips: e.target.checked })} />
-                  Drop-ships
+                  Blind-ships
                 </label>
                 <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--ink)" }}
                   title="Will overnight on request">

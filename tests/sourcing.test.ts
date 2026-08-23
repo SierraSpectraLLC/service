@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   blindShipNote, canExpedite, effectiveDays, isStalePrice, offerSummary, offersFor,
-  priceAgeDays, rankOffers, STALE_PRICE_DAYS, type Offer,
+  priceAgeDays, rankOffers, STALE_PRICE_DAYS, URGENT_DIRECT_DAYS, URGENT_VIA_SHOP_DAYS,
+  urgentDays, type Offer,
 } from "@/lib/sourcing";
 import { suggestOrders } from "@/lib/po";
 
@@ -41,10 +42,13 @@ describe("rankOffers", () => {
     const r = rankOffers([mystery, ff], { mode: "fastest", crossDockDays: 1 });
     expect(r.map((o) => o.vendor)).toEqual(["Frit & Ferrule", "SurplusCo"]);
   });
-  it("urgent narrows to overnight-capable drop-shippers, or says nothing can", () => {
-    const r = rankOffers([agilent, ff, mystery], { mode: "cheapest", urgent: true, crossDockDays: 1 });
-    expect(r.map((o) => o.vendor)).toEqual(["Frit & Ferrule"]);
-    expect(rankOffers([agilent, mystery], { mode: "fastest", urgent: true, crossDockDays: 1 })).toEqual([]);
+  it("urgent keeps both lanes: blind-ship to the door beats overnight via the shop", () => {
+    const oem = offer({ vendor: "Agilent", isOem: true, priceCents: 21000, leadDays: 2, expediteOk: true });
+    const r = rankOffers([oem, ff, mystery], { mode: "cheapest", urgent: true, crossDockDays: 1 });
+    // F&F blind-ships overnight (1d); Agilent overnights to our dock and back
+    // out under our paperwork (2d); SurplusCo can't be rushed at all.
+    expect(r.map((o) => o.vendor)).toEqual(["Frit & Ferrule", "Agilent"]);
+    expect(rankOffers([mystery], { mode: "fastest", urgent: true, crossDockDays: 1 })).toEqual([]);
   });
   it("offersFor matches part numbers the book's loose way", () => {
     const r = offersFor([agilent, offer({ partNumber: " ext255h ", vendor: "Other", priceCents: 1 })],
@@ -54,11 +58,13 @@ describe("rankOffers", () => {
   });
 });
 
-describe("canExpedite", () => {
-  it("overnight needs both the will and the drop-ship lane", () => {
-    expect(canExpedite({ expediteOk: true, dropShips: true })).toBe(true);
-    expect(canExpedite({ expediteOk: true, dropShips: false })).toBe(false);
-    expect(canExpedite({ expediteOk: false, dropShips: true })).toBe(false);
+describe("urgent lanes", () => {
+  it("a rush travels one of two ways, both ending in our paperwork", () => {
+    expect(canExpedite({ expediteOk: true })).toBe(true);
+    expect(canExpedite({ expediteOk: false })).toBe(false);
+    expect(urgentDays({ expediteOk: true, dropShips: true })).toBe(URGENT_DIRECT_DAYS);
+    expect(urgentDays({ expediteOk: true, dropShips: false })).toBe(URGENT_VIA_SHOP_DAYS);
+    expect(urgentDays({ expediteOk: false, dropShips: true })).toBeNull();
   });
 });
 
@@ -76,7 +82,7 @@ describe("staleness", () => {
 describe("offerSummary and blindShipNote", () => {
   it("reads as the fine print a buyer needs", () => {
     const s = offerSummary(offer({ leadDays: 3, dropShips: true, expediteOk: true }), 1);
-    expect(s).toBe("3d door to door · drop-ships · overnight ok");
+    expect(s).toBe("3d door to door · blind-ships · overnight ok");
     expect(offerSummary(offer({}), 1)).toBe("lead time unknown · via the shop");
   });
   it("keeps the vendor's name out of the box", () => {

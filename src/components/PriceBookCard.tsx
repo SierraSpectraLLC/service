@@ -28,7 +28,7 @@ const COLUMNS = [
   { key: "price", label: "Price", width: 70 },
   { key: "lead", label: "Lead d", width: 55 },
   { key: "oem", label: "OEM", width: 45 },
-  { key: "drop", label: "Drop-ship", width: 70 },
+  { key: "drop", label: "Blind-ship", width: 70 },
   { key: "ovn", label: "Overnight", width: 70 },
   { key: "url", label: "Link", width: 130 },
   { key: "note", label: "Note", width: 130 },
@@ -245,7 +245,7 @@ export default function PriceBookCard({ prices, knownVendors, today = "" }: {
               <span className="t-body" style={{ fontWeight: 700, color: i === 0 ? "#085041" : undefined }}>{formatCents(p.priceCents)}</span>
               <span className="mut t-small">
                 {[p.leadDays !== null ? `${p.leadDays}d` : "lead ?",
-                  p.dropShips ? "drop-ships" : "via the shop",
+                  p.dropShips ? "blind-ships" : "via the shop",
                   p.expediteOk ? "overnight ok" : ""].filter(Boolean).join(" · ")}
               </span>
               {today && isStalePrice(p.updatedAt, today) && (

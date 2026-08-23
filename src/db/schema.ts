@@ -1987,7 +1987,7 @@ export const partPrices = pgTable("part_prices", {
    * because "fastest supplier" is a sort, and you cannot sort prose.
    */
   leadDays: integer("lead_days"),
-  /** Will they ship to a client's site under our paperwork? */
+  /** VERIFIED to blind-ship: to a client site under OUR paperwork only. */
   dropShips: boolean("drop_ships").notNull().default(false),
   /** Will they expedite/overnight on request (at a cost)? */
   expediteOk: boolean("expedite_ok").notNull().default(false),
