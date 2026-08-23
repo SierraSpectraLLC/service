@@ -49,7 +49,13 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const router = useRouter();
   const stageNames = stageDefs.map((d) => d.name);
   const stageColor = (name: string) => stageDefs.find((d) => d.name === name) ?? { bg: "#EEF1F5", fg: "#475569" };
-  const [selected, setSelected] = useState<string[]>(() => (initial?.f ? initial.f.split("|").filter(Boolean) : []));
+  // No filter in the URL means the board opens on OUR side of the split -
+  // the systems whose move is ours. "f=none" is a deliberately cleared filter
+  // and stays cleared; anything else is the shared link it always was.
+  const [selected, setSelected] = useState<string[]>(() => (
+    initial?.f == null ? ["Ours to move"]
+    : initial.f === "none" ? []
+    : initial.f.split("|").filter(Boolean)));
   const [filterOpen, setFilterOpen] = useState(false);
   const [q, setQ] = useState(initial?.q ?? "");
   const [sortBy, setSortBy] = useState<"default" | "owner" | "id">(
@@ -66,7 +72,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     const t = setTimeout(() => {
       const p = new URLSearchParams();
       if (q.trim()) p.set("q", q.trim());
-      if (selected.length) p.set("f", selected.join("|"));
+      p.set("f", selected.length ? selected.join("|") : "none");
       if (sortBy !== "default") p.set("sort", sortBy);
       const s = p.toString();
       router.replace(s ? `/?${s}` : "/", { scroll: false });
@@ -153,13 +159,16 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   const mine = useMemo(() => data.filter((i) => i.mine).sort((a, b) =>
     Number(b.down) - Number(a.down) || b.overdue - a.overdue || a.priority - b.priority), [data]);
 
+  // Counted inside the active filter, so the tiles describe the board being
+  // looked at - except "With someone else", which is the other half of the
+  // ours/not-ours split and would read 0 under the default filter.
   const counts = {
-    total: data.length,
-    down: data.filter((i) => i.down).length,
-    blocked: data.filter((i) => i.stages.includes("Waiting / blocked")).length,
-    waiting: data.filter((i) => i.openParts > 0).length,
-    gas: data.filter((i) => i.gasIssues.length > 0).length,
-    shipped: data.filter((i) => i.stages.includes("Shipped") || i.stages.includes("Waiting to ship")).length,
+    total: filtered.length,
+    down: filtered.filter((i) => i.down).length,
+    blocked: filtered.filter((i) => i.stages.includes("Waiting / blocked")).length,
+    waiting: filtered.filter((i) => i.openParts > 0).length,
+    gas: filtered.filter((i) => i.gasIssues.length > 0).length,
+    shipped: filtered.filter((i) => i.stages.includes("Shipped") || i.stages.includes("Waiting to ship")).length,
     parked: data.filter((i) => !i.queueMine).length,
   };
 
@@ -226,7 +235,11 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
         )} />
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {([
-          ["Total systems", counts.total, "var(--navy)"],
+          [filtered.length === data.length ? "Total systems" : "Systems in this filter",
+            filtered.length === data.length
+              ? counts.total
+              : <>{counts.total}<span className="mut" style={{ fontSize: 13, fontWeight: 400 }}> of {data.length}</span></>,
+            "var(--navy)"],
           // The one number that overrides every other on this screen.
           ["Down", counts.down, "#A32D2D"],
           // Reads as "how much of the board isn't ours to move" - the number
@@ -236,7 +249,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
           ["Awaiting parts", counts.waiting, "#8A5410"],
           ["Gas attention", counts.gas, "#A33A1A"],
           ...(showShipping ? [["Ship queue + shipped", counts.shipped, "#085041"]] : []),
-        ] as [string, number, string][]).map(([label, n, color]) => (
+        ] as [string, React.ReactNode, string][]).map(([label, n, color]) => (
           <div key={label} className="card" style={{ padding: "12px 14px", marginBottom: 0 }}>
             <div className="mut t-small">{label}</div>
             <div style={{ fontSize: 26, fontWeight: 700, color }}>{n}</div>
