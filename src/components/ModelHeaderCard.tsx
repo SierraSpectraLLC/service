@@ -3,7 +3,9 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { upload } from "@vercel/blob/client";
-import { setCatalogPhoto } from "@/app/actions";
+import { setCatalogPhoto, setVocabManufacturer } from "@/app/actions";
+import { inputDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "@/components/ui/Toast";
 import { stockSrc } from "@/lib/photos";
 import { fmtBytes } from "@/lib/storage";
 
@@ -13,10 +15,11 @@ import { fmtBytes } from "@/lib/storage";
  * in Settings does. Identity lives in the RecordHero above; this card only
  * holds the photo and its upload affordance.
  */
-export default function ModelHeaderCard({ termId, name, hasPhoto }: {
+export default function ModelHeaderCard({ termId, name, hasPhoto, manufacturer }: {
   termId: number;
   name: string;
   hasPhoto: boolean;
+  manufacturer: string;
 }) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
@@ -41,7 +44,7 @@ export default function ModelHeaderCard({ termId, name, hasPhoto }: {
 
   return (
     <div className="card">
-      <div className="card-title" style={{ marginBottom: 8 }}>Photo</div>
+      <div className="card-title" style={{ marginBottom: 8 }}>Model</div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ flexShrink: 0 }}>
           {hasPhoto ? (
@@ -63,6 +66,22 @@ export default function ModelHeaderCard({ termId, name, hasPhoto }: {
             onChange={(e) => { void send(e.target.files?.[0]); e.target.value = ""; }} />
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
+          <div className="t-body" style={{ marginBottom: 6 }}>
+            Made by <b>{manufacturer || "nobody recorded"}</b>
+            <button className="btn link" style={{ marginLeft: 8 }}
+              onClick={async () => {
+                const next = await inputDialog({
+                  title: `Who makes ${name}?`, action: "Save maker", label: "Manufacturer",
+                  initial: manufacturer, allowEmpty: true,
+                  hint: "Blank files it under Maker not set in the catalog.",
+                });
+                if (next === null || next === manufacturer) return;
+                const res = await setVocabManufacturer(termId, next);
+                if (res?.error) { setError(res.error); return; }
+                toast({ message: next ? `${name} is made by ${next}` : `Cleared the maker on ${name}` });
+                router.refresh();
+              }}>{manufacturer ? "change" : "set the maker"}</button>
+          </div>
           <div className="mut t-small">
             The catalog&apos;s stock photo for {name}: it shows on every unit that has no photo of its own.
           </div>
