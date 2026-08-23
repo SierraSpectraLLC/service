@@ -6,11 +6,13 @@ import { instruments, orgs, parts, poLines, purchaseOrders, stockrooms, stockroo
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
+import { makerNames } from "@/lib/makersData";
 import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { formatCents } from "@/lib/money";
 import { canSeeCosts } from "@/lib/redact";
-import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import NeededPartsCard from "@/components/NeededPartsCard";
+import NewPoButton from "@/components/NewPoButton";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
 
@@ -120,7 +122,13 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         crumb={<>Operations › <b>Purchasing</b></>}
         title="Purchasing"
         sub="Orders and receiving."
-        actions={<Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>}
+        actions={
+          <>
+            <NewPoButton rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))}
+              vendors={isHouse(user.role) ? await makerNames(readTenant(user)) : []} />
+            <Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>
+          </>
+        }
       />
       <Toolbar
         search={
