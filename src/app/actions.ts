@@ -9050,12 +9050,22 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<{
 
 export type PartPriceInput = {
   partNumber: string; vendor: string; price: string; isOem?: boolean; url?: string; note?: string;
+  /** Business days to ship. Blank/undefined = unknown, kept null on purpose. */
+  leadDays?: string;
+  dropShips?: boolean; expediteOk?: boolean;
+  /**
+   * Names the part, and doing so is what catalogues an unknown PN: a pasted
+   * vendor sheet with a name column builds the catalog as it prices it. A
+   * priced-but-unnamed number stays out of the catalog on purpose.
+   */
+  name?: string;
 };
 
 /** One row, validated and case-insensitively matched against what's on file. */
 async function cleanPriceRow(r: PartPriceInput): Promise<
   | { ok: false; error: string }
   | { ok: true; pn: string; vendor: string; cents: number; isOem: boolean; url: string; note: string;
+      leadDays: number | null; dropShips: boolean; expediteOk: boolean;
       existing: typeof partPrices.$inferSelect | undefined }
 > {
   const pn = r.partNumber.trim().slice(0, 80);
@@ -9063,11 +9073,20 @@ async function cleanPriceRow(r: PartPriceInput): Promise<
   if (!pn || !vendor) return { ok: false, error: "Part number and vendor are both required" };
   const cents = parseMoney(r.price);
   if (cents === null) return { ok: false, error: `"${r.price.trim() || "(blank)"}" isn't a price - use a number like 129.95` };
+  const leadRaw = (r.leadDays ?? "").trim();
+  const leadDays = leadRaw === "" ? null : parseInt(leadRaw, 10);
+  if (leadDays !== null && (!Number.isFinite(leadDays) || leadDays < 0 || leadDays > 365)) {
+    return { ok: false, error: `"${leadRaw}" isn't a lead time - business days, like 3` };
+  }
   const [existing] = await db.select().from(partPrices).where(and(
     sql`lower(${partPrices.partNumber}) = ${pn.toLowerCase()}`,
     sql`lower(${partPrices.vendor}) = ${vendor.toLowerCase()}`,
   ));
-  return { ok: true, pn, vendor, cents, isOem: !!r.isOem, url: (r.url ?? "").trim().slice(0, 300), note: (r.note ?? "").trim().slice(0, 200), existing };
+  return {
+    ok: true, pn, vendor, cents, isOem: !!r.isOem, url: (r.url ?? "").trim().slice(0, 300),
+    note: (r.note ?? "").trim().slice(0, 200),
+    leadDays, dropShips: !!r.dropShips, expediteOk: !!r.expediteOk, existing,
+  };
 }
 
 /**
@@ -9080,7 +9099,7 @@ async function cleanPriceRow(r: PartPriceInput): Promise<
  */
 export async function addPartPrices(
   rows: PartPriceInput[],
-): Promise<{ error?: string; created?: number; updated?: number; failures?: { row: number; name: string; error: string }[] }> {
+): Promise<{ error?: string; created?: number; updated?: number; catalogued?: number; failures?: { row: number; name: string; error: string }[] }> {
   const u = await requireStaff();
   const usable = rows.filter((r) => r.partNumber.trim() || r.vendor.trim() || r.price.trim());
   if (!usable.length) return { error: "Nothing to save" };
@@ -9090,10 +9109,15 @@ export async function addPartPrices(
   for (let i = 0; i < usable.length; i++) {
     const row = await cleanPriceRow(usable[i]);
     if (!row.ok) { failures.push({ row: i + 1, name: usable[i].partNumber.trim() || "(no PN)", error: row.error }); continue; }
-    const { pn, vendor, cents, isOem, url, note, existing } = row;
+    const { pn, vendor, cents, isOem, url, note, leadDays, dropShips, expediteOk, existing } = row;
     if (existing) {
-      await db.update(partPrices).set({ priceCents: cents, isOem, url, note, updatedBy: u.email, updatedAt: new Date() })
-        .where(eq(partPrices.id, existing.id));
+      await db.update(partPrices).set({
+        priceCents: cents, isOem, url, note,
+        // A blank lead time on a re-paste keeps what somebody once recorded.
+        ...(leadDays !== null ? { leadDays } : {}),
+        dropShips, expediteOk,
+        updatedBy: u.email, updatedAt: new Date(),
+      }).where(eq(partPrices.id, existing.id));
       if (existing.priceCents !== cents) {
         await audit({
           actor: u.email, entityType: "price", entityId: existing.id,
@@ -9105,7 +9129,8 @@ export async function addPartPrices(
     } else {
       const [p] = await db.insert(partPrices).values({
         tenantOrgId: myTenantOrgId(u),
-        partNumber: pn, vendor, priceCents: cents, isOem, url, note, updatedBy: u.email,
+        partNumber: pn, vendor, priceCents: cents, isOem, url, note,
+        leadDays, dropShips, expediteOk, updatedBy: u.email,
       }).returning();
       await audit({
         actor: u.email, entityType: "price", entityId: p.id,
@@ -9114,8 +9139,37 @@ export async function addPartPrices(
       created++;
     }
   }
+  // A pasted sheet that NAMES its parts fills the catalog as it prices them.
+  // One stub per unknown PN: number, name, and - for an OEM row - the vendor
+  // as maker, since the maker's own sheet is the one source that knows.
+  let catalogued = 0;
+  const named = new Map<string, { partNumber: string; name: string; manufacturer: string }>();
+  for (const r of usable) {
+    const pn = r.partNumber.trim().slice(0, 80);
+    const nm = (r.name ?? "").trim().slice(0, 120);
+    if (!pn || !nm || named.has(pn.toLowerCase())) continue;
+    named.set(pn.toLowerCase(), { partNumber: pn, name: nm, manufacturer: r.isOem ? r.vendor.trim().slice(0, 80) : "" });
+  }
+  if (named.size) {
+    const have = await db.select({ partNumber: partCatalog.partNumber }).from(partCatalog)
+      .where(forTenant(partCatalog.tenantOrgId, myTenantOrgId(u)));
+    const known = new Set(have.map((r) => r.partNumber.trim().toLowerCase()));
+    for (const stub of named.values()) {
+      if (known.has(stub.partNumber.toLowerCase())) continue;
+      const [c] = await db.insert(partCatalog).values({
+        tenantOrgId: myTenantOrgId(u), partNumber: stub.partNumber, name: stub.name,
+        manufacturer: stub.manufacturer, createdBy: u.email,
+      }).returning();
+      await audit({
+        actor: u.email, entityType: "catalog_part", entityId: c.id,
+        action: `catalogued PN ${stub.partNumber} (${stub.name}) from a pasted price sheet`,
+      });
+      catalogued++;
+    }
+  }
   revalidatePath("/settings/catalog");
-  return { created, updated, failures };
+  revalidatePath("/settings/parts");
+  return { created, updated, catalogued, failures };
 }
 
 export async function deletePartPrice(id: number): Promise<{ error?: string }> {

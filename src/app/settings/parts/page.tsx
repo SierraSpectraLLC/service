@@ -8,6 +8,7 @@ import {
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
+import { shopToday } from "@/lib/shopday";
 import { makerNames } from "@/lib/makersData";
 import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
 import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
@@ -30,6 +31,7 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
   let user;
   try { user = await requireStaff(); } catch { redirect("/"); }
   const tenant = readTenant(user);
+  const today = shopToday();
 
   const [rows, terms, usedParts, usedStock, usedPo] = await Promise.all([
     db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, tenant))
@@ -73,6 +75,8 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
   const priceRows = await db.select({
     id: partPrices.id, partNumber: partPrices.partNumber, vendor: partPrices.vendor,
     isOem: partPrices.isOem, priceCents: partPrices.priceCents, url: partPrices.url, note: partPrices.note,
+    leadDays: partPrices.leadDays, dropShips: partPrices.dropShips, expediteOk: partPrices.expediteOk,
+    updatedAt: partPrices.updatedAt,
   }).from(partPrices).where(forTenant(partPrices.tenantOrgId, tenant))
     .orderBy(asc(partPrices.partNumber), asc(partPrices.vendor));
 
@@ -151,12 +155,15 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
         prices={priceRows.map((p) => ({
           id: p.id, partNumber: p.partNumber, vendor: p.vendor, isOem: p.isOem,
           priceCents: p.priceCents, url: p.url,
+          leadDays: p.leadDays, dropShips: p.dropShips, expediteOk: p.expediteOk,
+          updatedOn: p.updatedAt.toISOString().slice(0, 10),
         }))}
+        today={today}
         unnamed={uncatalogued(withAliases, used)}
         makers={bookNames}
         initialFacet={f}
       />
-      <PriceBookCard prices={priceRows} knownVendors={[...new Set([...bookNames, ...priceRows.map((p) => p.vendor)])].sort()} />
+      <PriceBookCard prices={priceRows} today={today} knownVendors={[...new Set([...bookNames, ...priceRows.map((p) => p.vendor)])].sort()} />
     </div>
   );
 }

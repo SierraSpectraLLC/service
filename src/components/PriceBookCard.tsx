@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { addPartPrices, deletePartPrice } from "@/app/actions";
 import { formatCents, centsToInput } from "@/lib/money";
 import { groupByPn, normalizePn } from "@/lib/priceBook";
+import { isStalePrice } from "@/lib/sourcing";
 import { toCsv } from "@/lib/csv";
 import { matchesQuery } from "@/lib/search";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
@@ -12,22 +13,31 @@ import Dialog from "@/components/ui/Dialog";
 
 export type PriceBookRow = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string; note: string;
+  leadDays: number | null; dropShips: boolean; expediteOk: boolean; updatedAt: Date;
 };
 
-type GridRow = { partNumber: string; vendor: string; price: string; oem: string; url: string; note: string };
+type GridRow = {
+  partNumber: string; name: string; vendor: string; price: string; lead: string;
+  oem: string; drop: string; ovn: string; url: string; note: string;
+};
 
 const COLUMNS = [
-  { key: "partNumber", label: "Part number", width: 140 },
-  { key: "vendor", label: "Vendor", width: 130 },
-  { key: "price", label: "Price", width: 80 },
-  { key: "oem", label: "OEM", width: 50 },
-  { key: "url", label: "Link", width: 150 },
-  { key: "note", label: "Note", width: 150 },
+  { key: "partNumber", label: "Part number", width: 130 },
+  { key: "name", label: "Name", width: 140 },
+  { key: "vendor", label: "Vendor", width: 120 },
+  { key: "price", label: "Price", width: 70 },
+  { key: "lead", label: "Lead d", width: 55 },
+  { key: "oem", label: "OEM", width: 45 },
+  { key: "drop", label: "Drop-ship", width: 70 },
+  { key: "ovn", label: "Overnight", width: 70 },
+  { key: "url", label: "Link", width: 130 },
+  { key: "note", label: "Note", width: 130 },
 ] as const;
 
-const blank = (): GridRow => ({ partNumber: "", vendor: "", price: "", oem: "", url: "", note: "" });
+const blank = (): GridRow => ({ partNumber: "", name: "", vendor: "", price: "", lead: "", oem: "", drop: "", ovn: "", url: "", note: "" });
 const filled = (r: GridRow) => !!(r.partNumber.trim() && r.vendor.trim() && r.price.trim());
 const oemish = (s: string) => /^(y|yes|oem|true|1)$/i.test(s.trim());
+const yes = (s: string) => /^(y|yes|true|1)$/i.test(s.trim());
 
 /**
  * The house price book: every vendor's price for a part number, side by side.
@@ -35,9 +45,11 @@ const oemish = (s: string) => /^(y|yes|oem|true|1)$/i.test(s.trim());
  * (PN, vendor) pair updates its price - pasting this quarter's quote sheet
  * over last quarter's is the maintenance path, not an error.
  */
-export default function PriceBookCard({ prices, knownVendors }: {
+export default function PriceBookCard({ prices, knownVendors, today = "" }: {
   prices: PriceBookRow[];
   knownVendors: string[];
+  /** The shop's today, for flagging prices nobody has confirmed lately. */
+  today?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<GridRow[]>([blank(), blank(), blank()]);
@@ -83,8 +95,10 @@ export default function PriceBookCard({ prices, knownVendors }: {
   /** "edit" = the row's values dropped into the grid; saving upserts in place. */
   const editRow = (p: PriceBookRow) => {
     const draft: GridRow = {
-      partNumber: p.partNumber, vendor: p.vendor, price: centsToInput(p.priceCents),
-      oem: p.isOem ? "OEM" : "", url: p.url, note: p.note,
+      partNumber: p.partNumber, name: "", vendor: p.vendor, price: centsToInput(p.priceCents),
+      lead: p.leadDays === null ? "" : String(p.leadDays),
+      oem: p.isOem ? "OEM" : "", drop: p.dropShips ? "y" : "", ovn: p.expediteOk ? "y" : "",
+      url: p.url, note: p.note,
     };
     setRows((rs) => {
       const already = rs.findIndex((r) =>
@@ -103,7 +117,8 @@ export default function PriceBookCard({ prices, knownVendors }: {
     setError(""); setFailures([]); setSaved("");
     startTransition(async () => {
       const res = await addPartPrices(usable.map((r) => ({
-        partNumber: r.partNumber, vendor: r.vendor, price: r.price,
+        partNumber: r.partNumber, name: r.name, vendor: r.vendor, price: r.price,
+        leadDays: r.lead, dropShips: yes(r.drop), expediteOk: yes(r.ovn),
         isOem: oemish(r.oem), url: r.url, note: r.note,
       })));
       if (res?.error) { setError(res.error); return; }
@@ -111,6 +126,7 @@ export default function PriceBookCard({ prices, knownVendors }: {
       const bits = [
         res.created ? `${res.created} added` : "",
         res.updated ? `${res.updated} updated` : "",
+        res.catalogued ? `${res.catalogued} new part${res.catalogued === 1 ? "" : "s"} catalogued` : "",
       ].filter(Boolean);
       setSaved(bits.join(", ") || "Nothing changed");
       const bad = new Set((res.failures ?? []).map((f) => f.row));
@@ -121,8 +137,8 @@ export default function PriceBookCard({ prices, knownVendors }: {
 
   const template = () => toCsv([
     COLUMNS.map((c) => c.label),
-    ["228-35145-91", "Shimadzu", "129.00", "OEM", "", ""],
-    ["228-35145-91", "Chrom Tech", "98.00", "", "https://chromtech.com/...", "min order 2"],
+    ["228-35145-91", "Plunger seal", "Shimadzu", "129.00", "5", "OEM", "", "", "", ""],
+    ["228-35145-91", "Plunger seal", "Chrom Tech", "98.00", "2", "", "y", "y", "https://chromtech.com/...", "min order 2"],
   ]);
 
   return (
@@ -172,7 +188,9 @@ export default function PriceBookCard({ prices, knownVendors }: {
                       <td key={c.key} style={{ padding: 2, borderBottom: "1px solid var(--line)" }}>
                         <input value={r[c.key]} aria-label={`${c.label}, row ${i + 1}`}
                           list={c.key === "vendor" ? "price-vendors" : undefined}
-                          placeholder={c.key === "oem" ? "OEM?" : c.key === "price" ? "129.95" : ""}
+                          placeholder={c.key === "oem" ? "OEM?" : c.key === "price" ? "129.95"
+                            : c.key === "lead" ? "3" : c.key === "drop" || c.key === "ovn" ? "y/n"
+                            : c.key === "name" ? "names new PNs" : ""}
                           onChange={(e) => setCell(i, c.key, e.target.value)}
                           onPaste={(e) => onPaste(e, i, ci)}
                           className="t-small" style={{ width: "100%", padding: "3px 4px" }} />
@@ -225,6 +243,14 @@ export default function PriceBookCard({ prices, knownVendors }: {
               <span className="t-body">{p.vendor}</span>
               {p.isOem && <span className="pill accent">OEM</span>}
               <span className="t-body" style={{ fontWeight: 700, color: i === 0 ? "#085041" : undefined }}>{formatCents(p.priceCents)}</span>
+              <span className="mut t-small">
+                {[p.leadDays !== null ? `${p.leadDays}d` : "lead ?",
+                  p.dropShips ? "drop-ships" : "via the shop",
+                  p.expediteOk ? "overnight ok" : ""].filter(Boolean).join(" · ")}
+              </span>
+              {today && isStalePrice(p.updatedAt, today) && (
+                <span className="pill warn" title="Not confirmed in over 90 days">stale</span>
+              )}
               {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="t-small">order ↗</a>}
               {p.note && <span className="mut t-small">{p.note}</span>}
               <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
