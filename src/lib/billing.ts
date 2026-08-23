@@ -116,6 +116,15 @@ export function coverageFor(input: {
   };
 }
 
+/**
+ * What a part sells for: what it landed at, plus the markup, rounded to the
+ * cent. A part with no recorded cost sells for nothing rather than for a
+ * guess - a $0 line on the draft is a question somebody answers before send,
+ * where an invented price is one nobody notices.
+ */
+export const sellPrice = (costCents: number | null, markupBps: number): number =>
+  costCents === null || costCents <= 0 ? 0 : Math.round((costCents * (10000 + Math.max(0, markupBps))) / 10000);
+
 export type PartRow = {
   id: number; name: string; partNumber: string; qty: number | null;
   /** What it cost us. The sell price comes from the price book. */

@@ -16,7 +16,7 @@ import {
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  expenses,
+  expenses, invoices, invoiceLines, payments,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -44,7 +44,13 @@ import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
-import { EXPENSE_KINDS } from "@/lib/billing";
+import { EXPENSE_KINDS, linesTotal } from "@/lib/billing";
+import { asStatementRow, draftSourceFor, dueFor, invoiceById } from "@/lib/invoiceData";
+import { invoiceView, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
+import { brandForTenant } from "@/lib/brand";
+import { btn, emailShell, esc } from "@/lib/emailTheme";
+import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
+import { appUrl } from "@/lib/appUrl";
 import { cleanBody, messageableFrom } from "@/lib/messages";
 import { QUALIFICATIONS, DOC_TYPES, SIG_ROLES, canApprove, canDelete, canExecute, canRevokeApproval, isProtocol } from "@/lib/gxp";
 import { consentModeFor, mayEnroll, remoteAbility } from "@/lib/remoteAccess";
@@ -76,7 +82,7 @@ import {
 import { getModules } from "@/lib/flags";
 import { DEFAULT_STOPS, clampHeight, serializeStops, type Stop } from "@/lib/appearance";
 import { serializeDigestDays } from "@/lib/digestDays";
-import { sendDigestEdition } from "@/lib/digest";
+import { digestRecipientList, sendDigestEdition } from "@/lib/digest";
 import { pushValueToSheet, fetchTrackerRows, appendInstrumentToSheet } from "@/lib/sheetSync";
 import {
   GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, BLOCKED_STAGE,
@@ -10272,5 +10278,324 @@ export async function setPoWorkOrder(poId: number, workOrderId: number | null): 
   });
   revPo(poId);
   revWo(wo);
+  return {};
+}
+
+// ---------------- Invoices ----------------
+// The bill for work that is finished. Nothing in this section writes a total,
+// a balance or an amount due: the lines carry qty and unit price, payments
+// carry what arrived, and every figure anybody reads is summed at render by
+// lib/billing and lib/statement. The status column is the lifecycle word -
+// sent, void, referred - and never an arithmetic result.
+
+/**
+ * Who at a client hears about their money. The digest recipient list is the
+ * one place a client has already told us where their mail goes; the AP address
+ * is added on top by the caller, because reminders belong at the desk that
+ * pays rather than the lab that ordered.
+ */
+async function orgRecipients(orgId: number): Promise<string[]> {
+  const [org] = await db.select({ list: orgs.digestRecipients }).from(orgs).where(eq(orgs.id, orgId));
+  return org ? digestRecipientList(org.list) : [];
+}
+
+/** Where an invoice is read, so a write shows up everywhere it appears. */
+function revInvoice(inv: { id: number; workOrderId: number | null }) {
+  revalidatePath(`/money/invoices/${inv.id}`);
+  revalidatePath("/money");
+  if (inv.workOrderId) revalidatePath(`/work/${inv.workOrderId}`);
+}
+
+/**
+ * Compose the bill for a closed job, and write it as a draft.
+ *
+ * The lines are built by the same loader the draft page rendered, not posted
+ * back from the form: what somebody looked at and what gets written come from
+ * one place, so a stale page cannot invoice last week's numbers.
+ *
+ * Numbers race, exactly as work order numbers do - two drafts in the same
+ * second read the same highest number. The unique index is what makes that a
+ * failed insert rather than two bills called INV-0094, and this retries.
+ */
+export async function draftInvoice(workOrderId: number): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const found = await loadWorkOrder(u, workOrderId);
+  if ("error" in found) return found;
+  const { wo } = found;
+  if (wo.orgId === null) return { error: "This job has no client on it - an invoice needs somebody to bill." };
+
+  const existing = await db.select().from(invoices)
+    .where(and(eq(invoices.workOrderId, workOrderId), ne(invoices.status, "void")));
+  if (existing.length) {
+    return { error: `${wo.number} is already on ${existing[0].number}.` };
+  }
+
+  const src = await draftSourceFor(workOrderId);
+  if (!src) return { error: "Not found" };
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: invoices.number }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, wo.tenantOrgId));
+    const number = nextWoNumber(used.map((r) => r.number), src.context.invoicePrefix);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId,
+        agreementId: src.coverage.agreementId,
+        number, status: "draft",
+        poNumber: src.org?.poNumber ?? "",
+        createdBy: u.email,
+      }).returning();
+      if (src.lines.length) {
+        await db.insert(invoiceLines).values(src.lines.map((l, i) => ({
+          invoiceId: inv.id, kind: l.kind, description: l.description,
+          // Thousandths: 4.5 hours is 4500 and no part of a bill is a float.
+          qty: Math.round(l.qty * 1000), unitCents: l.unitCents,
+          covered: l.covered, coveredBy: l.coveredBy ?? "",
+          sourceId: l.sourceId, position: i,
+        })));
+      }
+      const total = linesTotal(src.lines);
+      await audit({
+        actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+        entityType: "invoice", entityId: inv.id, tenantOrgId: wo.tenantOrgId,
+        action: `drafted ${number} from ${wo.number}: ${src.lines.length} line${src.lines.length === 1 ? "" : "s"}, ${formatCents(total)}`
+          + (src.coverage.agreementNumber && total === 0 ? ` - covered by ${src.coverage.agreementNumber}` : ""),
+      });
+      revInvoice(inv);
+      return { id: inv.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** The two fields a draft is edited on before it goes out. */
+export async function updateInvoice(
+  id: number, data: { poNumber?: string; note?: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  if (!inv) return { error: "Not found" };
+  const patch: Partial<typeof invoices.$inferInsert> = { updatedAt: new Date() };
+  const changes: string[] = [];
+  if (data.poNumber !== undefined && data.poNumber.trim() !== inv.poNumber) {
+    patch.poNumber = data.poNumber.trim();
+    changes.push(`PO ${patch.poNumber || "cleared"}`);
+  }
+  if (data.note !== undefined && data.note.trim() !== inv.note) {
+    patch.note = data.note.trim();
+    changes.push("note");
+  }
+  if (!changes.length) return {};
+  await db.update(invoices).set(patch).where(eq(invoices.id, id));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
+    action: `edited ${inv.number}: ${changes.join(", ")}`,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/**
+ * Take a line off a draft.
+ *
+ * Only off a DRAFT. An invoice that changed after it was sent is one nobody
+ * can reconcile against the copy in their inbox - past send, the way to
+ * remove money is a credit line, which leaves both facts on the record.
+ */
+export async function removeInvoiceLine(lineId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [line] = await db.select().from(invoiceLines).where(eq(invoiceLines.id, lineId));
+  if (!line) return {};
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, line.invoiceId));
+  if (!inv) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has been sent - issue a credit line instead of editing it.` };
+  await db.delete(invoiceLines).where(eq(invoiceLines.id, lineId));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+    action: `removed a line from ${inv.number}: ${line.description} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/**
+ * Issue it: stamp the date, apply the client's terms, open a share link and
+ * mail it.
+ *
+ * The link is how the client reads the bill, and its open event is the Viewed
+ * signal on the timeline - there is no second tracker, because a second
+ * tracker is a second answer to "did they see it". Mail failing does not
+ * un-issue the invoice; the link exists either way and the error says so.
+ */
+export async function sendInvoice(id: number): Promise<{ error?: string; token?: string; warning?: string }> {
+  const u = await requireStaff();
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  if (!inv) return { error: "Not found" };
+  if (inv.status !== "draft") return { error: `${inv.number} has already been sent.` };
+  const lines = await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, id));
+  if (!lines.length) return { error: "There is nothing on this invoice to send." };
+
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, inv.orgId));
+  const issuedOn = shopToday();
+  const dueOn = dueFor(org ?? null, issuedOn);
+
+  const token = crypto.randomBytes(18).toString("base64url");
+  const [link] = await db.insert(shareLinks).values({
+    token, kind: "invoice", orgId: inv.orgId, invoiceId: inv.id,
+    label: `Invoice ${inv.number}`,
+    // A bill stays readable well past its due date: a link that dies at day 30
+    // is a link that dies exactly when collections starts needing it.
+    expiresOn: addDays(issuedOn, 365),
+    tenantOrgId: inv.tenantOrgId, createdBy: u.email,
+  }).returning();
+
+  await db.update(invoices).set({ status: "sent", issuedOn, dueOn, updatedAt: new Date() })
+    .where(eq(invoices.id, id));
+
+  const total = linesTotal(lines.map((l) => ({
+    kind: "part" as const, description: "", qty: l.qty / 1000,
+    unitCents: l.unitCents, covered: l.covered, sourceId: null,
+  })));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
+    action: `sent ${inv.number} to ${org?.name ?? "the client"}: ${formatCents(total)}, due ${dueOn}`,
+  });
+
+  const warning = await mailInvoice({ inv, org: org ?? null, token, total, dueOn })
+    .then(() => "")
+    .catch(() => "The invoice is issued and the link works, but the email did not go out.");
+  revInvoice(inv);
+  return { token, ...(warning ? { warning } : {}) };
+}
+
+/**
+ * The email itself. Threaded per client through lib/emailThread, so this
+ * month's invoice and last month's are one conversation rather than twelve
+ * lookalike messages, and addressed to the AP contact when there is one -
+ * reminders go to the desk that pays, not the lab that ordered.
+ */
+async function mailInvoice(opts: {
+  inv: typeof invoices.$inferSelect;
+  org: typeof orgs.$inferSelect | null;
+  token: string; total: number; dueOn: string;
+}): Promise<void> {
+  const { inv, org } = opts;
+  const to = [org?.apEmail?.trim(), ...(await orgRecipients(inv.orgId))].filter(Boolean) as string[];
+  if (!to.length) return;
+  const base = appUrl();
+  if (!base) return;
+  const brand = await brandForTenant(inv.tenantOrgId);
+  const href = `${base}/share/${opts.token}`;
+  const html = emailShell({
+    brand: brand.operatorName || brand.name,
+    logoUrl: brand.operatorLogoUrl || undefined,
+    tagline: brand.tagline || undefined,
+    preheader: `Invoice ${inv.number} - ${formatCents(opts.total)}, due ${opts.dueOn}`,
+    body: `<p style="margin:0 0 12px;"><strong>Invoice ${esc(inv.number)}</strong></p>`
+      + `<p style="margin:0 0 16px;">${esc(formatCents(opts.total))}, due ${esc(opts.dueOn)}.</p>`
+      + btn(href, "View the invoice"),
+    footer: `Questions about a line? Reply to this message and we will pause that line while the rest stays due.`,
+  });
+  const root = threadRootId(`invoice-org-${inv.orgId}`, mailHost(process.env.EMAIL_FROM));
+  await sendEmail([...new Set(to)], `${brand.name}: invoice ${inv.number}`, html, {
+    headers: threadHeaders(root),
+    text: `Invoice ${inv.number} - ${formatCents(opts.total)}, due ${opts.dueOn}.\n${href}`,
+  });
+}
+
+/**
+ * Money arrived. Never edits a line and never edits another payment: a
+ * mistake is corrected by a second row, so the ledger reads as what happened
+ * rather than as what somebody last decided it should look like.
+ *
+ * The status column is nudged to partial or paid for the sake of a list that
+ * has not summed anything yet; lib/statement still reconciles it against the
+ * rows, and the rows win.
+ */
+export async function recordPayment(
+  invoiceId: number,
+  data: { method: string; amount: string; reference: string; receivedOn: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const cents = parseMoney(data.amount);
+  if (cents === null || cents <= 0) return { error: "Enter an amount like 840.00" };
+  const day = data.receivedOn.trim();
+  if (!isIsoDay(day)) return { error: "Pick the date it arrived" };
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, invoiceId));
+  if (!inv) return { error: "Not found" };
+  if (inv.status === "draft") return { error: `${inv.number} has not been sent yet.` };
+  const method = (PAYMENT_METHODS as readonly string[]).includes(data.method) ? data.method : "other";
+
+  const [row] = await db.insert(payments).values({
+    tenantOrgId: inv.tenantOrgId, invoiceId, method, amountCents: cents,
+    reference: data.reference.trim(), receivedOn: day, recordedBy: u.email,
+  }).returning();
+
+  const full = await invoiceById(invoiceId);
+  const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
+  if (view && inv.status !== "void" && inv.status !== "referred") {
+    const next = view.balanceCents <= 0 ? "paid" : "partial";
+    if (next !== inv.status) {
+      await db.update(invoices).set({ status: next, updatedAt: new Date() }).where(eq(invoices.id, invoiceId));
+    }
+  }
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: invoiceId, tenantOrgId: inv.tenantOrgId,
+    action: `recorded ${formatCents(cents)} by ${METHOD_LABEL[method].toLowerCase()} on ${inv.number}`
+      + (row.reference ? ` (${row.reference})` : "")
+      + (view ? ` - ${view.balanceCents <= 0 ? "paid in full" : `${formatCents(view.balanceCents)} still open`}` : ""),
+  });
+  revInvoice(inv);
+  return {};
+}
+
+/** Undo a payment that was never really there. Audited with the reason. */
+export async function deletePayment(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [row] = await db.select().from(payments).where(eq(payments.id, id));
+  if (!row) return {};
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, row.invoiceId));
+  await db.delete(payments).where(eq(payments.id, id));
+  if (inv) {
+    await audit({
+      actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: inv.tenantOrgId,
+      action: `removed a ${formatCents(row.amountCents)} payment from ${inv.number} - reason: ${why}`,
+      field: "reason", newValue: why,
+    });
+    revInvoice(inv);
+  }
+  return {};
+}
+
+/**
+ * Void it. The row and its lines stay: an invoice number that vanishes is a
+ * gap somebody has to explain to an auditor, and "voided on the 3rd because
+ * it was billed to the wrong site" is the explanation.
+ */
+export async function voidInvoice(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [inv] = await db.select().from(invoices).where(eq(invoices.id, id));
+  if (!inv) return { error: "Not found" };
+  if (inv.status === "void") return {};
+  const paid = await db.select().from(payments).where(eq(payments.invoiceId, id));
+  if (paid.length) return { error: `${inv.number} has payments against it - remove those first.` };
+  await db.update(invoices).set({ status: "void", updatedAt: new Date() }).where(eq(invoices.id, id));
+  await db.update(shareLinks).set({ revokedAt: new Date() }).where(eq(shareLinks.invoiceId, id));
+  await audit({
+    actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: inv.tenantOrgId,
+    action: `voided ${inv.number} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revInvoice(inv);
   return {};
 }

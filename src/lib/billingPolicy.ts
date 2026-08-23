@@ -11,7 +11,9 @@
 // throwing in the middle of rendering somebody's invoice. Nothing here decides
 // anything - lib/dunning and lib/credit read these numbers.
 //
-// Pure. No imports, no database.
+// Pure: one import, for rendering money, and no database.
+
+import { formatCents } from "@/lib/money";
 
 export const FEE_TYPES = ["none", "flat", "interest"] as const;
 export type FeeType = (typeof FEE_TYPES)[number];
@@ -39,6 +41,13 @@ export type BillingPolicy = {
   escalation: EscalationContact[];
   /** Draw the parts-only sales tax line, at the site's rate. */
   taxParts: boolean;
+  /**
+   * What a part sells for over what it landed at, in basis points. 3000 is the
+   * usual 30%. Lives with the policy rather than in a settings column because
+   * a client on a retainer is often the client who negotiated the markup down,
+   * and that is a per-client fact.
+   */
+  partsMarkupBps: number;
 };
 
 /**
@@ -60,6 +69,7 @@ export const DEFAULT_POLICY: BillingPolicy = {
   dunningAuto: true,
   escalation: [],
   taxParts: true,
+  partsMarkupBps: 3000,
 };
 
 const int = (v: unknown, fallback: number): number => {
@@ -102,6 +112,7 @@ function merge(base: BillingPolicy, raw: unknown): BillingPolicy {
     dunningAuto: typeof v.dunningAuto === "boolean" ? v.dunningAuto : base.dunningAuto,
     escalation: v.escalation === undefined ? base.escalation : contacts(v.escalation),
     taxParts: typeof v.taxParts === "boolean" ? v.taxParts : base.taxParts,
+    partsMarkupBps: int(v.partsMarkupBps, base.partsMarkupBps),
   };
 }
 
@@ -116,7 +127,7 @@ export function feeClause(p: BillingPolicy): string {
   if (p.feeType === "none") return "";
   const what = p.appliesTo === "parts" ? "the parts balance" : "the unpaid balance";
   const charge = p.feeType === "flat"
-    ? `a late charge of ${(p.flatCents / 100).toFixed(2)} applies`
+    ? `a late charge of ${formatCents(p.flatCents)} applies`
     : `a late charge of ${(p.rateBpsMonthly / 100).toFixed(2)}% per month applies`;
   const grace = p.graceDays > 0 ? ` after ${p.graceDays} days` : "";
   return `Payable per the terms above; ${charge} on ${what}${grace}.`;

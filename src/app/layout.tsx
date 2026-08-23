@@ -125,6 +125,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     { href: "/work", label: "Work orders" },
     { href: "/assets", label: "Assets" },
     ...(hasStock ? [{ href: "/stock", label: "Inventory" }] : []),
+    /* Money is staff work: a client sees their own bills through their own
+       portal token, never through a nav word that lists everybody's. */
+    ...(isStaff ? [{ href: "/money", label: "Billing" }] : []),
   ];
   const navGroups = isStaff ? [
     {

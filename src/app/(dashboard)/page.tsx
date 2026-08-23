@@ -18,6 +18,7 @@ import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
+import MoneyCard from "@/components/MoneyCard";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
@@ -217,6 +218,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
           key: c.key, date: c.date, title: c.title, body: c.body, image: c.image, href: c.href,
         }))} />
       )}
+      {/* Whose move is it, in money - above the board, because an unbilled
+          closed job is work that is finished and still costing. */}
+      {isStaff && <MoneyCard />}
       <Dashboard
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}

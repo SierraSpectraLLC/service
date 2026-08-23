@@ -1,18 +1,25 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { attachments, shareLinks, shareLinkFiles } from "@/db/schema";
-import { getBrand } from "@/lib/brand";
+import { attachments, orgs, shareLinks, shareLinkFiles } from "@/db/schema";
+import { brandForTenant, getBrand } from "@/lib/brand";
 import { linkState } from "@/lib/dropShare";
 import { fmtBytes } from "@/lib/storage";
 import { shopToday } from "@/lib/shopday";
+import { asStatementRow, invoiceForOrg, invoicesForOrg } from "@/lib/invoiceData";
+import { statementFor } from "@/lib/statement";
+import ClientInvoice from "@/components/ClientInvoice";
 import { EmptyState, PublicShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
 /**
- * What a share link shows the person holding it: the named files, and nothing
- * about the store they came from. Dead links say why in one sentence and stop
- * - see the drop page for the reasoning; it is the same posture.
+ * What a share link shows the person holding it, and nothing about the store
+ * it came from. Dead links say why in one sentence and stop - see the drop
+ * page for the reasoning; it is the same posture.
+ *
+ * The link is also the authorization. Everything a client sees about money is
+ * fetched through the ORG ID ON THIS ROW - never through an id in the URL - so
+ * a token for one client cannot be pointed at another client's invoice.
  */
 export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -31,6 +38,19 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         />
       </PublicShell>
     );
+  }
+
+  // The open, recorded on the link itself. This IS the Viewed signal an
+  // invoice timeline reads: one answer to "did they see it", living where the
+  // link already lives rather than in a second tracker that can disagree.
+  await db.update(shareLinks).set({
+    openedAt: link.openedAt ?? new Date(),
+    lastOpenedAt: new Date(),
+    openCount: link.openCount + 1,
+  }).where(eq(shareLinks.id, link.id)).catch(() => {});
+
+  if (link.kind === "invoice" && link.invoiceId !== null && link.orgId !== null) {
+    return <InvoiceShare link={link} />;
   }
 
   const fileIds = (await db.select({ attachmentId: shareLinkFiles.attachmentId })
@@ -62,6 +82,62 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           </div>
         )}
       </div>
+    </PublicShell>
+  );
+}
+
+/**
+ * The bill, and the client's own account beside it.
+ *
+ * The document carries the OPERATOR's name, never the platform's - a client
+ * is buying service from a service company, and the software they never chose
+ * has no business signing their invoice.
+ */
+async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) {
+  const orgId = link.orgId as number;
+  const [full, all, org, brand] = await Promise.all([
+    invoiceForOrg(link.invoiceId as number, orgId),
+    invoicesForOrg(orgId),
+    db.select().from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0] ?? null),
+    brandForTenant(link.tenantOrgId),
+  ]);
+  const name = brand.operatorName || brand.name;
+
+  if (!full) {
+    return (
+      <PublicShell brandName={name} width={620}>
+        <EmptyState title="This invoice is no longer available" body="Ask us for a fresh link." />
+      </PublicShell>
+    );
+  }
+
+  const today = shopToday();
+  const statement = statementFor({ orgId, invoices: all.map(asStatementRow), today });
+
+  return (
+    <PublicShell brandName={name} tagline={brand.tagline} width={640}>
+      <ClientInvoice
+        brandName={name}
+        orgName={org?.name ?? ""}
+        apEmail={org?.apEmail ?? ""}
+        invoice={{
+          id: full.row.id, number: full.row.number, issuedOn: full.row.issuedOn,
+          dueOn: full.row.dueOn, poNumber: full.row.poNumber, note: full.row.note,
+          lines: full.lines.map((l) => ({
+            id: l.id, kind: l.kind, description: l.description, detail: l.detail,
+            qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
+          })),
+          paidCents: full.payments.reduce((n, p) => n + p.amountCents, 0),
+        }}
+        statement={{
+          openCents: statement.openCents,
+          payableCents: statement.payableCents,
+          count: statement.open.length,
+          open: statement.open.map((v) => ({
+            number: v.number, balanceCents: v.balanceCents, daysLate: v.daysLate,
+          })),
+        }}
+      />
     </PublicShell>
   );
 }

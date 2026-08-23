@@ -43,6 +43,9 @@ export const STANDING_TONE: Record<Standing, Tone> = {
   due: "warn", sent: "info", referred: "bad",
 };
 
+export const PAYMENT_METHODS = ["ach", "card", "check", "other"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
 export const METHOD_LABEL: Record<string, string> = {
   ach: "ACH", card: "Card", check: "Check", other: "Other",
 };

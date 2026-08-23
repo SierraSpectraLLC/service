@@ -62,7 +62,18 @@ const FIXTURE = `
     ('WO-0402', 2, 1, 'Replace turbo and recertify',       'Down',     'active',   'joe', '2026-08-11', 'Rita Alvarez'),
     ('WO-0403', 5, 2, 'No signal at detector',             'Down',     'waiting',  'joe', '2026-08-04', 'Sam Okafor'),
     ('WO-0404', 3, 1, 'Carryover on blank injections',     'Degraded', 'resolved', 'joe', '2026-07-28', 'Rita Alvarez'),
-    ('WO-0405', 4, 2, 'Intake inspection and quote',       'Routine',  'closed',   'joe', '2026-07-14', 'Sam Okafor');
+    ('WO-0405', 4, 2, 'Intake inspection and quote',       'Routine',  'closed',   'joe', '2026-07-14', 'Sam Okafor'),
+    -- Two closed jobs with nothing billed against them: the leak the Billing
+    -- overview exists to show. One is covered (the $0 invoice that still
+    -- documents the visit), one is straight time and materials.
+    ('WO-0406', 3, 1, 'Quarterly PM, visit 6 of 6',        'Routine',  'closed',   'joe', '2026-08-05', 'Rita Alvarez'),
+    ('WO-0407', 5, 2, 'ICP-OES ignition fault',            'Down',     'closed',   'joe', '2026-07-30', 'Sam Okafor');
+  UPDATE work_orders SET closed_at = now() - interval '9 days',
+    close_summary = 'Intake inspection done, quote sent.' WHERE number = 'WO-0405';
+  UPDATE work_orders SET closed_at = now() - interval '3 days',
+    close_summary = 'PM run to the checklist; all readings in band.' WHERE number = 'WO-0406';
+  UPDATE work_orders SET closed_at = now() - interval '6 days',
+    close_summary = 'Torch and injector replaced, ignition verified.' WHERE number = 'WO-0407';
 
   INSERT INTO stockrooms (name, kind, keeper, location) VALUES
     ('Main stockroom', 'shop', 'joe', 'Back wall');
@@ -101,7 +112,8 @@ const FIXTURE = `
   INSERT INTO expenses (work_order_id, kind, description, amount_cents, incurred_on, logged_by) VALUES
     (2, 'mileage', '84 miles round trip at 0.67', 5628, to_char(now() - interval '5 days', 'YYYY-MM-DD'), '${OWNER}'),
     (2, 'shipping', 'Overnight freight, turbo from Edwards', 21400, to_char(now() - interval '6 days', 'YYYY-MM-DD'), '${OWNER}'),
-    (2, 'other', 'Crane rental, half day', 45000, to_char(now() - interval '5 days', 'YYYY-MM-DD'), 'Sam Ortiz');
+    (2, 'other', 'Crane rental, half day', 45000, to_char(now() - interval '5 days', 'YYYY-MM-DD'), 'Sam Ortiz'),
+    (7, 'mileage', '212 miles round trip at 0.67', 14204, to_char(now() - interval '6 days', 'YYYY-MM-DD'), '${OWNER}');
 
   -- Lab Zen pays on paper and has a live PO with room on it. Coastal has no PO
   -- at all and a punitive policy - short grace, a flat late fee, a hold that
@@ -120,6 +132,31 @@ const FIXTURE = `
     (1, 'Lab Zen - Building C', '1400 Harbor Way, Richmond, CA 94804', 'Rita Alvarez', '${OWNER}'),
     (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', '${OWNER}');
   UPDATE org_sites SET tax_rate_bps = 1025 WHERE org_id = 1;
+
+  -- Three invoices so /money has an open one, an overdue one and a settled
+  -- one, and so the $0 covered invoice is on screen rather than only in a test.
+  INSERT INTO invoices (org_id, work_order_id, agreement_id, number, status, issued_on, due_on, po_number, created_by) VALUES
+    (1, 3, NULL, 'INV-0091', 'paid',  to_char(now() - interval '38 days', 'YYYY-MM-DD'), to_char(now() - interval '8 days', 'YYYY-MM-DD'), 'PO-88213', '${OWNER}'),
+    (1, 2, 1,    'INV-0092', 'sent',  to_char(now() - interval '9 days', 'YYYY-MM-DD'),  to_char(now() + interval '21 days', 'YYYY-MM-DD'), 'PO-88213', '${OWNER}'),
+    (2, 5, NULL, 'INV-0087', 'sent',  to_char(now() - interval '72 days', 'YYYY-MM-DD'), to_char(now() - interval '42 days', 'YYYY-MM-DD'), '', '${OWNER}');
+  INSERT INTO invoice_lines (invoice_id, kind, description, detail, qty, unit_cents, covered, covered_by, position) VALUES
+    (1, 'labor', 'Labor, on site - Dev Owner', 'Tune and verify', 3000, 15500, false, '', 0),
+    (1, 'part', 'G7100-60001 Capillary kit', 'price book, 30% markup', 1000, 27300, false, '', 1),
+    (2, 'labor', 'Labor, on site - Dev Owner', 'Turbo replacement', 7000, 14000, true, 'AGR-2026-01', 0),
+    (2, 'travel', 'Travel - Sam Ortiz', '', 4000, 0, true, 'AGR-2026-01', 1),
+    (2, 'part', 'EXT255H Turbo pump', 'drawn from the parts allowance', 1000, 630500, true, 'AGR-2026-01', 2),
+    (2, 'expense', 'Crane rental, half day', '', 1000, 45000, false, '', 3),
+    (3, 'part', '05971-80059 HED supply', '', 1000, 390000, false, '', 0),
+    (3, 'labor', 'Labor, on site - Sam Ortiz', 'Intake inspection', 2000, 19500, false, '', 1);
+  INSERT INTO payments (invoice_id, method, amount_cents, reference, received_on, recorded_by) VALUES
+    (1, 'check', 73800, '4417', to_char(now() - interval '12 days', 'YYYY-MM-DD'), '${OWNER}');
+
+  -- The live link the client reads INV-0092 through, already opened twice:
+  -- the Viewed line on the invoice timeline comes off this row.
+  INSERT INTO share_links (token, kind, org_id, invoice_id, label, expires_on, created_by, opened_at, last_opened_at, open_count) VALUES
+    ('devinvoicetoken12345', 'invoice', 1, 2, 'Invoice INV-0092',
+      to_char(now() + interval '300 days', 'YYYY-MM-DD'), '${OWNER}',
+      now() - interval '8 days', now() - interval '6 days', 2);
   UPDATE instruments SET site_id = 1 WHERE client = 'Lab Zen';
   UPDATE instruments SET site_id = 2 WHERE client = 'Coastal Analytical';
 
@@ -181,18 +218,25 @@ const FIXTURE = `
     (1, 'Dev Owner', to_char(now() - interval '2 days', 'YYYY-MM-DD'), 180, 'Tune and verify', '${OWNER}', NULL),
     (2, 'Dev Owner', to_char(now() - interval '5 days', 'YYYY-MM-DD'), 420, 'Turbo replacement', '${OWNER}', 2),
     (2, 'Sam Ortiz', to_char(now() - interval '4 days', 'YYYY-MM-DD'), 240, 'Pump-down watch', '${OWNER}', 2),
-    (4, 'Sam Ortiz', to_char(now() - interval '9 days', 'YYYY-MM-DD'), 120, 'Intake inspection', '${OWNER}', NULL);
+    (4, 'Sam Ortiz', to_char(now() - interval '9 days', 'YYYY-MM-DD'), 120, 'Intake inspection', '${OWNER}', NULL),
+    (3, 'Dev Owner', to_char(now() - interval '3 days', 'YYYY-MM-DD'), 240, 'Quarterly PM', '${OWNER}', 6),
+    (5, 'Dev Owner', to_char(now() - interval '6 days', 'YYYY-MM-DD'), 540, 'Torch and injector', '${OWNER}', 7),
+    (5, 'Dev Owner', to_char(now() - interval '6 days', 'YYYY-MM-DD'), 90,  'Drive to Astoria',  '${OWNER}', 7);
 
   -- Hours that are not all alike: travel and remote next to onsite, and one
   -- entry already marked not billable because the agreement covers it.
   UPDATE time_entries SET category = 'travel', billable = true WHERE id = 3;
   UPDATE time_entries SET category = 'onsite', billable = false WHERE id = 2;
   UPDATE time_entries SET category = 'remote' WHERE id = 4;
+  UPDATE time_entries SET category = 'travel' WHERE id = 7;
 
   INSERT INTO parts (instrument_id, name, part_number, vendor, cost, cost_cents, status, installed_at) VALUES
     (2, 'Turbo pump', 'EXT255H', 'Edwards', '$4,850.00', 485000, 'Installed', to_char(now() - interval '5 days', 'YYYY-MM-DD')),
     (1, 'Capillary kit', 'G7100-60001', 'Agilent', '$210.00', 21000, 'Installed', to_char(now() - interval '2 days', 'YYYY-MM-DD')),
     (5, 'HED supply', '05971-80059', 'Agilent', 'call for quote', NULL, 'Ordered', '');
+  INSERT INTO parts (instrument_id, work_order_id, name, part_number, vendor, cost, cost_cents, status, installed_at) VALUES
+    (3, 6, 'Desolvation line', 'SH-DL-8060', 'Shimadzu', '$640.00', 64000, 'Installed', to_char(now() - interval '3 days', 'YYYY-MM-DD')),
+    (5, 7, 'Torch, quartz', 'N0790456', 'PerkinElmer', '$1,180.00', 118000, 'Installed', to_char(now() - interval '6 days', 'YYYY-MM-DD'));
 
   INSERT INTO folders (org_id, name) VALUES (NULL, 'Manuals');
   INSERT INTO attachments (org_id, instrument_id, asset_id, folder_id, file_name, kind, description, url, size, uploaded_by) VALUES
@@ -226,7 +270,7 @@ async function seed() {
   const seeded = await pg.query("SELECT 1 FROM orgs LIMIT 1");
   if (seeded.rows.length === 0) {
     await pg.exec(FIXTURE);
-    console.log("[dev:local] seeded fixture (2 orgs, 6 systems, 10 assets, 5 WOs, 1 PO, 1 stockroom)");
+    console.log("[dev:local] seeded fixture (2 orgs, 6 systems, 10 assets, 5 WOs, 1 PO, 1 stockroom, 3 invoices)");
   } else {
     console.log("[dev:local] existing data kept - delete the data dir to reseed");
   }
