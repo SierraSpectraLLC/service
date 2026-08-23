@@ -5,9 +5,15 @@ import { brandForTenant, getBrand } from "@/lib/brand";
 import { linkState } from "@/lib/dropShare";
 import { fmtBytes } from "@/lib/storage";
 import { shopToday } from "@/lib/shopday";
-import { asStatementRow, invoiceForOrg, invoicesForOrg } from "@/lib/invoiceData";
+import {
+  asStatementRow, billingContext, creditFor, invoiceForOrg, invoicesForOrg,
+  quoteForOrg, quoteTotal,
+} from "@/lib/invoiceData";
+import { quoteStanding } from "@/lib/quotes";
+import { feeClause } from "@/lib/billingPolicy";
 import { statementFor } from "@/lib/statement";
 import ClientInvoice from "@/components/ClientInvoice";
+import ClientQuote from "@/components/ClientQuote";
 import { EmptyState, PublicShell } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +57,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
 
   if (link.kind === "invoice" && link.invoiceId !== null && link.orgId !== null) {
     return <InvoiceShare link={link} />;
+  }
+  if (link.kind === "quote" && link.quoteId !== null && link.orgId !== null) {
+    return <QuoteShare link={link} />;
   }
 
   const fileIds = (await db.select({ attachmentId: shareLinkFiles.attachmentId })
@@ -137,6 +146,63 @@ async function InvoiceShare({ link }: { link: typeof shareLinks.$inferSelect }) 
             number: v.number, balanceCents: v.balanceCents, daysLate: v.daysLate,
           })),
         }}
+      />
+    </PublicShell>
+  );
+}
+
+/**
+ * The price, and the three things a client can do about it.
+ *
+ * Same door as the invoice: the quote is fetched through the ORG ID ON THIS
+ * ROW, so a token for one client cannot be pointed at another client's price.
+ * The credit standing is read here rather than at approval time so the portal
+ * can say, before they press anything, that the job will open on hold.
+ */
+async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
+  const orgId = link.orgId as number;
+  const [full, org, brand] = await Promise.all([
+    quoteForOrg(link.quoteId as number, orgId),
+    db.select().from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0] ?? null),
+    brandForTenant(link.tenantOrgId),
+  ]);
+  const name = brand.operatorName || brand.name;
+
+  if (!full) {
+    return (
+      <PublicShell brandName={name} width={620}>
+        <EmptyState title="This quote is no longer available" body="Ask us for a fresh link." />
+      </PublicShell>
+    );
+  }
+
+  const today = shopToday();
+  const [credit, ctx] = await Promise.all([
+    creditFor(orgId, today).catch(() => null),
+    billingContext(orgId),
+  ]);
+
+  return (
+    <PublicShell brandName={name} tagline={brand.tagline} width={640}>
+      <ClientQuote
+        token={link.token}
+        quoteId={full.row.id}
+        number={full.row.number}
+        title={full.row.title}
+        brandName={name}
+        orgName={org?.name ?? ""}
+        expiresOn={full.row.expiresOn}
+        depositPct={full.row.depositPct}
+        totalCents={quoteTotal(full)}
+        onHold={credit?.onHold ?? false}
+        standing={quoteStanding(full.row, today)}
+        answeredBy={full.row.answeredBy}
+        answeredOn={full.row.answeredOn ?? ""}
+        feeClause={feeClause(ctx.policy)}
+        lines={full.lines.map((l) => ({
+          id: l.id, description: l.description, detail: l.detail,
+          qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
+        }))}
       />
     </PublicShell>
   );

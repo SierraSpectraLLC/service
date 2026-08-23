@@ -17,7 +17,8 @@ import { db } from "@/db";
 import {
   agreements, appSettings, creditOverrides, disputes, dunningEvents, expenses,
   instruments, invoiceFees, invoiceLines, invoices, orgs, orgSites, partPrices,
-  parts, payments, promises, rateCards, timeEntries, workOrders,
+  parts, payments, promises, quoteLines, quotes, rateCards, shareLinks, timeEntries,
+  workOrders,
 } from "@/db/schema";
 import {
   buildInvoiceLines, coverageFor, coveredValue, linesTotal, sellPrice,
@@ -29,6 +30,7 @@ import { resolveRate, type RateCard } from "@/lib/rates";
 import { dueDate, invoiceView, isOpen, type InvoiceRow } from "@/lib/statement";
 import { CLEAR, creditStanding, type CreditStanding } from "@/lib/credit";
 import { nextAction, promiseBroken } from "@/lib/dunning";
+import { daysToExpiry, stale } from "@/lib/quotes";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import type { MoneyInput } from "@/lib/digestMoney";
 import { shopToday } from "@/lib/shopday";
@@ -424,10 +426,69 @@ export async function moneyDigest(today: string): Promise<MoneyInput> {
       orgName: name(id), balanceCents: s.balanceCents, oldestDaysLate: s.oldestDaysLate,
     }));
 
+  // Quotes inside a week of lapsing. A quote nobody answered is revenue that
+  // simply evaporates, and it evaporates quietly - there is no aging report it
+  // ever appears on.
+  const quoteRows = await allQuotes();
+  const links = await db.select().from(shareLinks);
+  const staleQuotes = stale(quoteRows.map((q) => q.row), today).map((row) => {
+    const f = quoteRows.find((x) => x.row.id === row.id)!;
+    return {
+      number: row.number, orgName: name(row.orgId),
+      daysLeft: daysToExpiry(row.expiresOn, today) ?? 0,
+      valueCents: quoteTotal(f),
+      views: links.find((l) => l.quoteId === row.id)?.openCount ?? 0,
+    };
+  });
+
   return {
+    staleQuotes,
     unbilled: jobs.map((j) => ({
       number: j.number, orgName: j.orgName, daysClosed: j.daysClosed, valueCents: j.valueCents,
     })).filter((j) => j.valueCents > 0),
     brokenPromises, openDisputes, overdue, onHold,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Quotes. Same split as invoices: pure rules in lib/quotes, fetching here, and
+// one org-scoped door the share viewer uses.
+// ---------------------------------------------------------------------------
+
+export type FullQuote = {
+  row: typeof quotes.$inferSelect;
+  lines: (typeof quoteLines.$inferSelect)[];
+};
+
+export const quoteTotal = (q: FullQuote): number =>
+  q.lines.reduce((n, l) => n + (l.covered ? 0 : Math.round(qtyOf(l) * l.unitCents)), 0);
+
+async function hydrateQuotes(rows: (typeof quotes.$inferSelect)[]): Promise<FullQuote[]> {
+  if (!rows.length) return [];
+  const lineRows = await db.select().from(quoteLines)
+    .where(inArray(quoteLines.quoteId, rows.map((r) => r.id)));
+  return rows.map((row) => ({
+    row,
+    lines: lineRows.filter((l) => l.quoteId === row.id).sort((a, b) => a.position - b.position || a.id - b.id),
+  }));
+}
+
+/** Every quote in the workspace, newest first. Internal surfaces only. */
+export async function allQuotes(): Promise<FullQuote[]> {
+  const rows = await db.select().from(quotes);
+  return (await hydrateQuotes(rows)).sort((a, b) => b.row.id - a.row.id);
+}
+
+export async function quoteById(id: number): Promise<FullQuote | null> {
+  return (await hydrateQuotes(await db.select().from(quotes).where(eq(quotes.id, id))))[0] ?? null;
+}
+
+/**
+ * One quote, for a client - the org id applied IN THE QUERY, exactly as
+ * invoiceForOrg does it. A token for one client cannot be pointed at another
+ * client's price.
+ */
+export async function quoteForOrg(id: number, orgId: number): Promise<FullQuote | null> {
+  const rows = await db.select().from(quotes).where(and(eq(quotes.id, id), eq(quotes.orgId, orgId)));
+  return (await hydrateQuotes(rows))[0] ?? null;
 }

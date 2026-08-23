@@ -5,7 +5,7 @@ import { db } from "@/db";
 import {
   assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, parts, poLines,
   purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements,
-  rateCards,
+  rateCards, quotes,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, readTenant } from "@/lib/tenancy";
@@ -36,6 +36,8 @@ import { coverageFor } from "@/lib/billing";
 import { asStatementRow, billingContext, creditFor, invoicesForOrg } from "@/lib/invoiceData";
 import { invoiceView, isOpen } from "@/lib/statement";
 import { resolveRate } from "@/lib/rates";
+import { quoteStanding, STANDING_LABEL as QUOTE_STANDING, STANDING_TONE as QUOTE_TONE } from "@/lib/quotes";
+import QuoteJobButton from "@/components/QuoteJobButton";
 import PhotosPanel from "@/components/PhotosPanel";
 import { isPhotoFile } from "@/lib/photos";
 import { procedures } from "@/db/schema";
@@ -45,7 +47,7 @@ import { parseChecklist } from "@/lib/checklist";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
 import { mentionableOn } from "@/lib/mentionAudience";
 import PanelLayout from "@/components/PanelLayout";
-import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
+import { HeroKebab, Id, Panel, Pill, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -216,6 +218,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await db.select().from(orgs).where(eq(orgs.id, wo.orgId)).then((r) => r[0] ?? null)
     : null;
   const rate = resolveRate(rateCardRows, { orgId: wo.orgId, agreementId: coverage.agreementId });
+  const quoteRows = staff
+    ? await db.select().from(quotes).where(eq(quotes.workOrderId, woId)).orderBy(desc(quotes.id))
+    : [];
 
   const place = inst
     ? { href: `/instruments/${inst.id}`, label: `${inst.externalId}${systemLabel(inst, unitRows) ? ` - ${systemLabel(inst, unitRows)}` : ""}` }
@@ -292,9 +297,14 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         meta={`opened ${wo.openedOn}${wo.assignee ? ` · with ${wo.assignee}` : " · nobody assigned"}`}
         stats={heroStats}
         actions={
-          <Link href={place.href} className="btn sm" style={{ textDecoration: "none" }}>
-            {place.label} →
-          </Link>
+          <>
+            {staff && canAdd && wo.orgId !== null && quoteRows.length === 0 && (
+              <QuoteJobButton workOrderId={wo.id} number={wo.number} title={wo.title} today={today} />
+            )}
+            <Link href={place.href} className="btn sm" style={{ textDecoration: "none" }}>
+              {place.label} →
+            </Link>
+          </>
         }
         kebab={<HeroKebab arrange menuLabel={`Actions for ${wo.number}`} />}
       />
@@ -310,6 +320,20 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           orgName={askedBy}
           canOverride={user.role === "owner"}
         />
+      )}
+
+      {staff && quoteRows.length > 0 && (
+        <Panel title="Quotes" count={quoteRows.length} hint="What this job was priced at, and what the client said.">
+          {quoteRows.map((q) => (
+            <div key={q.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+              <Link href={`/money/quotes/${q.id}`} className="t-body" style={{ textDecoration: "none", fontWeight: 600 }}>
+                <Id>{q.number}</Id>
+              </Link>
+              <span className="mut t-small" style={{ flex: 1, minWidth: 0 }}>{q.title}</span>
+              <Pill tone={QUOTE_TONE[quoteStanding(q, today)]}>{QUOTE_STANDING[quoteStanding(q, today)]}</Pill>
+            </div>
+          ))}
+        </Panel>
       )}
 
       {staff && (

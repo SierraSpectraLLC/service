@@ -1,0 +1,133 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { and, desc, eq, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { auditLog, orgs, shareLinks, workOrders } from "@/db/schema";
+import { requireUser } from "@/lib/authz";
+import { isStaffRole } from "@/lib/tenants";
+import { formatCents } from "@/lib/money";
+import { shopMonthDay, shopToday } from "@/lib/shopday";
+import { billingContext, quoteById, quoteTotal } from "@/lib/invoiceData";
+import { feeClause } from "@/lib/billingPolicy";
+import {
+  daysToExpiry, depositCents, quoteStanding, STANDING_LABEL, STANDING_TONE,
+} from "@/lib/quotes";
+import QuoteActions from "@/components/QuoteActions";
+import InvoiceLineList from "@/components/InvoiceLineList";
+import { Id, Panel, Pill, RecordHero } from "@/components/ui";
+import type { HeroStat } from "@/components/ui";
+
+export const dynamic = "force-dynamic";
+
+/** One price, what it is made of, and what happened after it went out. */
+export default async function QuotePage({ params }: { params: Promise<{ id: string }> }) {
+  let user;
+  try { user = await requireUser(); } catch { redirect("/login"); }
+  if (!isStaffRole(user.role)) redirect("/");
+  const id = parseInt((await params).id, 10);
+  if (!Number.isInteger(id)) notFound();
+
+  const full = await quoteById(id);
+  if (!full) notFound();
+  const { row } = full;
+  const today = shopToday();
+
+  const [org, wo, link, history, ctx] = await Promise.all([
+    db.select().from(orgs).where(eq(orgs.id, row.orgId)).then((r) => r[0] ?? null),
+    row.workOrderId === null ? Promise.resolve(null)
+      : db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId)).then((r) => r[0] ?? null),
+    db.select().from(shareLinks)
+      .where(and(eq(shareLinks.quoteId, id), isNull(shareLinks.revokedAt))).then((r) => r[0] ?? null),
+    db.select().from(auditLog)
+      .where(and(eq(auditLog.entityType, "quote"), eq(auditLog.entityId, String(id))))
+      .orderBy(desc(auditLog.createdAt)).limit(50),
+    billingContext(row.orgId),
+  ]);
+
+  const standing = quoteStanding(row, today);
+  const total = quoteTotal(full);
+  const deposit = depositCents(total, row.depositPct);
+  const left = daysToExpiry(row.expiresOn, today);
+  const clause = feeClause(ctx.policy);
+
+  const stats: HeroStat[] = [
+    { label: "total", value: formatCents(total) },
+    ...(deposit > 0 ? [{ label: `deposit on approval (${row.depositPct}%)`, value: formatCents(deposit) }] : []),
+    ...(standing === "awaiting" && left !== null
+      ? [{ label: left >= 0 ? "days left" : "days past expiry", value: Math.abs(left), tone: left <= 7 ? "warn" as const : undefined }]
+      : []),
+    ...(link?.openCount ? [{ label: `viewed${link.openCount > 1 ? ` ${link.openCount}x` : ""}`, value: link.openedAt ? shopMonthDay(link.openedAt) : "yes" }] : []),
+  ];
+
+  return (
+    <div className="container">
+      <div className="crumb">
+        <Link href="/money">Billing</Link> › <Link href="/money/quotes">Quotes</Link> › <b>{row.number}</b>
+      </div>
+      <RecordHero
+        eyebrow={<>Quote · {org?.name ?? "client gone"}</>}
+        id={row.number}
+        title={row.title || wo?.title || "Quote"}
+        meta={
+          <>
+            {wo && <><Link href={`/work/${wo.id}`}><Id>{wo.number}</Id></Link> · </>}
+            {row.sentOn ? `sent ${row.sentOn}` : "not sent yet"}
+            {row.expiresOn ? ` · expires ${row.expiresOn}` : ""}
+            {row.answeredOn ? ` · ${standing} ${row.answeredOn} by ${row.answeredBy}` : ""}
+          </>
+        }
+        stats={stats}
+        actions={<QuoteActions id={id} number={row.number} status={row.status} />}
+      />
+
+      <div className="row-2" style={{ marginBottom: 10 }}>
+        <Pill tone={STANDING_TONE[standing]}>{STANDING_LABEL[standing]}</Pill>
+        {link && (
+          <Link className="btn sm" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
+            Open as the client
+          </Link>
+        )}
+        {row.depositInvoiceId && (
+          <Link className="btn sm" href={`/money/invoices/${row.depositInvoiceId}`} style={{ textDecoration: "none" }}>
+            The deposit invoice
+          </Link>
+        )}
+      </div>
+
+      <InvoiceLineList
+        editable={false}
+        lines={full.lines.map((l) => ({
+          id: l.id, kind: l.kind, description: l.description, detail: l.detail,
+          qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
+        }))}
+        totalCents={total}
+      />
+
+      {row.answerNote && (
+        <Panel title={standing === "declined" ? "Why they said no" : "What they said"}>
+          <div className="t-body">{row.answerNote}</div>
+          <div className="mut t-meta" style={{ marginTop: 4 }}>
+            {row.answeredBy}{row.answeredOn ? ` · ${row.answeredOn}` : ""}
+            {wo ? " · also posted to the job, where the engineer will read it" : ""}
+          </div>
+        </Panel>
+      )}
+
+      {clause && (
+        <Panel title="Terms that ride the paper" hint="A late charge is only collectable if the client saw it before agreeing.">
+          <div className="t-body">{clause}</div>
+        </Panel>
+      )}
+
+      <Panel title="History" count={history.length} empty="Nothing yet.">
+        {history.length > 0 && history.map((a) => (
+          <div key={a.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+            <span className="mut t-small" style={{ width: 96 }}>{shopMonthDay(a.createdAt)}</span>
+            <span className="t-body" style={{ flex: 1, minWidth: 0 }}>{a.action}</span>
+            <span className="mut t-meta">{a.actor}</span>
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}

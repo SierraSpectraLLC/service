@@ -12,7 +12,7 @@ import { moneyLines, renderMoneySection, renderMoneyText, type MoneyInput } from
 import { TONE_HEX } from "@/lib/tones";
 
 const empty: MoneyInput = {
-  unbilled: [], brokenPromises: [], openDisputes: [], overdue: [], onHold: [],
+  unbilled: [], brokenPromises: [], openDisputes: [], overdue: [], onHold: [], staleQuotes: [],
 };
 
 const full: MoneyInput = {
@@ -31,6 +31,9 @@ const full: MoneyInput = {
   ],
   onHold: [
     { orgName: "Coastal Analytical", balanceCents: 395800, oldestDaysLate: 41 },
+  ],
+  staleQuotes: [
+    { number: "Q-0088", orgName: "Lab Zen", daysLeft: 4, valueCents: 432000, views: 2 },
   ],
 };
 
@@ -66,6 +69,12 @@ describe("moneyLines", () => {
     expect(p?.ours).toBe(false);
     expect(p?.text).toContain("2 days past");
     expect(p?.text).toContain("theirs, then ours by the next rung");
+  });
+
+  it("names a lapsing quote and whether they ever opened it", () => {
+    const q = moneyLines(full).find((l) => l.text.includes("Q-0088"));
+    expect(q?.whose).toBe("Lab Zen");
+    expect(q?.text).toContain("$4,320, viewed 2 times - expires in 4 days");
   });
 
   it("puts a credit hold back on us - it is our decision to lift", () => {

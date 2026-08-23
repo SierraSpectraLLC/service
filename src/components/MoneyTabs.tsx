@@ -1,13 +1,13 @@
 import { Tabs } from "@/components/ui";
 
 /**
- * The four rooms of /money, in the order money moves through them: what has
- * been quoted, what has been billed, and what is stuck. Overview is the loop
- * itself.
+ * The rooms of /money, in the order money moves through them: what has been
+ * quoted, what has been billed, what is stuck, and the standing arrangements
+ * underneath all of it. Overview is the loop itself.
  */
 export default function MoneyTabs({ active, counts = {} }: {
-  active: "overview" | "quotes" | "invoices" | "collections";
-  counts?: Partial<Record<"quotes" | "invoices" | "collections", number>>;
+  active: "overview" | "quotes" | "invoices" | "collections" | "contracts";
+  counts?: Partial<Record<"quotes" | "invoices" | "collections" | "contracts", number>>;
 }) {
   return (
     <Tabs
@@ -21,6 +21,7 @@ export default function MoneyTabs({ active, counts = {} }: {
           key: "collections", label: "Collections", href: "/money/collections",
           count: counts.collections, warn: (counts.collections ?? 0) > 0,
         },
+        { key: "contracts", label: "Contracts", href: "/money/contracts", count: counts.contracts },
       ]}
     />
   );

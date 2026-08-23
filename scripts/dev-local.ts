@@ -94,7 +94,13 @@ const FIXTURE = `
     (1, 'WAT271066', 'ESI capillary', 1, 0, 68000);
 
   INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, visits_included, parts_allowance_cents, labor_included_minutes, value_cents, created_by) VALUES
-    (1, 'contract', 'AGR-2026-01', 'Lab Zen full service', 'active', '2026-01-01', '2026-12-31', 6, 500000, 4800, 3600000, '${OWNER}');
+    (1, 'contract', 'AGR-2026-01', 'Lab Zen full service', 'active', '2026-01-01', '2026-12-31', 6, 500000, 4800, 3600000, '${OWNER}'),
+    -- A second contract inside its 60-day notice window, so the renewals cron
+    -- has something to draft against and the Contracts screen shows what a
+    -- term coming to an end looks like.
+    (1, 'contract', 'AGR-2025-04', 'Lab Zen GC-MS coverage', 'active',
+      to_char(now() - interval '320 days', 'YYYY-MM-DD'),
+      to_char(now() + interval '39 days', 'YYYY-MM-DD'), 4, 250000, 2400, 1800000, '${OWNER}');
 
   -- ── Billing ───────────────────────────────────────────────────────────────
   -- Three rungs of rate card so resolveRate's precedence is visible in the app:
@@ -191,11 +197,39 @@ const FIXTURE = `
   -- Everyone else keeps the ordinary 7am.
   UPDATE orgs SET digest_hour = EXTRACT(hour FROM now() AT TIME ZONE 'America/Los_Angeles')::int
     WHERE id = 2;
+
+  -- A quote out with the client, viewed twice and a week from lapsing, so the
+  -- portal's approve path and the digest's "unanswered" line both have a row.
+  -- WO-0401 waits on it; approving moves that job to active.
+  UPDATE work_orders SET state = 'waiting' WHERE number = 'WO-0401';
+  INSERT INTO quotes (org_id, work_order_id, number, status, title, sent_on, expires_on, deposit_pct, created_by) VALUES
+    (1, 1, 'Q-1001', 'sent', 'Annual PM and checkout',
+      to_char(now() - interval '4 days', 'YYYY-MM-DD'),
+      to_char(now() + interval '5 days', 'YYYY-MM-DD'), 50, '${OWNER}');
+  INSERT INTO quote_lines (quote_id, kind, description, detail, qty, unit_cents, position) VALUES
+    (1, 'part', 'G7100-60001 Capillary kit', 'price book, 30% markup', 1000, 27300, 0),
+    (1, 'labor', 'Labor, on site', 'estimated 6.0 h at the Lab Zen rate card', 6000, 15500, 1),
+    (1, 'travel', 'Travel', 'half rate', 1000, 7750, 2);
+  INSERT INTO share_links (token, kind, org_id, quote_id, label, expires_on, created_by, opened_at, last_opened_at, open_count) VALUES
+    ('devquotetoken123456', 'quote', 1, 1, 'Quote Q-1001',
+      to_char(now() + interval '35 days', 'YYYY-MM-DD'), '${OWNER}',
+      now() - interval '4 days', now() - interval '2 days', 2);
   UPDATE instruments SET site_id = 1 WHERE client = 'Lab Zen';
   UPDATE instruments SET site_id = 2 WHERE client = 'Coastal Analytical';
 
   INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, archived, archived_at, archived_by) VALUES
     ('LZ-000', 'Lab Zen', 'Agilent 5975C GC-MSD', 'Agilent', 'US83221', 99, '{"Shipped"}', true, now() - interval '40 days', 'joe');
+
+  -- Whose systems these are. Without it nothing draws down against a
+  -- contract - lib/agreementUsage counts by owner_org_id, not by the client
+  -- name on the row - and the whole entitlement half of the app reads empty.
+  UPDATE instruments SET owner_org_id = 1 WHERE client = 'Lab Zen';
+  UPDATE instruments SET owner_org_id = 2 WHERE client = 'Coastal Analytical';
+  -- Parts follow whose money bought them, stamped at purchase - that is what
+  -- lib/agreementUsage draws a parts allowance down against.
+  UPDATE parts SET owner_org_id = i.owner_org_id FROM instruments i
+    WHERE parts.instrument_id = i.id;
+
 
   INSERT INTO pm_schedules (instrument_id, title, assignee, every_days, next_due, last_done) VALUES
     (1, 'Quarterly source clean', 'joe', 90, to_char(now() - interval '5 days', 'YYYY-MM-DD'), to_char(now() - interval '95 days', 'YYYY-MM-DD')),
@@ -304,7 +338,7 @@ async function seed() {
   const seeded = await pg.query("SELECT 1 FROM orgs LIMIT 1");
   if (seeded.rows.length === 0) {
     await pg.exec(FIXTURE);
-    console.log("[dev:local] seeded fixture (2 orgs, 6 systems, 10 assets, 5 WOs, 1 PO, 1 stockroom, 3 invoices)");
+    console.log("[dev:local] seeded fixture (2 orgs, 6 systems, 10 assets, 7 WOs, 1 PO, 1 stockroom, 3 invoices, 1 quote)");
   } else {
     console.log("[dev:local] existing data kept - delete the data dir to reseed");
   }

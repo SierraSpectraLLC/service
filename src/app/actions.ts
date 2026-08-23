@@ -17,7 +17,7 @@ import {
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   expenses, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
-  dunningEvents, creditOverrides,
+  dunningEvents, creditOverrides, quotes, quoteLines,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -49,6 +49,9 @@ import { EXPENSE_KINDS, linesTotal } from "@/lib/billing";
 import { asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById } from "@/lib/invoiceData";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
+import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
+import { feeClause } from "@/lib/billingPolicy";
+import { linkState } from "@/lib/dropShare";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import { brandForTenant } from "@/lib/brand";
 import { btn, emailShell, esc } from "@/lib/emailTheme";
@@ -10999,5 +11002,322 @@ export async function referInvoice(id: number, reason: string): Promise<{ error?
     field: "reason", newValue: why,
   });
   revInvoice(inv);
+  return {};
+}
+
+// ---------------- Quotes ----------------
+// A price, offered - composed by the same function that composes an invoice,
+// from the same rows, so what was quoted and what gets billed cannot drift.
+// The three answering actions are TOKEN-GATED: the person pressing them is the
+// client, holding a share link and no account, so the token is the credential
+// and the org on its row is the authorization.
+
+function revQuote(q: { id: number; workOrderId: number | null }) {
+  revalidatePath(`/money/quotes/${q.id}`);
+  revalidatePath("/money/quotes");
+  revalidatePath("/money");
+  if (q.workOrderId) revalidatePath(`/work/${q.workOrderId}`);
+}
+
+/**
+ * Price a job that has not been done yet.
+ *
+ * Same composer as the invoice: the parts somebody listed as needed, the hours
+ * estimated against the job, the rate card that client is on. A quote whose
+ * arithmetic is a second implementation is a quote that disagrees with its own
+ * invoice six weeks later.
+ */
+export async function draftQuote(
+  workOrderId: number, data: { depositPct: number; expiresOn: string; title: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const found = await loadWorkOrder(u, workOrderId);
+  if ("error" in found) return found;
+  const { wo } = found;
+  if (wo.orgId === null) return { error: "This job has no client on it - a quote needs somebody to send it to." };
+
+  const expires = data.expiresOn.trim();
+  if (!isIsoDay(expires)) return { error: "Pick the day it stops being good for" };
+  const pct = Math.max(0, Math.min(100, Math.round(data.depositPct)));
+
+  const src = await draftSourceFor(workOrderId);
+  if (!src) return { error: "Not found" };
+  if (!src.lines.length) {
+    return { error: "There is nothing to price yet - add the parts and the hours you expect." };
+  }
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: quotes.number }).from(quotes)
+      .where(forTenant(quotes.tenantOrgId, wo.tenantOrgId));
+    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    try {
+      const [q] = await db.insert(quotes).values({
+        tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId,
+        agreementId: src.coverage.agreementId,
+        number, status: "draft",
+        title: data.title.trim() || wo.title,
+        expiresOn: expires, depositPct: pct, createdBy: u.email,
+      }).returning();
+      await db.insert(quoteLines).values(src.lines.map((l, i) => ({
+        quoteId: q.id, kind: l.kind, description: l.description,
+        qty: Math.round(l.qty * 1000), unitCents: l.unitCents,
+        covered: l.covered, coveredBy: l.coveredBy ?? "",
+        sourceId: l.sourceId, position: i,
+      })));
+      const total = linesTotal(src.lines);
+      await audit({
+        actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
+        entityType: "quote", entityId: q.id, tenantOrgId: wo.tenantOrgId,
+        action: `drafted ${number} from ${wo.number}: ${formatCents(total)}`
+          + (pct > 0 ? `, ${pct}% deposit on approval` : "") + `, good to ${expires}`,
+      });
+      revQuote(q);
+      return { id: q.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** Open the link and mail it. The client answers on the link, not by reply. */
+export async function sendQuote(id: number): Promise<{ error?: string; token?: string; warning?: string }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) return { error: "Not found" };
+  if (q.status !== "draft") return { error: `${q.number} has already been sent.` };
+  const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, id));
+  if (!lines.length) return { error: "There is nothing on this quote to send." };
+
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+  const today = shopToday();
+  const token = crypto.randomBytes(18).toString("base64url");
+  await db.insert(shareLinks).values({
+    token, kind: "quote", orgId: q.orgId, quoteId: q.id,
+    label: `Quote ${q.number}`,
+    // Outliving the quote itself on purpose: a link that dies the same day
+    // leaves a client staring at "no longer active" with no idea what lapsed.
+    expiresOn: addDays(q.expiresOn || today, 30),
+    tenantOrgId: q.tenantOrgId, createdBy: u.email,
+  });
+  await db.update(quotes).set({ status: "sent", sentOn: today, updatedAt: new Date() })
+    .where(eq(quotes.id, id));
+
+  const total = lines.reduce((n, l) => n + (l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents)), 0);
+  await audit({
+    actor: u.email, entityType: "quote", entityId: id, tenantOrgId: q.tenantOrgId,
+    action: `sent ${q.number} to ${org?.name ?? "the client"}: ${formatCents(total)}, expires ${q.expiresOn}`,
+  });
+
+  const warning = await mailQuote({ q, org: org ?? null, token, total })
+    .then(() => "")
+    .catch(() => "The quote is out and the link works, but the email did not go out.");
+  revQuote(q);
+  return { token, ...(warning ? { warning } : {}) };
+}
+
+async function mailQuote(opts: {
+  q: typeof quotes.$inferSelect;
+  org: typeof orgs.$inferSelect | null;
+  token: string; total: number;
+}): Promise<void> {
+  const { q, org } = opts;
+  const to = [org?.apEmail?.trim(), ...(await orgRecipients(q.orgId))].filter(Boolean) as string[];
+  if (!to.length) return;
+  const base = appUrl();
+  if (!base) return;
+  const brand = await brandForTenant(q.tenantOrgId);
+  const href = `${base}/share/${opts.token}`;
+  const { policy } = await billingContext(q.orgId);
+  const clause = feeClause(policy);
+  const html = emailShell({
+    brand: brand.operatorName || brand.name,
+    logoUrl: brand.operatorLogoUrl || undefined,
+    tagline: brand.tagline || undefined,
+    preheader: `Quote ${q.number} - ${formatCents(opts.total)}, good to ${q.expiresOn}`,
+    body: `<p style="margin:0 0 12px;"><strong>Quote ${esc(q.number)}</strong>${q.title ? ` - ${esc(q.title)}` : ""}</p>`
+      + `<p style="margin:0 0 16px;">${esc(formatCents(opts.total))}, good until ${esc(q.expiresOn)}.`
+      + `${q.depositPct > 0 ? ` A ${q.depositPct}% deposit is invoiced on approval.` : ""}</p>`
+      + btn(href, "Read it and answer"),
+    // The clause prints because a late charge is only collectable if the terms
+    // rode the paper the client agreed to.
+    footer: clause || undefined,
+  });
+  const root = threadRootId(`quote-org-${q.orgId}`, mailHost(process.env.EMAIL_FROM));
+  await sendEmail([...new Set(to)], `${brand.operatorName || brand.name}: quote ${q.number}`, html, {
+    headers: threadHeaders(root),
+    text: `Quote ${q.number} - ${formatCents(opts.total)}, good until ${q.expiresOn}.\n${href}`,
+  });
+}
+
+/**
+ * The token IS the credential. Everything a client-side quote action touches is
+ * reached through the org id ON THE LINK'S ROW, never through an id in the
+ * request - the same door the share viewer reads money through.
+ */
+async function quoteByToken(token: string, quoteId: number): Promise<
+  { error: string } | { link: typeof shareLinks.$inferSelect; q: typeof quotes.$inferSelect }
+> {
+  if (!token || token.length < 12) return { error: "This link is not valid." };
+  const [link] = await db.select().from(shareLinks).where(eq(shareLinks.token, token));
+  if (!link || link.kind !== "quote" || link.orgId === null) return { error: "This link is not valid." };
+  if (linkState(link, shopToday()) !== "active") return { error: "This link is no longer active." };
+  const [q] = await db.select().from(quotes)
+    .where(and(eq(quotes.id, quoteId), eq(quotes.orgId, link.orgId)));
+  if (!q || link.quoteId !== q.id) return { error: "This link is not valid." };
+  return { link, q };
+}
+
+/**
+ * The client says yes.
+ *
+ * Three things follow, in this order and all of them audited: the job is taken
+ * off its wait, a deposit invoice is raised if the quote asked for one, and the
+ * answer is written where the engineer will read it. If the client is on credit
+ * hold the job is still recorded - it opens held, and the portal said so before
+ * they pressed the button.
+ */
+export async function approveQuote(
+  token: string, quoteId: number, signedBy: string,
+): Promise<{ error?: string; depositInvoiceId?: number; onHold?: boolean }> {
+  const found = await quoteByToken(token, quoteId);
+  if ("error" in found) return found;
+  const { q } = found;
+  const today = shopToday();
+  if (!answerable(q, today)) return { error: `${q.number} is ${quoteStanding(q, today)} and cannot be answered.` };
+  const who = signedBy.trim().slice(0, 120);
+  if (!who) return { error: "Type your name to sign." };
+
+  const lines = await db.select().from(quoteLines).where(eq(quoteLines.quoteId, q.id));
+  const total = lines.reduce((n, l) => n + (l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents)), 0);
+  const deposit = depositCents(total, q.depositPct);
+  const credit = await creditFor(q.orgId, today).catch(() => null);
+
+  let depositInvoiceId: number | null = null;
+  if (deposit > 0) {
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+    const ctx = await billingContext(q.orgId);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const used = await db.select({ number: invoices.number }).from(invoices)
+        .where(forTenant(invoices.tenantOrgId, q.tenantOrgId));
+      const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+      try {
+        const [inv] = await db.insert(invoices).values({
+          tenantOrgId: q.tenantOrgId, orgId: q.orgId, workOrderId: q.workOrderId,
+          agreementId: q.agreementId, number, status: "sent",
+          // Due immediately: a deposit that is net 30 is not a deposit.
+          issuedOn: today, dueOn: today,
+          poNumber: org?.poNumber ?? "",
+          note: `${q.depositPct}% deposit on ${q.number}`,
+          createdBy: "client approval",
+        }).returning();
+        await db.insert(invoiceLines).values({
+          invoiceId: inv.id, kind: "fee_ref",
+          description: `Deposit on ${q.number}`,
+          detail: `${q.depositPct}% of ${formatCents(total)}, due on approval`,
+          qty: 1000, unitCents: deposit, covered: false, sourceId: q.id, position: 0,
+        });
+        depositInvoiceId = inv.id;
+        break;
+      } catch { /* number raced; try the next one */ }
+    }
+  }
+
+  await db.update(quotes).set({
+    status: "approved", answeredOn: today, answeredBy: who,
+    depositInvoiceId, updatedAt: new Date(),
+  }).where(eq(quotes.id, q.id));
+
+  // The job comes off its wait. There is no "Ready" state in this codebase -
+  // a job waiting on the client's answer sits in `waiting`, and the answer
+  // moves it to `active`, which is what Ready meant.
+  if (q.workOrderId !== null) {
+    const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, q.workOrderId));
+    if (wo && wo.state === "waiting") {
+      await db.update(workOrders).set({ state: "active" }).where(eq(workOrders.id, wo.id));
+    }
+    if (wo) {
+      await db.insert(workOrderNotes).values({
+        workOrderId: wo.id, author: who, authorEmail: "",
+        text: `Approved ${q.number} (${formatCents(total)}).`
+          + (deposit > 0 ? ` A ${q.depositPct}% deposit of ${formatCents(deposit)} was invoiced.` : "")
+          + (credit?.onHold ? " The account is past due, so this opens on credit hold." : ""),
+      });
+    }
+  }
+
+  await audit({
+    actor: who, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+    action: `${who} approved ${q.number}: ${formatCents(total)}`
+      + (deposit > 0 ? `, ${formatCents(deposit)} deposit invoiced` : "")
+      + (credit?.onHold ? " - the job opens on credit hold" : ""),
+  });
+  revQuote(q);
+  return { depositInvoiceId: depositInvoiceId ?? undefined, onHold: credit?.onHold ?? false };
+}
+
+/**
+ * The client says no. The reason goes to the job's discussion, where the
+ * engineer will read it - not into a field on a quote nobody opens again.
+ */
+export async function declineQuote(
+  token: string, quoteId: number, data: { by: string; reason: string },
+): Promise<{ error?: string }> {
+  const found = await quoteByToken(token, quoteId);
+  if ("error" in found) return found;
+  const { q } = found;
+  const today = shopToday();
+  if (!answerable(q, today)) return { error: `${q.number} is ${quoteStanding(q, today)} and cannot be answered.` };
+  const who = data.by.trim().slice(0, 120) || "The client";
+  const why = data.reason.trim().slice(0, 2000);
+
+  await db.update(quotes).set({
+    status: "declined", answeredOn: today, answeredBy: who,
+    answerNote: why, updatedAt: new Date(),
+  }).where(eq(quotes.id, q.id));
+
+  if (q.workOrderId !== null) {
+    await db.insert(workOrderNotes).values({
+      workOrderId: q.workOrderId, author: who, authorEmail: "",
+      text: `Declined ${q.number}.${why ? ` ${why}` : ""}`,
+    });
+  }
+  await audit({
+    actor: who, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+    action: `${who} declined ${q.number}${why ? ` - ${why}` : ""}`,
+    ...(why ? { field: "reason", newValue: why } : {}),
+  });
+  revQuote(q);
+  return {};
+}
+
+/**
+ * The client asks something instead of answering. It posts to the job's
+ * discussion and leaves the quote answerable - a question is not a no, and
+ * closing the quote because somebody asked about a line is how a sale is lost
+ * to a misunderstanding.
+ */
+export async function askAboutQuote(
+  token: string, quoteId: number, data: { by: string; question: string },
+): Promise<{ error?: string }> {
+  const found = await quoteByToken(token, quoteId);
+  if ("error" in found) return found;
+  const { q } = found;
+  const text = data.question.trim().slice(0, 2000);
+  if (text.length < 3) return { error: "Say a little more and we will answer it." };
+  const who = data.by.trim().slice(0, 120) || "The client";
+
+  if (q.workOrderId !== null) {
+    await db.insert(workOrderNotes).values({
+      workOrderId: q.workOrderId, author: who, authorEmail: "",
+      text: `Question on ${q.number}: ${text}`,
+    });
+  }
+  await audit({
+    actor: who, entityType: "quote", entityId: q.id, tenantOrgId: q.tenantOrgId,
+    action: `${who} asked about ${q.number}: ${text.slice(0, 200)}`,
+  });
+  revQuote(q);
   return {};
 }

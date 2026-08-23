@@ -32,6 +32,7 @@ export type MoneyInput = {
   openDisputes: { number: string; orgName: string; reason: string; daysOpen: number; disputedCents: number; restCents: number }[];
   overdue: { number: string; orgName: string; daysLate: number; balanceCents: number }[];
   onHold: { orgName: string; balanceCents: number; oldestDaysLate: number }[];
+  staleQuotes: { number: string; orgName: string; daysLeft: number; valueCents: number; views: number }[];
 };
 
 /** How many days before an unbilled closed job is worth a line of its own. */
@@ -76,6 +77,15 @@ export function moneyLines(m: MoneyInput): MoneyLine[] {
     out.push({
       whose: o.orgName, ours: false,
       text: `${o.number} is ${o.daysLate} day${o.daysLate === 1 ? "" : "s"} past due, ${formatCents(o.balanceCents)}.`,
+    });
+  }
+
+  for (const q of m.staleQuotes) {
+    out.push({
+      whose: q.orgName, ours: false,
+      text: `${q.number} unanswered, ${formatCents(q.valueCents)}`
+        + `${q.views > 0 ? `, viewed ${q.views === 1 ? "once" : `${q.views} times`}` : ", never opened"}`
+        + ` - ${q.daysLeft <= 0 ? "expired" : `expires in ${q.daysLeft} day${q.daysLeft === 1 ? "" : "s"}`}.`,
     });
   }
 

@@ -1052,6 +1052,7 @@ export const shareLinks = pgTable("share_links", {
   /** Which org the link speaks to. Money is fetched through THIS, never the URL. */
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
   invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  quoteId: integer("quote_id").references((): AnyPgColumn => quotes.id, { onDelete: "cascade" }),
   /**
    * When it was first opened, and how many times. This IS the Viewed signal
    * the invoice timeline reads - there is no second tracker, because a second
@@ -2180,6 +2181,59 @@ export const creditOverrides = pgTable("credit_overrides", {
   liftedAt: timestamp("lifted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("credit_overrides_org_idx").on(t.orgId)]);
+
+/**
+ * A price, offered.
+ *
+ * Composed by the same lib/billing function that composes an invoice, from the
+ * same rows - so what was quoted and what gets billed are produced by one
+ * piece of code rather than two that drift. What a quote adds over an invoice
+ * is a date it stops being true and a deposit somebody owes on saying yes.
+ */
+export const quotes = pgTable("quotes", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "set null" }),
+  number: text("number").notNull(),
+  // draft | sent | approved | declined | expired
+  status: text("status").notNull().default("draft"),
+  title: text("title").notNull().default(""),
+  sentOn: text("sent_on").notNull().default(""),
+  expiresOn: text("expires_on").notNull().default(""),
+  /** Percent due on approval. Zero means nothing is owed until the work is done. */
+  depositPct: integer("deposit_pct").notNull().default(0),
+  /** Set when the client answers, with their own words in `answerNote`. */
+  answeredOn: text("answered_on"),
+  answeredBy: text("answered_by").notNull().default(""),
+  answerNote: text("answer_note").notNull().default(""),
+  /** The deposit invoice approval generated, if it did. */
+  depositInvoiceId: integer("deposit_invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("quotes_org_idx").on(t.orgId),
+  index("quotes_wo_idx").on(t.workOrderId),
+  unique("quote_number_unique").on(t.tenantOrgId, t.number),
+]);
+
+/** The same shape as an invoice line, for the same reason: one composer. */
+export const quoteLines = pgTable("quote_lines", {
+  id: serial("id").primaryKey(),
+  quoteId: integer("quote_id").notNull().references((): AnyPgColumn => quotes.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("part"),
+  description: text("description").notNull().default(""),
+  detail: text("detail").notNull().default(""),
+  qty: integer("qty").notNull().default(1000),     // thousandths
+  unitCents: integer("unit_cents").notNull().default(0),
+  covered: boolean("covered").notNull().default(false),
+  coveredBy: text("covered_by").notNull().default(""),
+  sourceId: integer("source_id"),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("quote_lines_quote_idx").on(t.quoteId)]);
 
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it

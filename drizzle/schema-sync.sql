@@ -2973,3 +2973,85 @@ DO $$ BEGIN
       FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- ── Quotes: a price, offered ───────────────────────────────────────────────
+-- Composed by the same lib/billing function that composes an invoice, from the
+-- same rows, so what was quoted and what gets billed cannot drift apart. What
+-- a quote adds is a date it stops being true and a deposit owed on yes.
+CREATE TABLE IF NOT EXISTS "quotes" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "work_order_id" integer,
+  "agreement_id" integer,
+  "number" text NOT NULL,
+  "status" text NOT NULL DEFAULT 'draft',
+  "title" text NOT NULL DEFAULT '',
+  "sent_on" text NOT NULL DEFAULT '',
+  "expires_on" text NOT NULL DEFAULT '',
+  "deposit_pct" integer NOT NULL DEFAULT 0,
+  "answered_on" text,
+  "answered_by" text NOT NULL DEFAULT '',
+  "answer_note" text NOT NULL DEFAULT '',
+  "deposit_invoice_id" integer,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "quotes_org_idx" ON "quotes" ("org_id");
+CREATE INDEX IF NOT EXISTS "quotes_wo_idx" ON "quotes" ("work_order_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quote_number_unique') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quote_number_unique" UNIQUE ("tenant_org_id", "number");
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "quote_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "quote_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'part',
+  "description" text NOT NULL DEFAULT '',
+  "detail" text NOT NULL DEFAULT '',
+  "qty" integer NOT NULL DEFAULT 1000,
+  "unit_cents" integer NOT NULL DEFAULT 0,
+  "covered" boolean NOT NULL DEFAULT false,
+  "covered_by" text NOT NULL DEFAULT '',
+  "source_id" integer,
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "quote_lines_quote_idx" ON "quote_lines" ("quote_id");
+
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "quote_id" integer;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_org_id_orgs_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_work_order_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_agreement_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_agreement_id_fk"
+      FOREIGN KEY ("agreement_id") REFERENCES "agreements"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_deposit_invoice_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_deposit_invoice_id_fk"
+      FOREIGN KEY ("deposit_invoice_id") REFERENCES "invoices"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quote_lines_quote_id_fk') THEN
+    ALTER TABLE "quote_lines" ADD CONSTRAINT "quote_lines_quote_id_fk"
+      FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_quote_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_quote_id_fk"
+      FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

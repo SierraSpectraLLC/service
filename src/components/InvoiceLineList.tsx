@@ -15,7 +15,7 @@ export type Line = {
 
 const KIND_LABEL: Record<string, string> = {
   part: "Part", labor: "Labor", travel: "Travel",
-  expense: "Expense", tax: "Tax", fee_ref: "Fee",
+  expense: "Expense", tax: "Tax", fee_ref: "Charge",
 };
 
 /** Hours read as hours; a count of things reads as a count. */
