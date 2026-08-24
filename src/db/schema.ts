@@ -2552,6 +2552,12 @@ export const appSettings = pgTable("app_settings", {
   loadedLaborCents: integer("loaded_labor_cents").notNull().default(0),
   /** Platform-wide billing policy defaults; an org's own jsonb wins. */
   billingPolicy: jsonb("billing_policy"),
+  /**
+   * The shop's travel rules - radius, per diems, lodging cap. About OUR
+   * engineers rather than any client, which is why there is no per-org
+   * override the way billing_policy has one. See lib/expensePolicy.
+   */
+  expensePolicy: jsonb("expense_policy"),
 });
 
 /**

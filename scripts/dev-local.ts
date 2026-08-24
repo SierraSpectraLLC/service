@@ -40,6 +40,11 @@ const FIXTURE = `
   UPDATE orgs SET is_operator = true WHERE name = 'Sierra Spectra';
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
   UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
+  -- The travel rulebook the WO expense panel applies: 80 mi stipend radius,
+  -- $30 day per diem beyond it, $65/night stepping to $85 after 3, $180 rooms.
+  UPDATE app_settings SET expense_policy =
+    '{"radiusMiles":80,"dayPerDiemCents":3000,"overnightPerDiemCents":6500,"extendedAfterNights":3,"overnightExtendedCents":8500,"hotelNightCapCents":18000}'
+    WHERE id = 1;
 
   INSERT INTO users (id, name, email, role, onboarded_at) VALUES
     ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now()),

@@ -8,6 +8,8 @@ import { resolvePolicy } from "@/lib/billingPolicy";
 import { monthsWithActivity } from "@/lib/accountingExport";
 import { stripeMode } from "@/lib/stripe";
 import BillingDefaultsForm from "@/components/BillingDefaultsForm";
+import ExpenseRulesForm from "@/components/ExpenseRulesForm";
+import { resolveExpensePolicy } from "@/lib/expensePolicy";
 import { PageHead } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -58,6 +60,7 @@ export default async function BillingSettingsPage() {
         }}
         months={months}
       />
+      <ExpenseRulesForm policy={resolveExpensePolicy(settings?.expensePolicy ?? null)} />
     </>
   );
 }

@@ -5,6 +5,7 @@ import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import { deleteExpense, logExpense } from "@/app/actions";
 import { EXPENSE_KINDS, EXPENSE_LABEL } from "@/lib/billing";
+import { policyConfigured, tripAllowance, type ExpensePolicy } from "@/lib/expensePolicy";
 import { formatCents } from "@/lib/money";
 
 export type ExpenseRow = {
@@ -26,15 +27,18 @@ const mdy = (iso: string) => {
  * find afterwards - it reaches both the invoice and the job cost from this one
  * entry.
  */
-export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isStaff }: {
+export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isStaff, policy }: {
   workOrderId: number;
   rows: ExpenseRow[];
   today: string;
   canEdit: boolean;
   isStaff: boolean;
+  /** The shop's travel rules, resolved. Unconfigured renders nothing extra. */
+  policy?: ExpensePolicy;
 }) {
   const [draft, setDraft] = useState({ kind: "mileage", description: "", amount: "", incurredOn: today, billable: true });
   const [error, setError] = useState("");
+  const [trip, setTrip] = useState({ miles: "", nights: "" });
   const [pending, startTransition] = useTransition();
 
   if (!canEdit && rows.length === 0) return null;
@@ -89,6 +93,70 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
           </button>
         </div>
       )}
+
+      {/* The travel rulebook, applied to THIS trip. The engineer answers the
+          two questions only they know - how far, how many nights - and the
+          policy answers everything else: whether the stipend already paid,
+          what per diem the trip earned, what a room may cost. The buttons log
+          the answer, so the amount on the row is the policy's number and not
+          somebody's recollection of it. */}
+      {canEdit && policy && policyConfigured(policy) && (() => {
+        const miles = parseInt(trip.miles, 10) || 0;
+        const nights = parseInt(trip.nights, 10) || 0;
+        const a = tripAllowance(policy, { oneWayMiles: miles, nights });
+        const quickLog = (kind: string, amountCents: number, description: string) => {
+          setError("");
+          startTransition(async () => {
+            const res = await logExpense(workOrderId, {
+              kind, description, amount: (amountCents / 100).toFixed(2),
+              incurredOn: draft.incurredOn, billable: draft.billable,
+            });
+            if (res?.error) { setError(res.error); return; }
+            toast({ message: `Logged ${formatCents(amountCents)} - ${description}` });
+          });
+        };
+        return (
+          <div className="t-small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "7px 9px", borderRadius: 8, background: "#F4F7FB", marginBottom: rows.length ? 10 : 0 }}>
+            <span className="mut">Trip:</span>
+            <input className="t-small" inputMode="numeric" value={trip.miles} placeholder="mi"
+              aria-label="One-way miles from home"
+              onChange={(e) => setTrip({ ...trip, miles: e.target.value.replace(/[^0-9]/g, "") })}
+              style={{ width: 58, padding: "3px 6px" }} />
+            <span className="mut">mi one-way,</span>
+            <input className="t-small" inputMode="numeric" value={trip.nights} placeholder="0"
+              aria-label="Nights away"
+              onChange={(e) => setTrip({ ...trip, nights: e.target.value.replace(/[^0-9]/g, "") })}
+              style={{ width: 44, padding: "3px 6px" }} />
+            <span className="mut">nights</span>
+            {trip.miles === "" ? (
+              <span className="mut">- enter the distance and the rules answer.</span>
+            ) : a.withinRadius && nights === 0 ? (
+              <span style={{ color: "var(--t-warn-fg)", fontWeight: 600 }}>
+                Within the {policy.radiusMiles} mi radius - gas and meals ride the car stipend.
+              </span>
+            ) : (
+              <>
+                {a.perDiemCents > 0 && (
+                  <button className="btn sm" disabled={pending}
+                    onClick={() => quickLog("per_diem",
+                      a.perDiemCents,
+                      `Per diem, ${a.perDiemBreakdown}${miles ? ` - ${miles} mi` : ""}`)}>
+                    Log per diem {formatCents(a.perDiemCents)}
+                  </button>
+                )}
+                {a.hotelNightCapCents > 0 && (
+                  <span className="mut">
+                    Lodging up to {formatCents(a.hotelNightCapCents)}/night - log the receipt as Lodging.
+                  </span>
+                )}
+                {!a.withinRadius && nights === 0 && a.perDiemCents === 0 && (
+                  <span className="mut">Beyond the radius - receipts are on us.</span>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {rows.map((r) => (
         <div key={r.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>

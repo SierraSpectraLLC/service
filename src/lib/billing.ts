@@ -22,11 +22,11 @@ import { formatCents } from "@/lib/money";
 import { priceTime, type RateCard } from "@/lib/rates";
 
 /** What kind of out-of-pocket it was. Drives nothing but the label. */
-export const EXPENSE_KINDS = ["mileage", "shipping", "per_diem", "other"] as const;
+export const EXPENSE_KINDS = ["mileage", "shipping", "per_diem", "lodging", "other"] as const;
 export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
 
 export const EXPENSE_LABEL: Record<string, string> = {
-  mileage: "Mileage", shipping: "Shipping", per_diem: "Per diem", other: "Other",
+  mileage: "Mileage", shipping: "Shipping", per_diem: "Per diem", lodging: "Lodging", other: "Other",
 };
 
 export const LINE_KINDS = ["part", "labor", "travel", "expense", "tax", "fee_ref"] as const;

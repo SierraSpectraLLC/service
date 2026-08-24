@@ -3130,3 +3130,6 @@ ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "billable" boolean NOT NULL DEFA
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "person" text NOT NULL DEFAULT '';
 ALTER TABLE "expenses" ALTER COLUMN "work_order_id" DROP NOT NULL;
 
+-- The shop's travel rules: radius, per diems, lodging cap. See lib/expensePolicy.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "expense_policy" jsonb;
+

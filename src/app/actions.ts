@@ -103,6 +103,7 @@ import {
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
+import { resolveExpensePolicy } from "@/lib/expensePolicy";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
@@ -11678,6 +11679,29 @@ export async function askAboutQuote(
  * "changed the late-fee rate" is the line somebody needs a year later, not
  * "updated settings".
  */
+/**
+ * The shop's travel rules, saved whole. The form posts every field, so the
+ * resolver's fallback-to-default is the validation: a malformed number lands
+ * on the default rather than in the column, and there is no partial patch
+ * that could silently zero the fields it did not mention.
+ */
+export async function saveExpensePolicy(data: Record<string, unknown>): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const before = resolveExpensePolicy(row?.expensePolicy ?? null);
+  const after = resolveExpensePolicy(data);
+  await db.insert(appSettings).values({ id: 1, expensePolicy: after })
+    .onConflictDoUpdate({ target: appSettings.id, set: { expensePolicy: after } });
+  const changes = (Object.keys(after) as (keyof typeof after)[])
+    .filter((k) => before[k] !== after[k]);
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "expense-policy",
+    action: changes.length ? `changed travel rules: ${changes.join(", ")}` : "saved travel rules unchanged",
+  });
+  revalidatePath("/settings/billing");
+  return {};
+}
+
 export async function saveBillingDefaults(data: {
   policy: Record<string, unknown>;
   invoicePrefix?: string;
