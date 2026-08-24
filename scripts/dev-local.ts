@@ -39,6 +39,7 @@ const FIXTURE = `
     ('Harbor Biotech', 'client');
   UPDATE orgs SET is_operator = true WHERE name = 'Sierra Spectra';
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
+  UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
 
   INSERT INTO users (id, name, email, role, onboarded_at) VALUES
     ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now()),

@@ -8,55 +8,106 @@ import { PublicShell } from "@/components/ui";
  * signed out it is this. That split is why it lives in a component rather
  * than a route of its own - moving the dashboard off "/" would have meant
  * rewriting 42 redirect("/") calls, every one of which means "you do not
- * belong on that page, go home", and home is still the board for anyone with
- * a session.
+ * belong on that page, go home", and home is still the board for a session.
  *
- * The library is the lead: a stranger who lands here is far likelier to want
- * a part number for the pump in front of them than a sales conversation, and
- * the pages that answer that are the ones search engines can see.
+ * TWO AUDIENCES, and the page says so rather than blurring them. A lab with
+ * a dead LC wants somebody to fix it; a service company wants the system the
+ * fixing runs on. Writing one page that gestures at both would have served
+ * neither, so the fold splits and each side gets its own door.
+ *
+ * The platform/operator distinction the README insists on is load-bearing
+ * here: `brandName` is the PRODUCT and `operatorName` is the company that
+ * does the service work. Naming the operator on the service side is what
+ * keeps the page honest - the software does not repair anything.
+ *
+ * The library leads the lead-gen because it is the only part of this that a
+ * stranger can use before talking to anyone, and it is the only part search
+ * engines can see. Someone looking up a part number for the pump in front of
+ * them is a better first contact than someone reading a pitch.
  */
-export default function Landing({ brandName, tagline, catalogOn }: {
+export default function Landing({ brandName, operatorName, catalogOn, contactEmail }: {
+  /** The platform: the product being sold to other service companies. */
   brandName: string;
-  tagline: string;
+  /** The service company running this instance, who actually does the work. */
+  operatorName: string;
   catalogOn: boolean;
+  /** Where a service enquiry goes. Blank hides the button rather than mailing nowhere. */
+  contactEmail: string;
 }) {
+  const sameName = operatorName.trim().toLowerCase() === brandName.trim().toLowerCase();
   return (
-    <PublicShell brandName={brandName} tagline={tagline} width={720}
-      title={`${brandName} keeps a lab's instruments accounted for`}
-      sub="Every system, every module, every part that went into it - one record per machine, from intake to sign-off, shared with the people who own it.">
-      <div className="card" style={{ padding: 18 }}>
-        <div style={{ display: "grid", gap: 14 }}>
-          {[
-            ["One record per system", "Modules, serials, stages, the work done on each and the parts it took. Not a spreadsheet row - a history."],
-            ["Your client sees the same page you do", "Reports, quotes, invoices and parts orders come off the same records the bench works from, so there is one version of what happened."],
-            ["Parts, sourced and tracked", "What fits the machine, what it costs, who can get it soonest, and where the box is."],
-          ].map(([h, p]) => (
-            <div key={h}>
-              <div className="t-body" style={{ fontWeight: 700, color: "var(--navy)" }}>{h}</div>
-              <div className="mut t-small" style={{ lineHeight: 1.6 }}>{p}</div>
+    <PublicShell brandName={brandName} width={760}
+      title="Every instrument, accounted for"
+      sub="One record per machine - its modules, its serials, the work done on it and the parts that went in - shared with the people who own it. Built on the bench, not in a boardroom.">
+
+      {/* The two doors. Side by side at desk width, stacked on a phone: the
+          choice is the page's whole job, so it sits above everything else. */}
+      <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+        <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column" }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>For laboratories</div>
+          <div className="t-lead" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
+            Get an instrument fixed
+          </div>
+          <div className="mut t-small" style={{ lineHeight: 1.65, flex: 1 }}>
+            LC, GC, MS, TOC and the modules around them - repair, refurbishment,
+            preventive maintenance and parts{sameName ? "" : `, from ${operatorName}`}.
+            You get a portal with your systems in it: what is happening to each one,
+            what it costs, and every report and invoice in one place.
+          </div>
+          {contactEmail && (
+            <div style={{ marginTop: 12 }}>
+              <a className="btn sm accent" style={{ textDecoration: "none" }}
+                href={`mailto:${contactEmail}?subject=${encodeURIComponent("Instrument service enquiry")}`}>
+                Talk to us about a system
+              </a>
             </div>
-          ))}
+          )}
+        </div>
+
+        <div className="card" style={{ padding: 18, display: "flex", flexDirection: "column" }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>For service companies</div>
+          <div className="t-lead" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
+            Run your shop on {brandName}
+          </div>
+          <div className="mut t-small" style={{ lineHeight: 1.65, flex: 1 }}>
+            The system this shop runs on, for yours. Work orders, PM schedules,
+            parts sourcing and purchase orders, quotes and invoices, and a client
+            portal that shows your customers the same record your bench works
+            from - under your name and your logo, not ours.
+          </div>
+          {contactEmail && (
+            <div style={{ marginTop: 12 }}>
+              <a className="btn sm primary" style={{ textDecoration: "none" }}
+                href={`mailto:${contactEmail}?subject=${encodeURIComponent(`${brandName} for our service business`)}`}>
+                See it on your own work
+              </a>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* The shared exhibit. It proves the claim above for a lab (we know this
+          equipment) and for an operator (this is what the catalog gives you),
+          and it is the one surface a crawler can read. */}
       {catalogOn && (
         <div className="card" style={{ padding: 18, marginTop: 12 }}>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>Open to everyone</div>
-          <div className="t-body" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Open to everyone, no account</div>
+          <div className="t-lead" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
             The equipment library
           </div>
-          <div className="mut t-small" style={{ lineHeight: 1.6, marginBottom: 10 }}>
+          <div className="mut t-small" style={{ lineHeight: 1.65, marginBottom: 12 }}>
             Specifications, part numbers, PM kit contents and maintenance intervals,
-            recorded from service work rather than copied off a datasheet. No account needed.
+            recorded from service work rather than copied off a datasheet. Look up the
+            module in front of you and see what it takes to keep it running.
           </div>
-          <Link className="btn sm primary" href="/equipment" style={{ textDecoration: "none" }}>
+          <Link className="btn sm" href="/equipment" style={{ textDecoration: "none" }}>
             Browse the library
           </Link>
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, flexWrap: "wrap" }}>
-        <Link className="btn sm accent" href="/login" style={{ textDecoration: "none" }}>Sign in</Link>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
+        <Link className="btn sm" href="/login" style={{ textDecoration: "none" }}>Sign in</Link>
         <span className="mut t-small">Already working with us? Your portal is here.</span>
       </div>
     </PublicShell>

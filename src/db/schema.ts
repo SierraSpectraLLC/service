@@ -2454,6 +2454,14 @@ export const appSettings = pgTable("app_settings", {
   platformName: text("platform_name").notNull().default(""),
   platformTagline: text("platform_tagline").notNull().default(""),
   /**
+   * Where an enquiry from the public landing page goes. Its own field rather
+   * than reaching for STAFF_EMAILS[0]: that list is an authorization control,
+   * and the address a stranger writes to should be a deliberate choice, not a
+   * side effect of who happens to be the owner account. Blank hides the
+   * buttons rather than mailing nowhere.
+   */
+  publicContactEmail: text("public_contact_email").notNull().default(""),
+  /**
    * How the platform looks, for instances that would rather not be navy. See
    * lib/appearance, which owns the defaults and the validation - blank means
    * "the look the app ships with", so a future change to that default reaches

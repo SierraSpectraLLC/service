@@ -7906,13 +7906,23 @@ export async function removeOrg(orgId: number, reason: string): Promise<{ error?
  * What this instance calls itself. The portal is a product, so its name is data
  * rather than a string in the source - see lib/brand.ts.
  */
-export async function setBranding(data: { name: string; tagline: string }): Promise<{ error?: string }> {
+export async function setBranding(
+  data: { name: string; tagline: string; contactEmail?: string },
+): Promise<{ error?: string }> {
   const u = await requirePlatformOwner();
   const name = data.name.trim().slice(0, 60);
   const tagline = data.tagline.trim().slice(0, 80);
+  const contact = (data.contactEmail ?? "").trim().slice(0, 120);
   if (!name) return { error: "Give the platform a name" };
-  await db.insert(appSettings).values({ id: 1, platformName: name, platformTagline: tagline })
-    .onConflictDoUpdate({ target: appSettings.id, set: { platformName: name, platformTagline: tagline } });
+  // Blank is a valid answer - it takes the enquiry buttons off the landing
+  // page. A typo is not: a public "talk to us" that bounces is worse than no
+  // button, because nobody finds out it happened.
+  if (contact && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(contact)) {
+    return { error: "That contact address does not look like an email" };
+  }
+  const patch = { platformName: name, platformTagline: tagline, publicContactEmail: contact };
+  await db.insert(appSettings).values({ id: 1, ...patch })
+    .onConflictDoUpdate({ target: appSettings.id, set: patch });
   await audit({
     actor: u.email, entityType: "settings", entityId: "branding",
     action: `renamed the platform to "${name}"${tagline ? ` (${tagline})` : ""}`,

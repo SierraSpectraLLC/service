@@ -34,7 +34,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
   const visitor = await currentUser();
   if (!visitor) {
     const [brand, modules] = await Promise.all([getBrand(), getModules()]);
-    return <Landing brandName={brand.name} tagline={brand.tagline} catalogOn={modules.publicCatalog} />;
+    return <Landing brandName={brand.name} operatorName={brand.operatorName}
+      catalogOn={modules.publicCatalog} contactEmail={brand.contactEmail} />;
   }
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }

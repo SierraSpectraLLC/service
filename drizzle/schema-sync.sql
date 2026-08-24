@@ -3117,3 +3117,6 @@ ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "person" text NOT NULL DEFAULT '';
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "minutes" integer NOT NULL DEFAULT 0;
 
+-- Where an enquiry from the public landing page goes. See app_settings.publicContactEmail.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "public_contact_email" text NOT NULL DEFAULT '';
+
