@@ -228,14 +228,14 @@ export default function WorkOrdersPanel({ target, orders, today, canEdit, people
 
       {live.map(row)}
       {live.length === 0 && (
-        <div className="mut" style={{ fontSize: 12.5 }}>
+        <div className="mut" style={{ fontSize: 13 }}>
           Nothing outstanding{filed.length ? ` - ${filed.length} finished` : ""}.
         </div>
       )}
 
       {filed.length > 0 && (
         <details style={{ borderTop: "1px solid var(--line)", marginTop: live.length ? 0 : 8 }}>
-          <summary style={{ cursor: "pointer", padding: "8px 4px", fontSize: 12.5 }}>
+          <summary style={{ cursor: "pointer", padding: "8px 4px", fontSize: 13 }}>
             <b>Finished</b> <span className="mut">· {filed.length}</span>
           </summary>
           {filed.map(row)}

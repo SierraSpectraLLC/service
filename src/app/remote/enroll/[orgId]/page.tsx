@@ -43,7 +43,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
   if (!remoteConfigured()) {
     return (
       <div className="container page">
-        <h1 style={{ fontSize: 20, marginTop: 0 }}>Enroll a machine</h1>
+        <h1 style={{ fontSize: 19, marginTop: 0 }}>Enroll a machine</h1>
         <div className="card t-body">{NOT_CONFIGURED}</div>
       </div>
     );
@@ -69,7 +69,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
         Operations › <Link href="/remote" style={{ textDecoration: "none", color: "inherit" }}>Remote support</Link> › <b>Enroll a machine</b>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>Enroll a machine</h1>
+        <h1 style={{ fontSize: 19, margin: 0 }}>Enroll a machine</h1>
         <span className="pill info">{org.name}</span>
       </div>
 
@@ -83,7 +83,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
               Anything installed from this page joins <b>{org.name}</b>&apos;s machines and nobody else&apos;s.
             </div>
 
-            <ol style={{ fontSize: 13.5, margin: "0 0 12px", paddingLeft: 20, lineHeight: 1.7 }}>
+            <ol style={{ fontSize: 14, margin: "0 0 12px", paddingLeft: 20, lineHeight: 1.7 }}>
               <li>Download below and run it on the PC.</li>
               <li>Press <b>Install</b>, not Connect - Connect lasts only until the window closes.</li>
               <li>At the publisher warning, choose <b>More info → Run anyway</b>.</li>
@@ -93,7 +93,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
                 alike, so all three are here. The real fix is a signing
                 certificate; until then this is the whole of the friction, and
                 somebody standing at a lab PC should not have to guess it. */}
-            <details style={{ fontSize: 12.5, marginBottom: 16 }}>
+            <details style={{ fontSize: 13, marginBottom: 16 }}>
               <summary style={{ cursor: "pointer", color: "var(--t-info-fg)" }}>
                 Windows blocked it and offered no way through
               </summary>
@@ -129,7 +129,7 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
               }}>
                 <a href={d.url} className={d.primary ? "btn sm accent" : "btn sm"}
                   style={{ textDecoration: "none", minWidth: 150 }}>{d.label}</a>
-                <span className="mut" style={{ fontSize: 11.5 }}>{d.note}</span>
+                <span className="mut" style={{ fontSize: 12 }}>{d.note}</span>
               </div>
             ))}
 

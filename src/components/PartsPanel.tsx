@@ -320,7 +320,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             {draft.kind === "kit" && (
               <>
                 <span className="mut t-meta">the box as sold</span>
-                <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0, fontSize: 11.5, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--ink)", cursor: "pointer" }}>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", margin: 0, fontSize: 12, fontWeight: 400, textTransform: "none", letterSpacing: 0, color: "var(--ink)", cursor: "pointer" }}>
                   <input type="checkbox" checked={draft.expandKit} style={{ width: 14, height: 14 }}
                     onChange={(e) => setDraft({ ...draft, expandKit: e.target.checked })} />
                   also record what&apos;s inside it
@@ -571,7 +571,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               {p.note && <div className="t-small" style={{ marginTop: 5, color: "var(--slate, #475569)" }}>{p.note}</div>}
               {inside.length > 0 && (
                 <details style={{ marginTop: 6 }}>
-                  <summary style={{ cursor: "pointer", fontSize: 11.5, color: "var(--mut)" }}>
+                  <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--mut)" }}>
                     contains {inside.length} part{inside.length === 1 ? "" : "s"}
                   </summary>
                   <div style={{ paddingLeft: 12, marginTop: 4 }}>
@@ -599,7 +599,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               {visits.map((v, i) => (
                 <details key={v.day || "undated"} open={i === 0 && v.day !== ""}
                   style={{ borderTop: "1px solid var(--line)" }}>
-                  <summary style={{ cursor: "pointer", padding: "7px 2px", fontSize: 12.5 }}>
+                  <summary style={{ cursor: "pointer", padding: "7px 2px", fontSize: 13 }}>
                     <b>{v.label}</b>{" "}
                     <span className="mut">
                       · {v.parts.length} {v.parts.length === 1 ? "part" : "parts"}

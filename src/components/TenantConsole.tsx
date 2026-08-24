@@ -72,7 +72,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
         </div>
       )}
       {unassigned.length > 0 && (
-        <div style={{ fontSize: 12.5, color: "var(--t-warn-fg)", background: "#FAF0DC", borderRadius: 8, padding: "7px 10px", margin: "8px 0" }}>
+        <div style={{ fontSize: 13, color: "var(--t-warn-fg)", background: "#FAF0DC", borderRadius: 8, padding: "7px 10px", margin: "8px 0" }}>
           No company set for {unassigned.join(", ")} - they see nothing until one is.
         </div>
       )}
@@ -97,12 +97,12 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
                 {r.id === rootOrgId && <Pill tone="info">runs the platform</Pill>}
               </span>
             ),
-            seats: <span style={{ fontSize: 12.5 }}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</span>,
-            clients: <span style={{ fontSize: 12.5 }}>{r.clients}</span>,
-            logins: <span style={{ fontSize: 12.5 }}>{r.clientLogins}</span>,
-            systems: <span style={{ fontSize: 12.5 }}>{r.live}{r.systems !== r.live && <span className="mut"> of {r.systems}</span>}</span>,
-            machines: <span style={{ fontSize: 12.5 }}>{r.machines}</span>,
-            invited: <span style={{ fontSize: 12.5 }}>{r.invitedOnto || <span className="mut">-</span>}</span>,
+            seats: <span style={{ fontSize: 13 }}>{r.staff}{r.owners > 0 && <span className="mut"> ({r.owners} owner{r.owners === 1 ? "" : "s"})</span>}</span>,
+            clients: <span style={{ fontSize: 13 }}>{r.clients}</span>,
+            logins: <span style={{ fontSize: 13 }}>{r.clientLogins}</span>,
+            systems: <span style={{ fontSize: 13 }}>{r.live}{r.systems !== r.live && <span className="mut"> of {r.systems}</span>}</span>,
+            machines: <span style={{ fontSize: 13 }}>{r.machines}</span>,
+            invited: <span style={{ fontSize: 13 }}>{r.invitedOnto || <span className="mut">-</span>}</span>,
             since: <span className="mut t-small">{r.since}</span>,
           },
         }))}

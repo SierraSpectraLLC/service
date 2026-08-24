@@ -122,7 +122,7 @@ export default function ClientRequest({ instrumentId, externalId, nextPm }: {
             <div className="t-body" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginBottom: 6 }}>
               {done === "already" ? "Already asked ✓" : number ? `${number} opened ✓` : "Sent ✓"}
             </div>
-            <div className="mut" style={{ fontSize: 12.5, marginBottom: 12 }}>
+            <div className="mut" style={{ fontSize: 13, marginBottom: 12 }}>
               {done === "already"
                 ? `Maintenance is already requested for ${externalId} and it's with the service team. Your note is on the system's discussion.`
                 : isPm

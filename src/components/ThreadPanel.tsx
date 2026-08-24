@@ -134,7 +134,7 @@ export default function ThreadPanel({ threadId, me, members, messages, addable }
             </div>
           );
         })}
-        {messages.length === 0 && <div className="mut" style={{ fontSize: 12.5 }}>Nothing said yet.</div>}
+        {messages.length === 0 && <div className="mut" style={{ fontSize: 13 }}>Nothing said yet.</div>}
         <div ref={endRef} />
       </div>
 

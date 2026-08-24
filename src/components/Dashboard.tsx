@@ -287,7 +287,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
               <span className="t-body" style={{ flex: "1 1 200px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {i.label || <span className="mut">No assets listed yet</span>}
               </span>
-              {i.mineNote && <span className="mut" style={{ fontSize: 11.5 }}>{i.mineNote}</span>}
+              {i.mineNote && <span className="mut" style={{ fontSize: 12 }}>{i.mineNote}</span>}
             </Link>
           ))}
         </Panel>

@@ -61,7 +61,7 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
         <div className="crumb" style={{ margin: 0 }}>
           <Link href="/remote" style={{ textDecoration: "none", color: "inherit" }}>Remote support</Link> ›
         </div>
-        <h1 style={{ fontSize: 18, margin: 0 }}>{label}</h1>
+        <h1 style={{ fontSize: 19, margin: 0 }}>{label}</h1>
         {host && <span className="mono mut t-meta">{host}</span>}
         {row.orgName && (
           <span className="pill info">{row.orgName}</span>

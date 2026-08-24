@@ -265,7 +265,7 @@ export default function StoreFileList({
     <>
       {folders.length > 0 || canOrganise ? (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <button className="btn link" style={{ fontSize: 12.5, fontWeight: trail.length ? 400 : 700, background: dragOver === "root" ? "#EEF4FB" : undefined, borderRadius: 6 }}
+          <button className="btn link" style={{ fontSize: 13, fontWeight: trail.length ? 400 : 700, background: dragOver === "root" ? "#EEF4FB" : undefined, borderRadius: 6 }}
             onClick={() => setAt(null)}
             onDragOver={(e) => { if (acceptsFileDrag(e)) { e.preventDefault(); setDragOver("root"); } }}
             onDragLeave={() => setDragOver(null)}
@@ -273,7 +273,7 @@ export default function StoreFileList({
           {trail.map((f, i) => (
             <span key={f.id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
               <span className="mut t-small">/</span>
-              <button className="btn link" style={{ fontSize: 12.5, fontWeight: i === trail.length - 1 ? 700 : 400 }}
+              <button className="btn link" style={{ fontSize: 13, fontWeight: i === trail.length - 1 ? 700 : 400 }}
                 onClick={() => setAt(f.id)}>{f.name}</button>
             </span>
           ))}
@@ -520,7 +520,7 @@ export default function StoreFileList({
           <span className="reg-cell" style={{ textAlign: "right", overflow: "visible" }}>
             {canOrganise && (
               <>
-                <button className="btn link row-act" style={{ fontSize: 10.5 }} disabled={pending}
+                <button className="btn link row-act" style={{ fontSize: 11 }} disabled={pending}
                   onClick={async () => {
                     const next = await inputDialog({
                       title: `Rename "${d.name}"`, action: "Rename",
@@ -532,9 +532,9 @@ export default function StoreFileList({
                       setError(res?.error ?? "");
                     });
                   }}>rename</button>
-                <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }} disabled={pending}
+                <button className="btn link row-act" style={{ fontSize: 11, marginLeft: 6 }} disabled={pending}
                   onClick={() => { setFolderMove(folderMove === d.id ? null : d.id); setError(""); }}>move</button>
-                <button className="btn link row-act" style={{ fontSize: 10.5, color: "var(--t-bad-fg)", marginLeft: 6 }} disabled={pending}
+                <button className="btn link row-act" style={{ fontSize: 11, color: "var(--t-bad-fg)", marginLeft: 6 }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Delete the "${d.name}" folder?`,
@@ -605,7 +605,7 @@ export default function StoreFileList({
               {f.fileName}
             </a>
             {f.description && (
-              <span className="mut" style={{ fontSize: 11.5, minWidth: 0, flex: "0 1 auto", ...oneLine }}>
+              <span className="mut" style={{ fontSize: 12, minWidth: 0, flex: "0 1 auto", ...oneLine }}>
                 {f.description}
               </span>
             )}
@@ -628,7 +628,7 @@ export default function StoreFileList({
           <span className="reg-cell" style={{ textAlign: "right", overflow: "visible" }}>
             <span className="mut t-small">{fmtBytes(f.size)}</span>
             {canOrganise && (
-              <button className="btn link row-act" style={{ fontSize: 10.5, marginLeft: 6 }}
+              <button className="btn link row-act" style={{ fontSize: 11, marginLeft: 6 }}
                 aria-label={`Details for ${f.fileName}`}
                 onClick={() => {
                   setDetails(f);
@@ -672,10 +672,10 @@ export default function StoreFileList({
                   height: 92, borderRadius: 6, background: "#FAF6EE", marginBottom: 6,
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                  <span aria-hidden style={{ fontSize: 30, color: "var(--t-warn-fg)" }}>▮</span>
+                  <span aria-hidden style={{ fontSize: 26, color: "var(--t-warn-fg)" }}>▮</span>
                 </div>
                 <div className="t-small" style={{ fontWeight: 700, ...oneLine }}>{d.name}</div>
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</div>
+                <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>{n === 0 ? "empty" : `${n} item${n === 1 ? "" : "s"}`}</div>
               </button>
             );
           })}
@@ -698,12 +698,12 @@ export default function StoreFileList({
                     <img src={`/api/files/${f.places[0].attachmentId}`} alt="" loading="lazy"
                       style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
-                    <span aria-hidden style={{ fontSize: 30, color: `var(--t-${glyph(f).tone}-fg)` }}>{glyph(f).glyph}</span>
+                    <span aria-hidden style={{ fontSize: 26, color: `var(--t-${glyph(f).tone}-fg)` }}>{glyph(f).glyph}</span>
                   )}
                 </div>
                 <div className="t-small" style={{ fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.25 }}>{f.fileName}</div>
               </a>
-              <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>
+              <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
                 {fmtBytes(f.size)} · {onShelf(f) ? "not on a system" : f.places[0].kind === "shelf" ? "" : (f.places[0] as { label: string }).label}
               </div>
             </div>
@@ -762,7 +762,7 @@ export default function StoreFileList({
               onChange={(e) => setDraft({ ...draft, description: e.target.value })}
               style={{ width: "100%", marginBottom: 10, resize: "vertical" }} />
 
-            <div className="mut" style={{ fontSize: 11.5, marginBottom: 10 }}>
+            <div className="mut" style={{ fontSize: 12, marginBottom: 10 }}>
               {fmtBytes(details.size)} · uploaded by {details.uploadedBy} · {details.when}
               <br />
               {details.places.some((pl) => pl.kind !== "shelf")
@@ -787,7 +787,7 @@ export default function StoreFileList({
                     <option key={x.id} value={x.id}>{x.externalId}{x.model ? ` - ${x.model}` : ""}</option>
                   ))}
                 </select>
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
                   It appears in that system&apos;s files AND stays here - one stored copy, filed twice.
                 </div>
               </div>

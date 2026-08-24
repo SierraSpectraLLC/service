@@ -95,7 +95,7 @@ export default function WhatsNew({ cards }: { cards: WhatsNewCard[] }) {
               )}
               <div style={{ padding: "14px 18px 6px" }}>
                 <div className="mut t-meta" style={{ textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>{mdY(c.date)}</div>
-                <div style={{ fontWeight: 800, fontSize: 15.5, color: "var(--navy)", marginBottom: 6 }}>{c.title}</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "var(--navy)", marginBottom: 6 }}>{c.title}</div>
                 <p className="t-body" style={{ lineHeight: 1.55, margin: 0 }}>{c.body}</p>
                 {c.href && (
                   <a href={c.href} className="btn link t-small" style={{ paddingLeft: 0 }}>Take a look →</a>

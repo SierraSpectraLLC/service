@@ -138,7 +138,7 @@ function Bar({ label, included, used, fmt, unlimited = false }: {
           background: a.over ? "#A32D2D" : a.pct >= 80 ? "#8A5410" : "#2E6B2E",
         }} />
       </div>
-      <div className="mut" style={{ fontSize: 10.5, marginTop: 2 }}>
+      <div className="mut" style={{ fontSize: 11, marginTop: 2 }}>
         {a.over ? `${fmt(-a.remaining)} over` : `${fmt(a.remaining)} left`}
       </div>
     </div>
@@ -396,8 +396,8 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 </span>
               )}
             </div>
-            <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{renewalLine(r, today)}</div>
-            {extra?.[r.id] && <div className="mut" style={{ fontSize: 11.5, marginTop: 2 }}>{extra[r.id]}</div>}
+            <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{renewalLine(r, today)}</div>
+            {extra?.[r.id] && <div className="mut" style={{ fontSize: 12, marginTop: 2 }}>{extra[r.id]}</div>}
 
             {/* The signed paper itself, beside the terms it contains. */}
             {(() => {
@@ -406,7 +406,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               return (
                 <div style={{ marginTop: 4 }}>
                   {mine.map((pp) => (
-                    <div key={pp.id} style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", fontSize: 11.5 }}>
+                    <div key={pp.id} style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap", fontSize: 12 }}>
                       <a href={`/api/files/${pp.id}`} target="_blank" rel="noreferrer" className="mono">{pp.fileName}</a>
                       <span className="mut">{pp.kind} · {pp.uploadedBy} · {pp.when}</span>
                       {canEdit && (
@@ -489,7 +489,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 Plus {formatCents(r.used.pmPartsCents ?? 0)} in PM parts, covered by the contract.
               </div>
             )}
-            {r.note && <div className="mut" style={{ fontSize: 11.5, marginTop: 6, whiteSpace: "pre-wrap" }}>{r.note}</div>}
+            {r.note && <div className="mut" style={{ fontSize: 12, marginTop: 6, whiteSpace: "pre-wrap" }}>{r.note}</div>}
           </div>
         );
       })}
@@ -648,7 +648,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   disabled={pending || !!busy} note={busy}
                   onPick={(f) => { touch("paper"); setHeldLib([...heldLib, f]); }}
                   onFiles={(files) => { touch("paper"); setHeldFiles([...heldFiles, ...files]); }} />
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
                   Uploaded when you save, and filed on both this agreement and your document shelf.
                 </div>
               </div>
@@ -678,7 +678,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                       onChange={(e) => up("included", { pmPartsIncluded: e.target.checked })} />
                     <span>
                       PM parts are included
-                      <span className="mut" style={{ display: "block", fontSize: 10.5 }}>
+                      <span className="mut" style={{ display: "block", fontSize: 11 }}>
                         Parts fitted on an included PM are reported but never drawn from this allowance.
                       </span>
                     </span>
@@ -728,7 +728,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                     </option>
                   ))}
                 </select>
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
                   Fitting one of these draws down its count instead of the money above. Past the
                   included quantity, extras bill as ordinary parts.
                 </div>
@@ -739,7 +739,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   <label>Labour hours included</label>
                   <input value={draft.laborIncludedHours} placeholder="40"
                     onChange={(e) => up("included", { laborIncludedHours: e.target.value })} />
-                  <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
                     Hours of work the contract includes; logged time draws it down.
                   </div>
                 </div>
@@ -747,7 +747,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   <label>Hourly rate ($/hr)</label>
                   <input value={draft.hourlyRate} placeholder="150"
                     onChange={(e) => up("included", { hourlyRate: e.target.value })} />
-                  <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>
+                  <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>
                     What an hour beyond the included ones bills at.
                   </div>
                 </div>

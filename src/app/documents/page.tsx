@@ -188,7 +188,7 @@ export default async function DocumentsPage(
           anything here because the page looked like filing something would
           clutter their systems. It never would. */}
       {isOwnStore && (
-        <div className="mut" style={{ fontSize: 12.5, marginTop: -4, marginBottom: 10 }}>
+        <div className="mut" style={{ fontSize: 13, marginTop: -4, marginBottom: 10 }}>
           Your organization&apos;s storage. A file put here belongs to
           {" "}{quota.storeName} and is attached to no system, no unit and no job -
           it is somewhere to keep things. Filing one onto a record is a separate,

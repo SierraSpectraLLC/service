@@ -345,7 +345,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 )}
                 <div style={{ flex: "1 1 190px", minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
+                    <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)" }}>
                       {asset.kind} - {asset.model || "(no model)"}
                     </div>
                     {asset.forSale && <span className="pill good">For sale</span>}

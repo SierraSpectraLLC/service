@@ -133,7 +133,7 @@ export default function PartNumberField({
               <span style={{ minWidth: 0, flex: 1 }}>
                 <span style={{ display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
                   <span className="mono t-small" style={{ fontWeight: 700, color: "var(--navy)" }}>{h.partNumber}</span>
-                  <span style={{ fontSize: 12.5 }}>{h.name || <span className="mut">unnamed</span>}</span>
+                  <span style={{ fontSize: 13 }}>{h.name || <span className="mut">unnamed</span>}</span>
                   {/* What it costs, where the reader is allowed to know - the
                       answer to "is this the one to order" is half price. */}
                   {h.entry.priceCents !== null && (
@@ -144,7 +144,7 @@ export default function PartNumberField({
                 </span>
                 {/* Why this row is here. Being offered 060-65005-91 after typing
                     060-65005-00 reads as the wrong answer unless it says why. */}
-                <span className="mut" style={{ fontSize: 10.5, display: "block" }}>
+                <span className="mut" style={{ fontSize: 11, display: "block" }}>
                   {[
                     h.wasQuoted && `replaces ${h.wasQuoted}`,
                     h.alsoKnownAs && `also ${h.alsoKnownAs}`,

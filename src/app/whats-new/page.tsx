@@ -33,7 +33,7 @@ export default async function WhatsNewPage() {
           )}
           <div style={{ padding: "14px 18px" }}>
             <div className="mut t-meta" style={{ textTransform: "uppercase", letterSpacing: ".06em", marginBottom: 4 }}>{mdY(e.date)}</div>
-            <div style={{ fontWeight: 800, fontSize: 15.5, color: "var(--navy)", marginBottom: 6 }}>{e.title}</div>
+            <div style={{ fontWeight: 800, fontSize: 16, color: "var(--navy)", marginBottom: 6 }}>{e.title}</div>
             <p className="t-body" style={{ lineHeight: 1.55, margin: 0 }}>{e.body}</p>
             {e.href && <a href={e.href} className="btn link" style={{ fontSize: 12, paddingLeft: 0 }}>Take a look →</a>}
           </div>

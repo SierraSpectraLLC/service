@@ -205,13 +205,13 @@ export default function AssetsPanel({ instrumentId, assets, unassigned, kinds, c
             {/* One line each way, so the stack reads as plumbed rather than as
                 an alphabetical parts manifest. */}
             {serving && (
-              <span className="mut" style={{ fontSize: 11.5 }}>
+              <span className="mut" style={{ fontSize: 12 }}>
                 → {serving.model || serving.serial || serving.kind}
                 {a.servesRole ? ` (${a.servesRole})` : ""}
               </span>
             )}
             {servers.length > 0 && (
-              <span className="mut" style={{ fontSize: 11.5 }}>
+              <span className="mut" style={{ fontSize: 12 }}>
                 {/* With the role, because two identical pumps on one spec read
                     as a stutter without it. */}
                 ← {servesLine(servers.map((s) => ({ ...s, servesRole: s.servesRole ?? "" })))}

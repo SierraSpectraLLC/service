@@ -525,7 +525,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
             );
           })}
           {partRows.length > 0 && (
-            <div className="mut" style={{ fontSize: 11.5, marginTop: 8 }}>
+            <div className="mut" style={{ fontSize: 12, marginTop: 8 }}>
               {partRows.length} part{partRows.length === 1 ? "" : "s"} from these orders {partRows.length === 1 ? "is" : "are"} on
               the system&apos;s parts list, where the client&apos;s allowance reads them.
             </div>

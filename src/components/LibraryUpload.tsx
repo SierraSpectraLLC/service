@@ -101,7 +101,7 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
         <button className="btn sm primary" disabled={!!busy || full} onClick={() => { setOpen(true); setError(""); }}>
           {busy ? `Uploading ${done + 1}/${total}...` : "⇧ Upload files"}
         </button>
-        <span className="mut" style={{ fontSize: 11.5 }}>
+        <span className="mut" style={{ fontSize: 12 }}>
           or drop them anywhere on this page
           {folderName ? <> · into <b style={{ fontWeight: 700 }}>{folderName}</b></> : ""}
         </span>
@@ -147,7 +147,7 @@ export default function LibraryUpload({ full, maxBytes, folderId = null, folderN
             background: "#fff", borderRadius: 14, padding: "22px 30px", textAlign: "center",
             border: "2px dashed var(--navy)",
           }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)" }}>Drop to upload</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: "var(--navy)" }}>Drop to upload</div>
             <div className="mut t-small" style={{ marginTop: 4 }}>
               {folderName ? <>Files land in <b style={{ fontWeight: 700 }}>{folderName}</b>. </> : "Files land in your storage. "}
               Nothing is attached to a system.

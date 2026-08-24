@@ -77,7 +77,7 @@ export default function RemoteDevicesPanel({ devices, systems, enrollOrgs, canEn
           <div key={d.id} style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <Dot tone={d.online ? "good" : "faint"} />
-              <b style={{ fontSize: 13.5, color: "var(--navy)" }}>{deviceLabel(d.nickname, d.name)}</b>
+              <b style={{ fontSize: 14, color: "var(--navy)" }}>{deviceLabel(d.nickname, d.name)}</b>
               {/* Kept beside the nickname, never replaced by it: the nickname
                   finds the machine, the hostname proves it is the right one. */}
               {deviceSubLabel(d.nickname, d.name) && (

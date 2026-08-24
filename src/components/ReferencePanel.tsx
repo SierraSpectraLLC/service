@@ -97,7 +97,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
         <div className="card-title">Reference</div>
         {/* How much of this shelf could travel with a licensed library. */}
         {canEdit && refs.length > 0 && (
-          <span className="mut" style={{ fontSize: 10.5 }}>{tallyLine(tallyProvenance(refs))}</span>
+          <span className="mut" style={{ fontSize: 11 }}>{tallyLine(tallyProvenance(refs))}</span>
         )}
         {canEdit && scopes.length > 0 && (
           <button className="btn sm" style={{ marginLeft: "auto" }}
@@ -221,7 +221,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
             <option value="">Not saying yet</option>
             {PROVENANCE_CHOICES.map((c) => <option key={c} value={c}>{PROVENANCE_LABEL[c]}</option>)}
           </select>
-          <div className="mut" style={{ fontSize: 10.5, marginBottom: 8 }}>
+          <div className="mut" style={{ fontSize: 11, marginBottom: 8 }}>
             {PROVENANCE_BLURB[(draft.provenance || "") as keyof typeof PROVENANCE_BLURB]}
           </div>
         </Dialog>
@@ -241,7 +241,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                 ) : (
                   <>
                     {r.title && <div className="t-body" style={{ fontWeight: 700 }}>{r.title}</div>}
-                    {r.body && <div style={{ fontSize: 12.5, whiteSpace: "pre-wrap" }}>{r.body}</div>}
+                    {r.body && <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{r.body}</div>}
                     {r.url && (looksLikeImage(r.url) ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <a href={r.url} target="_blank" rel="noreferrer">
@@ -253,7 +253,7 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
                   </>
                 )}
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 3 }}>
-                  <span className="mut" style={{ fontSize: 10.5 }}>{r.createdBy}{r.when ? ` · ${r.when}` : ""}</span>
+                  <span className="mut" style={{ fontSize: 11 }}>{r.createdBy}{r.when ? ` · ${r.when}` : ""}</span>
                   <ProvenanceChip what="ref" id={r.id} value={r.provenance ?? ""} canEdit={canEdit} />
                 </div>
               </div>

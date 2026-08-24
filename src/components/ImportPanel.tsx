@@ -255,7 +255,7 @@ export default function ImportPanel() {
                   key: r.row,
                   cells: {
                     row: <span className="mono t-small">{r.row}</span>,
-                    action: <span style={{ fontSize: 12.5 }}>{r.action}</span>,
+                    action: <span style={{ fontSize: 13 }}>{r.action}</span>,
                     note: r.error
                       ? <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{r.error}</span>
                       : <span className="mut t-small">ok</span>,
@@ -277,7 +277,7 @@ export default function ImportPanel() {
           )}
 
           {step === "preview" && !checked && (
-            <div className="mut" style={{ fontSize: 12.5 }}>
+            <div className="mut" style={{ fontSize: 13 }}>
               The kept rows changed since the last check.{" "}
               <button className="btn link" onClick={() => run(true)} disabled={pending}>
                 {pending ? "Checking..." : "Check again"}

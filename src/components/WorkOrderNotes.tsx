@@ -70,7 +70,7 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
         return (
           <div key={n.id} style={{ padding: "7px 0", borderTop: "1px solid var(--line)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{n.author}</span>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>{n.author}</span>
               <span className="mut t-meta">{fmtWhen(n.createdAt)}</span>
               {n.editedAt && (
                 <span className="mut t-meta" title={`Edited ${fmtWhen(n.editedAt)}`}>· edited</span>
@@ -119,7 +119,7 @@ export default function WorkOrderNotes({ workOrderId, notes, canPost, me, people
           </div>
         );
       })}
-      {notes.length === 0 && <div className="mut" style={{ fontSize: 12.5, marginBottom: 6 }}>Nothing yet. @mention somebody to make sure they see it.</div>}
+      {notes.length === 0 && <div className="mut" style={{ fontSize: 13, marginBottom: 6 }}>Nothing yet. @mention somebody to make sure they see it.</div>}
       {canPost && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <MentionBox people={people} value={text} onChange={setText} onEnter={post}

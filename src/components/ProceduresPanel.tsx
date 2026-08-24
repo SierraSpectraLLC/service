@@ -556,7 +556,7 @@ export default function ProceduresPanel({ items, assetTypes, modelOptions, model
         <div key={band.key}>
           <div className="row-hover" onClick={() => setOpenBand(bandOpen ? null : band.key)}
             style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 4px", cursor: "pointer", borderTop: "1px solid var(--line)" }}>
-            <span style={{ fontSize: 15, fontWeight: 800, color: "var(--navy)", letterSpacing: "-0.2px" }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: "var(--navy)", letterSpacing: "-0.2px" }}>
               {band.key === "system" ? "System-wide" : band.label}
             </span>
             <span className="mut t-small">

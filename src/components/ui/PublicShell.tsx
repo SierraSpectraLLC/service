@@ -20,7 +20,7 @@ export default function PublicShell({ brandName, tagline, title, sub, width = 56
       {(title != null || sub != null) && (
         <div style={{ marginBottom: 12 }}>
           <div className="eyebrow">{brandName}</div>
-          {title != null && <h1 style={{ fontSize: 20, margin: "2px 0 0" }}>{title}</h1>}
+          {title != null && <h1 style={{ fontSize: 19, margin: "2px 0 0" }}>{title}</h1>}
           {sub != null && <p className="mut t-body" style={{ margin: "4px 0 0", lineHeight: 1.6 }}>{sub}</p>}
         </div>
       )}

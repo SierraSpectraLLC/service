@@ -133,8 +133,8 @@ export default function SystemPanel({ instrument, label, clients, categories, st
           {!editing && (
             <>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginTop: 2 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--navy)" }}>
-                  {label || <span className="mut" style={{ fontWeight: 400, fontSize: 15 }}>No assets listed yet</span>}
+                <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)" }}>
+                  {label || <span className="mut" style={{ fontWeight: 400, fontSize: 16 }}>No assets listed yet</span>}
                 </div>
                 {instrument.category && (
                   <span className="pill info">{instrument.category}</span>

@@ -16,6 +16,31 @@
   --shadow-md: 0 8px 24px rgba(23, 42, 74, 0.14);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
+  /* ── The type scale ───────────────────────────────────────────────────────
+     Nine steps, and nothing between them.
+
+     There used to be no scale in the sense that matters - .t-* named six
+     sizes, but the stylesheet itself rendered at thirteen (9, 10, 10.5, 11,
+     12, 12.5, 13, 13.5, 14, 15, 16, 19, 22) and components added eighteen
+     more inline, seventy-two of those on half-pixels nobody chose on purpose:
+     12.5 next to 13 next to 12 in the same row, each one a judgement call
+     made once and never reconciled. That is what "the sizes are variable
+     everywhere" was - not a design decision, an absence of one.
+
+     These are the sizes. A value that is not one of them is a bug, and
+     tests/typeScale.test.ts fails the build over it. When something genuinely
+     needs a size the scale does not have, the fix is to argue for a step -
+     not to write 12.5 and move on. */
+  --fs-micro:  10px;
+  --fs-meta:   11px;
+  --fs-small:  12px;
+  --fs-body:   13px;
+  --fs-lead:   14px;
+  --fs-title:  16px;
+  --fs-hero:   19px;
+  --fs-page:   22px;
+  --fs-metric: 26px;
+
   /* ── Tones ──────────────────────────────────────────────────────────────
      The status vocabulary. Seven meanings, each a bg/fg pair, distilled from
      the ~45 hex pairs the inline pills grew by feel (the near-duplicates
@@ -43,6 +68,24 @@
      margins by feel, and every page drifted a pixel or two from the next. */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
 }
+
+/* On a phone the small end of the scale moves up one step.
+   Not decoration: the block at the bottom of this file forces every input to
+   16px so iOS will not zoom the page, which on the desktop scale left a form
+   row reading 11px label against a 16px field - a 45% jump inside one
+   control, and the single biggest reason the sizes read as arbitrary on a
+   phone. This closes that to 12/16, and makes the dense pages legible held at
+   arm's length. The headings do not move: they are already large enough, and
+   growing them costs the line-wraps a narrow screen can least afford. */
+@media (pointer: coarse) {
+  :root {
+    --fs-micro: 11px;
+    --fs-meta:  12px;
+    --fs-small: 13px;
+    --fs-body:  14px;
+    --fs-lead:  15px;
+  }
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 /* A column the height of the window: header, page, footer. Almost every page
@@ -54,7 +97,7 @@ body {
   -webkit-font-smoothing: antialiased;
   background: var(--bg);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--fs-lead);
   line-height: 1.45;
   min-height: 100dvh;
   display: flex;
@@ -65,7 +108,7 @@ body {
    letting it shrink. */
 .fill-window { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 a { color: var(--link); }
-input, select, textarea, button { font-family: inherit; font-size: 13px; }
+input, select, textarea, button { font-family: inherit; font-size: var(--fs-body); }
 input, select, textarea {
   padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; width: 100%;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
@@ -73,7 +116,7 @@ input, select, textarea {
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: none; border-color: var(--sky); box-shadow: 0 0 0 3px rgba(91, 168, 217, 0.22);
 }
-label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); margin-bottom: 3px; }
+label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(--mut); margin-bottom: 3px; }
 
 /* Page widths are a fixed set, not a per-page guess - blocks lined up
    differently on every route before this existed. Forms and records share one
@@ -110,8 +153,8 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin: 4px 0 14px;
 }
-.page-title { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; color: var(--navy); margin: 0; line-height: 1.2; }
-.page-sub { flex-basis: 100%; font-size: 13px; color: var(--mut); margin: -6px 0 0; }
+.page-title { font-size: var(--fs-page); font-weight: 800; letter-spacing: -0.4px; color: var(--navy); margin: 0; line-height: 1.2; }
+.page-sub { flex-basis: 100%; font-size: var(--fs-body); color: var(--mut); margin: -6px 0 0; }
 /* min/max width so a wide actions cluster (a facet strip in the head) scrolls
    inside itself on a phone instead of widening the page. */
 .page-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }
@@ -121,10 +164,10 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    reads as designed when there is nothing in it yet. */
 .empty {
   border: 1.5px dashed var(--line); border-radius: var(--radius);
-  padding: 28px 20px; text-align: center; color: var(--mut); font-size: 13px;
+  padding: 28px 20px; text-align: center; color: var(--mut); font-size: var(--fs-body);
   background: transparent;
 }
-.empty b { color: var(--ink); display: block; font-size: 14px; margin-bottom: 4px; }
+.empty b { color: var(--ink); display: block; font-size: var(--fs-lead); margin-bottom: 4px; }
 .empty .empty-act { margin-top: 10px; display: flex; justify-content: center; }
 
 /* Two independent stacks, so cards pack tightly instead of aligning into rows
@@ -152,7 +195,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .panel-grip {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   background: #F4F7FB; border: 1px solid var(--line); border-radius: 8px;
-  padding: 4px 8px; margin-bottom: 4px; cursor: grab; font-size: 12px; font-weight: 700;
+  padding: 4px 8px; margin-bottom: 4px; cursor: grab; font-size: var(--fs-small); font-weight: 700;
   color: var(--navy);
 }
 .panel-drop-tail { min-height: 44px; border-radius: 10px; border: 1px dashed var(--line); margin-bottom: 12px; }
@@ -180,7 +223,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   display: grid; grid-template-columns: var(--reg-cols);
   gap: 12px; align-items: end; padding: 8px 6px 6px;
   border-bottom: 1px solid var(--line);
-  font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: 0.6px;
   text-transform: uppercase; color: var(--mut);
   /* A few hundred units scroll a long way past their column names. */
   position: sticky; top: 0; z-index: 2; background: var(--card);
@@ -191,9 +234,9 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   display: flex; align-items: baseline; gap: 8px;
   padding: 20px 6px 5px; border-bottom: 2px solid var(--navy);
 }
-.reg-group-name { font-weight: 800; font-size: 15px; letter-spacing: -0.2px; color: var(--navy); }
+.reg-group-name { font-weight: 800; font-size: var(--fs-title); letter-spacing: -0.2px; color: var(--navy); }
 .reg-group-count {
-  font-size: 11px; font-weight: 700; color: var(--mut);
+  font-size: var(--fs-meta); font-weight: 700; color: var(--mut);
   background: #EEF1F5; border-radius: 999px; padding: 2px 8px;
 }
 .reg-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -214,7 +257,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    important in it". Most titles share a flex row with buttons or pills, so this
    is typographic only: a rule under the element would underline just the words
    and float beside whatever sits next to it. */
-.card-title { font-weight: 800; font-size: 16px; line-height: 1.25; letter-spacing: -0.2px; color: var(--navy); }
+.card-title { font-weight: 800; font-size: var(--fs-title); line-height: 1.25; letter-spacing: -0.2px; color: var(--navy); }
 /* The identity bar above the header. Both halves are variables so Settings >
    Configuration > Appearance can move them without a deploy; the values here
    are the fallback for a page rendered before settings are read, and match
@@ -223,7 +266,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   height: var(--spectrum-h, 3px);
   background: var(--spectrum-bg, linear-gradient(90deg,#172A4A 0%,#2B5F8F 25%,#5BA8D9 50%,#1D9E75 72%,#E8613C 100%));
 }
-.pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+.pill { font-size: var(--fs-meta); font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; display: inline-block; }
 /* A pill states its tone by name; the bg/fg pairs live in :root. A bare .pill
    with an inline style is the legacy form and sweeps away file by file. */
 .pill.neutral { background: var(--t-neutral-bg); color: var(--t-neutral-fg); }
@@ -247,10 +290,10 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .dot.bad     { background: #C23A3A; }
 
 /* One per list page that uses dots, above or below the table. */
-.legend { display: flex; gap: 14px; font-size: 12px; color: var(--mut); flex-wrap: wrap; align-items: center; }
+.legend { display: flex; gap: 14px; font-size: var(--fs-small); color: var(--mut); flex-wrap: wrap; align-items: center; }
 .legend > span { display: inline-flex; gap: 5px; align-items: center; }
 .btn {
-  cursor: pointer; border-radius: 8px; font-weight: 700; font-size: 13px;
+  cursor: pointer; border-radius: 8px; font-weight: 700; font-size: var(--fs-body);
   padding: 8px 14px; border: 1px solid var(--line); background: #fff; color: var(--navy);
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
@@ -258,17 +301,17 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 /* A disabled button says so - "Create" that looks live but ignores the click
    reads as a broken page, not as an unfinished form. */
 .btn:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
-.btn.sm { font-size: 12px; padding: 5px 10px; }
+.btn.sm { font-size: var(--fs-small); padding: 5px 10px; }
 .btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
 .btn.primary:hover { background: var(--navy-2); border-color: var(--navy-2); }
 .btn.accent { background: var(--coral); color: #fff; border-color: var(--coral); }
 .btn.accent:hover { background: var(--coral-2); border-color: var(--coral-2); }
-.btn.link { border: none; background: none; padding: 0; color: var(--link); font-size: 11px; }
+.btn.link { border: none; background: none; padding: 0; color: var(--link); font-size: var(--fs-meta); }
 .btn.link:hover { background: none; text-decoration: underline; }
 .btn:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
 .mut { color: var(--mut); }
 .mono { font-family: var(--mono); }
-.eyebrow { font-size: 11px; color: var(--mut); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.eyebrow { font-size: var(--fs-meta); color: var(--mut); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 
 /* ── Type scale ─────────────────────────────────────────────────────────────
    Six sizes with names, replacing ~1,600 inline fontSize picks of 11/12/13 by
@@ -276,16 +319,19 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    sweep can swap `style={{fontSize: 12}}` for `t-small` without changing
    anything else. Body text is 14px by default (see body above); these exist
    for the text that is deliberately not body. */
-.t-meta  { font-size: 11px; }   /* timestamps, counts, the smallest print   */
-.t-small { font-size: 12px; }   /* secondary lines, hints, row meta         */
-.t-body  { font-size: 13px; }   /* dense-page prose, table cells            */
-.t-lead  { font-size: 14px; }   /* a paragraph that leads a section         */
-.t-title { font-size: 16px; }   /* card titles (matches .card-title)        */
-.t-page  { font-size: 22px; }   /* page titles (matches .page-title)        */
+.t-micro { font-size: var(--fs-micro); }  /* chips, counters, the smallest mark  */
+.t-meta  { font-size: var(--fs-meta);  }  /* timestamps, counts, smallest print  */
+.t-small { font-size: var(--fs-small); }  /* secondary lines, hints, row meta    */
+.t-body  { font-size: var(--fs-body);  }  /* dense-page prose, table cells       */
+.t-lead  { font-size: var(--fs-lead);  }  /* a paragraph that leads a section    */
+.t-title { font-size: var(--fs-title); }  /* card titles (matches .card-title)   */
+.t-hero  { font-size: var(--fs-hero);  }  /* a record's own name on its page     */
+.t-page  { font-size: var(--fs-page);  }  /* page titles (matches .page-title)   */
+.t-metric{ font-size: var(--fs-metric);}  /* the one big number on a tile        */
 /* An identifier: serial, part number, WO number, model code. Monospace and a
    half-point small, so it reads as a designation rather than prose. `dim` for
    the secondary one on a line that already has a primary. */
-.t-mono-id { font-family: var(--mono); font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
+.t-mono-id { font-family: var(--mono); font-size: var(--fs-body); font-weight: 600; letter-spacing: -0.01em; }
 .t-mono-id.dim { color: var(--mut); font-weight: 500; }
 
 /* ── Stacks and rows ────────────────────────────────────────────────────────
@@ -351,16 +397,16 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 /* Ellipsis, not overlap: on a narrow phone a long brand name gives way to the
    utility icons instead of painting underneath them. */
 .brand-name {
-  font-weight: 800; font-size: 15px; letter-spacing: 0.4px; white-space: nowrap;
+  font-weight: 800; font-size: var(--fs-title); letter-spacing: 0.4px; white-space: nowrap;
   min-width: 0; overflow: hidden; text-overflow: ellipsis;
 }
 .brand-org {
-  font-size: 12px; opacity: 0.72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--fs-small); opacity: 0.72; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .header-nav { margin-left: auto; display: flex; gap: 2px; flex-wrap: wrap; align-items: center; }
 .nav-link {
   display: inline-block; padding: 6px 11px; border-radius: 999px;
-  color: inherit; text-decoration: none; font-size: 13px; font-weight: 600;
+  color: inherit; text-decoration: none; font-size: var(--fs-body); font-weight: 600;
   border: none; background: none; cursor: pointer; white-space: nowrap;
   opacity: 0.85; transition: background 0.12s ease, opacity 0.12s ease;
 }
@@ -396,12 +442,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .nav-badge {
   position: absolute; top: 3px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px;
   border-radius: 999px; background: var(--coral); color: #fff;
-  font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
+  font-size: var(--fs-micro); font-weight: 800; line-height: 16px; text-align: center;
 }
 .nav-avatar {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 999px;
-  border: 1.5px solid currentColor; font-size: 11px; font-weight: 800; letter-spacing: 0.2px;
+  border: 1.5px solid currentColor; font-size: var(--fs-meta); font-weight: 800; letter-spacing: 0.2px;
 }
 /* The identity block at the top of the account menu, and the divided sections
    under it. Plain rows so they don't pick up the hover of a menu link. */
@@ -425,11 +471,11 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   padding: 6px 0 14px; position: sticky; top: 12px;
 }
 .settings-group {
-  padding: 14px 16px 4px; font-size: 10.5px; font-weight: 700;
+  padding: 14px 16px 4px; font-size: var(--fs-meta); font-weight: 700;
   letter-spacing: 0.6px; text-transform: uppercase; color: var(--mut);
 }
 .settings-side a, .settings-mobnav nav a {
-  display: block; padding: 7px 16px; font-size: 13px; color: var(--ink);
+  display: block; padding: 7px 16px; font-size: var(--fs-body); color: var(--ink);
   text-decoration: none; border-left: 3px solid transparent;
 }
 .settings-side a:hover, .settings-mobnav nav a:hover { background: #F4F7FB; }
@@ -447,7 +493,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   }
   .settings-mobnav > summary {
     list-style: none; cursor: pointer; padding: 11px 14px;
-    font-size: 13.5px; font-weight: 600; color: var(--navy);
+    font-size: var(--fs-lead); font-weight: 600; color: var(--navy);
     display: flex; justify-content: space-between; align-items: center;
   }
   .settings-mobnav > summary::-webkit-details-marker { display: none; }
@@ -478,7 +524,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .header-nav { flex-wrap: nowrap; min-width: 0; }
   /* Descendant, not child: the Operations/Library menu summaries carry
      .nav-link too and have to shrink with the rest. */
-  .header-nav .nav-link { padding: 5px 6px; font-size: 12px; }
+  .header-nav .nav-link { padding: 5px 6px; font-size: var(--fs-small); }
   .brand-org { display: none; }
   /* The wordmark yields at tablet width; the logo keeps the corner. */
   .brand-name { display: none; }
@@ -512,11 +558,11 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   }
   .mnav-id { padding: 8px 18px 12px; border-bottom: 1px solid var(--line); color: var(--ink); }
   .mnav-group {
-    padding: 14px 18px 4px; font-size: 10.5px; font-weight: 700;
+    padding: 14px 18px 4px; font-size: var(--fs-meta); font-weight: 700;
     letter-spacing: 0.6px; text-transform: uppercase; color: var(--mut);
   }
   .mnav-pane a {
-    display: block; padding: 9px 18px; font-size: 14px; font-weight: 500;
+    display: block; padding: 9px 18px; font-size: var(--fs-lead); font-weight: 500;
     color: var(--ink); text-decoration: none;
   }
   .mnav-pane a.active { background: var(--t-info-bg); color: var(--navy); font-weight: 600; }
@@ -529,7 +575,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   }
   .mnav-tabbar a {
     flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-    font-size: 10.5px; font-weight: 600; color: var(--mut); text-decoration: none;
+    font-size: var(--fs-meta); font-weight: 600; color: var(--mut); text-decoration: none;
   }
   .mnav-tabbar a.active { color: var(--navy); }
   .mnav-tabbar a:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; border-radius: 6px; }
@@ -547,7 +593,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   border-bottom: 1px solid var(--line); margin-bottom: 12px;
 }
 .tab {
-  padding: 8px 12px 9px; font-size: 13px; font-weight: 600; color: var(--mut);
+  padding: 8px 12px 9px; font-size: var(--fs-body); font-weight: 600; color: var(--mut);
   text-decoration: none; border: none; background: none; cursor: pointer;
   border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
   transition: color 0.12s ease, border-color 0.12s ease;
@@ -558,7 +604,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
 .subtab {
-  padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  padding: 4px 11px; border-radius: 999px; font-size: var(--fs-small); font-weight: 600;
   color: var(--slate); background: none; border: 1px solid var(--line);
   text-decoration: none; white-space: nowrap;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -593,14 +639,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .menu-panel.left { right: auto; left: 0; }
 .menu-panel a, .menu-panel button {
-  padding: 8px 10px; font-size: 13px; color: var(--ink); text-decoration: none;
+  padding: 8px 10px; font-size: var(--fs-body); color: var(--ink); text-decoration: none;
   border-radius: 6px; text-align: left; background: none; border: none;
   font-weight: 400; cursor: pointer;
 }
 .menu-panel a:hover, .menu-panel button:hover { background: #EDF3FA; }
 /* Section label inside a grouped menu: quiet, uppercase, not hoverable. */
 .menu-label {
-  padding: 8px 10px 3px; font-size: 10px; font-weight: 700; letter-spacing: 0.6px;
+  padding: 8px 10px 3px; font-size: var(--fs-micro); font-weight: 700; letter-spacing: 0.6px;
   text-transform: uppercase; color: var(--mut);
 }
 .menu-label + .menu-label, .menu-panel a + .menu-label, .menu-panel button + .menu-label {
@@ -627,11 +673,11 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .pdf-page { border-radius: 4px; min-width: 0; }
 .pdf-page .pdf-thumb { position: relative; cursor: grab; }
-.pdf-page input { font-size: 11px; padding: 3px 5px; width: 100%; }
+.pdf-page input { font-size: var(--fs-meta); padding: 3px 5px; width: 100%; }
 /* Move / rotate / remove, spread across the card's width so each is a target
    rather than a pinpoint. */
 .pdf-page .pdf-acts { display: flex; gap: 2px; margin-top: 3px; }
-.pdf-page .pdf-acts .btn { flex: 1; padding: 3px 0; font-size: 12px; min-height: 26px; }
+.pdf-page .pdf-acts .btn { flex: 1; padding: 3px 0; font-size: var(--fs-small); min-height: 26px; }
 @media (max-width: 860px) {
   .pdf-studio { grid-template-columns: minmax(0, 1fr); }
   /* A source list that fills the viewport buries the pages under it. */
@@ -639,7 +685,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 /* No mouse: bigger everything, and no point advertising a drag that can't fire. */
 @media (hover: none) {
-  .pdf-page .pdf-acts .btn { min-height: 34px; font-size: 14px; }
+  .pdf-page .pdf-acts .btn { min-height: 34px; font-size: var(--fs-lead); }
   .pdf-page .pdf-thumb { cursor: default; }
   .pdf-drag-hint { display: none; }
 }
@@ -669,14 +715,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button {
-  border: none; background: #fff; color: var(--slate); font-size: 12px; font-weight: 700;
+  border: none; background: #fff; color: var(--slate); font-size: var(--fs-small); font-weight: 700;
   padding: 6px 12px; cursor: pointer;
 }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button[aria-pressed="true"] { background: var(--navy); color: #fff; }
 /* Segs whose choices are links (URL-driven windows): same skin as buttons. */
 .seg a {
-  border: none; background: #fff; color: var(--slate); font-size: 12px; font-weight: 700;
+  border: none; background: #fff; color: var(--slate); font-size: var(--fs-small); font-weight: 700;
   padding: 6px 12px; text-decoration: none;
 }
 .seg a + a { border-left: 1px solid var(--line); }
@@ -709,7 +755,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .band-label {
   display: flex; align-items: center; gap: 10px;
-  margin: 14px 0 8px; font-size: 11px; font-weight: 700;
+  margin: 14px 0 8px; font-size: var(--fs-meta); font-weight: 700;
   letter-spacing: 0.8px; text-transform: uppercase; color: var(--slate);
 }
 .band-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
@@ -738,7 +784,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    inline style. */
 
 /* Breadcrumb above the page head. The current page is the bold end. */
-.crumb { font-size: 12px; color: var(--mut); margin-bottom: 4px; }
+.crumb { font-size: var(--fs-small); color: var(--mut); margin-bottom: 4px; }
 .crumb a { color: var(--mut); text-decoration: none; }
 .crumb a:hover { color: var(--link); text-decoration: underline; }
 .crumb b { color: var(--ink); font-weight: 500; }
@@ -758,7 +804,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    sideways instead of wrapping into a wall. */
 .facets { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .facet {
-  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  font-size: var(--fs-small); font-weight: 600; padding: 4px 10px; border-radius: 999px;
   border: 1px solid var(--line); background: #fff; color: var(--mut);
   white-space: nowrap; cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -778,7 +824,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    buttons 26-29px, inline link-buttons 12-16px, checkboxes 15px. Density is
    a virtue on a desktop and a misclick on a phone. */
 @media (hover: none), (max-width: 639px) {
-  .facet { padding: 9px 14px; font-size: 12.5px; }
+  .facet { padding: 9px 14px; font-size: var(--fs-body); }
   .btn.sm { min-height: 36px; padding: 7px 12px; }
   .btn.link { min-height: 32px; display: inline-flex; align-items: center; padding: 4px 6px; }
   .kebab { min-height: 36px; min-width: 36px; }
@@ -795,12 +841,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
    tables and card grids that draw their own top edge. */
 .sec-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 14px 0 6px; font-size: 11px; font-weight: 700;
+  padding: 14px 0 6px; font-size: var(--fs-meta); font-weight: 700;
   letter-spacing: 0.8px; text-transform: uppercase; color: var(--slate);
 }
 .sec-head .sec-count {
   font-weight: 700; letter-spacing: 0; background: var(--t-neutral-bg);
-  border-radius: 999px; padding: 0 7px; font-size: 11px; color: var(--mut);
+  border-radius: 999px; padding: 0 7px; font-size: var(--fs-meta); color: var(--mut);
 }
 .sec-head.sticky { position: sticky; top: 0; z-index: 3; background: var(--bg); }
 
@@ -817,7 +863,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   width: 26px; height: 26px; border-radius: 6px; border: none; background: none;
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--mut); font-weight: 700; letter-spacing: 1px; cursor: pointer;
-  font-size: 13px; line-height: 1;
+  font-size: var(--fs-body); line-height: 1;
 }
 .kebab:hover { background: #EDF3FA; color: var(--navy); }
 .kebab:focus-visible { outline: 2px solid var(--sky); outline-offset: 1px; }
@@ -844,12 +890,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .sheet.dialog.sm { max-width: 440px; }
 .sheet.dialog.lg { max-width: 860px; }
 .dialog-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-.dialog-title { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -0.2px; color: var(--navy); }
-.dialog-context { font-size: 12px; color: var(--mut); margin-top: 2px; }
+.dialog-title { margin: 0; font-size: var(--fs-title); font-weight: 800; letter-spacing: -0.2px; color: var(--navy); }
+.dialog-context { font-size: var(--fs-small); color: var(--mut); margin-top: 2px; }
 .dialog-x {
   margin-left: auto; border: none; background: none; cursor: pointer;
   width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;
-  color: var(--mut); font-size: 15px; line-height: 1;
+  color: var(--mut); font-size: var(--fs-title); line-height: 1;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .dialog-x:hover { background: #EDF3FA; color: var(--navy); }
@@ -859,14 +905,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   display: flex; gap: 8px; align-items: center; padding: 12px 18px;
   border-top: 1px solid var(--line); flex-shrink: 0; background: var(--card);
 }
-.dialog-status { flex: 1; font-size: 12px; color: var(--mut); min-width: 0; }
+.dialog-status { flex: 1; font-size: var(--fs-small); color: var(--mut); min-width: 0; }
 .dialog-status.err { color: var(--t-bad-fg); }
 .dialog-status.ok { color: var(--t-good-fg); }
 
 /* A section heading inside a dialog body: card-title weight at form scale,
    so a long form reads as titled groups rather than one column of labels. */
 .dialog-section {
-  font-size: 13px; font-weight: 800; color: var(--navy);
+  font-size: var(--fs-body); font-weight: 800; color: var(--navy);
   letter-spacing: -0.1px; margin: 16px 0 8px;
 }
 .dialog-section:first-child { margin-top: 0; }
@@ -906,7 +952,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .proc-prevbox {
   display: inline-block; border: 1px solid var(--line); border-radius: 6px;
-  padding: 3px 8px; font-size: 12px; background: #fff; color: var(--mut);
+  padding: 3px 8px; font-size: var(--fs-small); background: #fff; color: var(--mut);
   min-width: 64px; text-align: center;
 }
 
@@ -917,14 +963,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .dialog-stepnav { background: #FAFBFD; border-right: 1px solid var(--line); padding: 12px 0; }
 .dialog-stepnav button {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 14px; font-size: 12.5px; color: var(--mut); font-weight: 500;
+  padding: 8px 14px; font-size: var(--fs-body); color: var(--mut); font-weight: 500;
   border: none; background: none; cursor: pointer; text-align: left;
   border-left: 3px solid transparent;
 }
 .dialog-stepnav button i {
   width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #C9D1DE;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 9px; font-style: normal; flex: none;
+  font-size: var(--fs-micro); font-style: normal; flex: none;
 }
 .dialog-stepnav button.done i { background: var(--t-good-fg); border-color: var(--t-good-fg); color: #fff; }
 .dialog-stepnav button.warn i { border-color: #E0A100; background: var(--t-warn-bg); color: var(--t-warn-fg); font-weight: 700; }
@@ -987,10 +1033,10 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .ecard-eyebrow { grid-column: 2; grid-row: 1; }
 .ecard-title {
   grid-column: 2; grid-row: 2;
-  font-weight: 700; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 700; font-size: var(--fs-lead); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ecard-title a { color: inherit; text-decoration: none; }
-.ecard-meta { grid-column: 2; grid-row: 3; font-size: 12px; color: var(--mut); min-width: 0; }
+.ecard-meta { grid-column: 2; grid-row: 3; font-size: var(--fs-small); color: var(--mut); min-width: 0; }
 .ecard-kebab { grid-column: 3; grid-row: 1; min-width: 26px; justify-self: end; }
 .ecard-pills { grid-column: 2 / 4; grid-row: 4; display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
 
@@ -1005,14 +1051,14 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .toast {
   background: var(--navy); color: #fff; padding: 10px 14px; border-radius: 10px;
-  font-size: 12.5px; display: flex; gap: 14px; align-items: center;
+  font-size: var(--fs-body); display: flex; gap: 14px; align-items: center;
   box-shadow: 0 10px 30px rgba(23, 42, 74, 0.3); pointer-events: auto;
   max-width: min(420px, calc(100vw - 28px));
 }
 .toast.bad { background: var(--t-bad-fg); }
 .toast-undo {
   border: none; background: none; cursor: pointer; padding: 0;
-  color: #9CC9EA; font-weight: 700; font-size: 12.5px; white-space: nowrap;
+  color: #9CC9EA; font-weight: 700; font-size: var(--fs-body); white-space: nowrap;
 }
 .toast.bad .toast-undo { color: #F8D0D0; }
 .toast-undo:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
@@ -1025,7 +1071,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 @keyframes toast-up { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* The count beside a tab's label; warn when the section wants attention. */
-.tab .tab-n { font-size: 11px; color: var(--mut); margin-left: 4px; font-weight: 600; }
+.tab .tab-n { font-size: var(--fs-meta); color: var(--mut); margin-left: 4px; font-weight: 600; }
 .tab .tab-n.warn { color: var(--t-warn-fg); }
 
 /* One field edited where it stands: the value with a pencil that shows on
@@ -1036,7 +1082,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-width: 0;
   text-align: left;
 }
-.inline-edit-view .pencil { color: var(--mut); font-size: 11px; opacity: 0; transition: opacity 0.12s ease; }
+.inline-edit-view .pencil { color: var(--mut); font-size: var(--fs-meta); opacity: 0; transition: opacity 0.12s ease; }
 .inline-edit-view:hover .pencil, .inline-edit-view:focus-visible .pencil { opacity: 1; }
 .inline-edit-view:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; border-radius: 4px; }
 @media (hover: none) { .inline-edit-view .pencil { opacity: 1; } }
@@ -1046,18 +1092,18 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .inline-edit input { border: none; padding: 0; font-size: inherit; min-width: 120px; width: auto; }
 .inline-edit input:focus-visible { outline: none; box-shadow: none; }
-.inline-edit kbd { font-size: 10px; color: var(--mut); font-family: var(--sans, inherit); }
+.inline-edit kbd { font-size: var(--fs-micro); color: var(--mut); font-family: var(--sans, inherit); }
 
 /* A labelled form field: label, control, then a hint or an error - never
    both, the error takes the hint's place while it stands. */
 .field { margin-bottom: 10px; min-width: 0; }
 .field-req { color: var(--t-bad-fg); }
 .field-opt { font-weight: 400; text-transform: none; letter-spacing: 0; }
-.field-hint { font-size: 12px; color: var(--mut); margin-top: 4px; }
-.field-err { font-size: 12px; color: var(--t-bad-fg); margin-top: 4px; }
+.field-hint { font-size: var(--fs-small); color: var(--mut); margin-top: 4px; }
+.field-err { font-size: var(--fs-small); color: var(--t-bad-fg); margin-top: 4px; }
 
 /* A line of context under a panel's title, before its fields. */
-.panel-hint { font-size: 12px; color: var(--mut); margin: -2px 0 10px; }
+.panel-hint { font-size: var(--fs-small); color: var(--mut); margin: -2px 0 10px; }
 
 /* ── Record hero ────────────────────────────────────────────────────────────
    The top of a record page: image, eyebrow, id + title, meta, a stats line
@@ -1070,12 +1116,12 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .rhero-main { flex: 1 1 auto; min-width: 0; }
 .rhero-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.rhero-title h1 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.3px; color: var(--navy); line-height: 1.25; }
-.rhero-title .t-mono-id { font-size: 13px; }
-.rhero-meta { font-size: 12.5px; margin-top: 2px; }
+.rhero-title h1 { margin: 0; font-size: var(--fs-hero); font-weight: 800; letter-spacing: -0.3px; color: var(--navy); line-height: 1.25; }
+.rhero-title .t-mono-id { font-size: var(--fs-body); }
+.rhero-meta { font-size: var(--fs-body); margin-top: 2px; }
 .rhero-stats { display: flex; gap: 4px 14px; flex-wrap: wrap; margin-top: 8px; }
-.rhero-stat { font-size: 12px; color: var(--mut); white-space: nowrap; }
-.rhero-stat b { font-size: 13px; color: var(--ink); font-weight: 700; }
+.rhero-stat { font-size: var(--fs-small); color: var(--mut); white-space: nowrap; }
+.rhero-stat b { font-size: var(--fs-body); color: var(--ink); font-weight: 700; }
 .rhero-stat.warn, .rhero-stat.warn b { color: var(--t-warn-fg); }
 .rhero-stat.bad, .rhero-stat.bad b { color: var(--t-bad-fg); }
 .rhero-stat.good, .rhero-stat.good b { color: var(--t-good-fg); }
@@ -1101,11 +1147,11 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 }
 .band-side button {
   display: flex; width: 100%; gap: 6px; align-items: baseline;
-  padding: 7px 14px; font-size: 13px; color: var(--ink);
+  padding: 7px 14px; font-size: var(--fs-body); color: var(--ink);
   background: none; border: none; border-left: 3px solid transparent;
   cursor: pointer; text-align: left;
 }
-.band-side button b { margin-left: auto; font-size: 11px; color: var(--mut); font-weight: 600; }
+.band-side button b { margin-left: auto; font-size: var(--fs-meta); color: var(--mut); font-weight: 600; }
 .band-side button.active { background: var(--t-info-bg); border-left-color: var(--navy); color: var(--navy); font-weight: 600; }
 .band-side button:focus-visible { outline: 2px solid var(--sky); outline-offset: -2px; }
 @media (max-width: 899px) {
@@ -1123,7 +1169,7 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   padding: 10px 14px; margin-top: 8px;
   box-shadow: 0 -8px 12px -12px rgba(23, 42, 74, 0.35);
 }
-.savebar-status { flex: 1; font-size: 12px; color: var(--mut); min-width: 0; }
+.savebar-status { flex: 1; font-size: var(--fs-small); color: var(--mut); min-width: 0; }
 .savebar-status .err { color: var(--t-bad-fg); }
 .savebar-status .ok { color: var(--t-good-fg); }
 
@@ -1160,6 +1206,11 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   textarea.t-meta, textarea.t-small, textarea.t-body, textarea.t-lead,
   .pdf-page input, .inline-edit input,
   [contenteditable="true"], [contenteditable=""] {
+    /* A literal 16px, NOT var(--fs-title). This number is iOS Safari's
+       zoom threshold, not a typographic choice: if the scale is ever retuned
+       and --fs-title lands at 15, every field on every phone starts dropping
+       the keyboard again. It is the one size in this file that is allowed to
+       be a magic number, because it belongs to the browser, not to us. */
     font-size: 16px !important;
   }
 }

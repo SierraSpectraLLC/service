@@ -369,7 +369,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
               <button className="btn sm" onClick={() => setDraft({ ...draft, aliases: [...draft.aliases, { kind: "oem", partNumber: "", manufacturer: "", note: "" }] })}>
                 ＋ Number
               </button>
-              <div className="mut" style={{ fontSize: 10.5, marginTop: 4 }}>
+              <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
                 Anything typed here finds this part - in a picker, on a purchase order, and in
                 the list of numbers nobody has described. <b style={{ fontWeight: 700 }}>Superseded</b> keeps
                 an old number look-up-able for the records that still quote it, and orders
@@ -428,7 +428,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                           }}
                           className="t-meta" style={{ width: "100%", padding: "3px 5px", marginTop: 2 }} />
                         {i > 0 && (
-                          <button className="btn link" style={{ fontSize: 10.5 }} disabled={pending}
+                          <button className="btn link" style={{ fontSize: 11 }} disabled={pending}
                             onClick={() => startTransition(async () => { await makePartPhotoCover(ph.id); router.refresh(); })}>
                             make cover
                           </button>
@@ -442,7 +442,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   </button>
                   <input ref={photoInput} type="file" accept="image/*" multiple style={{ display: "none" }}
                     onChange={(e) => { void upl(e.target.files); e.target.value = ""; }} />
-                  <div className="mut" style={{ fontSize: 10.5, marginTop: 4 }}>
+                  <div className="mut" style={{ fontSize: 11, marginTop: 4 }}>
                     One photo of this number is a photo of every one of them, so it belongs here rather
                     than on a record - it shows wherever the number does, on nobody&apos;s storage bill.
                   </div>
@@ -540,7 +540,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
             <label>Vendors &amp; prices</label>
             <div style={{ marginBottom: 8 }}>
               {prices.filter((p) => p.partNumber.toLowerCase() === draft.partNumber.trim().toLowerCase()).map((p) => (
-                <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--line)", fontSize: 12.5 }}>
+                <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
                   <span style={{ fontWeight: 600 }}>{p.vendor}</span>
                   {p.isOem && <span className="pill info">OEM</span>}
                   <span className="mono">{formatCents(p.priceCents)}</span>
@@ -606,7 +606,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   }}>＋ Vendor</button>
               </div>
               {!draft.partNumber.trim() && (
-                <div className="mut" style={{ fontSize: 10.5, marginTop: 3 }}>Type the part number first - prices hang off it.</div>
+                <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>Type the part number first - prices hang off it.</div>
               )}
             </div>
 

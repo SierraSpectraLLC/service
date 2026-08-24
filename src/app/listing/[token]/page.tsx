@@ -66,7 +66,7 @@ export default async function ListingPage({ params }: { params: Promise<{ token:
 
       <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}>{label || "Instrument system"}</div>
+          <div style={{ fontSize: 19, fontWeight: 700, color: "var(--navy)" }}>{label || "Instrument system"}</div>
           {category && <span className="pill info">{category}</span>}
           <span className="pill good">For sale</span>
         </div>

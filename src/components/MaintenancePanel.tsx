@@ -387,7 +387,7 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           <span className={`pill ${advisory ? "neutral" : "info"}`}>
             {advisory ? "reference only" : "on a schedule"}
           </span>
-          <span className="mut" style={{ fontSize: 11.5, flex: "1 1 200px" }}>{posture.note}</span>
+          <span className="mut" style={{ fontSize: 12, flex: "1 1 200px" }}>{posture.note}</span>
           {posture.canToggle && posture.instrumentId !== null && (
             <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button className="btn link" disabled={pending}

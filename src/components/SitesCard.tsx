@@ -94,7 +94,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
       </div>
       {s.address && <div className="mut t-small">{addressLine(s.address)}{s.onewayMiles > 0 ? ` · ${s.onewayMiles} mi` : ""}</div>}
       {(s.contactName || s.contactPhone) && (
-        <div className="mut" style={{ fontSize: 11.5 }}>
+        <div className="mut" style={{ fontSize: 12 }}>
           {[s.contactName, s.contactPhone, s.contactEmail].filter(Boolean).join(" · ")}
         </div>
       )}
@@ -157,7 +157,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
         )}
         {closed.length > 0 && (
           <details style={{ marginTop: 6 }}>
-            <summary style={{ cursor: "pointer", fontSize: 12.5, padding: "6px 0" }}>
+            <summary style={{ cursor: "pointer", fontSize: 13, padding: "6px 0" }}>
               <b>Closed</b> <span className="mut">· {closed.length}</span>
             </summary>
             {closed.map(row)}

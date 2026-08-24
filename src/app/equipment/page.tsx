@@ -60,7 +60,7 @@ export default async function EquipmentIndexPage() {
 
       {makers.map((mk) => (
         <div key={mk} className="card">
-          <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>{mk}</h2>
+          <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>{mk}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 8 }}>
             {rows.filter((r) => r.manufacturer === mk).map((r) => (
               <Link key={r.id} href={`/equipment/${r.publicSlug}`} className="row-hover"

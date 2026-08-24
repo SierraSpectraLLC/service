@@ -91,7 +91,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
             })}>
             Create link
           </button>
-          <div className="mut" style={{ fontSize: 10.5, flexBasis: "100%" }}>
+          <div className="mut" style={{ fontSize: 11, flexBasis: "100%" }}>
             Anyone with the link can send files{openFolderName ? <> into <b style={{ fontWeight: 700 }}>{openFolderName}</b></> : " into your storage"} -
             no account needed. You&apos;re notified when something arrives, and you can kill the link below at any time.
           </div>
@@ -106,7 +106,7 @@ export default function FileLinksCard({ links, storeOrgId, openFolderId, openFol
             <span className={`pill ${l.kind === "drop" ? "good" : "info"}`}>
               {l.kind === "drop" ? "⇩ receive" : "⇧ share"}
             </span>
-            <span style={{ fontSize: 12.5, fontWeight: 600, minWidth: 0 }}>{l.label || `Link until ${l.expiresOn}`}</span>
+            <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0 }}>{l.label || `Link until ${l.expiresOn}`}</span>
             <span className="mut t-meta">
               {state}
               {l.kind === "drop"

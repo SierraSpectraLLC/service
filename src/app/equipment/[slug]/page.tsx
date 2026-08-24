@@ -124,7 +124,7 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
   });
 
   const H = ({ children }: { children: React.ReactNode }) => (
-    <h2 style={{ fontSize: 17, margin: "0 0 8px" }}>{children}</h2>
+    <h2 style={{ fontSize: 16, margin: "0 0 8px" }}>{children}</h2>
   );
 
   return (
@@ -144,7 +144,7 @@ export default async function PublicModelPage({ params }: { params: Promise<{ sl
           )}
           <div style={{ flex: 1, minWidth: 240 }}>
             <div className="eyebrow">{term.manufacturer}</div>
-            <h1 style={{ margin: "2px 0 6px", fontSize: 27 }}>{term.name}</h1>
+            <h1 style={{ margin: "2px 0 6px", fontSize: 26 }}>{term.name}</h1>
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
               <span className="pill neutral">{term.assetType}</span>
               {term.categories.map((c) => (

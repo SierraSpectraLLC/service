@@ -74,7 +74,7 @@ export default function WelcomeForm({ email, suggested, kinds, brandName }: {
         <div>
           {kinds.map((k) => (
             <label key={k.kind} style={{
-              display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0",
+              display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "3px 0",
               textTransform: "none", letterSpacing: 0, color: "var(--ink)", fontWeight: 400,
             }}>
               <input type="checkbox" className="check" checked={!off.has(k.kind)} disabled={pending}

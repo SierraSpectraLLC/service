@@ -74,7 +74,12 @@ describe("touch typing does not trigger the iOS zoom", () => {
       expect(sizing!.text).toContain(`input.${cls}`);
     }
     // And those classes really are the small sizes this is defending against.
-    expect(css).toMatch(/\.t-small\s*\{\s*font-size:\s*1[0-5]px/);
+    // They size through the scale now, so the check follows the token to the
+    // number rather than expecting a literal in the class body.
+    expect(css).toMatch(/\.t-small\s*\{\s*font-size:\s*var\(--fs-small\)/);
+    const step = css.match(/--fs-small: *(\d+(?:\.\d+)?)px/);
+    expect(step, "--fs-small is not declared").not.toBeNull();
+    expect(Number(step![1])).toBeLessThan(16);
   });
 
   it("wins against an inline style attribute too", () => {
