@@ -361,6 +361,14 @@ export const orgSites = pgTable("org_sites", {
    * lives on the site. Zero means no tax line is drawn at all.
    */
   taxRateBps: integer("tax_rate_bps").notNull().default(0),
+  /**
+   * Road miles one-way from the shop, typed once by whoever set the site up.
+   * Zero = never measured. It exists so the travel-rules strip on a work
+   * order can answer from the site instead of asking the engineer to
+   * remember, and it is a DEFAULT, not the truth - the engineer's own start
+   * point wins, which is why the strip's miles field stays editable.
+   */
+  onewayMiles: integer("oneway_miles").notNull().default(0),
   // Archived rather than deleted: a closed lab is still where an instrument was,
   // and systems still point at it.
   archived: boolean("archived").notNull().default(false),
@@ -2086,6 +2094,11 @@ export const expenses = pgTable("expenses", {
   billable: boolean("billable").notNull().default(true),
   /** Whose expense, for overhead rows - who gets reimbursed. */
   person: text("person").notNull().default(""),
+  /**
+   * Which of the client's labs the trip went to. Set null on delete: the
+   * receipt outlives the closing of a building.
+   */
+  siteId: integer("site_id").references(() => orgSites.id, { onDelete: "set null" }),
   loggedBy: text("logged_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("expenses_wo_idx").on(t.workOrderId)]);

@@ -244,9 +244,13 @@ const FIXTURE = `
   -- One price nobody has confirmed in an age, for the stale pill.
   UPDATE part_prices SET updated_at = now() - interval '120 days' WHERE part_number = 'ED-A72401';
 
-  INSERT INTO org_sites (org_id, name, address, contact_name, created_by) VALUES
-    (1, 'Lab Zen - Building C', '1400 Harbor Way, Richmond, CA 94804', 'Rita Alvarez', '${OWNER}'),
-    (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', '${OWNER}');
+  -- Miles are what the travel-rules strip reads: Building C sits inside the
+  -- 80 mi stipend radius, the Sacramento lab beyond it, so switching the site
+  -- picker on a work order flips the verdict.
+  INSERT INTO org_sites (org_id, name, address, contact_name, oneway_miles, created_by) VALUES
+    (1, 'Lab Zen - Building C', '1400 Harbor Way, Richmond, CA 94804', 'Rita Alvarez', 45, '${OWNER}'),
+    (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', 610, '${OWNER}'),
+    (1, 'Lab Zen - Sacramento annex', '2101 Capitol Ave, Sacramento, CA 95816', 'Dev Ito', 140, '${OWNER}');
   UPDATE org_sites SET tax_rate_bps = 1025 WHERE org_id = 1;
 
   -- Three invoices so /money has an open one, an overdue one and a settled

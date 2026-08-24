@@ -6860,7 +6860,11 @@ export async function logTime(
  */
 export async function logExpense(
   workOrderId: number,
-  data: { kind: string; description: string; amount: string; incurredOn: string; billable?: boolean },
+  data: {
+    kind: string; description: string; amount: string; incurredOn: string; billable?: boolean;
+    /** Which of the client's labs the trip served. */
+    siteId?: number | null;
+  },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const cents = parseMoney(data.amount);
@@ -9750,6 +9754,8 @@ export async function setOrgBillingAddress(orgId: number, address: string): Prom
 
 export type SiteInput = {
   name: string; address: string; accessNotes: string; contactName: string; contactPhone: string;
+  /** One-way road miles from the shop, as text from the form. Blank = unknown. */
+  onewayMiles?: string;
 };
 
 const cleanSite = (d: SiteInput) => ({
@@ -9758,6 +9764,7 @@ const cleanSite = (d: SiteInput) => ({
   accessNotes: d.accessNotes.trim().slice(0, 1000),
   contactName: d.contactName.trim().slice(0, 80),
   contactPhone: d.contactPhone.trim().slice(0, 40),
+  onewayMiles: Math.max(0, Math.min(9999, parseInt(d.onewayMiles ?? "", 10) || 0)),
 });
 
 export async function addOrgSite(orgId: number, data: SiteInput): Promise<{ error?: string; id?: number }> {

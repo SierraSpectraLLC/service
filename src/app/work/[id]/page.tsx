@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  appSettings, assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, parts, poLines,
+  appSettings, assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, orgSites, parts, poLines,
   purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements,
   rateCards, quotes,
 } from "@/db/schema";
@@ -31,6 +31,7 @@ import WorkOrderNotes from "@/components/WorkOrderNotes";
 import PartsPanel from "@/components/PartsPanel";
 import ExpensesPanel from "@/components/ExpensesPanel";
 import { resolveExpensePolicy } from "@/lib/expensePolicy";
+import { siteLabel } from "@/lib/sites";
 import CreditHoldPanel from "@/components/CreditHoldPanel";
 import CoveragePanel from "@/components/CoveragePanel";
 import { coverageFor } from "@/lib/billing";
@@ -106,7 +107,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await visitFlag(wo.orgId, wo.instrumentId).catch(() => "")
     : "";
 
-  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows, settingsForPolicy] = await Promise.all([
+  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows, settingsForPolicy, siteRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.workOrderId, woId))
       .orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(timeEntries).where(eq(timeEntries.workOrderId, woId))
@@ -130,6 +131,11 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     wo.orgId === null ? Promise.resolve([]) : db.select().from(agreements).where(eq(agreements.orgId, wo.orgId)),
     // The travel rulebook the expense panel applies. One row, cached upstream.
     db.select().from(appSettings).where(eq(appSettings.id, 1)).then((r) => r[0]),
+    // The client's labs, so the trip strip can name the destination and read
+    // its miles instead of asking the engineer to remember them.
+    wo.orgId === null ? Promise.resolve([]) : db.select().from(orgSites)
+      .where(and(eq(orgSites.orgId, wo.orgId), eq(orgSites.archived, false)))
+      .orderBy(asc(orgSites.name), asc(orgSites.id)),
   ]);
 
   const taskIds = taskRows.map((t) => t.id);
@@ -421,6 +427,8 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       )}
       <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}
         policy={resolveExpensePolicy(settingsForPolicy?.expensePolicy ?? null)}
+        sites={siteRows.map((x) => ({ id: x.id, name: siteLabel(x), onewayMiles: x.onewayMiles }))}
+        defaultSiteId={inst?.siteId ?? null}
         rows={expenseRows.map((e) => ({
           id: e.id, kind: e.kind, description: e.description,
           amountCents: e.amountCents, incurredOn: e.incurredOn, billable: e.billable,

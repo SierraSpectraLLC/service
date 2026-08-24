@@ -27,7 +27,7 @@ const mdy = (iso: string) => {
  * find afterwards - it reaches both the invoice and the job cost from this one
  * entry.
  */
-export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isStaff, policy }: {
+export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isStaff, policy, sites = [], defaultSiteId = null }: {
   workOrderId: number;
   rows: ExpenseRow[];
   today: string;
@@ -35,10 +35,21 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
   isStaff: boolean;
   /** The shop's travel rules, resolved. Unconfigured renders nothing extra. */
   policy?: ExpensePolicy;
+  /** The client's labs, with their one-way miles where somebody measured. */
+  sites?: { id: number; name: string; onewayMiles: number }[];
+  /** The lab the work order's system lives at - the trip's obvious answer. */
+  defaultSiteId?: number | null;
 }) {
   const [draft, setDraft] = useState({ kind: "mileage", description: "", amount: "", incurredOn: today, billable: true });
   const [error, setError] = useState("");
-  const [trip, setTrip] = useState({ miles: "", nights: "" });
+  // The site answers the miles when it can. Seeding from the system's own lab
+  // means a single-site client never touches this at all.
+  const initialSite = sites.find((x) => x.id === defaultSiteId) ?? (sites.length === 1 ? sites[0] : undefined);
+  const [trip, setTrip] = useState({
+    siteId: initialSite?.id ?? null as number | null,
+    miles: initialSite && initialSite.onewayMiles > 0 ? String(initialSite.onewayMiles) : "",
+    nights: "",
+  });
   const [pending, startTransition] = useTransition();
 
   if (!canEdit && rows.length === 0) return null;
@@ -104,12 +115,14 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
         const miles = parseInt(trip.miles, 10) || 0;
         const nights = parseInt(trip.nights, 10) || 0;
         const a = tripAllowance(policy, { oneWayMiles: miles, nights });
+        const site = sites.find((x) => x.id === trip.siteId);
         const quickLog = (kind: string, amountCents: number, description: string) => {
           setError("");
           startTransition(async () => {
             const res = await logExpense(workOrderId, {
-              kind, description, amount: (amountCents / 100).toFixed(2),
-              incurredOn: draft.incurredOn, billable: draft.billable,
+              kind, description: site ? `${description} - ${site.name}` : description,
+              amount: (amountCents / 100).toFixed(2),
+              incurredOn: draft.incurredOn, billable: draft.billable, siteId: trip.siteId,
             });
             if (res?.error) { setError(res.error); return; }
             toast({ message: `Logged ${formatCents(amountCents)} - ${description}` });
@@ -118,6 +131,24 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
         return (
           <div className="t-small" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "7px 9px", borderRadius: 8, background: "#F4F7FB", marginBottom: rows.length ? 10 : 0 }}>
             <span className="mut">Trip:</span>
+            {sites.length > 1 && (
+              // Which lab. Picking one answers the miles when the site knows
+              // them; the box stays editable because the engineer's own start
+              // point wins over the shop's.
+              <select className="t-small" value={trip.siteId ?? ""} aria-label="Which site"
+                style={{ width: "auto", padding: "3px 6px" }}
+                onChange={(e) => {
+                  const next = sites.find((x) => x.id === parseInt(e.target.value, 10)) ?? null;
+                  setTrip({
+                    ...trip, siteId: next?.id ?? null,
+                    miles: next && next.onewayMiles > 0 ? String(next.onewayMiles) : trip.miles,
+                  });
+                }}>
+                <option value="">Site?</option>
+                {sites.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            )}
+            {sites.length === 1 && <span className="mut">{sites[0].name} -</span>}
             <input className="t-small" inputMode="numeric" value={trip.miles} placeholder="mi"
               aria-label="One-way miles from home"
               onChange={(e) => setTrip({ ...trip, miles: e.target.value.replace(/[^0-9]/g, "") })}

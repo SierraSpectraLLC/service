@@ -9,11 +9,13 @@ import { addressLine, siteLabel } from "@/lib/sites";
 export type SiteRow = {
   id: number; name: string; address: string; accessNotes: string;
   contactName: string; contactPhone: string; archived: boolean;
+  /** One-way road miles from the shop. 0 = never measured. */
+  onewayMiles: number;
   /** How many systems are installed here - what makes closing one a real decision. */
   systems: number;
 };
 
-const emptySite = { name: "", address: "", accessNotes: "", contactName: "", contactPhone: "" };
+const emptySite = { name: "", address: "", accessNotes: "", contactName: "", contactPhone: "", onewayMiles: "" };
 
 /**
  * Where the invoice goes, and where the instruments are.
@@ -48,6 +50,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
     setDraft({
       name: s.name, address: s.address, accessNotes: s.accessNotes,
       contactName: s.contactName, contactPhone: s.contactPhone,
+      onewayMiles: s.onewayMiles ? String(s.onewayMiles) : "",
     });
     setError(""); setSheet({ id: s.id });
   };
@@ -88,7 +91,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
           </span>
         )}
       </div>
-      {s.address && <div className="mut t-small">{addressLine(s.address)}</div>}
+      {s.address && <div className="mut t-small">{addressLine(s.address)}{s.onewayMiles > 0 ? ` · ${s.onewayMiles} mi` : ""}</div>}
       {(s.contactName || s.contactPhone) && (
         <div className="mut" style={{ fontSize: 11.5 }}>
           {[s.contactName, s.contactPhone].filter(Boolean).join(" · ")}
@@ -186,6 +189,13 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
             <textarea value={draft.address} rows={3} style={{ width: "100%", marginBottom: 8 }}
               placeholder={"123 Cedar St, Suite 400\nReno NV 89501"}
               onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
+
+            <label>Distance from the shop</label>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+              <input value={draft.onewayMiles} inputMode="numeric" placeholder="140" style={{ width: 90 }}
+                onChange={(e) => setDraft({ ...draft, onewayMiles: e.target.value.replace(/[^0-9]/g, "") })} />
+              <span className="mut t-small">road miles one-way - prefills the travel rules on a work order here</span>
+            </div>
 
             <div className="dialog-section">Who to ask for</div>
             <div className="pf2" style={{ marginBottom: 8 }}>

@@ -3133,3 +3133,15 @@ ALTER TABLE "expenses" ALTER COLUMN "work_order_id" DROP NOT NULL;
 -- The shop's travel rules: radius, per diems, lodging cap. See lib/expensePolicy.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "expense_policy" jsonb;
 
+-- The trip knows where it went. Sites carry their one-way road miles from the
+-- shop (0 = never measured) so the travel-rules strip answers from the site;
+-- expenses stamp which lab the trip served, surviving the site's closure.
+ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "oneway_miles" integer NOT NULL DEFAULT 0;
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "site_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_site_id_fk') THEN
+    ALTER TABLE "expenses" ADD CONSTRAINT "expenses_site_id_fk"
+      FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+

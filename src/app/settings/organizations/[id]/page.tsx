@@ -197,6 +197,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
         sites={siteRows.map((r) => ({
           id: r.id, name: r.name, address: r.address, accessNotes: r.accessNotes,
           contactName: r.contactName, contactPhone: r.contactPhone, archived: r.archived,
+          onewayMiles: r.onewayMiles,
           systems: siteSystems.filter((i) => i.siteId === r.id).length,
         }))}
       />}
