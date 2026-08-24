@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { setMyHomeBase } from "@/app/actions";
 import { toast } from "@/components/ui/Toast";
 import { Field, Panel } from "@/components/ui";
+import AddressField from "@/components/AddressField";
 
 /**
  * The engineer's own point zero. It is their home address, so it lives on
@@ -34,9 +35,9 @@ export default function HomeBaseCard({ address, placed }: {
     <Panel title="Home base"
       hint="Where your trips start. Work orders use it to figure road miles to a site - only the miles ever show, never the address.">
       <Field label="Address">
-        <input className="t-body" value={draft} placeholder="1200 Idlewild Dr, Reno NV 89509"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
+        <AddressField value={draft} ariaLabel="Home base address"
+          placeholder="1200 Idlewild Dr, Reno NV 89509"
+          onChange={setDraft} />
       </Field>
       <div className="row-2" style={{ alignItems: "center", marginTop: 8 }}>
         <button className="btn sm accent" onClick={save} disabled={pending || draft === address}>

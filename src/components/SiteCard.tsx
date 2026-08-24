@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { setSystemSite } from "@/app/actions";
+import { notifyEnRoute, setSystemSite } from "@/app/actions";
+import { directionsUrl } from "@/lib/geo";
 import { toast } from "@/components/ui/Toast";
 import { addressLine, siteLabel } from "@/lib/sites";
 
@@ -16,13 +17,15 @@ export type SiteOption = { id: number; name: string; address: string; archived: 
  * read as a warning about the site rather than as directions to it, and a page
  * that colours its reference material has nothing left for its actual alarms.
  */
-export default function SiteCard({ instrumentId, siteId, options, site, ownerOrgId, canEdit }: {
+export default function SiteCard({ instrumentId, siteId, options, site, ownerOrgId, canEdit, isStaff = false }: {
   instrumentId: number;
   siteId: number | null;
   /** The owner's sites, already narrowed by lib/sites.sitesFor. */
   options: SiteOption[];
   /** The full record for the current site, when there is one. */
-  site: { name: string; address: string; accessNotes: string; contactName: string; contactPhone: string } | null;
+  site: { name: string; address: string; accessNotes: string; contactName: string; contactPhone: string; contactEmail?: string } | null;
+  /** En-route is a driver's button; clients reading their own system don't drive to themselves. */
+  isStaff?: boolean;
   ownerOrgId: number | null;
   canEdit: boolean;
 }) {
@@ -64,6 +67,49 @@ export default function SiteCard({ instrumentId, siteId, options, site, ownerOrg
             <div style={{ marginTop: 8 }}>
               <div className="eyebrow" style={{ marginBottom: 2 }}>Getting in</div>
               <div className="t-small" style={{ whiteSpace: "pre-wrap" }}>{site.accessNotes}</div>
+            </div>
+          )}
+          {site.address && (
+            <div className="row-2" style={{ marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {/* A plain URL, no API: on a phone it opens the Maps app with
+                  turn-by-turn from wherever the device is. */}
+              <a className="btn sm" href={directionsUrl(site.address)} target="_blank" rel="noreferrer"
+                style={{ textDecoration: "none" }}>
+                Directions ↗
+              </a>
+              {isStaff && siteId !== null && (
+                <button className="btn sm accent" disabled={pending}
+                  onClick={() => {
+                    setError("");
+                    // Checked here, not in the render: the server has no
+                    // navigator, and probing it there shipped the button
+                    // disabled and froze hydration.
+                    if (!("geolocation" in navigator)) {
+                      setError("This browser offers no location - the ETA needs one");
+                      return;
+                    }
+                    // The browser asks the driver for their location; the
+                    // coordinates go to the server for one route computation
+                    // and are never stored.
+                    navigator.geolocation.getCurrentPosition(
+                      (pos) => startTransition(async () => {
+                        const res = await notifyEnRoute(siteId, {
+                          lat: pos.coords.latitude, lng: pos.coords.longitude,
+                        });
+                        if (res.error) { setError(res.etaText ? `${res.error}` : res.error); }
+                        if (res.etaText && res.sentTo) {
+                          toast({ message: `Told ${res.sentTo} - arriving ${res.etaText}` });
+                        } else if (res.etaText) {
+                          toast({ message: `ETA ${res.etaText}` });
+                        }
+                      }),
+                      () => setError("Location was refused - the ETA needs to know where you are"),
+                      { enableHighAccuracy: true, timeout: 10000 },
+                    );
+                  }}>
+                  {pending ? "Routing..." : "En route"}
+                </button>
+              )}
             </div>
           )}
         </>

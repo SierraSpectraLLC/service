@@ -58,7 +58,7 @@ import { linkState } from "@/lib/dropShare";
 import type { BillingPolicy } from "@/lib/billingPolicy";
 import { depositToClear, holdRefusal, type HeldAction } from "@/lib/credit";
 import { brandForTenant } from "@/lib/brand";
-import { btn, emailShell, esc } from "@/lib/emailTheme";
+import { btn, EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
 import { appUrl } from "@/lib/appUrl";
 import { payAmount, stripeConfigured, stripeMode } from "@/lib/stripe";
@@ -105,7 +105,7 @@ import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
 import { resolveExpensePolicy } from "@/lib/expensePolicy";
 import { categoryKey, cleanCategoryName, missingStarters } from "@/lib/expenseCategories";
-import { geocode } from "@/lib/geo";
+import { drivingRoute, geocode } from "@/lib/geo";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
@@ -6970,6 +6970,71 @@ export async function setMyHomeBase(address: string): Promise<{ error?: string; 
   return { label: hit.label };
 }
 
+/**
+ * "On my way" - the message every service client wants and no engineer stops
+ * to write from a parked van.
+ *
+ * The browser hands over where the engineer IS (they approve the location
+ * prompt; nothing is stored - the coordinates live exactly as long as this
+ * call). The route from there to the site gives the ETA - traffic-aware when
+ * Google is answering, honest about it when not - and the site's own contact
+ * gets one short email from the reports address. The ETA comes back to the
+ * caller either way, because "you'll be there around 2:40" is worth showing
+ * the driver even when the email could not send.
+ */
+export async function notifyEnRoute(
+  siteId: number,
+  from: { lat: number; lng: number },
+): Promise<{ error?: string; etaText?: string; sentTo?: string }> {
+  const u = await requireStaff();
+  if (!Number.isFinite(from.lat) || !Number.isFinite(from.lng)
+    || Math.abs(from.lat) > 90 || Math.abs(from.lng) > 180) {
+    return { error: "No usable location from the browser" };
+  }
+  const [site] = await db.select().from(orgSites).where(eq(orgSites.id, siteId));
+  if (!site) return { error: "Not found" };
+  const t = readTenant(u);
+  if (t !== null && site.tenantOrgId !== t) return { error: "Not found" };
+  if (site.lat === null || site.lng === null) {
+    return { error: "This site has no pin yet - save its address so it can be placed" };
+  }
+  const route = await drivingRoute(from, { lat: site.lat, lng: site.lng });
+  const mins = Math.max(1, Math.round(route.minutes));
+  const arrive = new Date(Date.now() + mins * 60_000);
+  const tz = process.env.SHOP_TZ || "America/Los_Angeles";
+  const at = arrive.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+  const qualifier = route.estimated ? " (rough estimate)" : route.traffic ? " with current traffic" : "";
+  const etaText = `about ${mins} min - around ${at}${qualifier}`;
+  const who = u.name || u.email;
+
+  if (!site.contactEmail) {
+    return { etaText, error: "No contact email on this site - ETA computed, nobody to send it to" };
+  }
+  const brand = await brandForTenant(site.tenantOrgId);
+  const html = emailShell({
+    brand: brand.operatorName,
+    logoUrl: brand.operatorLogoUrl || undefined,
+    tagline: "Service visit",
+    preheader: `${who} arrives ${etaText}.`,
+    width: 520,
+    body: `<p style="font-size:14px;line-height:1.6;color:${EMAIL.ink};margin:0;">`
+      + `${esc(who)} is on the way to ${esc(siteLabel(site))} - arriving ${esc(etaText)}.`
+      + `</p>`,
+    footer: `Sent by ${esc(brand.operatorName)}.`,
+  });
+  try {
+    await sendEmail([site.contactEmail], `${brand.operatorName}: ${who} is en route`, html,
+      { from: reportFrom(), replyTo: replyToAddress() });
+  } catch {
+    return { etaText, error: `ETA ${etaText} - but the email to ${site.contactEmail} failed to send` };
+  }
+  await audit({
+    actor: u.email, entityType: "site", entityId: siteId, tenantOrgId: site.tenantOrgId,
+    action: `en route to ${siteLabel(site)} - told ${site.contactEmail}, ETA ${etaText}`,
+  });
+  return { etaText, sentTo: site.contactEmail };
+}
+
 export async function addExpenseCategory(name: string): Promise<{ error?: string }> {
   const u = await requireOwner();
   const clean = cleanCategoryName(name);
@@ -9960,6 +10025,7 @@ export async function setOrgBillingAddress(orgId: number, address: string): Prom
 
 export type SiteInput = {
   name: string; address: string; accessNotes: string; contactName: string; contactPhone: string;
+  contactEmail?: string;
   /** One-way road miles from the shop, as text from the form. Blank = unknown. */
   onewayMiles?: string;
 };
@@ -9970,6 +10036,7 @@ const cleanSite = (d: SiteInput) => ({
   accessNotes: d.accessNotes.trim().slice(0, 1000),
   contactName: d.contactName.trim().slice(0, 80),
   contactPhone: d.contactPhone.trim().slice(0, 40),
+  contactEmail: (d.contactEmail ?? "").trim().toLowerCase().slice(0, 120),
   onewayMiles: Math.max(0, Math.min(9999, parseInt(d.onewayMiles ?? "", 10) || 0)),
 });
 

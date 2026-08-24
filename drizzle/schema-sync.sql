@@ -3199,3 +3199,6 @@ END $$;
 -- asset list instead of ending the story. Blank = ordinary part.
 ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "module_kind" text NOT NULL DEFAULT '';
 
+-- Who to tell we are coming: the en-route email's recipient, per site.
+ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "contact_email" text NOT NULL DEFAULT '';
+

@@ -265,7 +265,8 @@ const FIXTURE = `
   -- the near lab (45) and Sacramento the far one (140); from this engineer's
   -- home it is the other way around - which is the whole point of routing
   -- per engineer.
-  UPDATE org_sites SET lat = 37.9120, lng = -122.3560 WHERE name = 'Lab Zen - Building C';
+  UPDATE org_sites SET lat = 37.9120, lng = -122.3560, contact_email = 'rita@labzen.test'
+    WHERE name = 'Lab Zen - Building C';
   UPDATE org_sites SET lat = 38.5766, lng = -121.4686 WHERE name = 'Lab Zen - Sacramento annex';
   UPDATE house_members SET home_address = '9376 Laguna Springs Dr, Elk Grove, CA',
     home_lat = 38.4088, home_lng = -121.3716 WHERE email = '${OWNER}';

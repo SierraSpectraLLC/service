@@ -100,6 +100,57 @@ export async function drivingMiles(from: LatLng, to: LatLng): Promise<DrivenMile
   return { miles: haversineMiles(from, to) * ROAD_FACTOR, estimated: true };
 }
 
+/**
+ * The universal "take me there" link. No API, no key: this URL opens the
+ * Google Maps APP on a phone (both platforms register the handler) and the
+ * website on a desktop, with turn-by-turn from wherever the device is. The
+ * one Maps feature that costs nothing and cannot break.
+ */
+export const directionsUrl = (dest: string | LatLng): string =>
+  "https://www.google.com/maps/dir/?api=1&destination="
+  + encodeURIComponent(typeof dest === "string" ? dest.trim().replace(/\s+/g, " ") : `${dest.lat},${dest.lng}`);
+
+export type DrivenRoute = {
+  miles: number;
+  minutes: number;
+  /** True when the minutes include live traffic - Google with a key. */
+  traffic: boolean;
+  /** True when no router answered and both numbers are straight-line guesses. */
+  estimated: boolean;
+};
+
+/** A road route with a duration - traffic-aware when Google is answering. */
+export async function drivingRoute(from: LatLng, to: LatLng): Promise<DrivenRoute> {
+  if (googleKey()) {
+    const data = await getJson(
+      "https://maps.googleapis.com/maps/api/directions/json"
+      + `?origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}`
+      + `&departure_time=now&key=${googleKey()}`,
+    ) as { routes?: { legs?: { distance?: { value: number }; duration?: { value: number }; duration_in_traffic?: { value: number } }[] }[] } | null;
+    const legs = data?.routes?.[0]?.legs;
+    if (legs?.length) {
+      const meters = legs.reduce((n, l) => n + (l.distance?.value ?? 0), 0);
+      const inTraffic = legs.reduce((n, l) => n + (l.duration_in_traffic?.value ?? 0), 0);
+      const plain = legs.reduce((n, l) => n + (l.duration?.value ?? 0), 0);
+      const secs = inTraffic > 0 ? inTraffic : plain;
+      if (meters > 0 && secs > 0) {
+        return { miles: meters / 1609.344, minutes: secs / 60, traffic: inTraffic > 0, estimated: false };
+      }
+    }
+  } else {
+    const data = await getJson(
+      `https://router.project-osrm.org/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`,
+    ) as { routes?: { distance: number; duration: number }[] } | null;
+    const r = data?.routes?.[0];
+    if (r && r.distance > 0) {
+      return { miles: r.distance / 1609.344, minutes: r.duration / 60, traffic: false, estimated: false };
+    }
+  }
+  const miles = haversineMiles(from, to) * ROAD_FACTOR;
+  // The planning guess when no router answers: back roads average ~40 mph.
+  return { miles, minutes: (miles / 40) * 60, traffic: false, estimated: true };
+}
+
 /** Has either end moved since this cached answer was computed? */
 export const coordsMoved = (
   cached: { fromLat: number; fromLng: number; toLat: number; toLng: number },

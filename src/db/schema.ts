@@ -355,6 +355,8 @@ export const orgSites = pgTable("org_sites", {
   accessNotes: text("access_notes").notNull().default(""),
   contactName: text("contact_name").notNull().default(""),
   contactPhone: text("contact_phone").notNull().default(""),
+  /** Who to tell we are coming - the en-route email's recipient. */
+  contactEmail: text("contact_email").notNull().default(""),
   /**
    * Sales tax on PARTS at this address, in basis points (775 = 7.75%). Tax is
    * a property of where the goods landed, not of the client, which is why it

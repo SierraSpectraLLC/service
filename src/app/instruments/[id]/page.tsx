@@ -590,7 +590,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           { key: "site", label: "Site", node: (
             <SiteCard
               instrumentId={inst.id} siteId={inst.siteId} ownerOrgId={inst.ownerOrgId}
-              canEdit={canEdit}
+              canEdit={canEdit} isStaff={isStaff}
               options={sitesFor(siteRows, inst.ownerOrgId, inst.siteId)
                 .map((r) => ({ id: r.id, name: r.name, address: r.address, archived: r.archived }))}
               site={siteNow ? {

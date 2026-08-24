@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ROAD_FACTOR, coordsMoved, haversineMiles } from "@/lib/geo";
+import { ROAD_FACTOR, coordsMoved, directionsUrl, haversineMiles } from "@/lib/geo";
 
 /**
  * The pure floor under the routing stack. The providers are network and are
@@ -47,5 +47,21 @@ describe("when a cached distance stops being true", () => {
 
   it("ignores float dust, which is not a house move", () => {
     expect(coordsMoved(cached, { lat: RENO.lat + 1e-9, lng: RENO.lng }, RICHMOND)).toBe(false);
+  });
+});
+
+describe("the directions link", () => {
+  it("is the keyless universal URL - opens the Maps app on a phone", () => {
+    expect(directionsUrl("1400 Harbor Way, Richmond, CA 94804"))
+      .toBe("https://www.google.com/maps/dir/?api=1&destination=1400%20Harbor%20Way%2C%20Richmond%2C%20CA%2094804");
+  });
+
+  it("takes coordinates when that is what the record has", () => {
+    expect(directionsUrl({ lat: 37.912, lng: -122.356 }))
+      .toContain("destination=37.912%2C-122.356");
+  });
+
+  it("collapses the whitespace a pasted address drags along", () => {
+    expect(directionsUrl("  1400  Harbor Way\n Richmond ")).not.toMatch(/%0A|%20%20/);
   });
 });

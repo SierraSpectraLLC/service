@@ -5,17 +5,18 @@ import { addOrgSite, archiveOrgSite, setOrgBillingAddress, updateOrgSite } from 
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { addressLine, siteLabel } from "@/lib/sites";
+import AddressField from "@/components/AddressField";
 
 export type SiteRow = {
   id: number; name: string; address: string; accessNotes: string;
-  contactName: string; contactPhone: string; archived: boolean;
+  contactName: string; contactPhone: string; contactEmail: string; archived: boolean;
   /** One-way road miles from the shop. 0 = never measured. */
   onewayMiles: number;
   /** How many systems are installed here - what makes closing one a real decision. */
   systems: number;
 };
 
-const emptySite = { name: "", address: "", accessNotes: "", contactName: "", contactPhone: "", onewayMiles: "" };
+const emptySite = { name: "", address: "", accessNotes: "", contactName: "", contactPhone: "", contactEmail: "", onewayMiles: "" };
 
 /**
  * Where the invoice goes, and where the instruments are.
@@ -49,7 +50,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
   const openEdit = (s: SiteRow) => {
     setDraft({
       name: s.name, address: s.address, accessNotes: s.accessNotes,
-      contactName: s.contactName, contactPhone: s.contactPhone,
+      contactName: s.contactName, contactPhone: s.contactPhone, contactEmail: s.contactEmail,
       onewayMiles: s.onewayMiles ? String(s.onewayMiles) : "",
     });
     setError(""); setSheet({ id: s.id });
@@ -94,7 +95,7 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
       {s.address && <div className="mut t-small">{addressLine(s.address)}{s.onewayMiles > 0 ? ` · ${s.onewayMiles} mi` : ""}</div>}
       {(s.contactName || s.contactPhone) && (
         <div className="mut" style={{ fontSize: 11.5 }}>
-          {[s.contactName, s.contactPhone].filter(Boolean).join(" · ")}
+          {[s.contactName, s.contactPhone, s.contactEmail].filter(Boolean).join(" · ")}
         </div>
       )}
       {/* Plain text, like the address above it: these are directions, not a
@@ -186,9 +187,15 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
               onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ marginBottom: 8 }} />
 
             <label>Address</label>
-            <textarea value={draft.address} rows={3} style={{ width: "100%", marginBottom: 8 }}
-              placeholder={"123 Cedar St, Suite 400\nReno NV 89501"}
-              onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
+            {/* Pick, don't type: a chosen suggestion is Google's own formatted
+                address, and those always geocode - which is what the routed
+                miles and the directions link stand on. Plain typing still
+                works, and is all there is without a browser key. */}
+            <div style={{ marginBottom: 8 }}>
+              <AddressField value={draft.address} ariaLabel="Site address"
+                placeholder="123 Cedar St, Suite 400, Reno NV 89501"
+                onChange={(address) => setDraft({ ...draft, address })} />
+            </div>
 
             <label>Distance from the shop</label>
             <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
@@ -208,6 +215,12 @@ export default function SitesCard({ orgId, orgName, billingAddress, sites, canEd
                 <label>Phone</label>
                 <input value={draft.contactPhone} placeholder="775-555-0143"
                   onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} />
+              </div>
+              <div>
+                <label>Email</label>
+                {/* The en-route email's recipient: who to tell we are coming. */}
+                <input type="email" value={draft.contactEmail} placeholder="rita@labzen.com"
+                  onChange={(e) => setDraft({ ...draft, contactEmail: e.target.value })} />
               </div>
             </div>
 
