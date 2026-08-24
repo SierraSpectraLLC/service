@@ -259,6 +259,16 @@ const FIXTURE = `
     (2, 'Coastal Analytical - Dock 2', '88 Pier Road, Astoria, OR 97103', 'Sam Okafor', 610, '${OWNER}'),
     (1, 'Lab Zen - Sacramento annex', '2101 Capitol Ave, Sacramento, CA 95816', 'Dev Ito', 140, '${OWNER}');
   UPDATE org_sites SET tax_rate_bps = 1025 WHERE org_id = 1;
+  -- Pins for the routed-miles path, so no seed-time network call: real
+  -- coordinates for both Lab Zen labs, and the dev owner living in Elk Grove.
+  -- Chosen to INVERT the shop's typed defaults: from the shop, Richmond is
+  -- the near lab (45) and Sacramento the far one (140); from this engineer's
+  -- home it is the other way around - which is the whole point of routing
+  -- per engineer.
+  UPDATE org_sites SET lat = 37.9120, lng = -122.3560 WHERE name = 'Lab Zen - Building C';
+  UPDATE org_sites SET lat = 38.5766, lng = -121.4686 WHERE name = 'Lab Zen - Sacramento annex';
+  UPDATE house_members SET home_address = '9376 Laguna Springs Dr, Elk Grove, CA',
+    home_lat = 38.4088, home_lng = -121.3716 WHERE email = '${OWNER}';
 
   -- Three invoices so /money has an open one, an overdue one and a settled
   -- one, and so the $0 covered invoice is on screen rather than only in a test.

@@ -3164,3 +3164,33 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Dynamic mileage: sites and engineer homes carry coordinates (geocoded
+-- best-effort on save, never blocking), and routed distances are remembered
+-- per (engineer, site) so no page ever waits on a maps provider.
+ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "lat" double precision;
+ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "lng" double precision;
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "home_address" text NOT NULL DEFAULT '';
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "home_lat" double precision;
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "home_lng" double precision;
+CREATE TABLE IF NOT EXISTS "drive_cache" (
+  "id" serial PRIMARY KEY,
+  "member_email" text NOT NULL,
+  "site_id" integer NOT NULL,
+  "miles" double precision NOT NULL,
+  "from_lat" double precision NOT NULL,
+  "from_lng" double precision NOT NULL,
+  "to_lat" double precision NOT NULL,
+  "to_lng" double precision NOT NULL,
+  "estimated" boolean NOT NULL DEFAULT false,
+  "computed_at" timestamp NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drive_cache_member_site') THEN
+    ALTER TABLE "drive_cache" ADD CONSTRAINT "drive_cache_member_site" UNIQUE ("member_email","site_id");
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'drive_cache_site_id_fk') THEN
+    ALTER TABLE "drive_cache" ADD CONSTRAINT "drive_cache_site_id_fk"
+      FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+

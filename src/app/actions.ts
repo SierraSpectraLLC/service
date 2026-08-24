@@ -16,7 +16,7 @@ import {
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  expenses, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
+  driveCache, expenses, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
@@ -105,6 +105,7 @@ import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
 import { resolveExpensePolicy } from "@/lib/expensePolicy";
 import { categoryKey, cleanCategoryName, missingStarters } from "@/lib/expenseCategories";
+import { geocode } from "@/lib/geo";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
@@ -6878,6 +6879,39 @@ async function cleanKind(kind: string, tenant: number | null): Promise<string> {
   return match ? match.name : "other";
 }
 
+/**
+ * The engineer's own point zero: where the stipend radius measures from and
+ * where a routed trip starts. Self-service on purpose - it is their home
+ * address, so they type it, they can clear it, and nobody else's screen
+ * shows it (the trip strip shows miles, never the address).
+ *
+ * Geocoding happens here, once, at save - never on a render. A failed
+ * geocode still saves the text so their typing is not lost, and says so;
+ * routed miles simply stay unavailable until an address resolves.
+ */
+export async function setMyHomeBase(address: string): Promise<{ error?: string; label?: string }> {
+  const u = await requireStaff();
+  const clean = address.trim().slice(0, 300);
+  const [me] = await db.select().from(houseMembers).where(eq(houseMembers.email, u.email.toLowerCase()));
+  if (!me) return { error: "Not found" };
+  if (!clean) {
+    await db.update(houseMembers).set({ homeAddress: "", homeLat: null, homeLng: null })
+      .where(eq(houseMembers.id, me.id));
+    // Their routed answers start from a place that no longer stands.
+    await db.delete(driveCache).where(eq(driveCache.memberEmail, me.email));
+    revalidatePath("/inbox");
+    return {};
+  }
+  const hit = await geocode(clean);
+  await db.update(houseMembers).set({
+    homeAddress: clean, homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null,
+  }).where(eq(houseMembers.id, me.id));
+  await db.delete(driveCache).where(eq(driveCache.memberEmail, me.email));
+  revalidatePath("/inbox");
+  if (!hit) return { error: "Saved the address, but no map provider could place it - routed miles stay off until one can" };
+  return { label: hit.label };
+}
+
 export async function addExpenseCategory(name: string): Promise<{ error?: string }> {
   const u = await requireOwner();
   const clean = cleanCategoryName(name);
@@ -9881,6 +9915,19 @@ const cleanSite = (d: SiteInput) => ({
   onewayMiles: Math.max(0, Math.min(9999, parseInt(d.onewayMiles ?? "", 10) || 0)),
 });
 
+/**
+ * Pin a site to the map, best-effort. A failed geocode leaves lat/lng null
+ * and costs nothing anybody was promised: routed miles fall back to the
+ * site's typed default. Never allowed to fail the save that triggered it.
+ */
+async function geocodeSite(siteId: number, address: string): Promise<void> {
+  try {
+    const hit = address.trim() ? await geocode(address) : null;
+    await db.update(orgSites).set({ lat: hit?.lat ?? null, lng: hit?.lng ?? null })
+      .where(eq(orgSites.id, siteId));
+  } catch { /* the site stands without a pin */ }
+}
+
 export async function addOrgSite(orgId: number, data: SiteInput): Promise<{ error?: string; id?: number }> {
   const u = await requireUser();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -9892,6 +9939,7 @@ export async function addOrgSite(orgId: number, data: SiteInput): Promise<{ erro
   const [row] = await db.insert(orgSites).values({
     ...clean, orgId, tenantOrgId: orgTenant(org), createdBy: u.email,
   }).returning();
+  await geocodeSite(row.id, clean.address);
   await audit({
     actor: u.email, entityType: "site", entityId: row.id, tenantOrgId: orgTenant(org),
     action: `added site "${siteLabel(row)}" for ${org.name}`,
@@ -9911,6 +9959,7 @@ export async function updateOrgSite(siteId: number, data: SiteInput): Promise<{ 
   const clean = cleanSite(data);
   if (!clean.name && !clean.address) return { error: "Give it a name or an address" };
   await db.update(orgSites).set(clean).where(eq(orgSites.id, siteId));
+  if (clean.address !== site.address) await geocodeSite(siteId, clean.address);
   await audit({
     actor: u.email, entityType: "site", entityId: siteId, tenantOrgId: site.tenantOrgId,
     action: `edited site "${siteLabel({ ...site, ...clean })}"`,

@@ -1,11 +1,13 @@
 import { desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { notifications, notificationPrefs, users } from "@/db/schema";
+import { houseMembers, notifications, notificationPrefs, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { shopTime } from "@/lib/shopday";
 import InboxPanel from "@/components/InboxPanel";
 import SignInSettings from "@/components/SignInSettings";
+import HomeBaseCard from "@/components/HomeBaseCard";
+import { isStaffRole } from "@/lib/tenants";
 import { smsConfigured } from "@/lib/sms";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +33,12 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
     // theirs rather than in Settings, which is about the instance.
     db.select({ hash: users.passwordHash, phone: users.phone }).from(users).where(eq(users.email, email)),
   ]);
+  // The trip's starting point, for staff who drive. A client login has no
+  // house row and no trips, so the card simply is not there for them.
+  const [mine] = isStaffRole(user.role)
+    ? await db.select({ homeAddress: houseMembers.homeAddress, homeLat: houseMembers.homeLat })
+        .from(houseMembers).where(eq(houseMembers.email, email))
+    : [];
 
   return (
     <div className="container page">
@@ -42,6 +50,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         prefs={prefs}
         filter={{ kind: filter.kind, unread: filter.unread }}
       />
+      {mine && <HomeBaseCard address={mine.homeAddress} placed={mine.homeLat !== null} />}
       <SignInSettings
         name={user.name} email={user.email}
         hasPassword={!!me?.hash}

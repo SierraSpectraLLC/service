@@ -35,8 +35,9 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
   isStaff: boolean;
   /** The shop's travel rules, resolved. Unconfigured renders nothing extra. */
   policy?: ExpensePolicy;
-  /** The client's labs, with their one-way miles where somebody measured. */
-  sites?: { id: number; name: string; onewayMiles: number }[];
+  /** The client's labs: typed default miles, and routed miles from THIS
+      engineer's home when a home base and a pinned address both exist. */
+  sites?: { id: number; name: string; onewayMiles: number; routedMiles?: number | null; routedEstimated?: boolean }[];
   /** The lab the work order's system lives at - the trip's obvious answer. */
   defaultSiteId?: number | null;
   /** This workspace's own expense vocabulary; empty falls back to the built-ins. */
@@ -49,12 +50,15 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
     : EXPENSE_KINDS.map((k) => ({ value: k, label: EXPENSE_LABEL[k] }));
   const [draft, setDraft] = useState({ kind: kinds[0]?.value ?? "other", description: "", amount: "", incurredOn: today, billable: true });
   const [error, setError] = useState("");
-  // The site answers the miles when it can. Seeding from the system's own lab
-  // means a single-site client never touches this at all.
+  // The site answers the miles when it can - routed from this engineer's own
+  // home first, the site's typed default second. Seeding from the system's
+  // own lab means a single-site client never touches this at all.
+  const milesOf = (x?: { onewayMiles: number; routedMiles?: number | null }) =>
+    x ? (x.routedMiles ?? (x.onewayMiles > 0 ? x.onewayMiles : null)) : null;
   const initialSite = sites.find((x) => x.id === defaultSiteId) ?? (sites.length === 1 ? sites[0] : undefined);
   const [trip, setTrip] = useState({
     siteId: initialSite?.id ?? null as number | null,
-    miles: initialSite && initialSite.onewayMiles > 0 ? String(initialSite.onewayMiles) : "",
+    miles: milesOf(initialSite) !== null ? String(milesOf(initialSite)) : "",
     nights: "",
   });
   const [pending, startTransition] = useTransition();
@@ -146,10 +150,8 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
                 style={{ width: "auto", padding: "3px 6px" }}
                 onChange={(e) => {
                   const next = sites.find((x) => x.id === parseInt(e.target.value, 10)) ?? null;
-                  setTrip({
-                    ...trip, siteId: next?.id ?? null,
-                    miles: next && next.onewayMiles > 0 ? String(next.onewayMiles) : trip.miles,
-                  });
+                  const m = milesOf(next ?? undefined);
+                  setTrip({ ...trip, siteId: next?.id ?? null, miles: m !== null ? String(m) : trip.miles });
                 }}>
                 <option value="">Site?</option>
                 {sites.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
@@ -160,7 +162,11 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
               aria-label="One-way miles from home"
               onChange={(e) => setTrip({ ...trip, miles: e.target.value.replace(/[^0-9]/g, "") })}
               style={{ width: 58, padding: "3px 6px" }} />
-            <span className="mut">mi one-way,</span>
+            <span className="mut">
+              mi one-way{site?.routedMiles != null && String(site.routedMiles) === trip.miles
+                ? (site.routedEstimated ? " (straight-line estimate from your home)" : " (routed from your home)")
+                : ""},
+            </span>
             <input className="t-small" inputMode="numeric" value={trip.nights} placeholder="0"
               aria-label="Nights away"
               onChange={(e) => setTrip({ ...trip, nights: e.target.value.replace(/[^0-9]/g, "") })}

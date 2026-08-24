@@ -3,7 +3,7 @@
 // The build's verify-schema gate fails the deploy if a column is missing, so a
 // forgotten mirror is caught loudly - never shipped silently.
 import {
-  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique, numeric, jsonb,
+  pgTable, text, integer, boolean, timestamp, serial, primaryKey, index, unique, numeric, jsonb, doublePrecision,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { AdapterAccountType } from "next-auth/adapters";
@@ -369,6 +369,13 @@ export const orgSites = pgTable("org_sites", {
    * point wins, which is why the strip's miles field stays editable.
    */
   onewayMiles: integer("oneway_miles").notNull().default(0),
+  /**
+   * Where the address IS, geocoded best-effort when the address is saved.
+   * Null means "never resolved" - the strip falls back to oneway_miles and
+   * nothing anywhere waits on a maps provider to render a page.
+   */
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
   // Archived rather than deleted: a closed lab is still where an instrument was,
   // and systems still point at it.
   archived: boolean("archived").notNull().default(false),
@@ -534,6 +541,16 @@ export const houseMembers = pgTable("house_members", {
   orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("staff"), // owner | staff | none
   name: text("name").notNull().default(""),      // display only
+  /**
+   * The engineer's own point zero - where the stipend radius is measured
+   * from, and where a routed trip starts. Set by the engineer themselves on
+   * their own settings page, because it is their home: nobody else should be
+   * typing it, and they can leave it blank. Coordinates are the geocode of
+   * the address at the time it was saved.
+   */
+  homeAddress: text("home_address").notNull().default(""),
+  homeLat: doublePrecision("home_lat"),
+  homeLng: doublePrecision("home_lng"),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("house_member_email_unique").on(t.email)]);
@@ -2082,6 +2099,27 @@ export const rateCards = pgTable("rate_cards", {
  * receipt still says Fuel, because what a cost was called when it was logged
  * is a historical fact, not a live reference.
  */
+/**
+ * Routed road miles, remembered. One row per (engineer, site): homes and labs
+ * move rarely, routing providers rate-limit and bill, and a page must never
+ * wait on one - so the WO page reads this table and a miss is filled in the
+ * background of the next save. The coordinate snapshot is the invalidation:
+ * when either end has moved, the row no longer matches and is recomputed.
+ */
+export const driveCache = pgTable("drive_cache", {
+  id: serial("id").primaryKey(),
+  memberEmail: text("member_email").notNull(),
+  siteId: integer("site_id").notNull().references(() => orgSites.id, { onDelete: "cascade" }),
+  miles: doublePrecision("miles").notNull(),
+  fromLat: doublePrecision("from_lat").notNull(),
+  fromLng: doublePrecision("from_lng").notNull(),
+  toLat: doublePrecision("to_lat").notNull(),
+  toLng: doublePrecision("to_lng").notNull(),
+  /** haversine-with-road-factor when the router was unreachable; a routed row replaces it. */
+  estimated: boolean("estimated").notNull().default(false),
+  computedAt: timestamp("computed_at").notNull().defaultNow(),
+}, (t) => [unique("drive_cache_member_site").on(t.memberEmail, t.siteId)]);
+
 export const expenseCategories = pgTable("expense_categories", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),

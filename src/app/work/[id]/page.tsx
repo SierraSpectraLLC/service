@@ -32,6 +32,7 @@ import PartsPanel from "@/components/PartsPanel";
 import ExpensesPanel from "@/components/ExpensesPanel";
 import { resolveExpensePolicy } from "@/lib/expensePolicy";
 import { siteLabel } from "@/lib/sites";
+import { tripMilesFor } from "@/lib/tripMiles";
 import CreditHoldPanel from "@/components/CreditHoldPanel";
 import CoveragePanel from "@/components/CoveragePanel";
 import { coverageFor } from "@/lib/billing";
@@ -187,6 +188,13 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     : [];
   // Prices follow the same rule as everywhere else: a partner from another
   // workspace works the job without seeing what the house paid for the parts.
+  // Road miles from THIS person's home to each of the client's labs - cached,
+  // so the network is only touched when something moved. Staff only: a trip
+  // starts from an engineer's home, and clients do not have one on file.
+  const routedMiles = staff
+    ? await tripMilesFor(user.email, siteRows.map((x) => x.id)).catch(() => [])
+    : [];
+
   const showCosts = canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId);
 
   const today = shopToday();
@@ -430,7 +438,13 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       )}
       <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}
         policy={resolveExpensePolicy(settingsForPolicy?.expensePolicy ?? null)}
-        sites={siteRows.map((x) => ({ id: x.id, name: siteLabel(x), onewayMiles: x.onewayMiles }))}
+        sites={siteRows.map((x) => {
+          const routed = routedMiles.find((r) => r.siteId === x.id);
+          return {
+            id: x.id, name: siteLabel(x), onewayMiles: x.onewayMiles,
+            routedMiles: routed?.miles ?? null, routedEstimated: routed?.estimated ?? false,
+          };
+        })}
         defaultSiteId={inst?.siteId ?? null}
         categories={categoryRows.map((c) => c.name)}
         rows={expenseRows.map((e) => ({
