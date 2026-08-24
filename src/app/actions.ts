@@ -2403,6 +2403,8 @@ export async function deleteItemNote(noteId: number) {
 
 type PartInput = {
   kind: string; assetId?: number | null; name: string; partNumber: string; serial: string; qty: string; specs: string;
+  /** "Pump", "Autosampler"... - what this becomes on arrival. Blank = a part. */
+  moduleKind?: string;
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
   // The day it actually went in or came out, YYYY-MM-DD. Blank leaves whatever
@@ -2487,6 +2489,9 @@ function cleanPartInput(data: PartInput): PartInput {
   return {
     ...data,
     kind: data.kind === "consumable" || data.kind === "kit" ? data.kind : "part",
+    // Open vocabulary like the asset form's own kind field - trimmed, capped,
+    // and only ever meaningful on a "part" row (a consumable is never a unit).
+    moduleKind: data.kind === "part" ? (data.moduleKind ?? "").trim().slice(0, 40) : "",
     pmScheduleId: data.pmScheduleId ?? null,
     qty: data.qty.trim(),
     specs: serializeSpecs(parseSpecs(data.specs)),
@@ -2554,6 +2559,59 @@ export async function nameServiceVisit(
   });
   revWork({ instrumentId: t0.instrumentId, assetId: t0.assetId });
   return {};
+}
+
+/**
+ * The moment a purchase becomes a machine.
+ *
+ * The part row carried the whole request-and-order life: somebody said the
+ * system needs a new pump, purchasing ordered it, the carrier tracked it,
+ * Received landed it on the dock. What no amount of parts machinery could do
+ * is put the UNIT on the system's asset list - that is a different kind of
+ * record with its own serial, status and lifecycle. This is the bridge, and
+ * it is one action so the two records can never half-exist: the asset is
+ * born attached and In service, the part row closes as Installed and points
+ * at the unit it became (so "where is the receipt for this pump" has an
+ * answer), and the unit it replaces - the reason anybody ordered one - is
+ * decommissioned in the same breath, with events on both sides saying why.
+ */
+export async function intakeModule(
+  partId: number,
+  data: AssetInput & { replacesAssetId?: number | null },
+): Promise<{ error?: string; assetId?: number }> {
+  const u = await requireEditor();
+  const [part] = await db.select().from(parts).where(eq(parts.id, partId));
+  if (!part) return { error: "Not found" };
+  if (!part.moduleKind) return { error: "This line is a part, not a unit - nothing to intake" };
+  if (part.assetId !== null) return { error: "Already intaken - the unit is on the asset list" };
+  if (part.instrumentId === null) return { error: "No system to attach the unit to" };
+  if (part.status !== "Received" && part.status !== "Installed") {
+    return { error: "Intake happens when the box has arrived - mark it Received first" };
+  }
+  const created = await createAsset(part.instrumentId, data);
+  if (created.error || !created.id) return { error: created.error ?? "Could not create the asset" };
+  await logAssetEvent(created.id, "installed", part.instrumentId,
+    `intaken from ${part.name}${part.po ? ` on ${part.po}` : ""}`, u.name);
+  await db.update(parts).set({
+    assetId: created.id, status: "Installed",
+    installedAt: part.installedAt || shopToday(),
+  }).where(eq(parts.id, partId));
+  if (data.replacesAssetId != null) {
+    const [old] = await db.select().from(assets).where(eq(assets.id, data.replacesAssetId));
+    // Only a unit on the same system: a stale id from an open tab must not
+    // decommission a machine across the shop.
+    if (old && old.instrumentId === part.instrumentId && old.id !== created.id) {
+      await setAssetStatus(old.id, "Decommissioned");
+      await logAssetEvent(old.id, "removed", part.instrumentId,
+        `replaced by the new ${data.kind.trim() || part.moduleKind}`, u.name);
+    }
+  }
+  await audit({
+    actor: u.email, instrumentId: part.instrumentId, entityType: "part", entityId: partId,
+    action: `intook '${part.name}' as a ${part.moduleKind} on the asset list`,
+  });
+  rev(part.instrumentId);
+  return { assetId: created.id };
 }
 
 const partStatusVerb = (status: string) =>

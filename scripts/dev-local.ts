@@ -468,6 +468,12 @@ const FIXTURE = `
     (2, 'Turbo pump', 'EXT255H', 'Edwards', '$4,850.00', 485000, 'Installed', to_char(now() - interval '5 days', 'YYYY-MM-DD')),
     (1, 'Capillary kit', 'G7100-60001', 'Agilent', '$210.00', 21000, 'Installed', to_char(now() - interval '2 days', 'YYYY-MM-DD')),
     (5, 'HED supply', '05971-80059', 'Agilent', 'call for quote', NULL, 'Ordered', '');
+  -- A UNIT on order, arrived: the roughing pump the blocked GC has been
+  -- waiting for. module_kind is what turns Received into an intake door.
+  INSERT INTO parts (instrument_id, work_order_id, name, part_number, serial, vendor, cost, cost_cents,
+                     status, module_kind, received_at) VALUES
+    (2, 2, 'Roughing pump, Edwards RV5', 'A65401903', 'RV5-88213', 'Edwards', '$2,140.00', 214000,
+     'Received', 'Pump', to_char(now(), 'YYYY-MM-DD'));
   INSERT INTO parts (instrument_id, work_order_id, name, part_number, vendor, cost, cost_cents, status, installed_at) VALUES
     (3, 6, 'Desolvation line', 'SH-DL-8060', 'Shimadzu', '$640.00', 64000, 'Installed', to_char(now() - interval '3 days', 'YYYY-MM-DD')),
     (5, 7, 'Torch, quartz', 'N0790456', 'PerkinElmer', '$1,180.00', 118000, 'Installed', to_char(now() - interval '6 days', 'YYYY-MM-DD'));

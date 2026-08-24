@@ -2,12 +2,13 @@
 
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { useOptimistic, useState, useTransition } from "react";
-import { CARRIERS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
+import { CARRIERS, MODULE_KINDS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
+import { intakeModule } from "@/app/actions";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import {
   createPart, updatePart, setPartStatus, setPartAsset, deletePart, nameServiceVisit, type WorkTarget,
 } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { pricesFor, type PriceEntry } from "@/lib/priceBook";
 import PartNumberField from "./PartNumberField";
@@ -23,6 +24,8 @@ type Part = {
   parentPartId?: number | null;
   /** The maintenance job this part belongs to, if somebody said. */
   pmScheduleId?: number | null;
+  /** "Pump", "Autosampler"... - a UNIT on order, intaken as an asset on arrival. */
+  moduleKind?: string;
 };
 
 function PartStatusSelect({ part }: { part: Part }) {
@@ -61,7 +64,7 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
   );
 }
 
-const empty = { kind: "part", expandKit: true, pmScheduleId: null as number | null, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
+const empty = { kind: "part", moduleKind: "", expandKit: true, pmScheduleId: null as number | null, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
@@ -85,6 +88,22 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
+  // The arrival dialog: the box is here, the unit joins the asset list. What
+  // the order already knew arrives prefilled; the serial is the one thing only
+  // the box can say, so it is the field the cursor lands in.
+  const [intake, setIntake] = useState<null | { partId: number; moduleKind: string }>(null);
+  const [intakeDraft, setIntakeDraft] = useState({
+    kind: "", manufacturer: "", model: "", serial: "", location: "", replacesAssetId: "" as string,
+  });
+  const [intakeErr, setIntakeErr] = useState("");
+  const openIntake = (p: Part) => {
+    setIntakeDraft({
+      kind: p.moduleKind ?? "", manufacturer: p.vendor, model: p.name,
+      serial: p.serial, location: "", replacesAssetId: "",
+    });
+    setIntakeErr("");
+    setIntake({ partId: p.id, moduleKind: p.moduleKind ?? "" });
+  };
   const [draft, setDraft] = useState<typeof empty>(empty);
   const [specPairs, setSpecPairs] = useState<SpecPair[]>([]);
   const [flag, setFlag] = useState("");
@@ -97,7 +116,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const openEdit = (p: Part) => {
     // A date input only accepts a calendar day, so a row still carrying one of
     // the old year-less strings opens blank and says what is stored underneath.
-    setDraft({ kind: p.kind, expandKit: false, pmScheduleId: p.pmScheduleId ?? null, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
+    setDraft({ kind: p.kind, moduleKind: p.moduleKind ?? "", expandKit: false, pmScheduleId: p.pmScheduleId ?? null, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -303,6 +322,18 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               the Assets section above - then a &quot;For asset&quot; picker appears here and on each part row.
             </div>
           ) : null}
+          {/* A unit on order, not a part: says what it BECOMES, and Received
+              will offer the intake instead of ending the story. */}
+          {draft.kind === "part" && target.instrumentId !== null && (
+            <div style={{ marginBottom: 8 }}>
+              <label>Arrives as</label>
+              <select value={draft.moduleKind} aria-label="Arrives as"
+                onChange={(e) => setDraft({ ...draft, moduleKind: e.target.value })}>
+                <option value="">A part - fitted, not listed</option>
+                {MODULE_KINDS.map((k) => <option key={k} value={k}>A module: {k} - joins the asset list on arrival</option>)}
+              </select>
+            </div>
+          )}
           <div className="pf2" style={{ marginBottom: 8 }}>
             {showCosts && <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>}
             <div>
@@ -422,6 +453,17 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   <PartStatusSelect part={p} />
                 ) : (
                   <span className={`pill ${PART_TONE[p.status] ?? "neutral"}`}>{p.status}</span>
+                )}
+                {/* A unit on order wears what it becomes; once the box is here,
+                    the pill turns into the door that puts it on the asset list. */}
+                {p.moduleKind && p.assetId === null && (
+                  p.status === "Received" && canEdit ? (
+                    <button className="btn sm accent" onClick={() => openIntake(p)}>
+                      Intake as {p.moduleKind}
+                    </button>
+                  ) : (
+                    <span className="pill info" title="Joins the asset list when it arrives">unit: {p.moduleKind}</span>
+                  )
                 )}
                 {canEdit && <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => openEdit(p)}>edit</button>}
               </div>
@@ -560,6 +602,70 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           </div>
         );
       })()}
+    {intake && (
+      <Dialog open onClose={() => setIntake(null)} title={`Intake the new ${intake.moduleKind}`}
+        context="It joins this system's asset list, In service"
+        footer={
+          <>
+            <DialogStatus error={intakeErr}
+              problem={!intakeDraft.model.trim() && !intakeDraft.serial.trim() ? "give it a model or a serial" : null}
+              ok="The part line closes as Installed and points at the unit." />
+            <button className="btn" onClick={() => setIntake(null)} disabled={pending}>Cancel</button>
+            <button className="btn accent" disabled={pending || (!intakeDraft.model.trim() && !intakeDraft.serial.trim())}
+              onClick={() => startTransition(async () => {
+                const res = await intakeModule(intake.partId, {
+                  kind: intakeDraft.kind, manufacturer: intakeDraft.manufacturer,
+                  model: intakeDraft.model, serial: intakeDraft.serial,
+                  owner: "", location: intakeDraft.location, note: "",
+                  replacesAssetId: intakeDraft.replacesAssetId ? parseInt(intakeDraft.replacesAssetId, 10) : null,
+                });
+                if (res?.error) { setIntakeErr(res.error); return; }
+                toast({ message: `On the asset list - new ${intakeDraft.kind || intake.moduleKind}` });
+                setIntake(null);
+              })}>
+              {pending ? "Intaking..." : "Put it on the asset list"}
+            </button>
+          </>
+        }>
+        <div className="pf2" style={{ marginBottom: 8 }}>
+          <div>
+            <label>Kind</label>
+            <select value={intakeDraft.kind} onChange={(e) => setIntakeDraft({ ...intakeDraft, kind: e.target.value })}>
+              {MODULE_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+          <div>
+            <label>Serial - from the box</label>
+            <input value={intakeDraft.serial} autoFocus placeholder="US2411223"
+              onChange={(e) => setIntakeDraft({ ...intakeDraft, serial: e.target.value })} />
+          </div>
+        </div>
+        <div className="pf2" style={{ marginBottom: 8 }}>
+          <div>
+            <label>Manufacturer</label>
+            <input value={intakeDraft.manufacturer}
+              onChange={(e) => setIntakeDraft({ ...intakeDraft, manufacturer: e.target.value })} />
+          </div>
+          <div>
+            <label>Model</label>
+            <input value={intakeDraft.model}
+              onChange={(e) => setIntakeDraft({ ...intakeDraft, model: e.target.value })} />
+          </div>
+        </div>
+        {systemAssets.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <label>Replaces</label>
+            {/* The reason anybody ordered one. Picking here decommissions the
+                old unit in the same act, with events on both sides. */}
+            <select value={intakeDraft.replacesAssetId}
+              onChange={(e) => setIntakeDraft({ ...intakeDraft, replacesAssetId: e.target.value })}>
+              <option value="">Nothing - an addition</option>
+              {systemAssets.map((a) => <option key={a.id} value={a.id}>{a.label} - decommission it</option>)}
+            </select>
+          </div>
+        )}
+      </Dialog>
+    )}
     </div>
   );
 }

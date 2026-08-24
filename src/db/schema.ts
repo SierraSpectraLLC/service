@@ -977,6 +977,15 @@ export const parts = pgTable("parts", {
   name: text("name").notNull(),
   partNumber: text("part_number").notNull().default(""),
   serial: text("serial").notNull().default(""),
+  /**
+   * Set when what is on order is not a part but a UNIT - a roughing pump, an
+   * autosampler - that must join the system's asset list when it arrives.
+   * The value is the module kind it becomes ("Pump", "Autosampler"). The
+   * request/order/tracking life is the ordinary parts life; this is the flag
+   * that makes Received offer an intake instead of being the end of the
+   * story. Blank = an ordinary part, which is almost everything.
+   */
+  moduleKind: text("module_kind").notNull().default(""),
   qty: text("qty").notNull().default(""), // free text, mainly for consumables
   // Custom label/value fields as a JSON array of {k,v} - e.g. GC column ID/length.
   specs: text("specs").notNull().default(""),

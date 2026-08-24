@@ -3194,3 +3194,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- A part order that is really a UNIT on order: module_kind names what it
+-- becomes ("Pump", "Autosampler"), and Received offers an intake into the
+-- asset list instead of ending the story. Blank = ordinary part.
+ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "module_kind" text NOT NULL DEFAULT '';
+
