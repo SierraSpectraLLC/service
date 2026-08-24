@@ -1,0 +1,89 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { orgs, shareLinks } from "@/db/schema";
+import { requireUser } from "@/lib/authz";
+import { isStaffRole } from "@/lib/tenants";
+import { formatCents } from "@/lib/money";
+import { shopMonthDay, shopToday } from "@/lib/shopday";
+import { qtyOf, quoteForOrg, quoteTotal } from "@/lib/invoiceData";
+import { quoteStanding } from "@/lib/quotes";
+import { quoteOrderStatus, quoteSteps } from "@/lib/clientOrders";
+import OrderSteps from "@/components/OrderSteps";
+import { Id, PageHead, Panel, Pill } from "@/components/ui";
+
+export const dynamic = "force-dynamic";
+
+/** A special order at the quoted-first stage, as its client reads it. */
+export default async function ClientQuotePage({ params }: { params: Promise<{ id: string }> }) {
+  let user;
+  try { user = await requireUser(); } catch { redirect("/login"); }
+  if (isStaffRole(user.role) && user.orgId === null) redirect("/money");
+  if (user.orgId === null) redirect("/");
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, user.orgId));
+  if (!org || org.kind !== "client") redirect("/");
+  const id = parseInt((await params).id, 10);
+  if (!Number.isInteger(id)) notFound();
+
+  const full = await quoteForOrg(id, org.id);
+  if (!full) notFound();
+  const { row } = full;
+  const today = shopToday();
+  const standing = quoteStanding(row, today);
+  const status = quoteOrderStatus(row, standing);
+  const placedOn = shopMonthDay(row.createdAt);
+  const total = quoteTotal(full);
+  const [link] = await db.select({ token: shareLinks.token }).from(shareLinks)
+    .where(and(eq(shareLinks.quoteId, id), isNull(shareLinks.revokedAt)));
+
+  return (
+    <div className="container">
+      <div className="crumb"><Link href="/orders">Orders</Link> › <b>{row.number}</b></div>
+      <PageHead
+        title={<>Quote <Id>{row.number}</Id></>}
+        sub={`Placed ${placedOn}${row.expiresOn && standing === "awaiting" ? ` · good to ${row.expiresOn}` : ""}`}
+        actions={
+          <>
+            <Pill tone={status.tone}>{status.label}</Pill>
+            {status.needsYou && link && (
+              <Link className="btn sm primary" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
+                Review & approve
+              </Link>
+            )}
+          </>
+        }
+      />
+
+      <div className="card">
+        <OrderSteps steps={quoteSteps(row, standing, placedOn)} />
+        {row.status === "draft" && (
+          <div className="mut t-small" style={{ marginTop: 8 }}>
+            We are confirming price and lead time. You approve before anything moves - nothing is charged.
+          </div>
+        )}
+      </div>
+
+      <Panel title="Items" count={full.lines.length}>
+        {full.lines.map((l) => (
+          <div key={l.id} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span className="t-body" style={{ fontWeight: 600 }}>{l.description}</span>
+              {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
+            </span>
+            {qtyOf(l) !== 1 && <span className="mut t-small">× {qtyOf(l)}</span>}
+            <b className="mono t-body" style={{ width: 90, textAlign: "right" }}>
+              {l.unitCents > 0 ? formatCents(Math.round(qtyOf(l) * l.unitCents)) : "quote"}
+            </b>
+          </div>
+        ))}
+        {total > 0 && (
+          <div className="row-2" style={{ alignItems: "baseline", padding: "9px 0 0", borderTop: "2px solid var(--line)" }}>
+            <span className="t-body" style={{ fontWeight: 700, flex: 1 }}>Total</span>
+            <b className="mono t-body">{formatCents(total)}</b>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}

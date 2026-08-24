@@ -3,16 +3,13 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { placePartsOrder } from "@/app/actions";
-import { availabilityLabel, cartTotals, filterStore, hasChoice, linePrice, sourceTag, splitCart, type CartLine, type StoreFacet, type StorePart } from "@/lib/store";
+import {
+  availabilityHint, availabilityLabel, availabilityOf, bucketTotals, filterStore, hasChoice,
+  linePrice, sourceTag, splitCart, type CartLine, type StoreFacet, type StorePart,
+} from "@/lib/store";
 import { formatCents } from "@/lib/money";
 import { toast } from "@/components/ui/Toast";
-import { FacetStrip, Panel, Pill, Toolbar } from "@/components/ui";
-import type { Tone } from "@/lib/tones";
-
-export type OrderRow = {
-  number: string; kind: "invoice" | "quote"; label: string; tone: Tone;
-  totalCents: number; placedOn: string; token: string;
-};
+import { Dot, FacetStrip, Toolbar } from "@/components/ui";
 
 const CART_KEY = "ridgeline-store-cart";
 
@@ -28,22 +25,28 @@ const saveCart = (cart: CartLine[]) => {
   try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* per-tab nicety only */ }
 };
 
+const AVAIL_TONE = { now: "good", sourced: "info", special: "warn" } as const;
+
 /**
- * The client's parts store. Browse what the shop stocks and services - parts
- * that fit YOUR systems first - put them in a cart, place the order. Nothing
- * is charged here: the order lands with the shop, who confirm availability
- * and send the invoice with its pay link.
+ * The client's parts store: dense SKU rows, one add-with-variant control per
+ * part, and a cart that says honestly which lane each line travels - ships
+ * today, sourced then invoiced at ship, or quoted first. Nothing is charged
+ * here and no card exists to charge; invoices and quotes ride the same rails
+ * as the rest of the client's money.
  */
-export default function StoreFront({ items, orders, orgName, hasYours }: {
+export default function StoreFront({ items, orgName, hasYours, termsDays }: {
   items: StorePart[];
-  orders: OrderRow[];
   orgName: string;
   /** Whether any part matched this client's own systems, for the facet. */
   hasYours: boolean;
+  /** The org's payment terms, for the cart's footer sentence. */
+  termsDays: number;
 }) {
   const [q, setQ] = useState("");
   const [facet, setFacet] = useState<StoreFacet>(hasYours ? "yours" : "all");
   const [cart, setCart] = useState<CartLine[]>([]);
+  // Per-row purchase draft: the class picked and the quantity, before Add.
+  const [draft, setDraft] = useState<Record<number, { source?: "oem" | "alt"; qty: number }>>({});
   const [note, setNote] = useState("");
   const [placed, setPlaced] = useState<{ number?: string; quoteNumber?: string } | null>(null);
   const [error, setError] = useState("");
@@ -53,24 +56,28 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
   const update = (next: CartLine[]) => { setCart(next); saveCart(next); };
 
   const shown = useMemo(() => filterStore(items, facet, q), [items, facet, q]);
-  const totals = cartTotals(cart, items);
-  // A line's identity is part number PLUS chosen class: genuine and
-  // equivalent of the same PN are two lines, deliberately.
+  const totals = bucketTotals(cart, items);
+  const buckets = splitCart(cart, items);
+
+  const draftFor = (i: StorePart) =>
+    draft[i.id] ?? { qty: 1, source: hasChoice(i) ? ("oem" as const) : undefined };
+  const setRow = (i: StorePart, patch: Partial<{ source?: "oem" | "alt"; qty: number }>) =>
+    setDraft((d) => ({ ...d, [i.id]: { ...draftFor(i), ...patch } }));
+
   const same = (l: CartLine, pn: string, source?: "oem" | "alt") =>
     l.partNumber.toLowerCase() === pn.toLowerCase() && (l.source ?? "") === (source ?? "");
-  const inCart = (pn: string, source?: "oem" | "alt") => cart.find((l) => same(l, pn, source));
 
-  const add = (item: StorePart, source?: "oem" | "alt") => {
-    const line = inCart(item.partNumber, source);
+  const add = (item: StorePart) => {
+    const d = draftFor(item);
+    const source = hasChoice(item) ? d.source : undefined;
+    const line = cart.find((l) => same(l, item.partNumber, source));
     update(line
-      ? cart.map((l) => (l === line ? { ...l, qty: Math.min(999, l.qty + 1) } : l))
-      : [...cart, { partNumber: item.partNumber, qty: 1, ...(source ? { source } : {}) }]);
+      ? cart.map((l) => (l === line ? { ...l, qty: Math.min(999, l.qty + d.qty) } : l))
+      : [...cart, { partNumber: item.partNumber, qty: d.qty, ...(source ? { source } : {}) }]);
+    setRow(item, { qty: 1 });
     toast({ message: `Added ${item.name}${source ? ` (${source === "oem" ? "genuine" : "equivalent"})` : ""}` });
   };
-  const setQty = (pn: string, source: "oem" | "alt" | undefined, qty: number) =>
-    update(qty <= 0
-      ? cart.filter((l) => !same(l, pn, source))
-      : cart.map((l) => (same(l, pn, source) ? { ...l, qty: Math.min(999, qty) } : l)));
+  const removeLine = (l: CartLine) => update(cart.filter((x) => x !== l));
 
   const place = () => {
     setError("");
@@ -92,13 +99,44 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
     { key: "kit", label: "Kits" },
   ];
 
+  const qtyControl = (value: number, set: (n: number) => void, label: string) => (
+    <span className="row-2" style={{ alignItems: "center", gap: 0, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+      <button className="btn link" style={{ width: 26, textAlign: "center" }} aria-label={`One less ${label}`}
+        onClick={() => set(Math.max(1, value - 1))}>−</button>
+      <b className="mono t-small" style={{ width: 26, textAlign: "center" }}>{value}</b>
+      <button className="btn link" style={{ width: 26, textAlign: "center" }} aria-label={`One more ${label}`}
+        onClick={() => set(Math.min(999, value + 1))}>+</button>
+    </span>
+  );
+
+  const cartRow = (l: CartLine) => {
+    const item = items.find((i) => i.partNumber.toLowerCase() === l.partNumber.toLowerCase());
+    if (!item) return null;
+    const cents = linePrice(item, l.source);
+    return (
+      <div key={`${l.partNumber}|${l.source ?? ""}`} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="t-small" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {item.name}{l.qty > 1 ? ` ×${l.qty}` : ""}
+          </span>
+          {sourceTag(item, l.source) && <span className="mut t-meta">{sourceTag(item, l.source)}</span>}
+        </span>
+        <span className="mono t-small" style={{ width: 74, textAlign: "right" }}>
+          {cents !== null ? formatCents(cents * l.qty) : "quote"}
+        </span>
+        <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }}
+          aria-label={`Remove ${item.name}`} onClick={() => removeLine(l)}>×</button>
+      </div>
+    );
+  };
+
   return (
     <div style={{ display: "flex", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
-      <div style={{ flex: "1 1 560px", minWidth: 0 }}>
+      <div style={{ flex: "1 1 640px", minWidth: 0 }}>
         <Toolbar
           search={
             <input value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Part number, name or maker" aria-label="Search parts" />
+              placeholder="Part number, name, maker or instrument" aria-label="Search parts" />
           }
           facets={
             <FacetStrip facets={FACETS.map((f) => ({
@@ -109,96 +147,72 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
           }
         />
 
-        <div className="cardgrid">
-          {shown.map((i) => {
-            const line = inCart(i.partNumber);
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          {shown.map((i, n) => {
+            const d = draftFor(i);
+            const a = availabilityOf(i);
+            const chosenCents = hasChoice(i) ? linePrice(i, d.source) : i.priceCents;
             return (
-              <div key={i.id} className="card" style={{ marginBottom: 0, display: "flex", flexDirection: "column" }}>
+              <div key={i.id} style={{
+                display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
+                padding: "12px 14px", borderTop: n === 0 ? "none" : "1px solid var(--line)",
+              }}>
                 {i.photoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={i.photoUrl} alt={i.name}
-                    style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 8, background: "#F7F9FC", marginBottom: 8 }} />
+                  <img src={i.photoUrl} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, background: "#F7F9FC", flexShrink: 0 }} />
                 ) : (
-                  <div aria-hidden style={{ width: "100%", height: 120, borderRadius: 8, background: "#F7F9FC", border: "1px dashed var(--line)", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <span className="mut t-meta">{i.manufacturer || "part"}</span>
-                  </div>
+                  <div aria-hidden style={{ width: 56, height: 56, borderRadius: 8, background: "#F7F9FC", border: "1px dashed var(--line)", flexShrink: 0 }} />
                 )}
-                <div className="mut t-meta">{i.manufacturer}</div>
-                <div className="t-body" style={{ fontWeight: 700 }}>{i.name}</div>
-                <div className="mono t-meta" style={{ color: "var(--slate)" }}>{i.partNumber}</div>
-                {i.fitsLabel && (
-                  <div className={`t-meta ${i.fitsYours ? "" : "mut"}`}
-                    style={i.fitsYours ? { color: "var(--t-good-fg)" } : undefined}>
-                    {i.fitsYours ? "Fits your equipment" : i.fitsLabel}
+                <div style={{ flex: "1 1 200px", minWidth: 160 }}>
+                  <div className="mut t-meta" style={{ textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>{i.manufacturer}</div>
+                  <div className="t-body" style={{ fontWeight: 700 }}>{i.name}</div>
+                  <div className="mut t-meta">
+                    <span className="mono">{i.partNumber}</span>
+                    {i.fitsLabel && <> · <span style={i.fitsYours ? { color: "var(--t-good-fg)" } : undefined}>{i.fitsLabel}</span></>}
                   </div>
-                )}
-                <div className="t-meta" style={{ marginTop: 2 }}>
-                  {i.inStock
-                    ? <span className="pill good">In stock - ships now</span>
-                    : <span className="mut">{availabilityLabel(i)}</span>}
                 </div>
-                {hasChoice(i) ? (
-                  <div style={{ marginTop: "auto", paddingTop: 8 }}>
-                    {([["oem", `Genuine ${i.manufacturer}`.trim(), i.oemCents],
-                       ["alt", "OEM-equivalent", i.altCents]] as const).map(([src, label, cents]) => {
-                      const chosen = inCart(i.partNumber, src);
-                      return (
-                        <div key={src} className="row-2" style={{ alignItems: "center", padding: "3px 0" }}>
-                          <span className="t-small" style={{ flex: 1, minWidth: 0 }}>{label}</span>
-                          <b className="t-small">{formatCents(cents!)}</b>
-                          {chosen ? (
-                            <span className="row-2" style={{ alignItems: "center", gap: 4 }}>
-                              <button className="btn sm" aria-label={`One less ${label} ${i.name}`} onClick={() => setQty(i.partNumber, src, chosen.qty - 1)}>−</button>
-                              <b className="t-small" style={{ minWidth: 16, textAlign: "center" }}>{chosen.qty}</b>
-                              <button className="btn sm" aria-label={`One more ${label} ${i.name}`} onClick={() => setQty(i.partNumber, src, chosen.qty + 1)}>+</button>
-                            </span>
-                          ) : (
-                            <button className="btn sm accent" onClick={() => add(i, src)}>Add</button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="row-2" style={{ marginTop: "auto", paddingTop: 8, alignItems: "center" }}>
-                    <span style={{ minWidth: 0 }}>
-                      <b className="t-body">{i.priceCents !== null ? formatCents(i.priceCents) : <span className="mut" style={{ fontWeight: 400 }}>Priced on request</span>}</b>
+                <div style={{ flex: "0 1 170px", minWidth: 140 }}>
+                  <span className="row-2" style={{ gap: 5, alignItems: "center" }}>
+                    <Dot tone={AVAIL_TONE[a]} />
+                    <span className="t-meta" style={{ fontWeight: 700 }}>{availabilityLabel(i)}</span>
+                  </span>
+                  {availabilityHint(i) && <div className="mut t-meta">{availabilityHint(i)}</div>}
+                </div>
+                <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  {hasChoice(i) ? (
+                    <span className="seg" role="group" aria-label={`Class for ${i.name}`}>
+                      <button type="button" aria-pressed={d.source === "oem"} onClick={() => setRow(i, { source: "oem" })}>
+                        Genuine <b className="mono">{formatCents(i.oemCents!)}</b>
+                      </button>
+                      <button type="button" aria-pressed={d.source === "alt"} onClick={() => setRow(i, { source: "alt" })}>
+                        OEM-eq <b className="mono">{formatCents(i.altCents!)}</b>
+                      </button>
+                    </span>
+                  ) : (
+                    <span style={{ textAlign: "right" }}>
+                      {i.priceCents !== null
+                        ? <b className="mono t-body">{formatCents(i.priceCents)}</b>
+                        : <span className="mut t-small">quote on request</span>}
                       {sourceTag(i) && <span className="mut t-meta" style={{ display: "block" }}>{sourceTag(i)}</span>}
                     </span>
-                    <span className="sp" />
-                    {line ? (
-                      <span className="row-2" style={{ alignItems: "center", gap: 4 }}>
-                        <button className="btn sm" aria-label={`One less ${i.name}`} onClick={() => setQty(line.partNumber, undefined, line.qty - 1)}>−</button>
-                        <b className="t-body" style={{ minWidth: 20, textAlign: "center" }}>{line.qty}</b>
-                        <button className="btn sm" aria-label={`One more ${i.name}`} onClick={() => setQty(line.partNumber, undefined, line.qty + 1)}>+</button>
-                      </span>
-                    ) : (
-                      <button className="btn sm accent" onClick={() => add(i)}>Add</button>
-                    )}
-                  </div>
-                )}
+                  )}
+                  <span className="row-2" style={{ gap: 8, alignItems: "center" }}>
+                    {qtyControl(d.qty, (qty) => setRow(i, { qty }), i.name)}
+                    <button className={`btn sm ${chosenCents !== null ? "primary" : ""}`} onClick={() => add(i)}>
+                      {chosenCents !== null ? `Add · ${formatCents(chosenCents * d.qty)}` : "Add to quote"}
+                    </button>
+                  </span>
+                </div>
               </div>
             );
           })}
+          {shown.length === 0 && <div className="empty" style={{ border: 0 }}><b>Nothing matches.</b></div>}
         </div>
-        {shown.length === 0 && <div className="empty"><b>Nothing matches.</b></div>}
-
-        <Panel title="Your orders" count={orders.length} empty="Nothing ordered yet.">
-          {orders.length > 0 && orders.map((o) => (
-            <div key={o.number} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-              <span className="mono t-body" style={{ fontWeight: 700 }}>{o.number}</span>
-              <Pill tone={o.tone}>{o.label}</Pill>
-              <span className="mut t-small">{o.placedOn}</span>
-              <span className="sp" />
-              <b className="t-body">{formatCents(o.totalCents)}</b>
-              {o.token && (
-                <Link className="btn sm" href={`/share/${o.token}`} style={{ textDecoration: "none" }}>
-                  {o.kind === "quote" ? "Review / approve" : "View / pay"}
-                </Link>
-              )}
-            </div>
-          ))}
-        </Panel>
+        <div className="row-2 mut t-meta" style={{ gap: 14, flexWrap: "wrap" }}>
+          <span className="row-2" style={{ gap: 5 }}><Dot tone="good" />ships from our stock today</span>
+          <span className="row-2" style={{ gap: 5 }}><Dot tone="info" />sourced · invoiced at ship</span>
+          <span className="row-2" style={{ gap: 5 }}><Dot tone="warn" />special order · quoted first</span>
+        </div>
       </div>
 
       <div className="card" style={{ flex: "0 1 300px", minWidth: 260, position: "sticky", top: 70 }}>
@@ -206,13 +220,11 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
         {placed && (
           <div className="t-body" style={{ marginBottom: 10 }}>
             {placed.number && (
-              <div>Order <b className="mono">{placed.number}</b> placed for the in-stock items -
-                the invoice follows shortly.</div>
+              <div>Order <b className="mono">{placed.number}</b> placed - see <Link href="/orders">Orders</Link> for its progress.</div>
             )}
             {placed.quoteNumber && (
               <div style={{ marginTop: placed.number ? 6 : 0 }}>
-                Quote <b className="mono">{placed.quoteNumber}</b> opened for the items we source
-                to order - you approve it before anything moves.</div>
+                Quote <b className="mono">{placed.quoteNumber}</b> opened - you approve it before anything moves.</div>
             )}
             <div className="mut t-meta" style={{ marginTop: 6 }}>
               Nothing is charged now, and no card is on file to charge.
@@ -220,66 +232,57 @@ export default function StoreFront({ items, orders, orgName, hasYours }: {
           </div>
         )}
         {cart.length === 0 && !placed && <div className="mut t-body">Nothing in it yet.</div>}
-        {(() => {
-          const { now, quoted } = splitCart(cart, items);
-          const row = (l: CartLine) => {
-            const item = items.find((i) => i.partNumber.toLowerCase() === l.partNumber.toLowerCase());
-            if (!item) return null;
-            const cents = linePrice(item, l.source);
-            return (
-              <div key={`${l.partNumber}|${l.source ?? ""}`} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span className="t-small" style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
-                  {sourceTag(item, l.source) && <span className="mut t-meta">{sourceTag(item, l.source)}</span>}
-                </span>
-                <span className="mut t-small">× {l.qty}</span>
-                <span className="t-small" style={{ width: 70, textAlign: "right" }}>
-                  {cents !== null ? formatCents(cents * l.qty) : "TBD"}
-                </span>
-                <button className="btn link t-meta" style={{ color: "var(--t-bad-fg)" }}
-                  aria-label={`Remove ${item.name}`} onClick={() => setQty(l.partNumber, l.source, 0)}>×</button>
-              </div>
-            );
-          };
-          return (
-            <>
-              {now.length > 0 && (
-                <>
-                  <div className="t-meta" style={{ color: "var(--t-good-fg)", marginTop: 2 }}>Ships now</div>
-                  {now.map(row)}
-                </>
-              )}
-              {quoted.length > 0 && (
-                <>
-                  <div className="mut t-meta" style={{ marginTop: now.length ? 8 : 2 }}>
-                    Quoted first - sourced to order, you approve before anything moves
-                  </div>
-                  {quoted.map(row)}
-                </>
-              )}
-            </>
-          );
-        })()}
+        {buckets.now.length > 0 && (
+          <>
+            <div className="t-meta" style={{ color: "var(--t-good-fg)", fontWeight: 700, marginTop: 2 }}>Ships today</div>
+            {buckets.now.map(cartRow)}
+          </>
+        )}
+        {buckets.sourced.length > 0 && (
+          <>
+            <div className="t-meta" style={{ color: "var(--t-info-fg)", fontWeight: 700, marginTop: buckets.now.length ? 8 : 2 }}>
+              Sourced, invoiced at ship
+            </div>
+            {buckets.sourced.map(cartRow)}
+          </>
+        )}
+        {buckets.quoted.length > 0 && (
+          <>
+            <div className="t-meta" style={{ color: "var(--t-warn-fg)", fontWeight: 700, marginTop: buckets.now.length || buckets.sourced.length ? 8 : 2 }}>
+              Quoted first - nothing moves until you approve
+            </div>
+            {buckets.quoted.map(cartRow)}
+          </>
+        )}
         {cart.length > 0 && (
           <>
-            <div className="row-2" style={{ alignItems: "baseline", padding: "8px 0 0", borderTop: "2px solid var(--line)" }}>
-              <span className="t-body" style={{ fontWeight: 700, flex: 1 }}>Subtotal</span>
-              <b className="t-body">{formatCents(totals.subtotalCents)}</b>
-            </div>
-            {totals.unpriced > 0 && (
-              <div className="mut t-meta">plus {totals.unpriced} line{totals.unpriced === 1 ? "" : "s"} priced on request</div>
+            {totals.nowCents > 0 && (
+              <div className="row-2" style={{ alignItems: "baseline", padding: "8px 0 0", borderTop: "1px solid var(--line)", marginTop: 8 }}>
+                <span className="t-small" style={{ flex: 1 }}>Ships now</span>
+                <b className="mono t-small">{formatCents(totals.nowCents)}</b>
+              </div>
             )}
+            {totals.sourcedCents > 0 && (
+              <div className="row-2" style={{ alignItems: "baseline", padding: "3px 0 0" }}>
+                <span className="t-small" style={{ flex: 1 }}>Sourced, invoiced at ship</span>
+                <b className="mono t-small">{formatCents(totals.sourcedCents)}</b>
+              </div>
+            )}
+            <div className="row-2" style={{ alignItems: "baseline", padding: "8px 0 0", borderTop: "2px solid var(--line)", marginTop: 6 }}>
+              <span className="t-body" style={{ fontWeight: 800, flex: 1 }}>Total</span>
+              <b className="mono t-body">{formatCents(totals.nowCents + totals.sourcedCents)}
+                {totals.quotedLines > 0 && <span className="mut t-meta" style={{ fontFamily: "inherit" }}> + {totals.quotedLines} quote{totals.quotedLines === 1 ? "" : "s"}</span>}
+              </b>
+            </div>
             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything we should know? (optional)"
               className="t-small" style={{ margin: "8px 0" }} aria-label="Order note" />
             <button className="btn accent" style={{ width: "100%" }} disabled={pending} onClick={place}>
-              {pending ? "Placing..." : (() => {
-                const { now, quoted } = splitCart(cart, items);
-                return now.length && quoted.length ? "Place order + request quote"
-                  : quoted.length ? "Request quote" : "Place order";
-              })()}
+              {pending ? "Placing..." : totals.quotedLines && (buckets.now.length || buckets.sourced.length)
+                ? "Place order + request quote"
+                : totals.quotedLines ? "Request quote" : "Place order"}
             </button>
-            <div className="mut t-meta" style={{ marginTop: 6 }}>
-              We confirm availability, then send the invoice with its payment link. Nothing is charged now.
+            <div className="mut t-meta" style={{ marginTop: 6, textAlign: "center" }}>
+              Nothing is charged until it ships. Net {termsDays} on {orgName}&apos;s account.
             </div>
           </>
         )}

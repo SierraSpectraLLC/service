@@ -12173,9 +12173,12 @@ export async function placePartsOrder(
     });
   }
 
-  // The shelf's answer: on-hand across the house's own unarchived rooms.
-  // A line ships now only when the whole quantity is there - a partial fill
-  // is a sourcing conversation, so it quotes instead.
+  // The shelf's answer: on-hand across the house's own unarchived rooms. It
+  // decides which order lines ship today versus get sourced first - but the
+  // ORDER takes every PRICED line either way ("invoiced when it ships"), and
+  // only unpriced lines quote first: an unconfirmed price is the one thing a
+  // client must approve before anything moves. A chosen class is a sourcing
+  // request by definition, so it never ships from the shelf.
   const houseRooms = await db.select({ id: stockrooms.id }).from(stockrooms)
     .where(and(forTenant(stockrooms.tenantOrgId, tenant),
       isNull(stockrooms.orgId), eq(stockrooms.archived, false)));
@@ -12188,11 +12191,10 @@ export async function placePartsOrder(
       onHand.set(key, (onHand.get(key) ?? 0) + s.qty);
     }
   }
-  // A line with a chosen class is a sourcing request by definition - the
-  // shelf's box is whatever it is, so only unchosen lines can ship from it.
-  const nowLines = ordered.filter((o) =>
-    o.source === undefined && (onHand.get(o.part.partNumber.trim().toLowerCase()) ?? 0) >= o.qty);
-  const quoteLinesWanted = ordered.filter((o) => !nowLines.includes(o));
+  const shipsToday = (o: typeof ordered[number]) =>
+    o.source === undefined && (onHand.get(o.part.partNumber.trim().toLowerCase()) ?? 0) >= o.qty;
+  const nowLines = ordered.filter((o) => o.unitCents !== null);
+  const quoteLinesWanted = ordered.filter((o) => o.unitCents === null);
 
   const why = note.trim().slice(0, 300);
   // The chosen class rides the line where staff (and the client's paperwork)
@@ -12203,7 +12205,8 @@ export async function placePartsOrder(
     detail: `PN ${o.part.partNumber}`
       + (o.source === "oem" ? ` - genuine ${o.part.manufacturer || "OEM"}`.trimEnd()
         : o.source === "alt" ? " - OEM-equivalent" : "")
-      + (o.unitCents === null ? " - price to follow" : ""),
+      + (o.unitCents === null ? " - price to follow"
+        : shipsToday(o) ? "" : " - sourced to order"),
     qty: o.qty * 1000, unitCents: o.unitCents ?? 0, position: i,
   });
   const describe = (set: typeof ordered) => {
@@ -12230,8 +12233,9 @@ export async function placePartsOrder(
       await db.insert(invoiceLines).values(nowLines.map((o, i) => ({ invoiceId: inv.id, ...lineValues(o, i) })));
       await audit({
         actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: tenant,
-        action: `${org.name} ordered ${nowLines.length} in-stock part${nowLines.length === 1 ? "" : "s"} from the store`
-          + ` on ${number}: ${describe(nowLines)}`,
+        action: `${org.name} ordered ${nowLines.length} part${nowLines.length === 1 ? "" : "s"} from the store`
+          + ` on ${number}: ${describe(nowLines)}`
+          + (nowLines.some((o) => !shipsToday(o)) ? ` (${nowLines.filter((o) => !shipsToday(o)).length} sourced to order)` : ""),
       });
       revInvoice(inv);
       invoiceNumber = number;

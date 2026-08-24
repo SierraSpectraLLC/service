@@ -1,20 +1,17 @@
 import { redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, assets, instruments, orgs, partCatalog, partPhotos, partPrices, quoteLines as quoteLinesTable, quotes as quotesTable, shareLinks, stockItems, stockrooms } from "@/db/schema";
+import { appSettings, assets, instruments, orgs, partCatalog, partPhotos, partPrices, stockItems, stockrooms } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole, tenantOf } from "@/lib/tenants";
 import { forTenant } from "@/lib/tenancy";
 import { groupByPn } from "@/lib/priceBook";
 import { effectiveDays } from "@/lib/sourcing";
-import { buildStore, ORDER_LABEL } from "@/lib/store";
-import { quoteStanding, STANDING_LABEL as QUOTE_LABEL, STANDING_TONE as QUOTE_TONE } from "@/lib/quotes";
-import { asStatementRow, billingContext, invoicesForOrg } from "@/lib/invoiceData";
-import { invoiceView, STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
-import { shopMonthDay, shopToday } from "@/lib/shopday";
+import { buildStore } from "@/lib/store";
+import { billingContext } from "@/lib/invoiceData";
 import StoreFront from "@/components/StoreFront";
 import { PageHead } from "@/components/ui";
-import type { Tone } from "@/lib/tones";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +31,7 @@ export default async function StorePage() {
   if (!org || org.kind !== "client") redirect("/");
   const tenant = tenantOf(org);
 
-  const [catalog, priceRows, ctx, myInstruments, full] = await Promise.all([
+  const [catalog, priceRows, ctx, myInstruments] = await Promise.all([
     db.select().from(partCatalog).where(and(
       forTenant(partCatalog.tenantOrgId, tenant), eq(partCatalog.archived, false))),
     db.select({
@@ -43,15 +40,27 @@ export default async function StorePage() {
       leadDays: partPrices.leadDays, dropShips: partPrices.dropShips,
     }).from(partPrices).where(forTenant(partPrices.tenantOrgId, tenant)),
     billingContext(org.id),
-    db.select({ id: instruments.id, model: instruments.model }).from(instruments)
-      .where(eq(instruments.ownerOrgId, org.id)),
-    invoicesForOrg(org.id),
+    db.select({ id: instruments.id, externalId: instruments.externalId, model: instruments.model })
+      .from(instruments).where(eq(instruments.ownerOrgId, org.id)),
   ]);
 
   const myAssets = myInstruments.length
-    ? await db.select({ kind: assets.kind, model: assets.model }).from(assets)
-        .where(inArray(assets.instrumentId, myInstruments.map((i) => i.id)))
+    ? await db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model })
+        .from(assets).where(inArray(assets.instrumentId, myInstruments.map((i) => i.id)))
     : [];
+
+  // "fits your LZ-001 · 7890B" beats "Fits 7890B": name their unit when a
+  // model on the part maps to one of theirs.
+  const unitByModel = new Map<string, string>();
+  for (const i of myInstruments) {
+    if (i.model.trim()) unitByModel.set(i.model.trim().toLowerCase(), `${i.externalId} · ${i.model}`);
+  }
+  for (const a of myAssets) {
+    const inst = myInstruments.find((i) => i.id === a.instrumentId);
+    if (a.model.trim() && !unitByModel.has(a.model.trim().toLowerCase())) {
+      unitByModel.set(a.model.trim().toLowerCase(), `${inst?.externalId ?? "your"} · ${a.model}`);
+    }
+  }
 
   // The best COST per part number - it exists only on this side of buildStore.
   // Beside it, the honest ETA: the quickest door-to-door days any vendor
@@ -106,57 +115,17 @@ export default async function StorePage() {
       models: [...myInstruments.map((i) => i.model), ...myAssets.map((a) => a.model)],
       types: myAssets.map((a) => a.kind),
     },
-    photoByCatalogId, stockByPn, etaByPn,
+    photoByCatalogId, stockByPn, etaByPn, unitByModel,
   });
-
-  // Their own orders, in store language, with the portal door where one exists.
-  const today = shopToday();
-  const links = full.length
-    ? await db.select({ invoiceId: shareLinks.invoiceId, token: shareLinks.token }).from(shareLinks)
-        .where(and(inArray(shareLinks.invoiceId, full.map((f) => f.row.id)), isNull(shareLinks.revokedAt)))
-    : [];
-  const myQuotes = await db.select().from(quotesTable)
-    .where(eq(quotesTable.orgId, org.id)).orderBy(desc(quotesTable.id)).limit(12);
-  const quoteLinks = myQuotes.length
-    ? await db.select({ quoteId: shareLinks.quoteId, token: shareLinks.token }).from(shareLinks)
-        .where(and(inArray(shareLinks.quoteId, myQuotes.map((q) => q.id)), isNull(shareLinks.revokedAt)))
-    : [];
-  const qLines = myQuotes.length
-    ? await db.select().from(quoteLinesTable)
-        .where(inArray(quoteLinesTable.quoteId, myQuotes.map((q) => q.id)))
-    : [];
-  const orders = [
-    ...full.slice(0, 12).map((f) => {
-      const v = invoiceView(asStatementRow(f), today);
-      const label = f.row.status === "draft" ? ORDER_LABEL.draft : STANDING_LABEL[v.standing];
-      const tone: Tone = f.row.status === "draft" ? "info" : STANDING_TONE[v.standing];
-      return {
-        number: f.row.number, kind: "invoice" as const, label, tone,
-        totalCents: v.linesCents + v.feesCents,
-        placedOn: shopMonthDay(f.row.createdAt), at: f.row.createdAt.getTime(),
-        token: links.find((l) => l.invoiceId === f.row.id)?.token ?? "",
-      };
-    }),
-    ...myQuotes.map((q) => {
-      const s = quoteStanding(q, today);
-      return {
-        number: q.number, kind: "quote" as const,
-        label: q.status === "draft" ? "Quote being prepared" : QUOTE_LABEL[s],
-        tone: (q.status === "draft" ? "info" : QUOTE_TONE[s]) as Tone,
-        totalCents: qLines.filter((l) => l.quoteId === q.id && !l.covered)
-          .reduce((n, l) => n + Math.round((l.qty / 1000) * l.unitCents), 0),
-        placedOn: shopMonthDay(q.createdAt), at: q.createdAt.getTime(),
-        token: quoteLinks.find((l) => l.quoteId === q.id)?.token ?? "",
-      };
-    }),
-  ].sort((a, b) => b.at - a.at).slice(0, 14);
 
   return (
     <div className="container wide">
-      <PageHead title="Order parts"
-        sub={`Stocked and serviced by us, priced for ${org.name}.`} />
-      <StoreFront items={items} orders={orders} orgName={org.name}
-        hasYours={items.some((i) => i.fitsYours)} />
+      <PageHead title="Parts"
+        sub={`Stocked and serviced by us, priced for ${org.name}. Your equipment is already on file.`}
+        actions={<Link href="/orders" className="btn sm" style={{ textDecoration: "none" }}>Your orders →</Link>} />
+      <StoreFront items={items} orgName={org.name}
+        hasYours={items.some((i) => i.fitsYours)}
+        termsDays={org.termsDays} />
     </div>
   );
 }

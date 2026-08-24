@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { availabilityLabel, buildStore, cartTotals, filterStore, hasChoice, linePrice, sourceTag, splitCart } from "@/lib/store";
+import { availabilityHint, availabilityLabel, bucketTotals, buildStore, cartTotals, filterStore, hasChoice, linePrice, sourceTag, splitCart } from "@/lib/store";
 
 const cat = (over: Record<string, unknown>) => ({
   id: 1, partNumber: "PN-1", name: "Widget", manufacturer: "Maker",
@@ -88,7 +88,8 @@ describe("availability and the checkout split", () => {
       cat({ id: 3, partNumber: "ODD", name: "Odd bracket" }),
     ],
     {
-      oemCostByPn: new Map(), altCostByPn: new Map(), markupBps: 3000, yours: { models: [], types: [] },
+      oemCostByPn: new Map(), altCostByPn: new Map([["seal", 10000], ["cap", 7000]]),
+      markupBps: 3000, yours: { models: [], types: [] },
       stockByPn: new Map([["seal", 2]]),
       etaByPn: new Map([["cap", 3]]),
     },
@@ -96,20 +97,36 @@ describe("availability and the checkout split", () => {
 
   it("says what the shelf knows, in the client's words", () => {
     const by = (pn: string) => items.find((i) => i.partNumber === pn)!;
-    expect(availabilityLabel(by("SEAL"))).toBe("In stock - ships now");
-    expect(availabilityLabel(by("CAP"))).toBe("Sourced for you - about 3d");
-    expect(availabilityLabel(by("ODD"))).toBe("Special order - quoted first");
+    expect(availabilityLabel(by("SEAL"))).toBe("In stock · ships today");
+    expect(availabilityLabel(by("CAP"))).toBe("Sourced for you · ~3 d");
+    expect(availabilityHint(by("CAP"))).toBe("invoiced when it ships");
+    expect(availabilityLabel(by("ODD"))).toBe("Special order · quoted first");
+    expect(availabilityHint(by("ODD"))).toBe("price confirmed before anything moves");
     // On the shelf floats ahead of sourced, all else equal.
     expect(items[0].partNumber).toBe("SEAL");
   });
 
-  it("splits the cart: in stock orders now, the rest quotes first", () => {
-    const { now, quoted } = splitCart(
+  it("unpriced forces special-order, whatever the shelf says", () => {
+    const [stockedUnpriced] = buildStore([cat({ id: 9, partNumber: "MYST" })], {
+      oemCostByPn: new Map(), altCostByPn: new Map(),
+      markupBps: 3000, yours: { models: [], types: [] },
+      stockByPn: new Map([["myst", 4]]),
+    });
+    expect(availabilityLabel(stockedUnpriced)).toBe("Special order · quoted first");
+  });
+
+  it("splits three ways: priced ships or sources on the order, unpriced quotes", () => {
+    const { now, sourced, quoted } = splitCart(
       [{ partNumber: "seal", qty: 1 }, { partNumber: "CAP", qty: 2 }, { partNumber: "GONE", qty: 1 }],
       items,
     );
     expect(now.map((l) => l.partNumber)).toEqual(["seal"]);
-    expect(quoted.map((l) => l.partNumber)).toEqual(["CAP"]);
+    expect(sourced.map((l) => l.partNumber)).toEqual(["CAP"]);
+    expect(quoted).toEqual([]);
+    const t2 = bucketTotals([{ partNumber: "seal", qty: 2 }, { partNumber: "CAP", qty: 1 }], items);
+    expect(t2.nowCents).toBe(2 * 13000);
+    expect(t2.sourcedCents).toBe(9100);
+    expect(t2.count).toBe(3);
   });
 });
 
@@ -138,6 +155,13 @@ describe("the genuine-or-equivalent choice", () => {
     expect(sourceTag(cap, "alt")).toBe("OEM-equivalent");
     const t2 = cartTotals([{ partNumber: "CAP", qty: 1, source: "oem" }], items);
     expect(t2.subtotalCents).toBe(91000);
+  });
+
+  it("a chosen class never ships from the shelf: it sources on the order", () => {
+    const { now, sourced, quoted } = splitCart([{ partNumber: "CAP", qty: 1, source: "oem" }], items);
+    expect(now).toEqual([]);
+    expect(quoted).toEqual([]);
+    expect(sourced).toHaveLength(1);
   });
 
   it("no choice on the shelf: an in-stock box is whatever it is", () => {
