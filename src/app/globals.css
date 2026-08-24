@@ -73,6 +73,23 @@ input, select, textarea {
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: none; border-color: var(--sky); box-shadow: 0 0 0 3px rgba(91, 168, 217, 0.22);
 }
+/* Touch devices type at 16px, and it is not a taste decision.
+   iOS Safari force-zooms the page whenever a focused field's text is under
+   16px - every field here was 13px, and the small ones 11px - and each zoom
+   relays the page out under the caret: the field scrolls off, focus goes with
+   it, and the keyboard drops. That is one dropped keyboard per character on a
+   phone, on every text box on every page. Desktop keeps the dense scale; a
+   coarse pointer gets the size that stops the zoom happening at all.
+   The type-scale classes are re-stated here because .t-small on an input has
+   to lose to this, and element+class beats a bare class. */
+@media (pointer: coarse) {
+  input, select, textarea,
+  input.t-meta, input.t-small, input.t-body, input.t-lead,
+  select.t-meta, select.t-small, select.t-body, select.t-lead,
+  textarea.t-meta, textarea.t-small, textarea.t-body, textarea.t-lead {
+    font-size: 16px;
+  }
+}
 label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); margin-bottom: 3px; }
 
 /* Page widths are a fixed set, not a per-page guess - blocks lined up

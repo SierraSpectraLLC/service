@@ -66,9 +66,18 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
 
   // The URL mirrors the filter state (debounced for typing), so the filtered
   // board is a link. replace, not push: filtering is not ten history entries.
+  //
+  // Never while the search box has the caret, though. A route change re-runs
+  // the server component under a focused field, and on a phone that is a
+  // dropped keyboard - at a 300ms debounce, one per character, because nobody
+  // thumbs faster than that. The board still filters live off local state; it
+  // is only the ADDRESS that waits for the field to be let go, which `typing`
+  // tracks. Everything else (facets, sort) is a tap and syncs immediately.
   const first = useRef(true);
+  const [typing, setTyping] = useState(false);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
+    if (typing) return;
     const t = setTimeout(() => {
       const p = new URLSearchParams();
       if (q.trim()) p.set("q", q.trim());
@@ -78,7 +87,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       router.replace(s ? `/?${s}` : "/", { scroll: false });
     }, 300);
     return () => clearTimeout(t);
-  }, [q, selected, sortBy, router]);
+  }, [q, selected, sortBy, router, typing]);
 
   // "Docs expiring" appears only when some visible system could raise it -
   // a fleet with no regulated systems never sees the filter at all.
@@ -292,6 +301,7 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
       <Toolbar
         search={
           <input value={q} onChange={(e) => setQ(e.target.value)}
+            onFocus={() => setTyping(true)} onBlur={() => setTyping(false)}
             placeholder="ID, module, serial, client, stage..." aria-label="Search the board" />
         }
         facets={
