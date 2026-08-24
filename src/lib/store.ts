@@ -84,8 +84,18 @@ export function buildStore(
       const altCost = opts.altCostByPn.get(lc(c.partNumber));
       const oemCents = oemCost !== undefined && oemCost > 0 ? sellPrice(oemCost, opts.markupBps) : null;
       const altCents = altCost !== undefined && altCost > 0 ? sellPrice(altCost, opts.markupBps) : null;
-      const fits = c.models.some((m) => myModels.has(lc(m)))
-        || c.assetTypes.some((t) => myTypes.has(lc(t)));
+      // Does this suit equipment they actually have?
+      //
+      // A part that NAMES models has already answered the question, and its
+      // answer is the whole answer. Asking the asset type as well turned
+      // "fits an AOC-20S" into "fits an autosampler", and a client whose only
+      // autosampler is a TOC unit was offered a GC-MS attachment kit under
+      // the heading "For your systems". The kind of machine is a shelf, not a
+      // fit: it is the fallback for a part that names no model at all, which
+      // is what a generic consumable for a class of machine looks like.
+      const fits = c.models.length
+        ? c.models.some((m) => myModels.has(lc(m)))
+        : c.assetTypes.some((t) => myTypes.has(lc(t)));
       const inStock = (stock.get(lc(c.partNumber)) ?? 0) > 0;
       return {
         id: c.id,

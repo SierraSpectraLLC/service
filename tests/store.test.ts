@@ -23,6 +23,65 @@ describe("buildStore", () => {
     expect(keys).not.toMatch(/vendor|cost|margin|lead|drop/);
   });
 
+  /**
+   * Reported from a live client account: Modesto Irrigation District runs a
+   * TOC analyser, a UV-Vis and the autosampler bolted to the TOC. Under
+   * "For your systems" they were offered a Shimadzu AOC-20S attachment kit
+   * for a GC-MS and an Agilent needle seat for a G7167B - two autosampler
+   * parts for two autosamplers they do not own.
+   *
+   * The old rule asked "models match OR asset type matches", so a part that
+   * said in as many words which model it fits could still be recommended on
+   * the strength of the word "Autosampler". A part naming its models has
+   * already answered the question; the kind of machine is only the fallback
+   * for parts that name none.
+   */
+  it("does not recommend a part for a model they do not own, whatever kind of machine it is", () => {
+    const mid = {
+      oemCostByPn: new Map(), altCostByPn: new Map(), markupBps: 3000,
+      yours: {
+        models: ["ASI-V", "TOC-Vw", "UV-1900"],
+        types: ["Autosampler", "TOC", "UV-Vis"],
+      },
+    };
+    const items = buildStore([
+      cat({ id: 1, partNumber: "225-10681-91", name: "AOC-20S Attachment Kit for GCMS",
+        models: ["AOC-20S"], assetTypes: ["Autosampler"] }),
+      cat({ id: 2, partNumber: "G4267-87012", name: "Needle Seat",
+        models: ["G7167B"], assetTypes: ["Autosampler"] }),
+      cat({ id: 3, partNumber: "ASI-TUBE", name: "Sample tubing",
+        models: ["ASI-V"], assetTypes: ["Autosampler"] }),
+      cat({ id: 4, partNumber: "TOC-CAT", name: "Catalyst, generic",
+        models: [], assetTypes: ["TOC"] }),
+    ], mid);
+    const fits = (pn: string) => items.find((i) => i.partNumber === pn)!.fitsYours;
+
+    expect(fits("225-10681-91")).toBe(false);
+    expect(fits("G4267-87012")).toBe(false);
+    // Their own autosampler's part still fits, by name.
+    expect(fits("ASI-TUBE")).toBe(true);
+    // And a consumable that names no model still falls back to the machine kind.
+    expect(fits("TOC-CAT")).toBe(true);
+    expect(filterStore(items, "yours", "").map((i) => i.partNumber).sort())
+      .toEqual(["ASI-TUBE", "TOC-CAT"]);
+  });
+
+  /**
+   * The label and the highlight have to agree with the rule. The screenshot
+   * showed "Fits AOC-20S" in the green that means "this is for your bench",
+   * which is the contradiction stated out loud.
+   */
+  it("never paints a model they do not own as one of theirs", () => {
+    const [item] = buildStore(
+      [cat({ partNumber: "KIT", models: ["AOC-20S"], assetTypes: ["Autosampler"] })],
+      { oemCostByPn: new Map(), altCostByPn: new Map(), markupBps: 3000,
+        yours: { models: ["ASI-V"], types: ["Autosampler"] } },
+    );
+    expect(item.fitsYours).toBe(false);
+    expect(item.fitsLabel).toBe("Fits AOC-20S");
+    expect(item.fitsLabel).not.toMatch(/your/i);
+  });
+
   it("knows the client's own bench: model or module-type match, case-insensitive", () => {
     const items = buildStore(
       [
