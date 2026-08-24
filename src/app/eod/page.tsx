@@ -81,6 +81,8 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
         if (!isToday || e.kind !== "system") {
           return { ...e, suggestedUpdate: "", suggestedAction: "" };
         }
+        // Only a system has activity to suggest from; off-system work is the
+        // one kind of line nothing else in the app knows about.
         const happenings = todayAudit
           .filter((a) => a.instrumentId === e.id)
           .reverse()

@@ -3109,3 +3109,11 @@ DO $$ BEGIN
       FOREIGN KEY ("ship_to_site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Work that happened off the board: a call answered, an engineer walked
+-- through a problem. Both instrument_id and asset_id stay null on these rows,
+-- so the title is what identifies the line. See eod_updates.title.
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "person" text NOT NULL DEFAULT '';
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "minutes" integer NOT NULL DEFAULT 0;
+

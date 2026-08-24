@@ -17,9 +17,13 @@ import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 const SEP = "-".repeat(50);
 
 
-/** One line on the report: a system or a single asset, with the day's update. */
+/**
+ * One line on the report: a system, a single asset, or work that happened off
+ * the board entirely (see eod_updates.title).
+ */
 export type EodEntry = {
-  kind: "system" | "asset";
+  kind: "system" | "asset" | "offsystem";
+  /** The row's own id for an offsystem line - there is no record behind it. */
   id: number;
   externalId: string;
   label: string;
@@ -34,6 +38,9 @@ export type EodEntry = {
   internal: boolean;
   /** Something was written today - drives autopopulation on the EOD page. */
   written: boolean;
+  /** offsystem only: who did it, and how long it took. */
+  person?: string;
+  minutes?: number;
 };
 
 /**
@@ -69,8 +76,16 @@ export function includesSystem(
  * out - is not a record of anything, and must not make the day look reported.
  * A skipped line is different: leaving it out was the decision.
  */
-const recordsSomething = (s: { systemUpdate: string; actionItem: string; skipped: boolean }) =>
-  !!(s.systemUpdate.trim() || s.actionItem.trim() || s.skipped);
+const recordsSomething = (s: { systemUpdate: string; actionItem: string; skipped: boolean; title?: string }) =>
+  !!(s.systemUpdate.trim() || s.actionItem.trim() || s.skipped || (s.title ?? "").trim());
+
+/**
+ * Is this saved row work logged off the board? Nothing to hang it on, and a
+ * title saying what it was. Both halves matter: a row with no target and no
+ * title is the debris of a half-finished write, not a record of anything.
+ */
+export const isOffSystem = (s: { instrumentId: number | null; assetId: number | null; title: string }) =>
+  s.instrumentId === null && s.assetId === null && !!s.title.trim();
 
 /**
  * Everything that belongs on one client's report for a date, in report order:
@@ -140,6 +155,21 @@ export async function collectEodEntries(date: string, orgId: number | null, hist
       });
     }
   }
+
+  // Work with nothing to hang it on, newest last so the day reads in order.
+  // Same ownership stamp as everything else: the line belongs to the client it
+  // was written for, today and in every later reading of this date.
+  for (const u of saved.filter((s) => isOffSystem(s) && (s.ownerOrgId ?? null) === orgId)) {
+    entries.push({
+      kind: "offsystem", id: u.id,
+      externalId: u.title.trim(),
+      label: u.title.trim(),
+      systemUpdate: u.systemUpdate, actionItem: u.actionItem, skipped: u.skipped,
+      internal: u.internal,
+      written: true,
+      person: u.person, minutes: u.minutes,
+    });
+  }
   return entries;
 }
 
@@ -169,15 +199,20 @@ export async function eodGroups(
         // A retired unit on tonight's client report is noise.
         ne(assets.status, "Decommissioned"),
       )),
-    historical ? db.select().from(eodUpdates).where(eq(eodUpdates.date, date)) : Promise.resolve([]),
+    // Always, not just for history: an off-system line may be the ONLY thing a
+    // client has today, and reading it off active equipment would miss it.
+    db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
   ]);
   // Only this workspace's equipment, and only organizations it runs.
   const rows = mine(rowsAll);
   const standalone = mine(standaloneAll as { id: number; ownerOrgId: number | null; tenantOrgId: number | null }[]);
-  const saved = mine(savedAll as unknown as { ownerOrgId: number | null; tenantOrgId: number | null }[]) as unknown as typeof savedAll;
+  const saved = mine(savedAll);
   const orgRows = tenantOrgId === null
     ? orgRowsAll
     : orgRowsAll.filter((o) => o.id === tenantOrgId || o.parentOrgId === tenantOrgId);
+  // Off-system work has no equipment to be found through, so whichever way the
+  // day is being read, the orgs it was logged against have to come off the rows.
+  const offSystemOwners = saved.filter(isOffSystem).map((s) => s.ownerOrgId ?? null);
   const owners = historical
     // Straight off the rows: no join to who owns the equipment now, which is
     // what used to let a handoff move a past day's report between clients.
@@ -185,6 +220,7 @@ export async function eodGroups(
     : new Set<number | null>([
         ...rows.filter((r) => !r.archived).map((r) => r.ownerOrgId ?? null),
         ...standalone.map((r) => r.ownerOrgId ?? null),
+        ...offSystemOwners,
       ]);
   const groups: { orgId: number | null; name: string; recipients: string }[] = [];
   // The operator's own group first: house-stewarded work, reported internally.
@@ -216,8 +252,16 @@ export async function composeEodEmail(
   let filled = 0;
   const blocks = included.map((e, idx) => {
     if (e.written) filled++;
-    const href = e.kind === "system" ? `${url}/instruments/${e.id}` : `${url}/assets/${e.id}`;
     const label = esc(e.label);
+    // Off-system work has no page to link to - that is what makes it
+    // off-system - so its heading is plain text and carries who did it
+    // instead. "System Update" is the wrong words for a phone call.
+    if (e.kind === "offsystem") {
+      const by = [e.person ?? "", e.minutes ? `${e.minutes} min` : ""].filter(Boolean).map(esc).join(" · ");
+      return `Support ${idx + 1}: ${label}${by ? ` (${by})` : ""}`
+        + `\n\nWhat happened: ${esc(e.systemUpdate)}\nAction Item: ${esc(e.actionItem)}\n\n${SEP}`;
+    }
+    const href = e.kind === "system" ? `${url}/instruments/${e.id}` : `${url}/assets/${e.id}`;
     const noun = e.kind === "system" ? "System" : "Unit";
     const heading = url
       ? `<a href="${href}" style="color:${EMAIL.link};">${noun} ${idx + 1}: ${label}</a>`
@@ -230,7 +274,7 @@ export async function composeEodEmail(
     brand: brand.operatorName,
     logoUrl: brand.operatorLogoUrl || undefined,
     tagline: `Daily Updates · ${dateMDY}`,
-    preheader: `${included.length} system${included.length === 1 ? "" : "s"} on today's report.`,
+    preheader: `${included.length} line${included.length === 1 ? "" : "s"} on today's report.`,
     width: 640,
     body: `<pre style="font-family:${EMAIL.mono};font-size:13px;line-height:1.5;white-space:pre-wrap;color:${EMAIL.ink};margin:0;">${body}</pre>`,
     footer: url

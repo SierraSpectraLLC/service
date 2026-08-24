@@ -31,9 +31,14 @@ const FIXTURE = `
     ('Coastal Analytical', 'client'),
     -- The company that does the work. Its own organization, like any other -
     -- that is what makes an invoice carry ITS name rather than the platform's.
-    ('Sierra Spectra', 'provider');
-  UPDATE orgs SET is_operator = true WHERE id = 3;
-  UPDATE app_settings SET operator_org_id = 3 WHERE id = 1;
+    ('Sierra Spectra', 'provider'),
+    -- Last on purpose: the ids above are referenced by number further down.
+    -- A client with nothing of theirs on our bench, so the EOD page has to
+    -- prove it can report a day whose only work was a phone call. Before
+    -- off-system lines a client like this had no report at all.
+    ('Harbor Biotech', 'client');
+  UPDATE orgs SET is_operator = true WHERE name = 'Sierra Spectra';
+  UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
 
   INSERT INTO users (id, name, email, role, onboarded_at) VALUES
     ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now()),
@@ -63,6 +68,26 @@ const FIXTURE = `
     ('CA-001', 'Coastal Analytical', 'PerkinElmer Optima 8300 ICP-OES', 'PerkinElmer', 'PE83007', 4, '{"Intake"}', ''),
     ('CA-002', 'Coastal Analytical', 'Agilent 7890B GC', 'Agilent', 'CN14320', 5, '{"Waiting / blocked"}', 'HED fault - part on order.'),
     ('CA-003', 'Coastal Analytical', 'Waters Xevo TQ-S', 'Waters', 'WAT5521', 6, '{"In service"}', '');
+
+  -- Work with no system behind it: a LabZen engineer rang and got talked
+  -- through a problem. It belongs on their report and nowhere else in the app
+  -- could hold it, which is the whole point of the row.
+  INSERT INTO eod_updates (instrument_id, asset_id, date, owner_org_id, title, person, minutes,
+                           system_update, action_item, updated_by)
+  SELECT NULL, NULL, to_char(now(), 'YYYY-MM-DD'), o.id,
+         'Phone support - tune report question', 'Bill', 35,
+         'Their engineer called about a failing reserpine tune. Walked through the report: source was fine, the carrier gas regulator was drifting.',
+         'Send them the regulator check SOP',
+         'dev@local.test'
+  FROM orgs o WHERE o.name = 'Lab Zen';
+
+  INSERT INTO eod_updates (instrument_id, asset_id, date, owner_org_id, title, person, minutes,
+                           system_update, action_item, updated_by)
+  SELECT NULL, NULL, to_char(now(), 'YYYY-MM-DD'), o.id,
+         'Method advice - headspace carryover', 'Bill', 20,
+         'Talked their chemist through a carryover problem on a headspace method. Nothing of theirs is with us.',
+         '', 'dev@local.test'
+  FROM orgs o WHERE o.name = 'Harbor Biotech';
 
   -- Blocking is the one stage that demands a written reason, so the fixture's
   -- blocked system carries one - and an age, so the board can say how long.

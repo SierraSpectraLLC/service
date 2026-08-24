@@ -1206,6 +1206,28 @@ export const eodUpdates = pgTable("eod_updates", {
    */
   internal: boolean("internal").notNull().default(false),
 
+  /**
+   * Work that happened off the board entirely: a phone call, a question
+   * answered, somebody's engineer walked through a problem. Both instrument_id
+   * and asset_id are null on these rows - there is no record to hang them on,
+   * which is exactly why they went unlogged. The title is what it WAS, since
+   * there is no system name to stand in for it, and it is what marks the row:
+   * a row with no instrument, no asset and no title is not one of these.
+   *
+   * The two unique constraints below still hold, because Postgres counts NULLs
+   * as distinct - so a day takes as many of these as the day had.
+   */
+  title: text("title").notNull().default(""),
+  /** Who did it. Not updated_by: the person who helped is rarely the typist. */
+  person: text("person").notNull().default(""),
+  /**
+   * How long it took, for the record. Deliberately NOT a time_entries row:
+   * those bill, and hang off a system. This is a note of effort on a line of
+   * a report, and calling it billable time would be a different feature with
+   * a different set of consequences.
+   */
+  minutes: integer("minutes").notNull().default(0),
+
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [

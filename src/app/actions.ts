@@ -102,7 +102,7 @@ import {
 } from "@/lib/stages";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
-import { composeEodEmail } from "@/lib/eodEmail";
+import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
@@ -3782,14 +3782,40 @@ export async function resolveDiff(
  * where the work happens - the system's or asset's own page - and assembled by
  * /eod. Not audited: it's a draft of a message, not instrument history.
  */
+/**
+ * The three things an EOD line can be. A system or an asset is addressed by
+ * what it is ABOUT; off-system work has nothing behind it, so it is addressed
+ * by the row's own id - which is why every one of these actions takes a target
+ * rather than a pair of foreign keys.
+ */
+export type EodTarget = { instrumentId: number | null; assetId: number | null; eodId?: number | null };
+
+/**
+ * Load an off-system row for writing, refusing one from another workspace.
+ * Same posture as resolveTarget: the id in the payload buys nothing on its own.
+ */
+async function eodRowFor(actor: Awaited<ReturnType<typeof requireStaff>>, eodId: number) {
+  const [row] = await db.select().from(eodUpdates).where(eq(eodUpdates.id, eodId));
+  if (!row) throw new Error("Not found");
+  const t = readTenant(actor);
+  if (t !== null && row.tenantOrgId !== t) throw new Error("Not found");
+  return row;
+}
+
 export async function saveEodUpdate(
-  target: { instrumentId: number | null; assetId: number | null },
+  target: EodTarget,
   data: { systemUpdate: string; actionItem: string },
 ) {
   const u = await requireStaff();
   const date = shopToday();
   const systemUpdate = data.systemUpdate.trim();
   const actionItem = data.actionItem.trim();
+  if (target.eodId != null) {
+    await eodRowFor(u, target.eodId);
+    await db.update(eodUpdates).set({ systemUpdate, actionItem, updatedBy: u.name, updatedAt: new Date() })
+      .where(eq(eodUpdates.id, target.eodId));
+    return;
+  }
   // owner_org_id is stamped on the way in and deliberately absent from the
   // conflict SET: the line belongs to whoever owned the system the day it was
   // written, forever, whatever happens to the system afterwards.
@@ -3818,6 +3844,85 @@ export async function saveEodUpdate(
   // and a revalidate would make the client re-fetch the whole page each time
   // (visible jank on mobile). The typist's screen is already current; other
   // viewers get fresh data on page load, which is how the EOD flow works.
+}
+
+/**
+ * Log work that happened off the board.
+ *
+ * The gap this fills: every other EOD line hangs off a system or an asset,
+ * so an engineer ringing up and being talked through a problem had nowhere to
+ * be written down. It was real work, often for a named client, and it left no
+ * trace - which meant it never reached their report and never reached ours.
+ *
+ * `orgId` is whose report it lands on, stamped now and never re-read, exactly
+ * like every other line: who this was FOR does not change because the client
+ * roster does later. Null is the operator's own group.
+ */
+export async function logOffSystemWork(
+  orgId: number | null,
+  data: { title: string; person: string; minutes: number; systemUpdate: string; actionItem: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say what the work was" };
+  // Only a client this workspace actually runs, and never another tenant's.
+  const tenant = readTenant(u);
+  if (orgId !== null) {
+    const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!org) return { error: "Not found" };
+    if (tenant !== null && org.id !== tenant && org.parentOrgId !== tenant) return { error: "Not found" };
+  }
+  const [row] = await db.insert(eodUpdates).values({
+    tenantOrgId: tenant,
+    instrumentId: null, assetId: null,
+    date: shopToday(), ownerOrgId: orgId,
+    title, person: data.person.trim().slice(0, 80),
+    minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
+    systemUpdate: data.systemUpdate.trim(), actionItem: data.actionItem.trim(),
+    updatedBy: u.name, updatedAt: new Date(),
+  }).returning({ id: eodUpdates.id });
+  await audit({
+    actor: u.email, entityType: "eod", entityId: `offsystem:${row.id}`, tenantOrgId: tenant,
+    action: `logged off-system work: ${title}`,
+  });
+  revalidatePath("/eod");
+  return { id: row.id };
+}
+
+/** Fix what an off-system line says it was, who did it, or how long it took. */
+export async function editOffSystemWork(
+  eodId: number, data: { title: string; person: string; minutes: number },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const row = await eodRowFor(u, eodId);
+  if (!isOffSystem(row)) return { error: "Not found" };
+  const title = data.title.trim().slice(0, 160);
+  if (!title) return { error: "Say what the work was" };
+  await db.update(eodUpdates).set({
+    title, person: data.person.trim().slice(0, 80),
+    minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
+    updatedBy: u.name, updatedAt: new Date(),
+  }).where(eq(eodUpdates.id, eodId));
+  revalidatePath("/eod");
+  return {};
+}
+
+/**
+ * Remove an off-system line. Delete rather than skip because there is no
+ * record underneath: a line logged against the wrong client, or by mistake,
+ * has nothing to fall back to and would otherwise sit on the day forever.
+ */
+export async function deleteOffSystemWork(eodId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const row = await eodRowFor(u, eodId);
+  if (!isOffSystem(row)) return { error: "Not found" };
+  await db.delete(eodUpdates).where(eq(eodUpdates.id, eodId));
+  await audit({
+    actor: u.email, entityType: "eod", entityId: `offsystem:${eodId}`, tenantOrgId: row.tenantOrgId,
+    action: `removed off-system work: ${row.title}`,
+  });
+  revalidatePath("/eod");
+  return {};
 }
 
 /**
@@ -3894,10 +3999,17 @@ export async function setEodSkip(
  * the client's report and the partner digest simply never carry it.
  */
 export async function setEodInternal(
-  target: { instrumentId: number | null; assetId: number | null }, internal: boolean,
+  target: EodTarget, internal: boolean,
 ) {
   const u = await requireStaff();
   const date = shopToday();
+  if (target.eodId != null) {
+    await eodRowFor(u, target.eodId);
+    await db.update(eodUpdates).set({ internal, updatedBy: u.name, updatedAt: new Date() })
+      .where(eq(eodUpdates.id, target.eodId));
+    revalidatePath("/eod");
+    return;
+  }
   if (target.instrumentId !== null) {
     const [inst] = await db.select().from(instruments).where(eq(instruments.id, target.instrumentId));
     if (!inst) throw new Error("Not found");
