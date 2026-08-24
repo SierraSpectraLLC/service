@@ -446,6 +446,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
                 .map((p) => ({ ...p, createdAt: p.createdAt.toISOString() }))}
               systemAssets={[]} canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
               serviceEvents={serviceEvents} visitNames={visitNames}
+              moduleTypes={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
               pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />
           ) },
           { key: "photos", label: "Photos", node: (

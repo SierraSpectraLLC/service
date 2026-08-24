@@ -1,8 +1,9 @@
 "use client";
 
 import { confirmReason } from "@/components/ui/ConfirmDialog";
-import { useOptimistic, useState, useTransition } from "react";
-import { CARRIERS, MODULE_KINDS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
+import { useMemo, useOptimistic, useState, useTransition } from "react";
+import { CARRIERS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
+import { moduleTypeOptions } from "@/lib/moduleTypes";
 import { intakeModule } from "@/app/actions";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import {
@@ -68,7 +69,7 @@ const empty = { kind: "part", moduleKind: "", expandKit: true, pmScheduleId: nul
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [] }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [] }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
   /** Jobs completed, by day, so a visit can be named after the work it was. */
   serviceEvents?: ServiceEvent[];
@@ -85,6 +86,11 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
    * a contract that includes them - see lib/agreementUsage.
    */
   pmJobs?: { id: number; title: string }[];
+  /**
+   * Module types from the shop's equipment catalog, for the "Arrives as" and
+   * intake pickers. Empty falls back to the starter list.
+   */
+  moduleTypes?: string[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -108,6 +114,12 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const [specPairs, setSpecPairs] = useState<SpecPair[]>([]);
   const [flag, setFlag] = useState("");
   const [pending, startTransition] = useTransition();
+  // Kept whole across a re-render so the second picker's options don't shuffle
+  // under the finger while somebody is choosing from them.
+  const arrivesTypes = useMemo(
+    () => moduleTypeOptions(moduleTypes, draft.moduleKind),
+    [moduleTypes, draft.moduleKind],
+  );
 
   // Which day's heading is being renamed, and to what.
   const [naming, setNaming] = useState<null | { day: string; title: string }>(null);
@@ -327,11 +339,24 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           {draft.kind === "part" && target.instrumentId !== null && (
             <div style={{ marginBottom: 8 }}>
               <label>Arrives as</label>
-              <select value={draft.moduleKind} aria-label="Arrives as"
-                onChange={(e) => setDraft({ ...draft, moduleKind: e.target.value })}>
-                <option value="">A part - fitted, not listed</option>
-                {MODULE_KINDS.map((k) => <option key={k} value={k}>A module: {k} - joins the asset list on arrival</option>)}
+              {/* Two questions, not one list of every answer to both. Which
+                  module it is only matters once it IS a module, so that list
+                  stays folded away until the first answer asks for it - and
+                  when it opens it is the shop's own catalog, not ours. */}
+              <select value={draft.moduleKind ? "module" : "part"} aria-label="Arrives as"
+                onChange={(e) => setDraft({ ...draft, moduleKind: e.target.value === "module" ? (arrivesTypes[0] ?? "Other") : "" })}>
+                <option value="part">A part - fitted, not listed</option>
+                <option value="module">A module - joins the asset list on arrival</option>
               </select>
+              {draft.moduleKind !== "" && (
+                <div style={{ marginTop: 6 }}>
+                  <label>Which module</label>
+                  <select value={draft.moduleKind} aria-label="Module type"
+                    onChange={(e) => setDraft({ ...draft, moduleKind: e.target.value })}>
+                    {arrivesTypes.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
           )}
           <div className="pf2" style={{ marginBottom: 8 }}>
@@ -631,7 +656,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           <div>
             <label>Kind</label>
             <select value={intakeDraft.kind} onChange={(e) => setIntakeDraft({ ...intakeDraft, kind: e.target.value })}>
-              {MODULE_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+              {moduleTypeOptions(moduleTypes, intakeDraft.kind).map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
           </div>
           <div>

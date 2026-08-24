@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   appSettings, assets, attachments, auditLog, checklistItems, expenseCategories, instruments, itemNotes, orgs, orgSites, parts, poLines,
-  purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements,
+  purchaseOrders, taskNotes, tasks, timeEntries, vocabTerms, workOrders, workOrderNotes, expenses, agreements,
   rateCards, quotes,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
@@ -108,7 +108,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await visitFlag(wo.orgId, wo.instrumentId).catch(() => "")
     : "";
 
-  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows, settingsForPolicy, siteRows, categoryRows] = await Promise.all([
+  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows, settingsForPolicy, siteRows, categoryRows, vocabRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.workOrderId, woId))
       .orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(timeEntries).where(eq(timeEntries.workOrderId, woId))
@@ -140,6 +140,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     db.select().from(expenseCategories)
       .where(forTenant(expenseCategories.tenantOrgId, wo.tenantOrgId))
       .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
+    // The equipment catalog names the module types, so a part ordered here
+    // says what it arrives as in the shop's own words.
+    db.select({ kind: vocabTerms.kind, name: vocabTerms.name }).from(vocabTerms)
+      .where(forTenant(vocabTerms.tenantOrgId, wo.tenantOrgId)),
   ]);
 
   const taskIds = taskRows.map((t) => t.id);
@@ -434,6 +438,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
             .map((pp) => ({ ...pp, createdAt: pp.createdAt.toISOString() }))}
           systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
           canEdit={canAdd} isStaff={staff}
+          moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
           showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
       )}
       <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}
