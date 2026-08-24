@@ -44,7 +44,7 @@ export default function TenantConsole({ rows, unassigned, rootOrgId }: {
   return (
     <div>
       <PageHead title="Service companies"
-        sub="The numbers a price is built from - seats, clients, systems, machines - so an invoice is read here rather than reconstructed later."
+        sub="Seats, clients, systems, machines per tenant."
         actions={
           <button className="btn sm accent" onClick={() => setOpen((v) => !v)}>
             {open ? "Cancel" : "+ Open a workspace"}

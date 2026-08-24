@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  appSettings,
   assets, instruments, orgs, partCatalog, partNumbers, partPrices, stockItems, stockMoves,
   stockrooms, stockroomShares,
 } from "@/db/schema";
@@ -21,10 +22,16 @@ import { RecordHero, type HeroStat } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default async function StockroomPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function StockroomPage({ params, searchParams }: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ buy?: string; rush?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   const { id } = await params;
+  const { buy = "", rush = "" } = await searchParams;
+  const buyMode = buy === "fastest" ? "fastest" as const : "cheapest" as const;
+  const buyUrgent = rush === "1";
   const roomId = parseInt(id);
   if (isNaN(roomId)) notFound();
 
@@ -51,8 +58,12 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
     db.select({
       partNumber: partPrices.partNumber, vendor: partPrices.vendor,
       isOem: partPrices.isOem, priceCents: partPrices.priceCents,
+      leadDays: partPrices.leadDays, dropShips: partPrices.dropShips, expediteOk: partPrices.expediteOk,
     }).from(partPrices),
   ]);
+  const [buySettings] = await db.select({ crossDockDays: appSettings.crossDockDays })
+    .from(appSettings).where(eq(appSettings.id, 1));
+  const crossDockDays = buySettings?.crossDockDays ?? 1;
   // The parts book: what each number IS. A shelf line whose number the book
   // knows borrows its name, and the add-grid offers the book's numbers.
   const bookRows = await db.select({ id: partCatalog.id, partNumber: partCatalog.partNumber, name: partCatalog.name })
@@ -190,7 +201,9 @@ export default async function StockroomPage({ params }: { params: Promise<{ id: 
 
       {/* Ordering follows the same standing as stocking the shelf. */}
       {acc.issue && short.length > 0 && (
-        <ReorderCard stockroomId={room.id} groups={suggestOrders(short, priceRows)} />
+        <ReorderCard stockroomId={room.id}
+          groups={suggestOrders(short, priceRows, { mode: buyMode, urgent: buyUrgent, crossDockDays })}
+          mode={buyMode} urgent={buyUrgent} baseHref={`/stock/${room.id}`} />
       )}
 
       {acc.manage && (

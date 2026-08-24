@@ -6,11 +6,13 @@ import { instruments, orgs, parts, poLines, purchaseOrders, stockrooms, stockroo
 import { requireUser } from "@/lib/authz";
 import { shopMonthDay } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
+import { makerNames } from "@/lib/makersData";
 import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { formatCents } from "@/lib/money";
 import { canSeeCosts } from "@/lib/redact";
-import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import NeededPartsCard from "@/components/NeededPartsCard";
+import NewPoButton from "@/components/NewPoButton";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
 
@@ -119,8 +121,14 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
       <PageHead
         crumb={<>Operations › <b>Purchasing</b></>}
         title="Purchasing"
-        sub="Orders are raised from a stockroom's reorder list, priced from the price book. Receiving here is what puts stock on the shelf, so the count and the paperwork can't drift apart."
-        actions={<Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>}
+        sub="Orders and receiving."
+        actions={
+          <>
+            <NewPoButton rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))}
+              vendors={isHouse(user.role) ? await makerNames(readTenant(user)) : []} />
+            <Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>
+          </>
+        }
       />
       <Toolbar
         search={
@@ -162,7 +170,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           { key: "when", label: "Raised", width: "70px", align: "right", hideMobile: true },
         ]}
         rows={[...open.map(toRow), ...closed.map(toRow)]}
-        empty="No orders yet - open a stockroom and use its Needs ordering list to raise the first one"
+        empty="No orders."
       />
       <Legend items={[
         { tone: "neutral", label: "draft" },

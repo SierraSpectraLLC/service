@@ -43,6 +43,7 @@ export default async function SettingsPage() {
         orgs={orgRows.map((o) => ({ id: o.id, name: o.name, kind: o.kind }))}
         platformName={s?.platformName ?? ""}
         platformTagline={s?.platformTagline ?? ""}
+        publicContactEmail={s?.publicContactEmail ?? ""}
         operatorOrgId={s?.operatorOrgId ?? null}
         digestHour={digestHour}
         digestDays={digestDays}

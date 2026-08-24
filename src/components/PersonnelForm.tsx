@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import {
-  updateSettings, addOrg,
-  removeClientAccess, setClientAccessOrg,
+  updateSettings, addOrg, changePersonEmail,
+  removeClientAccess, setClientAccessOrg, updatePersonProfile,
 } from "@/app/actions";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import { DataTable, FacetStrip, Panel, Pill, SaveBar, Toolbar } from "@/components/ui";
@@ -24,7 +25,15 @@ type OrgRow = {
   id: number; name: string; kind: string; themeColor: string;
   systems: number; logins: number; editors: number; recipients: string;
 };
-type PersonRow = { name: string; email: string; org: string };
+type PersonRow = {
+  name: string; email: string; org: string;
+  firstName: string; lastName: string; title: string; siteId: number | null;
+  /** The client login row that decides their org; null for house staff. */
+  allowlistId: number | null;
+  orgId: number | null;
+  isStaff: boolean;
+};
+type SiteRow = { id: number; orgId: number; name: string };
 type OrphanRow = { id: number; entry: string };
 
 /**
@@ -38,8 +47,10 @@ export default function PersonnelForm(props: {
   orgs: OrgRow[]; orphans: OrphanRow[];
   /** Platform staff, who can open a workspace for a service company. */
   isPlatform: boolean;
-  /** Everyone with a login this viewer may see - read only, assembled not curated. */
+  /** Everyone with a login this viewer may see, and the profile on each. */
   directory: PersonRow[];
+  /** Unarchived sites, for saying where a person sits. */
+  sites: SiteRow[];
   operatorOrgId: number | null; sheetOrgId: number | null;
   showRecipients: boolean; showSheetSync: boolean;
   /** From the URL, so a filtered list is a link. */
@@ -62,6 +73,41 @@ export default function PersonnelForm(props: {
     if (q) p.set("q", q);
     if (k) p.set("kind", k);
     return `/settings/organizations${p.size ? `?${p}` : ""}`;
+  };
+
+  // The person being edited: their draft fields plus the row they came from.
+  const [person, setPerson] = useState<null | {
+    row: PersonRow; firstName: string; lastName: string; title: string;
+    email: string; orgId: number | null; siteId: number | null;
+  }>(null);
+  const [personError, setPersonError] = useState("");
+  const openPerson = (p: PersonRow) => {
+    setPersonError("");
+    setPerson({
+      row: p, firstName: p.firstName, lastName: p.lastName, title: p.title,
+      email: p.email, orgId: p.orgId, siteId: p.siteId,
+    });
+  };
+  const savePerson = () => {
+    if (!person) return;
+    setPersonError("");
+    startTransition(async () => {
+      const p = person;
+      const res = await updatePersonProfile(p.row.email, {
+        firstName: p.firstName, lastName: p.lastName, title: p.title, siteId: p.siteId,
+      });
+      if (res?.error) { setPersonError(res.error); return; }
+      if (p.row.allowlistId !== null && p.orgId !== null && p.orgId !== p.row.orgId) {
+        const moved = await setClientAccessOrg(p.row.allowlistId, p.orgId);
+        if (moved?.error) { setPersonError(moved.error); return; }
+      }
+      if (p.email.trim().toLowerCase() !== p.row.email.trim().toLowerCase()) {
+        const mailed = await changePersonEmail(p.row.email, p.email);
+        if (mailed?.error) { setPersonError(mailed.error); return; }
+      }
+      toast({ message: `Saved ${[p.firstName, p.lastName].filter(Boolean).join(" ") || p.row.name}` });
+      setPerson(null);
+    });
   };
 
   const [orgDraft, setOrgDraft] = useState({ name: "", kind: "client" });
@@ -195,22 +241,98 @@ export default function PersonnelForm(props: {
         </div>
       )}
 
-      {/* Read-only on purpose. There is no roster to curate any more: a person
-          is a login, so this is a window onto the ones that exist rather than a
-          second list to keep in step with them. People are added where they get
-          their access - the house in Admin, an organization on its own page. */}
-      <Panel title="Directory" count={props.directory.length}
+      {/* Still assembled, never curated - a person is a login. What IS editable
+          here is who that login says they are: their name's halves, their
+          title, their site, their address, and (for client logins) their org. */}
+      <Panel title="People" count={props.directory.length}
         hint={<>Everyone tasks can be assigned to and @mentions can reach. Add somebody by giving them a login:
-          your own people in <a href="/settings/admin">Admin</a>, a client&apos;s on their organization&apos;s page.</>}>
-        {props.directory.map((p) => (
-          <div key={p.email} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid var(--line)" }}>
-            <span className="t-body" style={{ fontWeight: 700 }}>{p.name}</span>
-            {p.org && <span className="pill neutral">{p.org}</span>}
-            <span className="mut mono t-meta" style={{ marginLeft: "auto" }}>{p.email}</span>
-          </div>
-        ))}
-        {props.directory.length === 0 && <div className="mut t-small">Nobody has a login yet.</div>}
+          your own people in <a href="/settings/admin">Admin</a>, a client&apos;s on their organization&apos;s page.
+          Open a row to set their name, title, site or email.</>}>
+        <DataTable
+          cols={[
+            { key: "person", label: "Person", width: "minmax(150px, 1.4fr)" },
+            { key: "org", label: "Organization", width: "minmax(110px, 1fr)" },
+            { key: "site", label: "Site", width: "minmax(90px, 0.9fr)", hideMobile: true },
+            { key: "email", label: "Email", width: "minmax(160px, 1.3fr)", hideMobile: true },
+          ]}
+          rows={props.directory.map((p): DataRow => ({
+            key: p.email,
+            actions: [{ label: "Edit", onClick: () => openPerson(p) }],
+            cells: {
+              person: (
+                <span style={{ minWidth: 0, display: "block" }}>
+                  <span className="t-body" style={{ fontWeight: 700 }}>{p.name}</span>
+                  {p.title && <span className="mut t-meta" style={{ display: "block" }}>{p.title}</span>}
+                </span>
+              ),
+              org: p.org ? <Pill tone={p.isStaff ? "warn" : "neutral"}>{p.org}</Pill> : null,
+              site: <span className="mut t-small">{props.sites.find((s2) => s2.id === p.siteId)?.name ?? ""}</span>,
+              email: <span className="mut mono t-meta">{p.email}</span>,
+            },
+          }))}
+          empty="Nobody has a login yet."
+        />
       </Panel>
+
+      {person && (() => {
+        const theirSites = props.sites.filter((s2) => s2.orgId === (person.orgId ?? -1));
+        const emailChanged = person.email.trim().toLowerCase() !== person.row.email.trim().toLowerCase();
+        const problem = !person.email.trim() ? "an address is required"
+          : emailChanged && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(person.email.trim()) ? "that does not read as an email address"
+          : null;
+        return (
+          <Dialog open onClose={() => setPerson(null)} size="sm" title="Edit person"
+            context={person.row.name}
+            footer={
+              <>
+                <DialogStatus error={personError} problem={problem}
+                  ok={emailChanged ? "They will sign in with the new address." : "Ready to save."} />
+                <button className="btn" onClick={() => setPerson(null)} disabled={pending}>Cancel</button>
+                <button className="btn accent" disabled={pending || !!problem} onClick={savePerson}>
+                  {pending ? "Saving..." : "Save"}
+                </button>
+              </>
+            }>
+            <div className="pf2" style={{ marginBottom: 8 }}>
+              <div>
+                <label>First name</label>
+                <input value={person.firstName} autoFocus
+                  onChange={(e) => setPerson({ ...person, firstName: e.target.value })} />
+              </div>
+              <div>
+                <label>Last name</label>
+                <input value={person.lastName}
+                  onChange={(e) => setPerson({ ...person, lastName: e.target.value })} />
+              </div>
+            </div>
+            <label>Title</label>
+            <input value={person.title} placeholder="Lab manager"
+              onChange={(e) => setPerson({ ...person, title: e.target.value })} style={{ marginBottom: 8 }} />
+            <label>Email</label>
+            <input value={person.email} className="mono"
+              onChange={(e) => setPerson({ ...person, email: e.target.value })} style={{ marginBottom: 8 }} />
+            {person.row.allowlistId !== null && (
+              <>
+                <label>Organization</label>
+                <select value={person.orgId ?? ""} style={{ marginBottom: 8 }}
+                  onChange={(e) => setPerson({ ...person, orgId: parseInt(e.target.value) || null, siteId: null })}>
+                  {props.orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </>
+            )}
+            {theirSites.length > 0 && (
+              <>
+                <label>Site</label>
+                <select value={person.siteId ?? ""} style={{ marginBottom: 8 }}
+                  onChange={(e) => setPerson({ ...person, siteId: parseInt(e.target.value) || null })}>
+                  <option value="">No site</option>
+                  {theirSites.map((s2) => <option key={s2.id} value={s2.id}>{s2.name}</option>)}
+                </select>
+              </>
+            )}
+          </Dialog>
+        );
+      })()}
 
       <SaveBar dirty={dirty} saving={pending} message={barMsg}
         onSave={() => startTransition(async () => {

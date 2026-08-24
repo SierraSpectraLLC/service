@@ -2671,3 +2671,452 @@ ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "usage_unit" text NOT NULL DEF
 ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "internal" boolean NOT NULL DEFAULT false;
 UPDATE "eod_updates" SET "internal" = true
  WHERE "internal" = false AND "updated_by" IN ('sheet-sync', 'parity');
+
+-- ═══ BILLING ═══════════════════════════════════════════════════════════════
+-- Additive only, like everything else in this file. Nothing here stores a
+-- balance: invoice totals, drawdown, aging and hold status are all summed from
+-- rows at render time by the pure functions in src/lib (see lib/billing).
+
+-- What an hour costs. Three rungs, most specific first: agreement, then org,
+-- then the platform default with both ids null. Multipliers are integer
+-- percentages of the base rate - 150 is time-and-a-half, 50 is half - because
+-- a float multiplier on money is how a $160 hour becomes $239.99999997.
+CREATE TABLE IF NOT EXISTS "rate_cards" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer,
+  "agreement_id" integer,
+  "hourly_cents" integer NOT NULL DEFAULT 0,
+  "after_hours_pct" integer NOT NULL DEFAULT 150,
+  "travel_pct" integer NOT NULL DEFAULT 50,
+  "min_increment_min" integer NOT NULL DEFAULT 15,
+  "label" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "rate_cards_org_idx" ON "rate_cards" ("org_id");
+
+-- Money on a job that is neither a part nor an hour: mileage, freight, a night
+-- in a motel. Against the work order, because that is what it bills against.
+CREATE TABLE IF NOT EXISTS "expenses" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "work_order_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'other',
+  "description" text NOT NULL DEFAULT '',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "incurred_on" text NOT NULL DEFAULT '',
+  "logged_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "expenses_wo_idx" ON "expenses" ("work_order_id");
+
+-- Is this hour billable, and which kind of hour is it. Billable defaults true
+-- and is defaulted again at the panel from the agreement's coverage, so hours
+-- on a covered system arrive unticked without anybody remembering.
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "billable" boolean NOT NULL DEFAULT true;
+ALTER TABLE "time_entries" ADD COLUMN IF NOT EXISTS "category" text NOT NULL DEFAULT 'onsite';
+
+-- How a client is billed, and who the paper goes to. billing_policy overrides
+-- the platform defaults in app_settings, the same layering the digest schedule
+-- uses. A blank po_number is one of the two silent AP rejections (the other is
+-- an exhausted one) - both are warned about at draft, never blocked.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "terms_days" integer NOT NULL DEFAULT 30;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "ap_email" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "po_number" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "po_balance_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "billing_policy" jsonb;
+
+-- Sales tax on PARTS at the address the goods landed at, in basis points
+-- (775 = 7.75%). Tax belongs to the place, not the client. Zero draws no line.
+ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "tax_rate_bps" integer NOT NULL DEFAULT 0;
+
+-- ── Invoices: the bill, its lines, and the money that arrived ───────────────
+-- No balance column anywhere. What is owed is lines + fees - payments, summed
+-- at render by lib/billing.invoiceBalance. `status` is a lifecycle word (sent,
+-- voided, referred), not an arithmetic result.
+CREATE TABLE IF NOT EXISTS "invoices" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "work_order_id" integer,
+  "agreement_id" integer,
+  "number" text NOT NULL,
+  "status" text NOT NULL DEFAULT 'draft',
+  "issued_on" text NOT NULL DEFAULT '',
+  "due_on" text NOT NULL DEFAULT '',
+  "po_number" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "invoices_org_idx" ON "invoices" ("org_id");
+CREATE INDEX IF NOT EXISTS "invoices_wo_idx" ON "invoices" ("work_order_id");
+
+-- Two invoices filed in the same second both read the same highest number.
+-- This index is what makes that a failed insert rather than two bills called
+-- INV-0094; the action retries, exactly as fileWorkOrder does.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_number_unique') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoice_number_unique" UNIQUE ("tenant_org_id", "number");
+  END IF;
+END $$;
+
+-- qty is thousandths, so 4.5 hours is 4500 and nothing about a bill is ever a
+-- float. `covered` prices the line at zero while keeping its real quantity and
+-- unit price - that is what makes the $0 invoice readable.
+CREATE TABLE IF NOT EXISTS "invoice_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "invoice_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'part',
+  "description" text NOT NULL DEFAULT '',
+  "detail" text NOT NULL DEFAULT '',
+  "qty" integer NOT NULL DEFAULT 1000,
+  "unit_cents" integer NOT NULL DEFAULT 0,
+  "covered" boolean NOT NULL DEFAULT false,
+  "covered_by" text NOT NULL DEFAULT '',
+  "source_id" integer,
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "invoice_lines_invoice_idx" ON "invoice_lines" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "payments" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "method" text NOT NULL DEFAULT 'check',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "reference" text NOT NULL DEFAULT '',
+  "received_on" text NOT NULL DEFAULT '',
+  "recorded_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "payments_invoice_idx" ON "payments" ("invoice_id");
+
+-- A share link now knows what is on the other side of it, and remembers being
+-- opened. That open IS the Viewed signal on an invoice timeline: one answer to
+-- "did they see it", recorded where the link already lives.
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "kind" text NOT NULL DEFAULT 'files';
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "org_id" integer;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "invoice_id" integer;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "opened_at" timestamp;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "last_opened_at" timestamp;
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "open_count" integer NOT NULL DEFAULT 0;
+
+-- Invoice numbering and the one cost input a margin needs. loaded_labor_cents
+-- at zero means nobody has said - the costing view reports that rather than a
+-- flattering 100% margin.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "invoice_prefix" text NOT NULL DEFAULT 'INV-';
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "loaded_labor_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "billing_policy" jsonb;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_org_id_orgs_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_work_order_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoices_agreement_id_fk') THEN
+    ALTER TABLE "invoices" ADD CONSTRAINT "invoices_agreement_id_fk"
+      FOREIGN KEY ("agreement_id") REFERENCES "agreements"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_lines_invoice_id_fk') THEN
+    ALTER TABLE "invoice_lines" ADD CONSTRAINT "invoice_lines_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payments_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "payments" ADD CONSTRAINT "payments_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payments_invoice_id_fk') THEN
+    ALTER TABLE "payments" ADD CONSTRAINT "payments_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_org_id_orgs_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_invoice_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- ── Collections: fees, promises, disputes, the ladder log, hold overrides ───
+-- A fee is its own row and never edits the invoice it belongs to: an invoice
+-- that changed after it was sent is one nobody can reconcile against the copy
+-- in their inbox. Waiving keeps the row - the record of having charged and
+-- then waived is the part worth anything.
+CREATE TABLE IF NOT EXISTS "invoice_fees" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "basis" text NOT NULL DEFAULT '',
+  "posted_on" text NOT NULL DEFAULT '',
+  "posted_by" text NOT NULL DEFAULT '',
+  "waived" boolean NOT NULL DEFAULT false,
+  "waived_by" text NOT NULL DEFAULT '',
+  "waived_reason" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "invoice_fees_invoice_idx" ON "invoice_fees" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "promises" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "promised_on" text NOT NULL DEFAULT '',
+  "by_name" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "kept_on" text,
+  "logged_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "promises_invoice_idx" ON "promises" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "disputes" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "line_id" integer,
+  "reason" text NOT NULL DEFAULT '',
+  "opened_on" text NOT NULL DEFAULT '',
+  "opened_by" text NOT NULL DEFAULT '',
+  "resolved_on" text,
+  "resolution" text NOT NULL DEFAULT '',
+  "resolved_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "disputes_invoice_idx" ON "disputes" ("invoice_id");
+
+-- Which rungs have actually been climbed. The ladder is data in lib/dunning;
+-- this is the log nextAction reads, and what the demand letter cites when it
+-- says "we have since sent 3 reminders and a statement".
+CREATE TABLE IF NOT EXISTS "dunning_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "invoice_id" integer NOT NULL,
+  "rung" text NOT NULL DEFAULT '',
+  "to_name" text NOT NULL DEFAULT '',
+  "to_email" text NOT NULL DEFAULT '',
+  "sent_by" text NOT NULL DEFAULT 'auto',
+  "note" text NOT NULL DEFAULT '',
+  "sent_on" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "dunning_events_invoice_idx" ON "dunning_events" ("invoice_id");
+
+CREATE TABLE IF NOT EXISTS "credit_overrides" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "reason" text NOT NULL DEFAULT '',
+  "until_on" text NOT NULL DEFAULT '',
+  "granted_by" text NOT NULL DEFAULT '',
+  "lifted_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "credit_overrides_org_idx" ON "credit_overrides" ("org_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_fees_invoice_id_fk') THEN
+    ALTER TABLE "invoice_fees" ADD CONSTRAINT "invoice_fees_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'invoice_fees_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "invoice_fees" ADD CONSTRAINT "invoice_fees_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'promises_invoice_id_fk') THEN
+    ALTER TABLE "promises" ADD CONSTRAINT "promises_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'promises_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "promises" ADD CONSTRAINT "promises_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_invoice_id_fk') THEN
+    ALTER TABLE "disputes" ADD CONSTRAINT "disputes_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_line_id_fk') THEN
+    ALTER TABLE "disputes" ADD CONSTRAINT "disputes_line_id_fk"
+      FOREIGN KEY ("line_id") REFERENCES "invoice_lines"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'disputes_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "disputes" ADD CONSTRAINT "disputes_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dunning_events_invoice_id_fk') THEN
+    ALTER TABLE "dunning_events" ADD CONSTRAINT "dunning_events_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'dunning_events_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "dunning_events" ADD CONSTRAINT "dunning_events_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'credit_overrides_org_id_orgs_id_fk') THEN
+    ALTER TABLE "credit_overrides" ADD CONSTRAINT "credit_overrides_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'credit_overrides_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "credit_overrides" ADD CONSTRAINT "credit_overrides_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- ── Quotes: a price, offered ───────────────────────────────────────────────
+-- Composed by the same lib/billing function that composes an invoice, from the
+-- same rows, so what was quoted and what gets billed cannot drift apart. What
+-- a quote adds is a date it stops being true and a deposit owed on yes.
+CREATE TABLE IF NOT EXISTS "quotes" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "work_order_id" integer,
+  "agreement_id" integer,
+  "number" text NOT NULL,
+  "status" text NOT NULL DEFAULT 'draft',
+  "title" text NOT NULL DEFAULT '',
+  "sent_on" text NOT NULL DEFAULT '',
+  "expires_on" text NOT NULL DEFAULT '',
+  "deposit_pct" integer NOT NULL DEFAULT 0,
+  "answered_on" text,
+  "answered_by" text NOT NULL DEFAULT '',
+  "answer_note" text NOT NULL DEFAULT '',
+  "deposit_invoice_id" integer,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "updated_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "quotes_org_idx" ON "quotes" ("org_id");
+CREATE INDEX IF NOT EXISTS "quotes_wo_idx" ON "quotes" ("work_order_id");
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quote_number_unique') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quote_number_unique" UNIQUE ("tenant_org_id", "number");
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "quote_lines" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "quote_id" integer NOT NULL,
+  "kind" text NOT NULL DEFAULT 'part',
+  "description" text NOT NULL DEFAULT '',
+  "detail" text NOT NULL DEFAULT '',
+  "qty" integer NOT NULL DEFAULT 1000,
+  "unit_cents" integer NOT NULL DEFAULT 0,
+  "covered" boolean NOT NULL DEFAULT false,
+  "covered_by" text NOT NULL DEFAULT '',
+  "source_id" integer,
+  "position" integer NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS "quote_lines_quote_idx" ON "quote_lines" ("quote_id");
+
+ALTER TABLE "share_links" ADD COLUMN IF NOT EXISTS "quote_id" integer;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_org_id_orgs_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_work_order_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_agreement_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_agreement_id_fk"
+      FOREIGN KEY ("agreement_id") REFERENCES "agreements"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quotes_deposit_invoice_id_fk') THEN
+    ALTER TABLE "quotes" ADD CONSTRAINT "quotes_deposit_invoice_id_fk"
+      FOREIGN KEY ("deposit_invoice_id") REFERENCES "invoices"("id") ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'quote_lines_quote_id_fk') THEN
+    ALTER TABLE "quote_lines" ADD CONSTRAINT "quote_lines_quote_id_fk"
+      FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'share_links_quote_id_fk') THEN
+    ALTER TABLE "share_links" ADD CONSTRAINT "share_links_quote_id_fk"
+      FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- ── Payments: the operator's own Stripe account, and the platform's cut ────
+-- The connected account belongs to the SERVICE COMPANY, not to Ridgeline.
+-- Money moves bank to bank; the platform never holds funds and never sees a
+-- card number. Blank means nobody has connected one and the pay buttons do
+-- not render at all.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_account_id" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "stripe_ready" boolean NOT NULL DEFAULT false;
+
+-- Zero, and it stays zero until somebody decides otherwise: a platform that
+-- silently starts taking a percentage of an operator's revenue is a platform
+-- they leave.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "platform_fee_bps" integer NOT NULL DEFAULT 0;
+
+-- ── People: the structured profile an owner can edit ───────────────────────
+-- first/last are the structured halves of "name" (which stays the display
+-- name everywhere); title is who they are at their company; site_id is which
+-- of their organization's sites they sit at.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "first_name" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_name" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "site_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_site_id_fk') THEN
+    ALTER TABLE "users" ADD CONSTRAINT "users_site_id_fk"
+      FOREIGN KEY ("site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- ── Sourcing: the facts "cheapest or fastest" is decided on ────────────────
+-- lead_days is the vendor's business days to ship (null = nobody asked, which
+-- sorts slower than any number); drop_ships is whether they ship to a client
+-- site under our paperwork; expedite_ok is whether they overnight on request.
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "lead_days" integer;
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "drop_ships" boolean NOT NULL DEFAULT false;
+ALTER TABLE "part_prices" ADD COLUMN IF NOT EXISTS "expedite_ok" boolean NOT NULL DEFAULT false;
+
+-- Days a non-drop-shipped part spends turning around at the shop, and the
+-- brand parts ship under (packing slips, blind-ship instructions).
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "cross_dock_days" integer NOT NULL DEFAULT 1;
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "parts_brand" text NOT NULL DEFAULT 'Ridgeline';
+
+-- ── Drop-ship and urgency on purchase orders ───────────────────────────────
+-- ship_to_site_id null = ships to the stockroom as always; set = the vendor
+-- ships straight to that client site under our paperwork (blind ship), and
+-- receiving confirms delivery instead of shelving. urgent = overnight it.
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "ship_to_site_id" integer;
+ALTER TABLE "purchase_orders" ADD COLUMN IF NOT EXISTS "urgent" boolean NOT NULL DEFAULT false;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'po_ship_to_site_fk') THEN
+    ALTER TABLE "purchase_orders" ADD CONSTRAINT "po_ship_to_site_fk"
+      FOREIGN KEY ("ship_to_site_id") REFERENCES "org_sites"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- Work that happened off the board: a call answered, an engineer walked
+-- through a problem. Both instrument_id and asset_id stay null on these rows,
+-- so the title is what identifies the line. See eod_updates.title.
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "person" text NOT NULL DEFAULT '';
+ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "minutes" integer NOT NULL DEFAULT 0;
+
+-- Where an enquiry from the public landing page goes. See app_settings.publicContactEmail.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "public_contact_email" text NOT NULL DEFAULT '';
+

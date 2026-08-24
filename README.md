@@ -97,6 +97,13 @@ Import the repo in Vercel. Add all env vars from `.env`. Then:
   hundreds of ms per page load that no code change can recover.
 - **Storage > Blob**: create a store; `BLOB_READ_WRITE_TOKEN` is injected
   automatically.
+- **Payments**: Stripe Connect Express, TEST MODE until launch. Set
+  `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (see `.env.example`); leave
+  them blank and the pay buttons do not render, which is a supported state -
+  the portal tells clients how to send a check. The connected account belongs
+  to the operator, not the platform: money moves bank to bank, no card number
+  reaches this server, and Ridgeline never holds funds. The webhook at
+  `/api/stripe/webhook` verifies signatures before parsing anything.
 - **Cron**: `vercel.json` schedules `GET /api/cron/sheet-sync` and
   `GET /api/cron/daily-digest` hourly. Set `CRON_SECRET` in project env; Vercel
   sends it as the bearer token.

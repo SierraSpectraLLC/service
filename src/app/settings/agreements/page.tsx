@@ -94,7 +94,7 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
   return (
     <div>
       <PageHead title="Agreements"
-        sub="The paper behind the work, across every client: what is in force, what is up for renewal, and how much of each allowance is left." />
+        sub="Contracts, POs and quotes across every client." />
       <Toolbar
         search={
           <form action="/settings/agreements">

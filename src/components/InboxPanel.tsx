@@ -88,14 +88,14 @@ export default function InboxPanel({ items, prefs, filter }: {
             when: <span className="mut">{n.when}</span>,
           },
         }))}
-        empty="Nothing yet - assignments, discussion posts, access requests and empty-gas flags land here as well as in email"
+        empty="Nothing yet."
       />
       <Legend items={[{ tone: "info", label: "unread" }]} />
 
       <DesktopAlerts />
 
       <Panel title="Email preferences"
-        hint="Everything always lands in this inbox; these only control which kinds also email you.">
+        hint="Which kinds also email you.">
         {NOTIFY_KINDS.map((k) => (
           <label key={k.kind} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", cursor: "pointer" }}>
             <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} className="check"

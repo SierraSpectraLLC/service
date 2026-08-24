@@ -10,10 +10,12 @@ import { sinceByStage, completedDurations, ageDays } from "@/lib/stageAges";
 import { pmCompliance, shippedTurnaround, minutesBy, spendBy } from "@/lib/reports";
 import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
+import { costingBoard } from "@/lib/invoiceData";
+import { SLOW_PAY_DAYS } from "@/lib/costing";
 import { addDays } from "@/lib/pm";
 import { shopToday } from "@/lib/shopday";
 import { forTenant, readTenant, viewTenant } from "@/lib/tenancy";
-import { Panel } from "@/components/ui";
+import { Panel, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +131,11 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const maxSpend = Math.max(0, ...spend.map(([, v]) => v.cents));
   const maxAvgStage = Math.max(0, ...avgRows.map((r) => r.avg));
 
+  // What it costs to be owed the money, per client. Same loader Costing uses,
+  // so the two pages cannot disagree about it.
+  const payDays = (await costingBoard(shopToday(), days).catch(() => ({ clients: [] })))
+    .clients.filter((c) => c.daysToPay !== null);
+
   return (
     <div className="container wide">
       <div className="crumb">Operations › <b>Metrics</b></div>
@@ -162,7 +169,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       <div className="panel-cols">
         <div>
       <Panel title="PM compliance"
-        hint="Scheduled maintenance that fell due in the window. A task reopened after being done counts as open - the work is not done.">
+        hint="Maintenance due in the window">
         {pmTotal === 0 ? (
           <div className="mut t-body">No scheduled maintenance fell due in this window.</div>
         ) : (
@@ -189,7 +196,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         )}
       </Panel>
       <Panel title="Hours"
-        hint="Logged labor, by client and by person. Unlogged work is invisible here - log hours on the system or unit where they happened.">
+        hint="Logged labor">
         {hoursByClient.length === 0 ? (
           <div className="mut t-body">No hours logged in this window.</div>
         ) : (
@@ -221,8 +228,32 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
           </div>
         )}
       </Panel>
+      {/* Days-to-pay, beside the work. A client's margin lives in Billing;
+          what it costs to be owed the money belongs next to how much of the
+          shop's time they take. */}
+      {payDays.length > 0 && (
+        <Panel
+          title="Days to pay"
+          count={payDays.length}
+          hint="Weighted by amount, over settled invoices"
+        >
+          {payDays.map((c) => (
+            <div key={c.orgId} className="row-2" style={{ alignItems: "baseline", padding: "6px 0", borderTop: "1px solid var(--line)" }}>
+              <span className="t-body" style={{ flex: 1, minWidth: 0 }}>{c.orgName}</span>
+              <span className="mut t-small">{c.terms}</span>
+              <Pill tone={c.daysToPay! >= SLOW_PAY_DAYS ? "bad" : c.daysToPay! > 20 ? "warn" : "good"}>
+                {c.daysToPay} d
+              </Pill>
+            </div>
+          ))}
+          <div className="mut t-small" style={{ marginTop: 8 }}>
+            <Link href="/money/costing">Costing →</Link>
+          </div>
+        </Panel>
+      )}
+
       <Panel title="Time in stage" count={active.length}
-        hint="Active systems, longest-parked first. Ages count from when the stage was added (systems that predate stage tracking count from their creation)."
+        hint="Active systems, longest-parked first"
         empty="No active systems">
         {active.length === 0 ? null : <>{active.map((i) => (
           <Link key={i.id} href={`/instruments/${i.id}`} className="row-hover"
@@ -242,7 +273,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         </div>
         <div>
       <Panel title="Turnaround"
-        hint="Days from a system entering the shop to its first Shipped. Days it spent in another organization's queue are shown separately - the client waited for them, but nobody here could have shortened them.">
+        hint="Intake to first Shipped">
         {turnaround.length === 0 ? (
           <div className="mut t-body">Nothing shipped in this window.</div>
         ) : (
@@ -283,7 +314,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         )}
       </Panel>
       <Panel title="Average days per stage"
-        hint="From completed stage transitions (a stage added and later removed). Builds up as systems move through the shop.">
+        hint="From completed stage transitions">
         {avgRows.map((r) => (
           <div key={r.stage} style={{ padding: "7px 4px", borderTop: "1px solid var(--line)" }}>
             <div className="t-body" style={{ display: "flex", alignItems: "center", gap: 8 }}>

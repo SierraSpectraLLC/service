@@ -10,6 +10,8 @@ import { storeQuota } from "@/lib/storeUsage";
 import OrgSettingsForm from "@/components/OrgSettingsForm";
 import SitesCard from "@/components/SitesCard";
 import AgreementsPanel from "@/components/AgreementsPanel";
+import BillingPolicyPanel from "@/components/BillingPolicyPanel";
+import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
 import { isHouse, maySeeAgreements } from "@/lib/tenancy";
@@ -103,12 +105,17 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   ];
 
   const base = `/settings/organizations/${org.id}`;
-  const tab = ["agreements", "sites"].includes(sp.tab ?? "") && (sp.tab !== "agreements" || seesAgreements)
+  // Billing is owner-only, so it is gated here as well as in the tab list -
+  // a tab you cannot see is not a tab you can reach by typing the URL.
+  const tab = ["agreements", "sites", "billing"].includes(sp.tab ?? "")
+    && (sp.tab !== "agreements" || seesAgreements)
+    && (sp.tab !== "billing" || isOwner)
     ? sp.tab! : "settings";
   const tabs: TabItem[] = [
     { key: "settings", label: "Settings", href: base },
     ...(seesAgreements ? [{ key: "agreements", label: "Agreements", count: agreementRows.length, href: `${base}?tab=agreements` }] : []),
     { key: "sites", label: "Sites", count: siteRows.length, href: `${base}?tab=sites` },
+    ...(isOwner ? [{ key: "billing", label: "Billing", href: `${base}?tab=billing` }] : []),
   ];
 
   return (
@@ -170,6 +177,18 @@ export default async function OrgSettingsPage({ params, searchParams }: {
         canEdit={isHouse(user.role)}
         papers={agreementPapers}
       />
+      )}
+
+      {tab === "billing" && isOwner && (
+        <BillingPolicyPanel
+          orgId={org.id}
+          orgName={org.name}
+          policy={resolvePolicy(s?.billingPolicy ?? null, org.billingPolicy ?? null)}
+          terms={org.termsDays}
+          apEmail={org.apEmail}
+          poNumber={org.poNumber}
+          poBalanceCents={org.poBalanceCents}
+        />
       )}
 
       {tab === "sites" && <SitesCard

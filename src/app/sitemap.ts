@@ -14,13 +14,19 @@ export const dynamic = "force-dynamic";
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const url = appUrl();
-  // Nothing to offer a crawler while the library is off.
-  if (!url || !(await getModules()).publicCatalog) return [];
+  // Relative URLs in a sitemap are worse than no sitemap.
+  if (!url) return [];
+  const { publicCatalog } = await getModules();
+  // The landing page stands whether or not the library is switched on; it is
+  // the root of the site and the only page every other one links back to.
+  const home = [{ url, changeFrequency: "weekly" as const, priority: 1 }];
+  if (!publicCatalog) return home;
   const rows = await db.select({ slug: vocabTerms.publicSlug }).from(vocabTerms)
     .where(and(eq(vocabTerms.published, true), eq(vocabTerms.kind, "model")))
     .orderBy(asc(vocabTerms.publicSlug))
     .catch(() => []);
   return [
+    ...home,
     { url: `${url}/equipment`, changeFrequency: "weekly", priority: 0.8 },
     ...rows.filter((r) => r.slug).map((r) => ({
       url: `${url}/equipment/${r.slug}`,

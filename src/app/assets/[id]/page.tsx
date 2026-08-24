@@ -508,7 +508,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
           { key: "hours", label: "Hours", node: (
             <HoursPanel target={target}
               entries={[...taggedTime].sort((a, b) => (a.date < b.date ? 1 : -1))
-                .map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note }))}
+                .map((t) => ({ id: t.id, person: t.person, date: t.date, minutes: t.minutes, note: t.note, billable: t.billable, category: t.category }))}
               people={directoryNames(peopleRows)} defaultPerson={user.name}
               today={shopToday()} canEdit={canEdit} isStaff={isStaff} />
           ) },

@@ -2,22 +2,25 @@ import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL 
 import { db } from "@/db";
 import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders, users } from "@/db/schema";
-import { queueView } from "@/lib/queue";
+import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
+import { getModules } from "@/lib/flags";
 import { shopTime } from "@/lib/shopday";
-import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
+import { BLOCKED_STAGE, GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { expiryAttention, expiryLabel } from "@/lib/gxp";
 import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
-import { requireUser, viewContext } from "@/lib/authz";
+import { currentUser, requireUser, viewContext } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
+import Landing from "@/components/Landing";
+import MoneyCard from "@/components/MoneyCard";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
@@ -25,6 +28,15 @@ export const dynamic = "force-dynamic";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; f?: string; sort?: string }> }) {
   const initial = await searchParams;
+  // The apex answers strangers now, so a missing session is not an error here
+  // - it is the other half of this route. Bouncing to /login would have made
+  // the front door of the site a sign-in form.
+  const visitor = await currentUser();
+  if (!visitor) {
+    const [brand, modules] = await Promise.all([getBrand(), getModules()]);
+    return <Landing brandName={brand.name} operatorName={brand.operatorName}
+      catalogOn={modules.publicCatalog} contactEmail={brand.contactEmail} />;
+  }
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
@@ -178,6 +190,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
         .filter((a) => a.instrumentId === i.id && assetAttention(a.status))
         .map((a) => `${a.kind.toLowerCase()} ${a.status === "Down" ? "down" : "attn"}`),
       missingFromSheet: droppedFromSheet.has(i.externalId),
+      // Blocked is the one stage that MEANS something is wrong: it is the only
+      // one that demands a written reason, and a system sitting in it is a
+      // system nobody is moving. The board has to say so, with the age -
+      // "blocked" and "blocked 40d" are different problems.
+      blockedDays: i.stages.includes(BLOCKED_STAGE)
+        ? (i.blockedSince ? daysSince(i.blockedSince, new Date()) : 0)
+        : null,
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
       // Whose move it is. A system parked with the client is still visible -
       // hiding it would just move the forgetting somewhere else - but it reads
@@ -217,6 +236,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
           key: c.key, date: c.date, title: c.title, body: c.body, image: c.image, href: c.href,
         }))} />
       )}
+      {/* Whose move is it, in money - above the board, because an unbilled
+          closed job is work that is finished and still costing. */}
+      {isStaff && <MoneyCard />}
       <Dashboard
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}

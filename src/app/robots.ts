@@ -3,10 +3,22 @@ import { appUrl } from "@/lib/appUrl";
 import { getModules } from "@/lib/flags";
 
 /**
- * The public library is the only indexable surface. Everything else is a
- * signed-in application or a bearer-token page, and neither belongs in a
- * search index - the token pages especially, where being findable would
- * defeat the token.
+ * Deny by default, allow the few pages meant for strangers.
+ *
+ * The posture is deliberate and it is the safe direction for an application
+ * whose every other route holds somebody's client data. `Disallow: /` covers
+ * the app, and each public surface is named:
+ *
+ *   /$          the landing page, and ONLY the landing page. The `$` is the
+ *               end-of-path wildcard both Google and Bing honour; without it
+ *               "/" would allow the entire site and undo the rule above.
+ *   /equipment  the library, which exists to be found.
+ *
+ * A page added later is invisible to crawlers until somebody names it here.
+ * That is the point: forgetting to allow a marketing page costs a little
+ * traffic, forgetting to disallow a client's invoice costs a great deal more.
+ * The token pages (/share, /drop, /listing) are listed anyway - belt and
+ * braces on the ones where being findable would defeat the credential.
  */
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const url = appUrl();
@@ -14,11 +26,9 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
   return {
     rules: [{
       userAgent: "*",
-      // While the library is off there is nothing here for anybody: disallow
-      // the whole site rather than advertising a door that answers 404.
-      ...(publicCatalog ? { allow: ["/equipment"] } : {}),
+      allow: ["/$", ...(publicCatalog ? ["/equipment"] : [])],
       disallow: ["/", "/api/", "/listing/", "/drop/", "/share/", "/catalog/", "/settings/"],
     }],
-    ...(url && publicCatalog ? { sitemap: `${url}/sitemap.xml`, host: url } : {}),
+    ...(url ? { sitemap: `${url}/sitemap.xml`, host: url } : {}),
   };
 }

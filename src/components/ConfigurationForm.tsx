@@ -47,7 +47,7 @@ export default function ConfigurationForm(props: {
   stageDefs: StageRow[];
   orgs: OrgRow[];
   modules: { sheetSync: boolean; eod: boolean; digest: boolean; remote: boolean; publicCatalog: boolean };
-  platformName: string; platformTagline: string; operatorOrgId: number | null;
+  platformName: string; platformTagline: string; publicContactEmail: string; operatorOrgId: number | null;
   /** When the internal edition of the daily digest goes out, in shop time. */
   digestHour: number;
   /** Which weekdays, as stored ("" = every day). */
@@ -95,7 +95,7 @@ export default function ConfigurationForm(props: {
   // last stored state and saves whatever differs, so there is exactly one
   // Save on the page however many panels it grows.
   const [base, setBase] = useState({
-    name: props.platformName, tagline: props.platformTagline,
+    name: props.platformName, tagline: props.platformTagline, contactEmail: props.publicContactEmail,
     headerColor: props.appearance.headerColor,
     spectrumHeight: props.appearance.spectrumHeight,
     spectrumStops: props.appearance.spectrumStops,
@@ -104,7 +104,9 @@ export default function ConfigurationForm(props: {
   const [barErr, setBarErr] = useState("");
   const clearBar = () => { setBarMsg(""); setBarErr(""); };
 
-  const [brandDraft, setBrandDraft] = useState({ name: props.platformName, tagline: props.platformTagline });
+  const [brandDraft, setBrandDraft] = useState({
+    name: props.platformName, tagline: props.platformTagline, contactEmail: props.publicContactEmail,
+  });
   const [opError, setOpError] = useState("");
 
   // ---- Appearance -------------------------------------------------------
@@ -145,7 +147,8 @@ export default function ConfigurationForm(props: {
     setBandH(DEFAULT_SPECTRUM_HEIGHT); setStops(DEFAULT_STOPS);
   };
 
-  const brandDirty = brandDraft.name !== base.name || brandDraft.tagline !== base.tagline;
+  const brandDirty = brandDraft.name !== base.name || brandDraft.tagline !== base.tagline
+    || brandDraft.contactEmail !== base.contactEmail;
   const lookDirty = (headerDefault ? "" : header) !== base.headerColor
     || bandH !== base.spectrumHeight
     || JSON.stringify(stops) !== JSON.stringify(base.spectrumStops);
@@ -172,7 +175,7 @@ export default function ConfigurationForm(props: {
         if (res?.error) { setBarErr(res.error); return; }
       }
       setBase({
-        name: brandDraft.name, tagline: brandDraft.tagline,
+        name: brandDraft.name, tagline: brandDraft.tagline, contactEmail: brandDraft.contactEmail,
         headerColor: headerDefault ? "" : header,
         spectrumHeight: bandH, spectrumStops: stops,
       });
@@ -181,7 +184,7 @@ export default function ConfigurationForm(props: {
   };
   const discardAll = () => {
     clearBar();
-    setBrandDraft({ name: base.name, tagline: base.tagline });
+    setBrandDraft({ name: base.name, tagline: base.tagline, contactEmail: base.contactEmail });
     setHeader(base.headerColor || DEFAULT_HEADER);
     setHeaderDefault(!base.headerColor);
     setBandH(base.spectrumHeight);
@@ -235,7 +238,7 @@ export default function ConfigurationForm(props: {
   return (
     <>
       <Panel title="This instance"
-        hint="The portal's name, who operates it, and which optional workflows are switched on.">
+        hint="">
         <div className="pf2">
           <Field label="Name">
             <input value={brandDraft.name} onChange={(e) => { clearBar(); setBrandDraft({ ...brandDraft, name: e.target.value }); }}
@@ -246,10 +249,18 @@ export default function ConfigurationForm(props: {
               placeholder="instrument portal" />
           </Field>
         </div>
+        {/* The one address a stranger can reach. Blank on purpose takes the
+            enquiry buttons off the landing page rather than mailing nowhere. */}
+        <Field label="Public contact address"
+          hint="Where enquiries from the home page go. Leave blank to show no contact button.">
+          <input type="email" value={brandDraft.contactEmail}
+            onChange={(e) => { clearBar(); setBrandDraft({ ...brandDraft, contactEmail: e.target.value }); }}
+            placeholder="hello@ridgelinefield.com" />
+        </Field>
         {/* Names an operator the moment it's picked - who runs the instance is
             not a draft to sit unsaved behind a bar. */}
         <Field label="Operated by"
-          hint="The operator is named on sign-off packets and reports; systems staff create are shared with it."
+          hint="Named on sign-off packets and reports."
           error={opError || undefined}>
           <select value={props.operatorOrgId ?? ""} disabled={pending}
             onChange={(e) => {
@@ -342,7 +353,7 @@ export default function ConfigurationForm(props: {
           is the point, since nobody can pick a five-stop gradient from a list
           of hex codes. */}
       <Panel title="Appearance"
-        hint="The header bar and the spectrum above it. Organizations that set their own colour keep it - this is what everyone else sees.">
+        hint="Header colors.">
 
         <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: 12 }}>
           <div style={{ height: bandH, background: gradientCss(stops) }} />

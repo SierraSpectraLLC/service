@@ -18,6 +18,8 @@ export type Brand = {
   operatorOrgId: number | null;
   /** The operator org's logo (blob URL), shown on those same documents. */
   operatorLogoUrl: string;
+  /** Where a public enquiry goes. Blank means do not offer the door at all. */
+  contactEmail: string;
 };
 
 /**
@@ -35,6 +37,7 @@ export const getBrand = cache(async (): Promise<Brand> => {
       .select({
         platformName: appSettings.platformName,
         platformTagline: appSettings.platformTagline,
+        publicContactEmail: appSettings.publicContactEmail,
         operatorOrgId: appSettings.operatorOrgId,
         operatorName: orgs.name,
         operatorLogoUrl: orgs.logoUrl,
@@ -52,9 +55,10 @@ export const getBrand = cache(async (): Promise<Brand> => {
       operatorName: operatorName || name,
       operatorOrgId: s?.operatorOrgId ?? null,
       operatorLogoUrl,
+      contactEmail: (s?.publicContactEmail ?? "").trim(),
     };
   } catch {
-    return { name: DEFAULT_BRAND, tagline: "instrument portal", operatorName: DEFAULT_BRAND, operatorOrgId: null, operatorLogoUrl: "" };
+    return { name: DEFAULT_BRAND, tagline: "instrument portal", operatorName: DEFAULT_BRAND, operatorOrgId: null, operatorLogoUrl: "", contactEmail: "" };
   }
 });
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, workOrders } from "@/db/schema";
+import { appSettings, instruments, orgSites, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isHouse, readTenant, visibleSystemIds } from "@/lib/tenancy";
 import { makerNames } from "@/lib/makersData";
@@ -11,8 +11,9 @@ import { stockAccess } from "@/lib/stock";
 import PoPanel from "@/components/PoPanel";
 import { RecordHero, type HeroStat } from "@/components/ui";
 import PoJobCard from "@/components/PoJobCard";
+import PoShippingCard from "@/components/PoShippingCard";
 import { woOpen } from "@/lib/workOrders";
-import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
+import { PO_LABEL, PO_TONE, poEditable, poTotals } from "@/lib/po";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,24 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
 
   const [org] = po.orgId === null ? [] : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, po.orgId));
 
+  // Drop-ship candidates: every unarchived client site in this tenant, named
+  // by whose it is. House-only, like the vendor list - a client issuing their
+  // own PO ships to their own dock and does not need the whole site book.
+  const canRoute = isHouse(user.role) && manage;
+  const siteRows = canRoute || po.shipToSiteId !== null
+    ? await db.select({
+        id: orgSites.id, name: orgSites.name, orgId: orgSites.orgId, archived: orgSites.archived,
+        orgName: orgs.name, orgKind: orgs.kind,
+      }).from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
+        .orderBy(asc(orgs.name), asc(orgSites.name))
+    : [];
+  const shipSites = siteRows
+    .filter((s) => (!s.archived && s.orgKind === "client") || s.id === po.shipToSiteId)
+    .map((s) => ({ id: s.id, label: `${s.orgName}${s.name ? ` - ${s.name}` : ""}` }));
+  const [settingsRow] = canRoute || po.shipToSiteId !== null
+    ? await db.select({ partsBrand: appSettings.partsBrand }).from(appSettings).where(eq(appSettings.id, 1))
+    : [];
+
   // Which jobs this order could be filed against: the ones on systems this
   // person can see, still taking work - plus whichever it is already on, so an
   // order filed against a job that has since closed still names it rather than
@@ -68,8 +87,10 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
   const onJob = woRows.find((w) => w.id === po.workOrderId) ?? null;
 
   const totals = poTotals(lines);
+  const dropSite = shipSites.find((s) => s.id === po.shipToSiteId) ?? null;
   const heroStats: HeroStat[] = [
     { value: PO_LABEL[po.status] ?? po.status, label: "", tone: (PO_TONE[po.status] ?? "neutral") === "neutral" ? undefined : PO_TONE[po.status] },
+    ...(po.urgent ? [{ value: "URGENT", label: "overnight", tone: "bad" as const }] : []),
     { value: `${totals.received} of ${totals.ordered}`, label: "received", tone: po.status === "partial" ? "warn" : undefined },
     ...(po.expectedAt ? [{ value: po.expectedAt, label: "expected" }] : []),
   ];
@@ -84,9 +105,22 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
         eyebrow={org?.name ? `${org.name}'s order` : "Our order"}
         id={po.number}
         title={po.vendor}
-        meta={<>→ {room ? <Link href={`/stock/${room.id}`} style={{ color: "inherit" }}>{room.name}</Link> : "(stockroom gone)"}</>}
+        meta={dropSite
+          ? <>→ drop-ship to {dropSite.label}</>
+          : <>→ {room ? <Link href={`/stock/${room.id}`} style={{ color: "inherit" }}>{room.name}</Link> : "(stockroom gone)"}</>}
         stats={heroStats}
       />
+
+      {(canRoute || po.shipToSiteId !== null || po.urgent) && (
+        <PoShippingCard
+          poId={po.id}
+          editable={canRoute && poEditable(po.status)}
+          shipToSiteId={po.shipToSiteId}
+          urgent={po.urgent}
+          sites={shipSites}
+          brand={settingsRow?.partsBrand || "Ridgeline"}
+        />
+      )}
 
       <PoPanel
         po={{

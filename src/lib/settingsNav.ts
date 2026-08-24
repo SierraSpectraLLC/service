@@ -38,6 +38,9 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
     name: "Organizations",
     entries: [
       { href: "/settings/organizations", label: "Clients & orgs", ownerOnly: true },
+      // How money works before anybody overrides it per client, and where the
+      // books leave for the accountant.
+      { href: "/settings/billing", label: "Billing & payments", ownerOnly: true },
       { href: "/settings/agreements", label: "Agreements", ownerOnly: false },
       // The instance's tenants - only the company running it has business here.
       { href: "/settings/tenants", label: "Service companies", ownerOnly: true, platformOnly: true },

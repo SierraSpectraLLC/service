@@ -61,7 +61,7 @@ export default async function AdminSettingsPage() {
   return (
     <div>
       <PageHead title="People & ownership"
-        sub="Who works here, what is waiting on a decision, and who owns and can see each system." />
+        sub="People, access and ownership." />
 
       <HouseMembersPanel members={houseRows} myEmail={user.email} />
 
@@ -89,8 +89,7 @@ export default async function AdminSettingsPage() {
           The summary line answers the audit question - who owns it, who sees
           it - and the full sharing panel opens only for the row being worked. */}
       <Panel title="Access &amp; ownership" count={rows.length}
-        hint="Every system, who owns it, and who can see it. Open a row to reassign the owner or
-          change who it is shared with.">
+        hint="Open a row to change the owner or sharing.">
         {rows.map((inst) => {
           const shares = shareRows.filter((s) => s.instrumentId === inst.id);
           const label = systemLabel(inst, assetRows.filter((a) => a.instrumentId === inst.id));

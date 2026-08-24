@@ -495,8 +495,18 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
   .mnav-burger { display: inline-flex; }
 
   .mnav-drawer { display: block; position: fixed; inset: 0; z-index: 45; }
+  /* The drawer's z-index makes it a STACKING CONTEXT, so the numbers inside it
+     start again from zero and .scrim's global 40 is meaningless here - it only
+     has to beat its sibling. Left alone, the scrim (40) painted over the pane
+     (positioned, z-index auto, so 0): the menu came up dimmed and every tap
+     landed on the scrim, whose job is to close the drawer. Links looked dead
+     because tapping one shut the menu instead of navigating.
+     Both get an explicit number so the pair is self-contained and does not
+     depend on what the dialog's scrim happens to be set to. */
+  .mnav-drawer .scrim { z-index: 0; }
   .mnav-pane {
     position: absolute; left: 0; top: 0; bottom: 0; width: min(280px, 84vw);
+    z-index: 1;
     background: var(--card); overflow-y: auto; padding: 10px 0 20px;
     box-shadow: 0 0 40px rgba(23, 42, 74, 0.3);
   }
@@ -1116,3 +1126,40 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .savebar-status { flex: 1; font-size: 12px; color: var(--mut); min-width: 0; }
 .savebar-status .err { color: var(--t-bad-fg); }
 .savebar-status .ok { color: var(--t-good-fg); }
+
+
+/* ── Typing on a phone ───────────────────────────────────────────────────────
+   LAST BLOCK IN THIS FILE, ON PURPOSE. Read the whole comment before moving it.
+
+   iOS Safari force-zooms the page whenever a focused field's text measures
+   under 16px, and each zoom relays the page out under the caret: the field
+   scrolls off, focus goes with it, and the keyboard drops. On a dense app
+   whose base field size is 13px (and 11px for the small ones) that is one
+   dropped keyboard per character, in every text box on every page.
+
+   The first version of this rule sat near the top of the file with the other
+   element defaults, and it did not work. Two later rules quietly beat it:
+
+     .pdf-page input   { font-size: 11px }      line ~647
+     .inline-edit input{ font-size: inherit }   line ~1064
+
+   Both are (0,1,1) - exactly the specificity of `input.t-small` - so the
+   cascade fell to source order, and both come later. A rule that has to
+   outrank every descendant selector written after it cannot live at the top
+   of a 1100-line stylesheet. It lives at the bottom, where source order is
+   on its side, and it carries !important so an inline style attribute cannot
+   beat it either. That is not decoration: on a touch device this is the
+   difference between a usable text box and an unusable one, and no component
+   has standing to opt out of it.
+
+   Desktop is untouched - the dense scale is still what a mouse gets. */
+@media (pointer: coarse) {
+  input, select, textarea,
+  input.t-meta, input.t-small, input.t-body, input.t-lead,
+  select.t-meta, select.t-small, select.t-body, select.t-lead,
+  textarea.t-meta, textarea.t-small, textarea.t-body, textarea.t-lead,
+  .pdf-page input, .inline-edit input,
+  [contenteditable="true"], [contenteditable=""] {
+    font-size: 16px !important;
+  }
+}

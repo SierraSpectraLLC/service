@@ -94,7 +94,7 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
   return (
     <div className="container page">
       <PageHead title="Discussions"
-        sub="Each organization has one private room with the operator; anything about a particular system belongs on that system." />
+        sub="" />
       {/* Only the operator has more than one room, so only they get the list. */}
       {rooms.length > 1 && (
         <DataTable

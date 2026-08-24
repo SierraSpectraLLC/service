@@ -8,6 +8,8 @@ import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
+import { creditForMany } from "@/lib/invoiceData";
+import type { CreditStanding } from "@/lib/credit";
 import { ageDays, sortWorkOrders, woLate, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
@@ -102,6 +104,11 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   // The queue facets: everyone with open work, plus the viewer even when their
   // plate is clean - "my queue is empty" is an answer worth being able to get.
   const staff = isHouse(user.role);
+  // Who is on credit hold, so a dispatcher sees it in the list rather than
+  // after opening the job. Staff only - a client has no business reading
+  // another client's standing, and no business reading a hold column about
+  // themselves in a work queue.
+  const holds: Map<number, CreditStanding> = staff ? await creditForMany(orgIds, today) : new Map();
   const names = [...new Set([
     ...(user.name ? [user.name] : []),
     ...sorted.filter((w) => woOpen(w.state)).map((w) => w.assignee.trim()).filter(Boolean),
@@ -138,6 +145,11 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
             {(WO_LABEL[w.state] ?? w.state) + (woLate(w, today) ? " · late" : "")}
           </Pill>
         ),
+        hold: w.orgId !== null && holds.get(w.orgId)?.onHold
+          ? <Pill tone="bad">On hold</Pill>
+          : w.orgId !== null && holds.get(w.orgId)?.override
+            ? <Pill tone="warn">Overridden</Pill>
+            : null,
         age: woOpen(w.state)
           ? <span className="mut">{days === 0 ? "today" : `${days} d`}{c.tasks > 0 ? ` · ${c.done}/${c.tasks}` : ""}</span>
           : null,
@@ -188,6 +200,7 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
           { key: "place", label: "System", width: "minmax(160px, 1.3fr)", hideMobile: true },
           { key: "who", label: "Assignee", width: "100px", hideMobile: true },
           { key: "state", label: "State", width: "120px" },
+          ...(staff ? [{ key: "hold", label: "Credit", width: "96px", hideMobile: true }] : []),
           { key: "age", label: "Age", width: "84px", hideMobile: true },
         ]}
         rows={[

@@ -1,6 +1,7 @@
 // Purchase-order math and the reorder-to-PO composer. Pure: callers hand in
 // rows, tests hand in literals.
 import { normalizePn, rankPrices, type PriceEntry } from "@/lib/priceBook";
+import { rankOffers, type Offer, type SourcingMode } from "@/lib/sourcing";
 import { needsReorder, shortBy, type StockLine } from "@/lib/stock";
 import type { Tone } from "@/lib/tones";
 
@@ -79,12 +80,22 @@ export type SuggestedLine = {
  */
 export function suggestOrders<T extends StockLine & { partNumber: string; name: string }>(
   lines: T[],
-  book: PriceEntry[],
+  book: PriceEntry[] | Offer[],
+  /**
+   * How to pick when more than one vendor sells a part. Absent = cheapest,
+   * which is what the composer always did. fastest/urgent need the book's
+   * sourcing columns (lead days, drop-ship, expedite) to mean anything.
+   */
+  opts?: { mode: SourcingMode; urgent?: boolean; crossDockDays: number },
 ): { vendor: string; lines: SuggestedLine[] }[] {
+  const pick = (rows: PriceEntry[]): PriceEntry[] =>
+    opts && rows.length && "leadDays" in rows[0]
+      ? rankOffers(rows as Offer[], opts)
+      : rankPrices(rows);
   const byVendor = new Map<string, SuggestedLine[]>();
   for (const line of lines) {
     if (!needsReorder(line)) continue;
-    const offers = rankPrices(book.filter((p) => normalizePn(p.partNumber) === normalizePn(line.partNumber)));
+    const offers = pick(book.filter((p) => normalizePn(p.partNumber) === normalizePn(line.partNumber)));
     const best = offers[0];
     const vendor = best?.vendor ?? "";
     const entry: SuggestedLine = {

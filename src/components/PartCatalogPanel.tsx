@@ -12,6 +12,7 @@ import { DataTable, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components
 import type { DataRow } from "@/components/ui/DataTable";
 import { toast } from "@/components/ui/Toast";
 import { formatCents } from "@/lib/money";
+import { isStalePrice } from "@/lib/sourcing";
 import {
   ALIAS_KIND_LABEL, ALIAS_KINDS, catalogLabel, isSuperseded, kitContents, MAX_PART_PHOTOS,
   PART_KINDS, PART_KIND_LABEL, searchCatalog, type PartAlias,
@@ -55,9 +56,12 @@ const emptyDraft = {
  */
 export type VendorPrice = {
   id: number; partNumber: string; vendor: string; isOem: boolean; priceCents: number; url: string;
+  leadDays: number | null; dropShips: boolean; expediteOk: boolean;
+  /** ISO date of the last confirmation, for the staleness flag. */
+  updatedOn: string;
 };
 
-export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed, makers = [], initialFacet = "" }: {
+export default function PartCatalogPanel({ items, assetTypes, modelsByType, prices = [], unnamed, makers = [], initialFacet = "", today = "" }: {
   items: CatalogRow[];
   assetTypes: string[];
   /** Catalog models per module type, for the per-model chips. */
@@ -70,6 +74,8 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
   makers?: string[];
   /** Facet from the URL (?f=), so a filtered book is a link. */
   initialFacet?: string;
+  /** The shop's today, for flagging prices nobody has confirmed lately. */
+  today?: string;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -82,7 +88,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
   const [sheet, setSheet] = useState<null | { id?: number }>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [lines, setLines] = useState<{ partNumber: string; name: string; qty: number }[]>([]);
-  const [vendorDraft, setVendorDraft] = useState({ vendor: "", price: "", isOem: false, url: "" });
+  const [vendorDraft, setVendorDraft] = useState({ vendor: "", price: "", isOem: false, url: "", leadDays: "", dropShips: false, expediteOk: false });
   const [busy, setBusy] = useState("");
   const photoInput = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
@@ -238,7 +244,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
       <PageHead
         title="Parts book"
-        sub="What each number means, so a part fitted in March still has a name in December. Nothing here is required to record a part - an unknown number always works."
+        sub="What each part number means."
         actions={<button className="btn sm primary" onClick={() => openAdd()}>+ Part number</button>}
       />
       <Toolbar
@@ -538,6 +544,14 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                   <span style={{ fontWeight: 600 }}>{p.vendor}</span>
                   {p.isOem && <span className="pill info">OEM</span>}
                   <span className="mono">{formatCents(p.priceCents)}</span>
+                  <span className="mut t-meta">
+                    {[p.leadDays !== null ? `${p.leadDays}d` : "lead ?",
+                      p.dropShips ? "blind-ships" : "via the shop",
+                      p.expediteOk ? "overnight ok" : ""].filter(Boolean).join(" · ")}
+                  </span>
+                  {isStalePrice(`${p.updatedOn}T00:00:00Z`, today) && (
+                    <span className="pill warn" title={`Last confirmed ${p.updatedOn}`}>stale</span>
+                  )}
                   {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="t-meta">link ↗</a>}
                   <button className="btn link" aria-label={`Remove ${p.vendor}'s price`} disabled={pending}
                     style={{ marginLeft: "auto", color: "var(--t-bad-fg)", fontSize: 12 }}
@@ -554,10 +568,25 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                 <input className="mono t-small" value={vendorDraft.url} placeholder="https://... (optional)"
                   onChange={(e) => setVendorDraft({ ...vendorDraft, url: e.target.value })}
                   style={{ flex: "2 1 160px" }} />
+                <input value={vendorDraft.leadDays} placeholder="Lead d" inputMode="numeric" title="Business days to ship"
+                  onChange={(e) => setVendorDraft({ ...vendorDraft, leadDays: e.target.value })}
+                  className="t-small" style={{ flex: "0 1 64px" }} aria-label="Lead time, business days" />
                 <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--ink)" }}>
                   <input type="checkbox" checked={vendorDraft.isOem} style={{ width: 14, height: 14 }}
                     onChange={(e) => setVendorDraft({ ...vendorDraft, isOem: e.target.checked })} />
                   OEM
+                </label>
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--ink)" }}
+                  title="Verified: ships to a client site under OUR paperwork, none of theirs in the box">
+                  <input type="checkbox" checked={vendorDraft.dropShips} style={{ width: 14, height: 14 }}
+                    onChange={(e) => setVendorDraft({ ...vendorDraft, dropShips: e.target.checked })} />
+                  Blind-ships
+                </label>
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--ink)" }}
+                  title="Will overnight on request">
+                  <input type="checkbox" checked={vendorDraft.expediteOk} style={{ width: 14, height: 14 }}
+                    onChange={(e) => setVendorDraft({ ...vendorDraft, expediteOk: e.target.checked })} />
+                  Overnight
                 </label>
                 <button type="button" className="btn sm" disabled={pending || !draft.partNumber.trim() || !vendorDraft.vendor.trim() || !vendorDraft.price.trim()}
                   onClick={() => {
@@ -566,10 +595,12 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
                       const res = await addPartPrices([{
                         partNumber: draft.partNumber, vendor: vendorDraft.vendor,
                         price: vendorDraft.price, isOem: vendorDraft.isOem, url: vendorDraft.url,
+                        leadDays: vendorDraft.leadDays, dropShips: vendorDraft.dropShips,
+                        expediteOk: vendorDraft.expediteOk,
                       }]);
                       if (res?.error) { setError(res.error); return; }
                       if (res.failures?.length) { setError(res.failures[0].error); return; }
-                      setVendorDraft({ vendor: "", price: "", isOem: false, url: "" });
+                      setVendorDraft({ vendor: "", price: "", isOem: false, url: "", leadDays: "", dropShips: false, expediteOk: false });
                       router.refresh();
                     });
                   }}>＋ Vendor</button>

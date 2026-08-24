@@ -60,6 +60,17 @@ export const users = pgTable("users", {
    * costs eight writes rather than eight hundred.
    */
   lastSeenAt: timestamp("last_seen_at"),
+  /**
+   * The structured halves of `name`, plus who this person is at their company.
+   * Editable by an owner in Settings > Organizations; `name` stays the one
+   * display name everywhere, rewritten from these whenever they are set so the
+   * two can never disagree.
+   */
+  firstName: text("first_name").notNull().default(""),
+  lastName: text("last_name").notNull().default(""),
+  title: text("title").notNull().default(""),
+  /** Which of their organization's sites this person sits at. */
+  siteId: integer("site_id").references((): AnyPgColumn => orgSites.id, { onDelete: "set null" }),
 });
 
 export const accounts = pgTable("accounts", {
@@ -188,6 +199,34 @@ export const orgs = pgTable("orgs", {
   // the machine, and opting a client into one must never opt them into the
   // other. Blank = the digest stays internal for this organization.
   digestRecipients: text("digest_recipients").notNull().default(""),
+  /** Days from issue to due. 30 unless their paper says otherwise. */
+  termsDays: integer("terms_days").notNull().default(30),
+  /** Where invoices and statements go. Blank falls back to the digest list. */
+  apEmail: text("ap_email").notNull().default(""),
+  /**
+   * The blanket PO an invoice must reference, and what is left on it. Both
+   * blank/zero means no PO on file - which is one of the two silent rejections
+   * (the other is an exhausted PO), so a draft invoice checks and WARNS rather
+   * than blocking. See lib/billing.poCheck.
+   */
+  poNumber: text("po_number").notNull().default(""),
+  poBalanceCents: integer("po_balance_cents").notNull().default(0),
+  /**
+   * This client's billing rules, overriding the platform defaults in
+   * app_settings - the same defaults-then-per-org layering the digest schedule
+   * uses. Shape and parsing live in lib/billingPolicy; jsonb so the fields can
+   * grow without a migration per knob.
+   */
+  billingPolicy: jsonb("billing_policy"),
+  /**
+   * The operator's own Stripe Connect account - THEIRS, not the platform's.
+   * Money moves bank to bank between the client and the service company;
+   * Ridgeline never holds funds and never sees a card number. Blank means
+   * nobody has connected one, and the pay buttons simply do not render.
+   */
+  stripeAccountId: text("stripe_account_id").notNull().default(""),
+  /** Whether Stripe has finished its checks on that account. */
+  stripeReady: boolean("stripe_ready").notNull().default(false),
   /**
    * The hour (0-23, shop time) this organization's digest goes out. On the
    * operator's own row it is the internal edition's hour.
@@ -316,6 +355,12 @@ export const orgSites = pgTable("org_sites", {
   accessNotes: text("access_notes").notNull().default(""),
   contactName: text("contact_name").notNull().default(""),
   contactPhone: text("contact_phone").notNull().default(""),
+  /**
+   * Sales tax on PARTS at this address, in basis points (775 = 7.75%). Tax is
+   * a property of where the goods landed, not of the client, which is why it
+   * lives on the site. Zero means no tax line is drawn at all.
+   */
+  taxRateBps: integer("tax_rate_bps").notNull().default(0),
   // Archived rather than deleted: a closed lab is still where an instrument was,
   // and systems still point at it.
   archived: boolean("archived").notNull().default(false),
@@ -1019,6 +1064,23 @@ export const shareLinks = pgTable("share_links", {
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   revokedAt: timestamp("revoked_at"),
+  /**
+   * What is on the other side: files (every share before billing existed),
+   * an invoice, or a quote. The viewer branches on this.
+   */
+  kind: text("kind").notNull().default("files"),
+  /** Which org the link speaks to. Money is fetched through THIS, never the URL. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  quoteId: integer("quote_id").references((): AnyPgColumn => quotes.id, { onDelete: "cascade" }),
+  /**
+   * When it was first opened, and how many times. This IS the Viewed signal
+   * the invoice timeline reads - there is no second tracker, because a second
+   * tracker is a second answer to "did they see it".
+   */
+  openedAt: timestamp("opened_at"),
+  lastOpenedAt: timestamp("last_opened_at"),
+  openCount: integer("open_count").notNull().default(0),
 });
 
 // Cascades from both ends: a deleted file leaves every share it was in, and a
@@ -1144,6 +1206,28 @@ export const eodUpdates = pgTable("eod_updates", {
    */
   internal: boolean("internal").notNull().default(false),
 
+  /**
+   * Work that happened off the board entirely: a phone call, a question
+   * answered, somebody's engineer walked through a problem. Both instrument_id
+   * and asset_id are null on these rows - there is no record to hang them on,
+   * which is exactly why they went unlogged. The title is what it WAS, since
+   * there is no system name to stand in for it, and it is what marks the row:
+   * a row with no instrument, no asset and no title is not one of these.
+   *
+   * The two unique constraints below still hold, because Postgres counts NULLs
+   * as distinct - so a day takes as many of these as the day had.
+   */
+  title: text("title").notNull().default(""),
+  /** Who did it. Not updated_by: the person who helped is rarely the typist. */
+  person: text("person").notNull().default(""),
+  /**
+   * How long it took, for the record. Deliberately NOT a time_entries row:
+   * those bill, and hang off a system. This is a note of effort on a line of
+   * a report, and calling it billable time would be a different feature with
+   * a different set of consequences.
+   */
+  minutes: integer("minutes").notNull().default(0),
+
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -1198,6 +1282,15 @@ export const timeEntries = pgTable("time_entries", {
   minutes: integer("minutes").notNull().default(0),
   note: text("note").notNull().default(""),
   loggedBy: text("logged_by").notNull().default(""),
+  /**
+   * Whether these hours reach an invoice. Defaults true and is defaulted AGAIN
+   * at the panel from the agreement's coverage, so hours on a covered system
+   * arrive unticked without anybody having to remember. Unbillable hours are
+   * still hours: they stay on the record and in job costing.
+   */
+  billable: boolean("billable").notNull().default(true),
+  /** onsite | remote | travel - travel prices at the card's travel percent. */
+  category: text("category").notNull().default("onsite"),
   // Which job these hours went into. This is the column an invoice is built
   // from, so it is set null on delete for the same reason as tasks: the hours
   // were worked whatever happens to the paperwork around them.
@@ -1860,6 +1953,15 @@ export const purchaseOrders = pgTable("purchase_orders", {
   reference: text("reference").notNull().default(""), // vendor quote or confirmation number
   note: text("note").notNull().default(""),
   expectedAt: text("expected_at").notNull().default(""), // free text, like parts.eta
+  /**
+   * Drop-ship destination. Null is the normal case - the vendor ships to the
+   * stockroom above. Set, it means the vendor ships straight to this client
+   * site under our paperwork: receiving confirms delivery instead of shelving,
+   * and the send step carries the blind-ship instruction.
+   */
+  shipToSiteId: integer("ship_to_site_id").references((): AnyPgColumn => orgSites.id, { onDelete: "set null" }),
+  /** Somebody is waiting on this. Overnight it and say so on the paperwork. */
+  urgent: boolean("urgent").notNull().default(false),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   sentAt: timestamp("sent_at"),
@@ -1899,11 +2001,301 @@ export const partPrices = pgTable("part_prices", {
   isOem: boolean("is_oem").notNull().default(false),
   priceCents: integer("price_cents").notNull(),
   url: text("url").notNull().default(""),   // where to order it
-  note: text("note").notNull().default(""), // "min order 5", "6wk lead time"
+  note: text("note").notNull().default(""), // "min order 5", "returns need an RMA"
+  /**
+   * Business days from order to THIS VENDOR shipping it. Null is "nobody has
+   * asked", which the picker treats as slower than any number - an honest
+   * unknown must never beat a known week. Structured here (not in the note)
+   * because "fastest supplier" is a sort, and you cannot sort prose.
+   */
+  leadDays: integer("lead_days"),
+  /** VERIFIED to blind-ship: to a client site under OUR paperwork only. */
+  dropShips: boolean("drop_ships").notNull().default(false),
+  /** Will they expedite/overnight on request (at a cost)? */
+  expediteOk: boolean("expedite_ok").notNull().default(false),
   updatedBy: text("updated_by").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ---------------------------------------------------------------------------
+// Billing. Nothing here stores a balance - see lib/billing and lib/agreements:
+// every figure a person reads is summed from rows at render time.
+// ---------------------------------------------------------------------------
+
+/**
+ * What an hour costs, and how the odd hours are priced.
+ *
+ * Three rungs, most specific first: a card written against one AGREEMENT beats
+ * one written for the ORG, which beats the platform default (both ids null).
+ * That is the same layering the digest schedule uses, and lib/rates.resolveRate
+ * is the only place that decides it.
+ *
+ * The multipliers are integer PERCENTAGES, not floats: 150 is time-and-a-half,
+ * 50 is travel at half rate. A float multiplier on money is how a $160 hour
+ * becomes $239.99999997, and this codebase keeps money in integer cents for
+ * exactly that reason.
+ */
+export const rateCards = pgTable("rate_cards", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Null = the platform default for this workspace. */
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "cascade" }),
+  /** Null = not tied to one paper. Set, it beats the org's card. */
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "cascade" }),
+  hourlyCents: integer("hourly_cents").notNull().default(0),
+  /** Percent of the base rate for after-hours work. 150 = time and a half. */
+  afterHoursPct: integer("after_hours_pct").notNull().default(150),
+  /** Percent of the base rate for travel time. 50 = half rate. */
+  travelPct: integer("travel_pct").notNull().default(50),
+  /** Rounding granularity, in minutes. 15 bills a 7-minute call as a quarter hour. */
+  minIncrementMin: integer("min_increment_min").notNull().default(15),
+  label: text("label").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("rate_cards_org_idx").on(t.orgId)]);
+
+/**
+ * Money spent on a job that is neither a part nor an hour: mileage, freight,
+ * a night in a motel. Recorded against the work order because that is what it
+ * gets billed and costed against.
+ */
+export const expenses = pgTable("expenses", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  workOrderId: integer("work_order_id").notNull().references((): AnyPgColumn => workOrders.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("other"), // mileage | shipping | per_diem | other
+  description: text("description").notNull().default(""),
+  amountCents: integer("amount_cents").notNull().default(0),
+  incurredOn: text("incurred_on").notNull().default(""), // YYYY-MM-DD in shop time
+  loggedBy: text("logged_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("expenses_wo_idx").on(t.workOrderId)]);
+
+/**
+ * A bill. Nothing here is a balance: what is owed is
+ * lines + fees - payments, summed at render by lib/billing.invoiceBalance, and
+ * the status column is a lifecycle word (has it been sent, was it voided), not
+ * an arithmetic result. `partial` and `paid` are written when a payment lands
+ * because a human wants to see them on a list without the sum; the sum is
+ * still the authority, and the two are reconciled by invoiceStanding.
+ *
+ * workOrderId and agreementId are both nullable: a statement-only invoice for
+ * a retainer belongs to neither, and a job invoice belongs to one job.
+ */
+export const invoices = pgTable("invoices", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "set null" }),
+  number: text("number").notNull(),
+  // draft | sent | partial | paid | void | referred
+  status: text("status").notNull().default("draft"),
+  issuedOn: text("issued_on").notNull().default(""),   // YYYY-MM-DD, set at send
+  dueOn: text("due_on").notNull().default(""),         // issuedOn + the org's terms
+  poNumber: text("po_number").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("invoices_org_idx").on(t.orgId),
+  index("invoices_wo_idx").on(t.workOrderId),
+  unique("invoice_number_unique").on(t.tenantOrgId, t.number),
+]);
+
+/**
+ * One line. `covered` is the whole reason a $0 invoice exists: the line keeps
+ * its real quantity and unit price and prices out at zero, so the client can
+ * read what the contract just paid for. `sourceId` points back at the part,
+ * time entry or expense the line came from - that is how a redraft knows what
+ * it already billed.
+ */
+export const invoiceLines = pgTable("invoice_lines", {
+  id: serial("id").primaryKey(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  // part | labor | travel | expense | tax | fee_ref
+  kind: text("kind").notNull().default("part"),
+  description: text("description").notNull().default(""),
+  detail: text("detail").notNull().default(""),        // the second, quieter line
+  qty: integer("qty").notNull().default(1000),          // thousandths, so 4.5 h is 4500
+  unitCents: integer("unit_cents").notNull().default(0),
+  covered: boolean("covered").notNull().default(false),
+  coveredBy: text("covered_by").notNull().default(""),  // the agreement number it burned
+  sourceId: integer("source_id"),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("invoice_lines_invoice_idx").on(t.invoiceId)]);
+
+/** Money that arrived. Never edited - a mistake is corrected by another row. */
+export const payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  method: text("method").notNull().default("check"),   // ach | card | check | other
+  amountCents: integer("amount_cents").notNull().default(0),
+  reference: text("reference").notNull().default(""),  // check number, Stripe id
+  receivedOn: text("received_on").notNull().default(""),
+  recordedBy: text("recorded_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("payments_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * A late charge, as its own row.
+ *
+ * It never edits the invoice it belongs to. An invoice that changed after it
+ * was sent is one nobody can reconcile against the copy in their inbox, and a
+ * fee quietly folded into a line is the kind of thing a client finds and never
+ * trusts you about again. `basis` records what it was computed on, so the
+ * arithmetic can be explained a year later.
+ *
+ * Waiving keeps the row. Expect to waive more than you charge; the record of
+ * having charged and then waived is the part that is worth anything.
+ */
+export const invoiceFees = pgTable("invoice_fees", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  amountCents: integer("amount_cents").notNull().default(0),
+  /** "1.5%/mo on $3,900 undisputed, 41 days past due" - the sentence, kept. */
+  basis: text("basis").notNull().default(""),
+  postedOn: text("posted_on").notNull().default(""),
+  postedBy: text("posted_by").notNull().default(""),
+  waived: boolean("waived").notNull().default(false),
+  waivedBy: text("waived_by").notNull().default(""),
+  waivedReason: text("waived_reason").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("invoice_fees_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * "The check goes out Friday." Worth writing down for one reason: the morning
+ * after it is broken is the moment the conversation changes, and nobody
+ * remembers that date without a row for it.
+ */
+export const promises = pgTable("promises", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  promisedOn: text("promised_on").notNull().default(""),  // the day they said
+  byName: text("by_name").notNull().default(""),          // who said it
+  note: text("note").notNull().default(""),
+  /** Set when the money arrived. Null and past promisedOn = broken. */
+  keptOn: text("kept_on"),
+  loggedBy: text("logged_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("promises_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * A line the client has questioned. It pauses what the reminders ASK for on
+ * that line alone: the undisputed remainder keeps aging and keeps being
+ * chased, because a question about one cartridge must not buy ninety quiet
+ * days on the rest of the bill.
+ */
+export const disputes = pgTable("disputes", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  lineId: integer("line_id").references((): AnyPgColumn => invoiceLines.id, { onDelete: "set null" }),
+  reason: text("reason").notNull().default(""),
+  openedOn: text("opened_on").notNull().default(""),
+  openedBy: text("opened_by").notNull().default(""),
+  resolvedOn: text("resolved_on"),
+  /** "kept" (the line stands) or "credited" (a negative line was issued). */
+  resolution: text("resolution").notNull().default(""),
+  resolvedBy: text("resolved_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("disputes_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * A rung of the ladder that has actually been climbed. The ladder itself is
+ * data in lib/dunning; this is the log of what was sent, which is what
+ * nextAction reads to decide what comes next - and what the demand letter
+ * cites when it says "we have since sent 3 reminders and a statement".
+ */
+export const dunningEvents = pgTable("dunning_events", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  invoiceId: integer("invoice_id").notNull().references((): AnyPgColumn => invoices.id, { onDelete: "cascade" }),
+  /** The rung key from lib/dunning.LADDER. */
+  rung: text("rung").notNull().default(""),
+  /** Who it went to, by name and address, as sent. */
+  toName: text("to_name").notNull().default(""),
+  toEmail: text("to_email").notNull().default(""),
+  /** "auto" from the cron, or the email of whoever pressed the button. */
+  sentBy: text("sent_by").notNull().default("auto"),
+  note: text("note").notNull().default(""),
+  sentOn: text("sent_on").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("dunning_events_invoice_idx").on(t.invoiceId)]);
+
+/**
+ * The owner's decision to work for somebody who owes money anyway, with the
+ * reason they gave. Enforced in the action, not the form.
+ */
+export const creditOverrides = pgTable("credit_overrides", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  reason: text("reason").notNull().default(""),
+  /** Blank = until it is lifted by hand. YYYY-MM-DD otherwise. */
+  untilOn: text("until_on").notNull().default(""),
+  grantedBy: text("granted_by").notNull().default(""),
+  liftedAt: timestamp("lifted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("credit_overrides_org_idx").on(t.orgId)]);
+
+/**
+ * A price, offered.
+ *
+ * Composed by the same lib/billing function that composes an invoice, from the
+ * same rows - so what was quoted and what gets billed are produced by one
+ * piece of code rather than two that drift. What a quote adds over an invoice
+ * is a date it stops being true and a deposit somebody owes on saying yes.
+ */
+export const quotes = pgTable("quotes", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
+  agreementId: integer("agreement_id").references((): AnyPgColumn => agreements.id, { onDelete: "set null" }),
+  number: text("number").notNull(),
+  // draft | sent | approved | declined | expired
+  status: text("status").notNull().default("draft"),
+  title: text("title").notNull().default(""),
+  sentOn: text("sent_on").notNull().default(""),
+  expiresOn: text("expires_on").notNull().default(""),
+  /** Percent due on approval. Zero means nothing is owed until the work is done. */
+  depositPct: integer("deposit_pct").notNull().default(0),
+  /** Set when the client answers, with their own words in `answerNote`. */
+  answeredOn: text("answered_on"),
+  answeredBy: text("answered_by").notNull().default(""),
+  answerNote: text("answer_note").notNull().default(""),
+  /** The deposit invoice approval generated, if it did. */
+  depositInvoiceId: integer("deposit_invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("quotes_org_idx").on(t.orgId),
+  index("quotes_wo_idx").on(t.workOrderId),
+  unique("quote_number_unique").on(t.tenantOrgId, t.number),
+]);
+
+/** The same shape as an invoice line, for the same reason: one composer. */
+export const quoteLines = pgTable("quote_lines", {
+  id: serial("id").primaryKey(),
+  quoteId: integer("quote_id").notNull().references((): AnyPgColumn => quotes.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull().default("part"),
+  description: text("description").notNull().default(""),
+  detail: text("detail").notNull().default(""),
+  qty: integer("qty").notNull().default(1000),     // thousandths
+  unitCents: integer("unit_cents").notNull().default(0),
+  covered: boolean("covered").notNull().default(false),
+  coveredBy: text("covered_by").notNull().default(""),
+  sourceId: integer("source_id"),
+  position: integer("position").notNull().default(0),
+}, (t) => [index("quote_lines_quote_idx").on(t.quoteId)]);
 
 // RETIRED: merged into `procedures` (see the procedures-merge migration).
 // The table stays because the sync pipeline is additive-only; nothing reads it
@@ -2062,6 +2454,14 @@ export const appSettings = pgTable("app_settings", {
   platformName: text("platform_name").notNull().default(""),
   platformTagline: text("platform_tagline").notNull().default(""),
   /**
+   * Where an enquiry from the public landing page goes. Its own field rather
+   * than reaching for STAFF_EMAILS[0]: that list is an authorization control,
+   * and the address a stranger writes to should be a deliberate choice, not a
+   * side effect of who happens to be the owner account. Blank hides the
+   * buttons rather than mailing nowhere.
+   */
+  publicContactEmail: text("public_contact_email").notNull().default(""),
+  /**
    * How the platform looks, for instances that would rather not be navy. See
    * lib/appearance, which owns the defaults and the validation - blank means
    * "the look the app ships with", so a future change to that default reaches
@@ -2103,6 +2503,37 @@ export const appSettings = pgTable("app_settings", {
   // operator decides to be on the open web - and off means OFF: the pages 404
   // and the sitemap empties, not merely that the publish button is hidden.
   publicCatalogEnabled: boolean("public_catalog_enabled").notNull().default(false),
+  // Billing. The prefix is what invoice numbers are built on; the number
+  // itself is allocated by scanning the highest one in use, the same
+  // read-max-and-retry the work order numbers have always used.
+  invoicePrefix: text("invoice_prefix").notNull().default("INV-"),
+  /**
+   * The platform's cut of ACH volume, in basis points, taken as Stripe's
+   * application fee. Zero by default and it must stay zero until somebody
+   * decides otherwise: a platform that silently starts taking a percentage of
+   * an operator's revenue is a platform they leave.
+   */
+  platformFeeBps: integer("platform_fee_bps").notNull().default(0),
+  /**
+   * Days a part spends turning around at the shop when a vendor will not
+   * drop-ship: it lands on our dock and goes out again. Added to that route's
+   * lead time so "fastest" compares doors-to-door, not vendor promises.
+   */
+  crossDockDays: integer("cross_dock_days").notNull().default(1),
+  /**
+   * The name parts ship under. The client's parts relationship is with this
+   * brand - every packing slip, and the blind-ship instruction on drop-ship
+   * POs, carries it. Distinct from the operator's service brand on purpose.
+   */
+  partsBrand: text("parts_brand").notNull().default("Ridgeline"),
+  /**
+   * Fully loaded cost of an hour of labor - wage, burden, van, insurance -
+   * used only to show margin beside a bill. Zero means "we have not told it",
+   * and the costing view says so rather than reporting a fake 100% margin.
+   */
+  loadedLaborCents: integer("loaded_labor_cents").notNull().default(0),
+  /** Platform-wide billing policy defaults; an org's own jsonb wins. */
+  billingPolicy: jsonb("billing_policy"),
 });
 
 /**

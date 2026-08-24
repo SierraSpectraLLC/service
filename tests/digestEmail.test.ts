@@ -24,7 +24,10 @@ const board = (over: Partial<{
   gases: [], openParts: 2, lead: "joe.vincent", ...over,
 });
 
-const view = (over: Partial<Parameters<typeof partnerView>[0]["section"]> = {}) => partnerView({
+const view = (
+  over: Partial<Parameters<typeof partnerView>[0]["section"]> = {},
+  gapDays = 1,
+) => partnerView({
   section: {
     name: "Lab Zen",
     board: [board()],
@@ -36,6 +39,7 @@ const view = (over: Partial<Parameters<typeof partnerView>[0]["section"]> = {}) 
   dateLabel: "Sat Aug 22",
   portalUrl: "https://service.example.com",
   blockedStage: "Waiting / blocked",
+  gapDays,
   stageHex: () => TONE_HEX.bad,
   gasBlocking: (s) => s === "Empty" || s === "Low",
 });
@@ -109,7 +113,7 @@ describe("nothing internal reaches the client", () => {
   it("keeps an internal handback reason out of the row it would have led", () => {
     const v = view({
       handoffs: [{ externalId: "G-007", label: "Agilent UPLC", holder: "Lab Zen", reason: "not on sheet", days: 2 }],
-    });
+    }, 3);
     expect(v.handedBack[0].what).toBe("");
     expect(renderPartnerDigest(v, partnerPreheader(v))).not.toContain("not on sheet");
   });
@@ -127,13 +131,16 @@ describe("what the client is asked to do", () => {
     expect(merged[0].days).toBe(9); // the oldest wait is the one worth quoting
   });
 
-  it("words each ask as an instruction, with why it matters underneath", () => {
+  it("words each ask as an instruction, with the facts underneath and no commentary", () => {
     const v = view({ pending: [pending({ subject: "H-ESI needle seal" }), pending({ subject: "H-ESI needle" })] });
     expect(v.needs).toHaveLength(1);
     expect(v.needs[0].ask).toBe("Tracking numbers for H-ESI needle seal and H-ESI needle");
     expect(v.needs[0].why).toContain("Thermo Altis LC-MS/MS");
     expect(v.needs[0].why).toContain("ordered by Lab Zen 5d ago");
-    expect(v.needs[0].why).toContain("we cannot book the work until they land");
+    // The subline states what is true, never what it means for us: a clause
+    // like "we cannot book the work until they land" is the shop talking to
+    // itself in a client's inbox.
+    expect(v.needs[0].why).not.toMatch(/cannot book|waits on this part/);
   });
 
   it("puts a supplier wait with us, and names the date when the record has one", () => {
@@ -193,7 +200,7 @@ describe("shape and wording", () => {
   it("summarises the counts in the preheader", () => {
     const v = view({
       handoffs: [{ externalId: "G-007", label: "Agilent UPLC", holder: "Lab Zen", reason: "repair complete", days: 2 }],
-    });
+    }, 3);
     expect(partnerPreheader(v)).toBe("1 thing needs Lab Zen · 0 blocked with us · 1 handed back · 1 in work");
   });
 
@@ -211,5 +218,62 @@ describe("shape and wording", () => {
     expect(firstName("joe.vincent@sierraspectra.com")).toBe("Joe");
     expect(firstName("Bill Harner")).toBe("Bill");
     expect(firstName("")).toBe("");
+  });
+});
+
+describe("handed back is news, not a standing list", () => {
+  const handoffs = [
+    { externalId: "G-007", label: "Agilent UPLC", holder: "Lab Zen", reason: "repair complete", days: 1 },
+    { externalId: "G-008", label: "Waters TQ-S", holder: "Lab Zen", reason: "returned for install", days: 9 },
+    { externalId: "G-009", label: "Thermo ISQ", holder: "Lab Zen", reason: "sign-off pending", days: 30 },
+  ];
+
+  it("lists only what came back inside this edition's window", () => {
+    const v = view({ handoffs }, 1);
+    expect(v.handedBack.map((h) => h.externalId)).toEqual(["G-007"]);
+    expect(v.standingHandback).toEqual({ count: 2, oldestAge: "4w" });
+  });
+
+  it("widens with the window, so a Monday digest covers the weekend", () => {
+    const v = view({ handoffs }, 3);
+    expect(v.handedBack.map((h) => h.externalId)).toEqual(["G-007"]);
+    const monday = view({
+      handoffs: [{ ...handoffs[0], days: 3 }, handoffs[1], handoffs[2]],
+    }, 3);
+    expect(monday.handedBack.map((h) => h.externalId)).toEqual(["G-007"]);
+  });
+
+  it("says the standing count in one line rather than relisting it", () => {
+    const v = view({ handoffs }, 1);
+    const html = renderPartnerDigest(v, partnerPreheader(v));
+    expect(html).toContain("2 more systems are still with you from earlier, the oldest 4w ago");
+    // The names of the standing ones are NOT in the mail - they were sent
+    // when they happened, and the portal holds the list.
+    expect(html).not.toContain("G-008");
+    expect(html).not.toContain("Waters TQ-S");
+    expect(html).toContain("G-007");
+  });
+
+  it("still shows the section when nothing is new but systems are still out", () => {
+    const v = view({ handoffs: [handoffs[1], handoffs[2]] }, 1);
+    expect(v.handedBack).toHaveLength(0);
+    const html = renderPartnerDigest(v, partnerPreheader(v));
+    expect(html).toContain("Nothing new.");
+    expect(html).toContain("2 more systems are still with you");
+    // The inbox line reports the standing total on a morning with no news.
+    expect(partnerPreheader(v)).toContain("2 still with you");
+  });
+
+  it("drops the section entirely when nothing is out at all", () => {
+    const html = renderPartnerDigest(view({ handoffs: [] }, 1), "x");
+    expect(html).not.toContain("Handed back to");
+  });
+
+  it("carries the same split into the plain-text edition", () => {
+    const v = view({ handoffs }, 1);
+    const text = renderPartnerDigestText(v, partnerPreheader(v));
+    expect(text).toContain("HANDED BACK TO LAB ZEN (1)");
+    expect(text).toContain("2 more systems are still with you from earlier, the oldest 4w ago.");
+    expect(text).not.toContain("G-008");
   });
 });

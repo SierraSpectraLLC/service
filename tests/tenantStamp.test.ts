@@ -23,6 +23,8 @@ const STAMPED = [
   "purchaseOrders", "partPrices", "eodUpdates", "remoteDevices", "auditLog",
   "cloudConnections", "serviceVisits", "workOrders", "orgSites", "partCatalog", "agreements",
   "catalogRefs", "validationDocs", "messageThreads", "folders", "dropLinks", "shareLinks",
+  "rateCards", "expenses", "invoices", "payments", "invoiceFees", "promises",
+  "disputes", "dunningEvents", "creditOverrides", "quotes",
 ];
 
 const walk = (dir: string): string[] =>
