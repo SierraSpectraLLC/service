@@ -38,21 +38,30 @@ export async function sendEmail(
 }
 
 /**
- * Who the daily digest comes from.
+ * Who a daily report to a client comes from - the digest and the EOD report
+ * both, which is why this is not named for either of them.
  *
  * A separate address for a separate KIND of mail: sign-in links and a morning
- * report have nothing to do with each other, and giving the digest its own
- * sender lets recipients filter it, lets a subdomain carry its own sending
- * reputation, and stops a bounce on one from tarring the other. It has to be
- * an address on a domain verified in Resend - a subdomain is verified in its
- * own right - which is why it is environment rather than a setting somebody
- * could type into the app and silently break delivery with.
+ * report have nothing to do with each other, and giving the reports their own
+ * sender lets recipients filter them, lets a subdomain carry its own sending
+ * reputation, and stops a bounce on one from tarring the other. That last part
+ * is the real argument - a client marking a report as spam should never cost
+ * somebody else the ability to sign in.
  *
- * Unset falls back to EMAIL_FROM, which is exactly how every instance behaved
- * before this existed.
+ * It has to be an address on a domain verified in Resend - a subdomain is
+ * verified in its own right - which is why it is environment rather than a
+ * setting somebody could type into the app and silently break delivery with.
+ *
+ * The env var keeps its old name: instances are already set with it, and
+ * asking somebody to rename a variable mid-launch to get a behaviour they
+ * already wanted is a poor trade. Unset falls back to EMAIL_FROM, which is
+ * how every instance behaved before any of this existed.
  */
-export const digestFrom = (): string | undefined =>
+export const reportFrom = (): string | undefined =>
   process.env.DIGEST_EMAIL_FROM?.trim() || process.env.EMAIL_FROM;
+
+/** @deprecated Use reportFrom - it is not the digest's alone any more. */
+export const digestFrom = reportFrom;
 
 /**
  * Where replies land, when the sending address is not somewhere anybody reads.

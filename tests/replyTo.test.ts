@@ -48,17 +48,49 @@ describe("where a reply to a broadcast lands", () => {
   });
 });
 
-describe("every broadcast uses it, not just the digest", () => {
-  it("the EOD report asks for a reply-to as well", async () => {
-    // The regression this guards: sendEodEmail called sendEmail(to, subject,
-    // html) with no options at all, so a reply-all to the daily report went
-    // to EMAIL_FROM on the send-only subdomain and bounced for every
-    // recipient at once.
+describe("both daily reports are the same kind of mail", () => {
+  /**
+   * The regression this guards: sendEodEmail called sendEmail(to, subject,
+   * html) with no options at all. Replies went to EMAIL_FROM on the send-only
+   * subdomain and bounced for every recipient at once, and the report shared a
+   * sending reputation with the sign-in links - so a client marking a report
+   * as spam could cost somebody else the ability to get in.
+   */
+  it("the EOD report sends from the report address and takes replies elsewhere", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/app/actions.ts", "utf8");
     const at = src.indexOf("export async function sendEodEmail");
     expect(at).toBeGreaterThan(-1);
-    const body = src.slice(at, at + 2400);
+    const body = src.slice(at, at + 2800);
+    expect(body).toMatch(/sendEmail\(to, subject, html, \{[^}]*from: reportFrom\(\)/);
     expect(body).toMatch(/sendEmail\(to, subject, html, \{[^}]*replyTo: replyToAddress\(\)/);
+  });
+
+  it("the digest sends from the same address, so a client can filter them together", async () => {
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync("src/lib/digest.ts", "utf8")).toContain("const from = reportFrom();");
+  });
+});
+
+describe("who a daily report comes from", () => {
+  const savedFrom = { DIGEST_EMAIL_FROM: process.env.DIGEST_EMAIL_FROM, EMAIL_FROM: process.env.EMAIL_FROM };
+  afterEach(() => {
+    for (const [k, v] of Object.entries(savedFrom)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
+
+  it("prefers the reports' own sender", async () => {
+    process.env.EMAIL_FROM = "login@mail.ridgelinefield.com";
+    process.env.DIGEST_EMAIL_FROM = "updates@mail.ridgelinefield.com";
+    const { reportFrom } = await import("@/lib/email");
+    expect(reportFrom()).toBe("updates@mail.ridgelinefield.com");
+  });
+
+  it("falls back to EMAIL_FROM, which is how instances behaved before", async () => {
+    process.env.EMAIL_FROM = "login@mail.ridgelinefield.com";
+    delete process.env.DIGEST_EMAIL_FROM;
+    const { reportFrom } = await import("@/lib/email");
+    expect(reportFrom()).toBe("login@mail.ridgelinefield.com");
   });
 });
