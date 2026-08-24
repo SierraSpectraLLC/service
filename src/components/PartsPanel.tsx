@@ -3,7 +3,7 @@
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { CARRIERS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
-import { moduleTypeOptions } from "@/lib/moduleTypes";
+import { modelsForType, moduleTypeOptions, type CatalogModel } from "@/lib/moduleTypes";
 import { intakeModule } from "@/app/actions";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
 import {
@@ -69,7 +69,7 @@ const empty = { kind: "part", moduleKind: "", expandKit: true, pmScheduleId: nul
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [] }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [], moduleModels = [] }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
   /** Jobs completed, by day, so a visit can be named after the work it was. */
   serviceEvents?: ServiceEvent[];
@@ -87,10 +87,15 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
    */
   pmJobs?: { id: number; title: string }[];
   /**
-   * Module types from the shop's equipment catalog, for the "Arrives as" and
-   * intake pickers. Empty falls back to the starter list.
+   * Module types from the shop's equipment catalog, for the Asset pill and the
+   * intake picker. Empty falls back to the starter list.
    */
   moduleTypes?: string[];
+  /**
+   * The catalog's models, so choosing a module type can offer the units the
+   * shop already knows by name instead of asking somebody to retype one.
+   */
+  moduleModels?: CatalogModel[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -120,6 +125,16 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
     () => moduleTypeOptions(moduleTypes, draft.moduleKind),
     [moduleTypes, draft.moduleKind],
   );
+  // A module type only means something under a system, so the fourth pill is
+  // offered only where intake could actually land the unit.
+  const canBeAsset = target.instrumentId !== null;
+  // Which pill is lit. Reading it back off the draft is what makes an existing
+  // row open on the right one without storing the answer twice.
+  const pillKind = draft.moduleKind ? "asset" : draft.kind;
+  const catalogModels = useMemo(
+    () => modelsForType(moduleModels, draft.moduleKind),
+    [moduleModels, draft.moduleKind],
+  );
 
   // Which day's heading is being renamed, and to what.
   const [naming, setNaming] = useState<null | { day: string; title: string }>(null);
@@ -134,9 +149,25 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   };
   const close = () => { setForm(null); setDraft(empty); setSpecPairs([]); };
 
-  // Consumables usually come off the shelf and go straight in; parts start as Needed.
+  /**
+   * The four pills, over the two fields that actually carry the answer.
+   *
+   * "Asset" is not a fourth parts.kind - it is a part that says what it
+   * BECOMES, which is kind 'part' plus a module type. Keeping it a view over
+   * those two columns means no migration, and every row already on file
+   * classifies itself correctly the moment it is opened.
+   *
+   * Consumables usually come off the shelf and go straight in; everything else
+   * starts as Needed.
+   */
   const setKind = (kind: string) => {
-    setDraft((d) => ({ ...d, kind, ...(form?.mode === "new" ? { status: kind === "consumable" ? "Installed" : "Needed" } : {}) }));
+    const asset = kind === "asset";
+    setDraft((d) => ({
+      ...d,
+      kind: asset ? "part" : kind,
+      moduleKind: asset ? (d.moduleKind || arrivesTypes[0] || "Other") : "",
+      ...(form?.mode === "new" ? { status: kind === "consumable" ? "Installed" : "Needed" } : {}),
+    }));
   };
   const setPair = (i: number, patch: Partial<SpecPair>) =>
     setSpecPairs((s) => s.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
@@ -230,23 +261,61 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               )}
               <button className="btn" onClick={close} disabled={pending}>Cancel</button>
               <button className="btn accent" onClick={save} disabled={pending}>
-                {pending ? "Saving..." : form.mode === "new" ? "Add part" : "Save changes"}
+                {pending ? "Saving..." : form.mode !== "new" ? "Save changes"
+                  // The pill decided what this is; the button that commits it
+                  // should not go back to calling everything a part.
+                  : pillKind === "asset" ? "Add unit"
+                  : pillKind === "consumable" ? "Add consumable"
+                  : pillKind === "kit" ? "Add kit" : "Add part"}
               </button>
             </>
           }>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
             <div style={{ display: "flex", gap: 4 }}>
-              {[["part", "Part"], ["consumable", "Consumable"], ["kit", "Kit"]].map(([k, label]) => (
+              {[["part", "Part"], ["consumable", "Consumable"], ["kit", "Kit"],
+                ...(canBeAsset ? [["asset", "Asset"]] : [])].map(([k, label]) => (
                 <button key={k} className="pill" onClick={() => setKind(k)}
                   style={{
                     border: "none", cursor: "pointer",
-                    background: draft.kind === k ? "var(--navy)" : "#EEF1F5",
-                    color: draft.kind === k ? "#fff" : "#475569",
+                    background: pillKind === k ? "var(--navy)" : "#EEF1F5",
+                    color: pillKind === k ? "#fff" : "#475569",
                   }}>{label}</button>
               ))}
             </div>
             {draft.kind === "consumable" && (
               <span className="mut t-meta">ferrules, septa, liners... defaults to Installed</span>
+            )}
+            {/* What kind of unit, and - if the catalog knows any - which one.
+                Both sit with the pill that asked for them rather than as
+                labelled fields further down, because neither exists unless
+                this is an asset. */}
+            {pillKind === "asset" && (
+              <>
+                <select value={draft.moduleKind} aria-label="Module type" className="t-small" style={{ width: "auto" }}
+                  onChange={(e) => setDraft((d) => ({ ...d, moduleKind: e.target.value }))}>
+                  {arrivesTypes.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+                {catalogModels.length > 0 && (
+                  <select aria-label="Catalog model" className="t-small" style={{ width: "auto" }}
+                    value={catalogModels.some((m) => m.name === draft.name) ? draft.name : ""}
+                    onChange={(e) => {
+                      const pick = catalogModels.find((m) => m.name === e.target.value);
+                      if (!pick) return;
+                      // The name is the model; the maker only fills a blank,
+                      // because vendor is who we BUY from and somebody may
+                      // already have named a distributor.
+                      setDraft((d) => ({ ...d, name: pick.name, vendor: d.vendor.trim() || pick.manufacturer }));
+                    }}>
+                    <option value="">Pick a model...</option>
+                    {catalogModels.map((m) => (
+                      <option key={`${m.manufacturer}/${m.name}`} value={m.name}>
+                        {m.manufacturer ? `${m.manufacturer} ${m.name}` : m.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <span className="mut t-meta">joins the asset list on arrival</span>
+              </>
             )}
             {draft.kind === "kit" && (
               <>
@@ -265,11 +334,12 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               {/* The same book lookup the number field has, from the name side
                   - most people know what the thing is called, not its number. */}
               <PartNumberField value={draft.name} insert="name" className="" ariaLabel="Part name"
-                placeholder={draft.kind === "consumable" ? "e.g. Vespel ferrule 1/4in" : "e.g. 10kV HED supply"}
+                placeholder={pillKind === "consumable" ? "e.g. Vespel ferrule 1/4in"
+                  : pillKind === "asset" ? "e.g. TSQ 8000" : "e.g. 10kV HED supply"}
                 onChange={(name) => setDraft({ ...draft, name })}
                 onPick={(part) => setDraft((d) => ({
                   ...d,
-                  kind: part.kind === "kit" ? "kit" : d.kind,
+                  kind: part.kind === "kit" && !d.moduleKind ? "kit" : d.kind,
                   name: part.name || part.partNumber,
                   partNumber: d.partNumber.trim() || part.partNumber,
                   vendor: d.vendor.trim() || part.vendor,
@@ -286,7 +356,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   ...d,
                   // The book already knows this number is a kit; making
                   // somebody also say so is a question with a known answer.
-                  kind: part.kind === "kit" ? "kit" : d.kind,
+                  kind: part.kind === "kit" && !d.moduleKind ? "kit" : d.kind,
                   partNumber: part.partNumber,
                   // Only into fields nobody has filled: a pick corrects the
                   // number, it does not overwrite what somebody typed.
@@ -336,29 +406,6 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
           ) : null}
           {/* A unit on order, not a part: says what it BECOMES, and Received
               will offer the intake instead of ending the story. */}
-          {draft.kind === "part" && target.instrumentId !== null && (
-            <div style={{ marginBottom: 8 }}>
-              <label>Arrives as</label>
-              {/* Two questions, not one list of every answer to both. Which
-                  module it is only matters once it IS a module, so that list
-                  stays folded away until the first answer asks for it - and
-                  when it opens it is the shop's own catalog, not ours. */}
-              <select value={draft.moduleKind ? "module" : "part"} aria-label="Arrives as"
-                onChange={(e) => setDraft({ ...draft, moduleKind: e.target.value === "module" ? (arrivesTypes[0] ?? "Other") : "" })}>
-                <option value="part">A part - fitted, not listed</option>
-                <option value="module">A module - joins the asset list on arrival</option>
-              </select>
-              {draft.moduleKind !== "" && (
-                <div style={{ marginTop: 6 }}>
-                  <label>Which module</label>
-                  <select value={draft.moduleKind} aria-label="Module type"
-                    onChange={(e) => setDraft({ ...draft, moduleKind: e.target.value })}>
-                    {arrivesTypes.map((k) => <option key={k} value={k}>{k}</option>)}
-                  </select>
-                </div>
-              )}
-            </div>
-          )}
           <div className="pf2" style={{ marginBottom: 8 }}>
             {showCosts && <div><label>Cost ($)</label><input value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} placeholder="1,240" /></div>}
             <div>

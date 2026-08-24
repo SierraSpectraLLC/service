@@ -142,7 +142,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
     // The equipment catalog names the module types, so a part ordered here
     // says what it arrives as in the shop's own words.
-    db.select({ kind: vocabTerms.kind, name: vocabTerms.name }).from(vocabTerms)
+    db.select({ kind: vocabTerms.kind, name: vocabTerms.name, assetType: vocabTerms.assetType, manufacturer: vocabTerms.manufacturer }).from(vocabTerms)
       .where(forTenant(vocabTerms.tenantOrgId, wo.tenantOrgId)),
   ]);
 
@@ -439,6 +439,8 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           systemAssets={unitRows.map((a) => ({ id: a.id, label: `${a.kind} - ${a.model || a.serial || "?"}` }))}
           canEdit={canAdd} isStaff={staff}
           moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
+          moduleModels={vocabRows.filter((v) => v.kind === "model")
+            .map((v) => ({ assetType: v.assetType, name: v.name, manufacturer: v.manufacturer }))}
           showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
       )}
       <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}

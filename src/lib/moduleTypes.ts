@@ -27,3 +27,22 @@ export function moduleTypeOptions(catalog: readonly string[], current = ""): str
   push(current);
   return out;
 }
+
+export type CatalogModel = { assetType: string; name: string; manufacturer: string };
+
+/**
+ * The catalog's models for one module type, for the picker that fills a new
+ * unit's name and maker in one tap.
+ *
+ * Matching is case-insensitive on purpose: a catalog carrying "Mass spec" and
+ * a unit recorded as "Mass Spec" are the same type to everyone but a string
+ * comparison, and a picker that silently offered nothing would read as an
+ * empty catalog rather than a spelling difference.
+ */
+export function modelsForType(models: readonly CatalogModel[], type: string): CatalogModel[] {
+  const want = type.trim().toLowerCase();
+  if (!want) return [];
+  return models
+    .filter((m) => m.assetType.trim().toLowerCase() === want && m.name.trim())
+    .sort((a, b) => (a.manufacturer || "~").localeCompare(b.manufacturer || "~") || a.name.localeCompare(b.name));
+}

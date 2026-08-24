@@ -656,6 +656,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               canEdit={canEdit} isStaff={isStaff} showCosts={showCosts} priceBook={priceBook}
               serviceEvents={serviceEvents} visitNames={visitNames}
               moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
+              moduleModels={vocabRows.filter((v) => v.kind === "model")
+                .map((v) => ({ assetType: v.assetType, name: v.name, manufacturer: v.manufacturer }))}
               pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
