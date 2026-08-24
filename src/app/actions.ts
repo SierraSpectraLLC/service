@@ -149,7 +149,7 @@ import {
   assertSystemEditable, assertSystemVisible, assertWorkEditable, assetAccess, canEditSystem, forTenant, isHouse, readTenant, tenantOfOrg, tenantOfSystem, viewTenant, visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
 import { canSeePost, resolveRoom, type Audience, type Viewer } from "@/lib/discussionScope";
-import { sendEmail } from "@/lib/email";
+import { replyToAddress, sendEmail } from "@/lib/email";
 
 /** A system is named by its assets; the stored description is the fallback. */
 async function systemLabelFor(inst: { id: number; model: string }) {
@@ -3958,7 +3958,11 @@ export async function sendEodEmail(orgId: number | null): Promise<{ error?: stri
   if (!total) return { error: `Nothing to report for ${who}` };
   if (!filled) return { error: `Every line for ${who} is still blank - write at least one update first` };
   try {
-    await sendEmail(to, subject, html);
+    // Reply-to, for the same reason the digest carries one: this goes to a
+    // whole client team at once, somebody hits reply all, and the From is on
+    // a send-only subdomain that will not receive it. Without this the answer
+    // to a daily report bounces for everybody who sent it.
+    await sendEmail(to, subject, html, { replyTo: replyToAddress() });
   } catch (e) {
     // Explicit user action, so surface the failure instead of swallowing it.
     console.error("[eod] send failed:", (e as Error).message);

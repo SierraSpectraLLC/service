@@ -55,10 +55,28 @@ export const digestFrom = (): string | undefined =>
   process.env.DIGEST_EMAIL_FROM?.trim() || process.env.EMAIL_FROM;
 
 /**
- * Where replies to the digest should land, when the sending address is not
- * somewhere anybody reads. Blank = replies go to the sender, which is right
- * only if that inbox is real - a digest whose replies bounce is a broadcast,
- * not the conversation the threading is there to keep.
+ * Where replies land, when the sending address is not somewhere anybody reads.
+ *
+ * This matters more than it looks, because of how the sending domain is set
+ * up. Mail goes out from a subdomain that exists to SEND - it carries its own
+ * reputation, and the only MX Resend puts on it is a bounce collector. Nothing
+ * delivers a human's reply there. So an address that is perfect as a From is
+ * a dead letter box as a To, and "reply all" on a report that went to five
+ * people at a client bounces for all five at once.
+ *
+ * Naming a real inbox here is what turns a broadcast back into a conversation,
+ * which is the whole point of threading the editions together.
+ *
+ * Blank = replies go to the sender, which is right only when that address is
+ * itself a mailbox somebody reads.
+ *
+ * DIGEST_REPLY_TO is the older name, kept because instances are already set
+ * with it; it was scoped to the digest when the digest was the only broadcast
+ * this app sent. The EOD report is the same kind of mail and wants the same
+ * inbox, so the general name leads.
  */
-export const digestReplyTo = (): string | undefined =>
-  process.env.DIGEST_REPLY_TO?.trim() || undefined;
+export const replyToAddress = (): string | undefined =>
+  process.env.REPLY_TO?.trim() || process.env.DIGEST_REPLY_TO?.trim() || undefined;
+
+/** @deprecated Use replyToAddress - one concept, one function. */
+export const digestReplyTo = replyToAddress;

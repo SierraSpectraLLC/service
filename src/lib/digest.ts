@@ -37,7 +37,7 @@ import { BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/
 import { TONE_HEX } from "@/lib/tones";
 import { daysSince } from "@/lib/queue";
 import { houseEmails } from "@/lib/house";
-import { digestFrom, digestReplyTo, sendEmail } from "@/lib/email";
+import { digestFrom, replyToAddress, sendEmail } from "@/lib/email";
 import { brandForTenant } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { shopDay, shopHour, shopToday } from "@/lib/shopday";
@@ -881,7 +881,7 @@ export async function sendDigestEdition(
   // the sender stay coherent. Changing that address starts one fresh chain -
   // a one-time cost, and the honest one: it is a new sender.
   const from = digestFrom();
-  const replyTo = digestReplyTo();
+  const replyTo = replyToAddress();
   const host = mailHost(from);
   const send = (to: string[], subject: string, html: string, key: string, text?: string) =>
     sendEmail(to, subject, html, { from, replyTo, text, headers: threadHeaders(threadRootId(key, host)) });
