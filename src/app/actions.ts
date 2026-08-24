@@ -3865,6 +3865,11 @@ export async function logOffSystemWork(
   const u = await requireStaff();
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say what the work was" };
+  // The picker is a convenience; this is the rule. A name typed past the
+  // dropdown is a person who does not exist, and it would sit on a client's
+  // report looking exactly like one who does.
+  const person = data.person.trim();
+  if (person && !(await assignableNames(u)).has(person)) return { error: "Unknown person" };
   // Only a client this workspace actually runs, and never another tenant's.
   const tenant = readTenant(u);
   if (orgId !== null) {
@@ -3876,7 +3881,7 @@ export async function logOffSystemWork(
     tenantOrgId: tenant,
     instrumentId: null, assetId: null,
     date: shopToday(), ownerOrgId: orgId,
-    title, person: data.person.trim().slice(0, 80),
+    title, person,
     minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
     systemUpdate: data.systemUpdate.trim(), actionItem: data.actionItem.trim(),
     updatedBy: u.name, updatedAt: new Date(),
@@ -3898,8 +3903,10 @@ export async function editOffSystemWork(
   if (!isOffSystem(row)) return { error: "Not found" };
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say what the work was" };
+  const person = data.person.trim();
+  if (person && !(await assignableNames(u)).has(person)) return { error: "Unknown person" };
   await db.update(eodUpdates).set({
-    title, person: data.person.trim().slice(0, 80),
+    title, person,
     minutes: Math.max(0, Math.min(24 * 60, Math.round(data.minutes || 0))),
     updatedBy: u.name, updatedAt: new Date(),
   }).where(eq(eodUpdates.id, eodId));

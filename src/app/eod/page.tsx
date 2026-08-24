@@ -8,6 +8,7 @@ import { partOpen, gasAttention } from "@/lib/stages";
 import { shopToday, shopTodayMDY, shopTime } from "@/lib/shopday";
 import { collectEodEntries, composeEodEmail, eodGroups } from "@/lib/eodEmail";
 import { forTenant, readTenant } from "@/lib/tenancy";
+import { visibleDirectory } from "@/lib/directory";
 import EodPanel from "@/components/EodPanel";
 import EodDateNav from "@/components/EodDateNav";
 
@@ -35,13 +36,16 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
   const date = /^\d{4}-\d{2}-\d{2}$/.test(dateParam ?? "") ? dateParam! : today;
   const isToday = date === today;
 
-  const [recorded, groups, recentAudit] = await Promise.all([
+  const [recorded, groups, recentAudit, people] = await Promise.all([
     db.selectDistinct({ date: eodUpdates.date }).from(eodUpdates)
       .where(forTenant(eodUpdates.tenantOrgId, readTenant(user)))
       .orderBy(desc(eodUpdates.date)).limit(60),
     eodGroups(date, !isToday, readTenant(user)),
     db.select().from(auditLog).where(forTenant(auditLog.tenantOrgId, readTenant(user)))
       .orderBy(desc(auditLog.createdAt)).limit(400),
+    // Who this viewer may name on a line. Same list the server validates
+    // against, so the picker cannot offer a choice the save would refuse.
+    visibleDirectory(user),
   ]);
   const dates = recorded.map((r) => r.date);
 
@@ -113,7 +117,8 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
         <EodPanel key={g.orgId ?? "own"} clientName={g.name} orgId={g.orgId}
           entries={g.entries} dateMDY={isToday ? shopTodayMDY() : mdy(date)} readOnly={!isToday}
           canSend={g.canSend} recipientCount={g.recipientCount} sentInfo={g.sentInfo}
-          emailSubject={g.emailSubject} emailHtml={g.emailHtml} recipients={g.recipients} />
+          emailSubject={g.emailSubject} emailHtml={g.emailHtml} recipients={g.recipients}
+          people={people.map((p) => ({ name: p.name, org: p.org }))} me={user.name} />
       ))}
       {shown.length === 0 && (
         <div className="card">

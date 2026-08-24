@@ -52,7 +52,8 @@ const FIXTURE = `
   -- members of the operator, clients are allowlist rows on their org.
   INSERT INTO house_members (email, org_id, role, name) VALUES
     ('${OWNER}', 3, 'owner', 'Dev Owner'),
-    ('sam@sierraspectra.test', 3, 'staff', 'Sam Ortiz');
+    ('sam@sierraspectra.test', 3, 'staff', 'Sam Ortiz'),
+    ('bill@sierraspectra.test', 3, 'staff', 'Bill Reyes');
   INSERT INTO client_allowlist (entry, org_id, can_edit) VALUES
     ('maria@labzen.test', 1, true),
     ('accounts@coastal.test', 2, false);
@@ -76,7 +77,7 @@ const FIXTURE = `
   INSERT INTO eod_updates (instrument_id, asset_id, date, owner_org_id, title, person, minutes,
                            system_update, action_item, updated_by)
   SELECT NULL, NULL, to_char(now(), 'YYYY-MM-DD'), o.id,
-         'Phone support - tune report question', 'Bill', 35,
+         'Phone support - tune report question', 'Bill Reyes', 35,
          'Their engineer called about a failing reserpine tune. Walked through the report: source was fine, the carrier gas regulator was drifting.',
          'Send them the regulator check SOP',
          'dev@local.test'
@@ -85,7 +86,7 @@ const FIXTURE = `
   INSERT INTO eod_updates (instrument_id, asset_id, date, owner_org_id, title, person, minutes,
                            system_update, action_item, updated_by)
   SELECT NULL, NULL, to_char(now(), 'YYYY-MM-DD'), o.id,
-         'Method advice - headspace carryover', 'Bill', 20,
+         'Method advice - headspace carryover', 'Bill Reyes', 20,
          'Talked their chemist through a carryover problem on a headspace method. Nothing of theirs is with us.',
          '', 'dev@local.test'
   FROM orgs o WHERE o.name = 'Harbor Biotech';

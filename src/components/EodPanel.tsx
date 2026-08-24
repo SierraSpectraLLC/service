@@ -56,7 +56,28 @@ const nounOf = (e: EodLine) =>
 const bylineOf = (e: EodLine) =>
   [e.person, e.minutes ? `${e.minutes} min` : ""].filter(Boolean).join(" · ");
 
-const BLANK_LOG = { title: "", person: "", minutes: "", systemUpdate: "", actionItem: "" };
+/**
+ * A blank log, with the person pre-filled to whoever is typing.
+ *
+ * Not empty: the overwhelmingly common case is logging your own call, and a
+ * required picker that starts unset makes everybody answer a question they
+ * had already answered by being signed in. `me` only survives if it is
+ * somebody the directory actually knows - a name that fails the same check
+ * the server applies would just fail at save.
+ */
+/** The directory as a picker: organizations in the order they arrived, people sorted. */
+function byOrg(people: { name: string; org: string }[]): [string, string[]][] {
+  const groups = new Map<string, string[]>();
+  for (const p of people) {
+    const key = p.org || "Unassigned";
+    groups.set(key, [...(groups.get(key) ?? []), p.name]);
+  }
+  return [...groups].map(([org, names]) => [org, names.sort((a, b) => a.localeCompare(b))]);
+}
+
+const blankLog = (me: string, known: Set<string>) => ({
+  title: "", person: known.has(me) ? me : "", minutes: "", systemUpdate: "", actionItem: "",
+});
 
 /**
  * One client's daily report: the work they own, the updates written on those
@@ -66,9 +87,13 @@ const BLANK_LOG = { title: "", person: "", minutes: "", systemUpdate: "", action
  */
 export default function EodPanel({
   clientName, orgId, entries, dateMDY, readOnly = false, canSend = false, recipientCount = 0, sentInfo = "",
-  emailSubject = "", emailHtml = "", recipients = [],
+  emailSubject = "", emailHtml = "", recipients = [], people = [], me = "",
 }: {
   clientName: string; orgId: number | null; entries: EodLine[]; dateMDY: string;
+  /** Who there is to name, scoped by lib/directory - never a free-text roster. */
+  people?: { name: string; org: string }[];
+  /** The signed-in person, who did the work often enough to be the default. */
+  me?: string;
   readOnly?: boolean; canSend?: boolean; recipientCount?: number; sentInfo?: string;
   /** The composed report, so the preview shows the bytes that would be sent. */
   emailSubject?: string; emailHtml?: string; recipients?: string[];
@@ -81,7 +106,9 @@ export default function EodPanel({
   const [sendMsg, setSendMsg] = useState("");
   const [showBlanks, setShowBlanks] = useState(false);
   const [logging, setLogging] = useState(false);
-  const [log, setLog] = useState(BLANK_LOG);
+  // The names this panel may offer, and the same set the server will accept.
+  const known = new Set(people.map((p) => p.name));
+  const [log, setLog] = useState(() => blankLog(me, known));
   const [logErr, setLogErr] = useState("");
   const [pending, startTransition] = useTransition();
   // Logging and removing off-system work change the SET of lines, not the text
@@ -265,7 +292,7 @@ export default function EodPanel({
             </button>
           )}
           {!readOnly && (
-            <button className="btn sm" onClick={() => { setLog(BLANK_LOG); setLogErr(""); setLogging(true); }}
+            <button className="btn sm" onClick={() => { setLog(blankLog(me, known)); setLogErr(""); setLogging(true); }}
               title={`Something you did for ${clientName} that no system covers`}>
               + Log work
             </button>
@@ -370,10 +397,23 @@ export default function EodPanel({
             placeholder="Phone support - tune report question" />
         </Field>
         <div className="row-2" style={{ gap: 10 }}>
-          <Field label="Who did it" htmlFor="log-person">
-            <input id="log-person" value={log.person}
-              onChange={(e) => setLog((l) => ({ ...l, person: e.target.value }))}
-              placeholder="Bill" />
+          {/* A picker, not a text box. "Bill", "bill" and "Bill R." were three
+              people to every report that counted by name, and the one thing
+              they could never be was a link to an actual account. The list is
+              lib/directory's, scoped to who this viewer may name, and grouped
+              by organization so the shop's own people read as distinct from a
+              client's. */}
+          <Field label="Who did it" htmlFor="log-person"
+            hint={people.length ? undefined : "Nobody to pick yet - add people in Settings."}>
+            <select id="log-person" value={log.person} disabled={!people.length}
+              onChange={(e) => setLog((l) => ({ ...l, person: e.target.value }))}>
+              <option value="">Not recorded</option>
+              {byOrg(people).map(([org, names]) => (
+                <optgroup key={org} label={org}>
+                  {names.map((n) => <option key={n} value={n}>{n}</option>)}
+                </optgroup>
+              ))}
+            </select>
           </Field>
           <Field label="Minutes" hint="For the record - it does not bill" htmlFor="log-minutes">
             <input id="log-minutes" value={log.minutes} inputMode="numeric"
