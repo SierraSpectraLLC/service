@@ -9,6 +9,7 @@ import { formatCents } from "@/lib/money";
 
 export type ExpenseRow = {
   id: number; kind: string; description: string; amountCents: number; incurredOn: string;
+  billable: boolean;
 };
 
 const mdy = (iso: string) => {
@@ -32,7 +33,7 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
   canEdit: boolean;
   isStaff: boolean;
 }) {
-  const [draft, setDraft] = useState({ kind: "mileage", description: "", amount: "", incurredOn: today });
+  const [draft, setDraft] = useState({ kind: "mileage", description: "", amount: "", incurredOn: today, billable: true });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -47,6 +48,8 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
       const res = await logExpense(workOrderId, draft);
       if (res?.error) { setError(res.error); return; }
       toast({ message: `Logged ${draft.amount.trim()} of ${EXPENSE_LABEL[draft.kind].toLowerCase()}` });
+      // billable survives the reset on purpose: on a fixed-price job somebody
+      // is about to log four receipts in a row, all ours to absorb.
       setDraft({ ...draft, description: "", amount: "" });
     });
   };
@@ -73,6 +76,14 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
             onChange={(e) => setDraft({ ...draft, description: e.target.value })}
             onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
             placeholder="62 mi round trip (optional)" style={{ flex: "1 1 160px" }} />
+          {/* Same control, same words as the Hours panel above it. Unticked
+              means ours to absorb: it stays in the job's cost and off the
+              invoice draft - no line to remember to delete. */}
+          <label className="t-small" style={{ display: "flex", alignItems: "center", gap: 5, margin: 0, whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={draft.billable} style={{ width: 15, height: 15 }}
+              onChange={(e) => setDraft({ ...draft, billable: e.target.checked })} />
+            Billable
+          </label>
           <button className="btn sm accent" onClick={submit} disabled={pending || !draft.amount.trim()}>
             {pending ? "Logging..." : "Log"}
           </button>
@@ -83,6 +94,7 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
         <div key={r.id} className="row-2" style={{ alignItems: "baseline", padding: "5px 0", borderTop: "1px solid var(--line)" }}>
           <span className="t-body" style={{ fontWeight: 700, width: 70 }}>{formatCents(r.amountCents)}</span>
           <span className="pill neutral">{EXPENSE_LABEL[r.kind] ?? r.kind}</span>
+          {!r.billable && <span className="pill faint" title="Ours to absorb - counts in the job cost, never reaches the invoice">not billed</span>}
           {r.incurredOn && <span className="mut t-small">{mdy(r.incurredOn)}</span>}
           {r.description && <span className="mut t-small">- {r.description}</span>}
           {isStaff && (

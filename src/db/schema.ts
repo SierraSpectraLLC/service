@@ -2063,11 +2063,29 @@ export const rateCards = pgTable("rate_cards", {
 export const expenses = pgTable("expenses", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
-  workOrderId: integer("work_order_id").notNull().references((): AnyPgColumn => workOrders.id, { onDelete: "cascade" }),
+  /**
+   * Null is an OVERHEAD expense - an engineer's internet bill, the shop's
+   * software seat - money the business spent that no job caused. It shares
+   * this table with job expenses because the row is the same shape and the
+   * difference is exactly one fact: whether a work order made it happen.
+   * Overhead never reaches an invoice and never joins a job's cost; it has
+   * its own room at /money/expenses.
+   */
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "cascade" }),
   kind: text("kind").notNull().default("other"), // mileage | shipping | per_diem | other
   description: text("description").notNull().default(""),
   amountCents: integer("amount_cents").notNull().default(0),
   incurredOn: text("incurred_on").notNull().default(""), // YYYY-MM-DD in shop time
+  /**
+   * Whether this reaches the client's invoice. Cost either way - jobCost
+   * counts every expense, billable or not, because the money left regardless.
+   * What this flag decides is only who ends up paying: unticked on a
+   * fixed-price job means "ours to absorb", and the draft never sees it, so
+   * nobody has to remember to delete the lunch line before sending.
+   */
+  billable: boolean("billable").notNull().default(true),
+  /** Whose expense, for overhead rows - who gets reimbursed. */
+  person: text("person").notNull().default(""),
   loggedBy: text("logged_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("expenses_wo_idx").on(t.workOrderId)]);

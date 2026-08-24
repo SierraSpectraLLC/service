@@ -136,6 +136,8 @@ export type TimeRow = {
 };
 export type ExpenseRow = {
   id: number; kind: string; description: string; amountCents: number;
+  /** Off means ours to absorb: it stays in the job's cost and off the draft. */
+  billable: boolean;
 };
 
 /** "beyond contract" is a label a client should read before the number. */
@@ -199,7 +201,10 @@ export function buildInvoiceLines(input: {
     });
   }
 
-  for (const e of input.expenses) {
+  // Only what the client is meant to pay. An unbillable expense is real money
+  // - jobCost counts it - but it was ours to absorb, and keeping it out of the
+  // draft here is what spares every fixed-price job a hand-deleted lunch line.
+  for (const e of input.expenses.filter((x) => x.billable)) {
     lines.push({
       kind: "expense",
       description: e.description || e.kind,

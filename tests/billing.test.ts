@@ -48,10 +48,45 @@ describe("what lands on the invoice", () => {
   });
 
   it("bills expenses at what they cost, once each", () => {
-    const lines = build({ expenses: [{ id: 5, kind: "mileage", description: "Mileage, 62 mi", amountCents: 4300 }] });
+    const lines = build({ expenses: [{ id: 5, kind: "mileage", description: "Mileage, 62 mi", amountCents: 4300, billable: true }] });
     const e = lines.find((l) => l.kind === "expense")!;
     expect(e.qty).toBe(1);
     expect(lineAmount(e)).toBe(4300);
+  });
+});
+
+describe("an expense marked ours to absorb", () => {
+  /**
+   * The fixed-price problem this flag exists for: a $10k flat job, and the
+   * engineer's lunch, gas, parking and tolls logged against it daily. Before
+   * the flag, every one of those landed on the invoice draft and somebody
+   * deleted them by hand before send - and the day they forgot, a client read
+   * our lunch on their bill.
+   */
+  it("stays off the draft entirely", () => {
+    const lines = build({
+      expenses: [
+        { id: 5, kind: "per_diem", description: "Lunch, site visit", amountCents: 1800, billable: false },
+        { id: 6, kind: "other", description: "Tolls", amountCents: 1200, billable: true },
+      ],
+    });
+    const drafted = lines.filter((l) => l.kind === "expense");
+    expect(drafted).toHaveLength(1);
+    expect(drafted[0].description).toBe("Tolls");
+  });
+
+  /**
+   * The other half, and it must NOT mirror the first: the money left whether
+   * or not the client pays it back, so the job's cost counts every expense.
+   * Billable decides who pays, never whether it happened.
+   */
+  it("still counts in the job's cost - absorbing is not erasing", () => {
+    const c = jobCost({
+      lines: [], partsCostCents: 0, billedMinutes: 0, loadedLaborCents: 0,
+      // The caller sums ALL expense rows into this, flag or no flag.
+      expensesCents: 1800 + 1200,
+    });
+    expect(c.costCents).toBe(3000);
   });
 });
 
@@ -82,7 +117,7 @@ describe("the covered case - a $0 invoice is a feature", () => {
 
 describe("tax", () => {
   it("taxes the parts that were actually sold, and nothing else", () => {
-    const lines = build({ taxRateBps: 775, expenses: [{ id: 5, kind: "other", description: "Freight", amountCents: 10000 }] });
+    const lines = build({ taxRateBps: 775, expenses: [{ id: 5, kind: "other", description: "Freight", amountCents: 10000, billable: true }] });
     const tax = lines.find((l) => l.kind === "tax")!;
     expect(lineAmount(tax)).toBe(4185); // 7.75% of the 540.00 part, not the labor or freight
   });

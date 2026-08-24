@@ -6859,7 +6859,7 @@ export async function logTime(
  */
 export async function logExpense(
   workOrderId: number,
-  data: { kind: string; description: string; amount: string; incurredOn: string },
+  data: { kind: string; description: string; amount: string; incurredOn: string; billable?: boolean },
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
   const cents = parseMoney(data.amount);
@@ -6890,16 +6890,61 @@ export async function deleteExpense(id: number, reason: string): Promise<{ error
   if (typeof why !== "string") return why;
   const [row] = await db.select().from(expenses).where(eq(expenses.id, id));
   if (!row) return {};
-  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId));
-  if (wo) await assertWorkEditable(u, wo);
+  // Overhead rows have no job to check against, so the tenant stamp is the
+  // whole authorization; job rows still answer to their work order.
+  let wo: typeof workOrders.$inferSelect | undefined;
+  if (row.workOrderId === null) {
+    const t = readTenant(u);
+    if (t !== null && row.tenantOrgId !== t) return {};
+  } else {
+    [wo] = await db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId));
+    if (wo) await assertWorkEditable(u, wo);
+  }
   await db.delete(expenses).where(eq(expenses.id, id));
   await audit({
     actor: u.email, instrumentId: wo?.instrumentId ?? null, assetId: wo?.assetId ?? null,
-    entityType: "expense", entityId: id,
+    entityType: "expense", entityId: id, tenantOrgId: row.tenantOrgId,
     action: `removed a ${row.kind} expense of ${formatCents(row.amountCents)} - reason: ${why}`,
     field: "reason", newValue: why,
   });
-  revalidatePath(`/work/${row.workOrderId}`);
+  revalidatePath(row.workOrderId === null ? "/money/expenses" : `/work/${row.workOrderId}`);
+  return {};
+}
+
+/**
+ * Money the business spent that no job caused - an engineer's internet bill,
+ * a software seat, the shop's own postage. It lands in the same table as job
+ * expenses with NULL where the work order would be, which is the entire
+ * difference: overhead never reaches an invoice draft (those are built from a
+ * work order's expenses) and never joins a job's margin. What it feeds is the
+ * monthly ledger at /money/expenses.
+ *
+ * `person` is who gets reimbursed, validated against the directory like every
+ * other field that names somebody - see logOffSystemWork for the argument.
+ */
+export async function logOverheadExpense(
+  data: { kind: string; description: string; amount: string; incurredOn: string; person: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const cents = parseMoney(data.amount);
+  if (cents === null || cents <= 0) return { error: "Enter an amount like 43.00" };
+  const date = data.incurredOn.trim();
+  if (!isIsoDay(date)) return { error: "Pick the date it was incurred" };
+  const description = data.description.trim();
+  if (!description) return { error: "Say what it was - a bare amount is unreadable in a month" };
+  const person = data.person.trim();
+  if (person && !(await assignableNames(u)).has(person)) return { error: "Unknown person" };
+  const kind = (EXPENSE_KINDS as readonly string[]).includes(data.kind) ? data.kind : "other";
+  const [row] = await db.insert(expenses).values({
+    tenantOrgId: readTenant(u), workOrderId: null,
+    kind, description, amountCents: cents,
+    incurredOn: date, billable: false, person, loggedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "expense", entityId: row.id, tenantOrgId: row.tenantOrgId,
+    action: `logged ${formatCents(cents)} of overhead - ${description}${person ? ` (${person})` : ""}`,
+  });
+  revalidatePath("/money/expenses");
   return {};
 }
 

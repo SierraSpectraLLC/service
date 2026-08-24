@@ -129,6 +129,7 @@ export async function draftSourceFor(woId: number): Promise<DraftSource | null> 
   }));
   const expenseList: ExpenseRow[] = expenseRows.map((e) => ({
     id: e.id, kind: e.kind, description: e.description, amountCents: e.amountCents,
+    billable: e.billable,
   }));
 
   // The price book prices a part when it knows it; otherwise the landed cost

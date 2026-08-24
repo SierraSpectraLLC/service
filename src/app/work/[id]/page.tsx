@@ -419,7 +419,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}
         rows={expenseRows.map((e) => ({
           id: e.id, kind: e.kind, description: e.description,
-          amountCents: e.amountCents, incurredOn: e.incurredOn,
+          amountCents: e.amountCents, incurredOn: e.incurredOn, billable: e.billable,
         }))} />
           </>
           ) }] : []),

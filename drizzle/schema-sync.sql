@@ -3120,3 +3120,13 @@ ALTER TABLE "eod_updates" ADD COLUMN IF NOT EXISTS "minutes" integer NOT NULL DE
 -- Where an enquiry from the public landing page goes. See app_settings.publicContactEmail.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "public_contact_email" text NOT NULL DEFAULT '';
 
+-- Expenses grow two facts and lose a constraint. billable: whether the row
+-- reaches the client's invoice (cost either way - see schema.ts). person: who
+-- gets reimbursed, for overhead rows. work_order_id nullable: an overhead
+-- expense (an engineer's internet bill) is money no job caused, and it lives
+-- in this table with NULL where the job would be. DROP NOT NULL is additive in
+-- the sense that matters: no data changes shape and no old row can break.
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "billable" boolean NOT NULL DEFAULT true;
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "person" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ALTER COLUMN "work_order_id" DROP NOT NULL;
+

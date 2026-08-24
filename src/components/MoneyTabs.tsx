@@ -6,7 +6,7 @@ import { Tabs } from "@/components/ui";
  * underneath all of it. Overview is the loop itself.
  */
 export default function MoneyTabs({ active, counts = {} }: {
-  active: "overview" | "quotes" | "invoices" | "collections" | "contracts" | "costing";
+  active: "overview" | "quotes" | "invoices" | "collections" | "contracts" | "costing" | "overhead";
   counts?: Partial<Record<"quotes" | "invoices" | "collections" | "contracts", number>>;
 }) {
   return (
@@ -23,6 +23,7 @@ export default function MoneyTabs({ active, counts = {} }: {
         },
         { key: "contracts", label: "Contracts", href: "/money/contracts", count: counts.contracts },
         { key: "costing", label: "Costing", href: "/money/costing" },
+        { key: "overhead", label: "Overhead", href: "/money/expenses" },
       ]}
     />
   );

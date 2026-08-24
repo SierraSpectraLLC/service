@@ -174,6 +174,16 @@ const FIXTURE = `
     (2, 'other', 'Crane rental, half day', 45000, to_char(now() - interval '5 days', 'YYYY-MM-DD'), 'Sam Ortiz'),
     (7, 'mileage', '212 miles round trip at 0.67', 14204, to_char(now() - interval '6 days', 'YYYY-MM-DD'), '${OWNER}');
 
+  -- One expense ours to absorb: it must show in the job's cost and stay off
+  -- the invoice draft, which is the pair the billable flag exists for.
+  INSERT INTO expenses (work_order_id, kind, description, amount_cents, incurred_on, billable, logged_by) VALUES
+    (2, 'per_diem', 'Lunch, install day', 1850, to_char(now() - interval '5 days', 'YYYY-MM-DD'), false, 'Sam Ortiz');
+
+  -- Overhead: money no job caused. Lives at /money/expenses, never invoiced.
+  INSERT INTO expenses (work_order_id, kind, description, amount_cents, incurred_on, billable, person, logged_by) VALUES
+    (NULL, 'other', 'Internet, August', 8999, to_char(now() - interval '3 days', 'YYYY-MM-DD'), false, 'Bill Reyes', '${OWNER}'),
+    (NULL, 'other', 'CAD seat, monthly', 21500, to_char(date_trunc('month', now()), 'YYYY-MM-DD'), false, '', '${OWNER}');
+
   -- Lab Zen pays on paper and has a live PO with room on it. Coastal has no PO
   -- at all and a punitive policy - short grace, a flat late fee, a hold that
   -- trips early - so the credit-hold and dunning paths have something to fire
