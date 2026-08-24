@@ -13,6 +13,7 @@
  */
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { STARTER_CATEGORIES } from "../src/lib/expenseCategories";
 import path from "node:path";
 
 const DATA_DIR = process.env.PGLITE_DIR
@@ -40,6 +41,12 @@ const FIXTURE = `
   UPDATE orgs SET is_operator = true WHERE name = 'Sierra Spectra';
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
   UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
+  -- The starter expense vocabulary, exactly as createOperator seeds it - the
+  -- fixture must eat what production cooks.
+  INSERT INTO expense_categories (tenant_org_id, name, sort_order, created_by)
+  SELECT (SELECT id FROM orgs WHERE name = 'Sierra Spectra'), v.name, v.ord, '${OWNER}'
+  FROM (VALUES ${STARTER_CATEGORIES.map((n, i) => `('${n.replace(/'/g, "''")}', ${i + 1})`).join(", ")}) AS v(name, ord);
+
   -- The travel rulebook the WO expense panel applies: 80 mi stipend radius,
   -- $30 day per diem beyond it, $65/night stepping to $85 after 3, $180 rooms.
   UPDATE app_settings SET expense_policy =

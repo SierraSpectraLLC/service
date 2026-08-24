@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { desc, isNull, and } from "drizzle-orm";
+import { asc, desc, isNull, and } from "drizzle-orm";
 import { db } from "@/db";
-import { expenses } from "@/db/schema";
+import { expenseCategories, expenses } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
@@ -24,11 +24,14 @@ export default async function OverheadExpensesPage() {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
 
-  const [rows, people] = await Promise.all([
+  const [rows, people, categoryRows] = await Promise.all([
     db.select().from(expenses)
       .where(and(isNull(expenses.workOrderId), forTenant(expenses.tenantOrgId, readTenant(user))))
       .orderBy(desc(expenses.incurredOn), desc(expenses.id)),
     visibleDirectory(user),
+    db.select().from(expenseCategories)
+      .where(forTenant(expenseCategories.tenantOrgId, readTenant(user)))
+      .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
   ]);
 
   return (
@@ -40,6 +43,7 @@ export default async function OverheadExpensesPage() {
       />
       <MoneyTabs active="overhead" />
       <OverheadPanel today={shopToday()} me={user.name}
+        categories={categoryRows.map((c) => c.name)}
         people={people.map((p) => ({ name: p.name, org: p.org }))}
         rows={rows.map((r) => ({
           id: r.id, kind: r.kind, description: r.description,

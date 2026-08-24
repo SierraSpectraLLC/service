@@ -27,7 +27,7 @@ const mdy = (iso: string) => {
  * find afterwards - it reaches both the invoice and the job cost from this one
  * entry.
  */
-export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isStaff, policy, sites = [], defaultSiteId = null }: {
+export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isStaff, policy, sites = [], defaultSiteId = null, categories = [] }: {
   workOrderId: number;
   rows: ExpenseRow[];
   today: string;
@@ -39,8 +39,15 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
   sites?: { id: number; name: string; onewayMiles: number }[];
   /** The lab the work order's system lives at - the trip's obvious answer. */
   defaultSiteId?: number | null;
+  /** This workspace's own expense vocabulary; empty falls back to the built-ins. */
+  categories?: string[];
 }) {
-  const [draft, setDraft] = useState({ kind: "mileage", description: "", amount: "", incurredOn: today, billable: true });
+  // The picker's options: the workspace's own vocabulary, or the built-ins
+  // for one that has none. Never both - two lists teaches double filing.
+  const kinds: { value: string; label: string }[] = categories.length
+    ? categories.map((c) => ({ value: c, label: c }))
+    : EXPENSE_KINDS.map((k) => ({ value: k, label: EXPENSE_LABEL[k] }));
+  const [draft, setDraft] = useState({ kind: kinds[0]?.value ?? "other", description: "", amount: "", incurredOn: today, billable: true });
   const [error, setError] = useState("");
   // The site answers the miles when it can. Seeding from the system's own lab
   // means a single-site client never touches this at all.
@@ -62,7 +69,7 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
     startTransition(async () => {
       const res = await logExpense(workOrderId, draft);
       if (res?.error) { setError(res.error); return; }
-      toast({ message: `Logged ${draft.amount.trim()} of ${EXPENSE_LABEL[draft.kind].toLowerCase()}` });
+      toast({ message: `Logged ${draft.amount.trim()} of ${(EXPENSE_LABEL[draft.kind] ?? draft.kind).toLowerCase()}` });
       // billable survives the reset on purpose: on a fixed-price job somebody
       // is about to log four receipts in a row, all ours to absorb.
       setDraft({ ...draft, description: "", amount: "" });
@@ -79,7 +86,7 @@ export default function ExpensesPanel({ workOrderId, rows, today, canEdit, isSta
         <div className="row-2" style={{ marginBottom: rows.length ? 10 : 0 }}>
           <select className="t-body" value={draft.kind} aria-label="Kind of expense"
             onChange={(e) => setDraft({ ...draft, kind: e.target.value })} style={{ width: "auto" }}>
-            {EXPENSE_KINDS.map((k) => <option key={k} value={k}>{EXPENSE_LABEL[k]}</option>)}
+            {kinds.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
           </select>
           <input className="t-body" value={draft.amount} inputMode="decimal" aria-label="Amount"
             onChange={(e) => setDraft({ ...draft, amount: e.target.value })}

@@ -2068,6 +2068,29 @@ export const rateCards = pgTable("rate_cards", {
  * a night in a motel. Recorded against the work order because that is what it
  * gets billed and costed against.
  */
+/**
+ * What an expense can be called here - each workspace's own list.
+ *
+ * The five hardcoded kinds lasted exactly until a real shop's bookkeeping met
+ * them: one wants Fuel split from Tolls, another folds both into Vehicle. So
+ * the vocabulary is rows, seeded from a starter set when a workspace is
+ * created (see lib/expenseCategories) and edited freely after.
+ *
+ * Expense rows store the NAME as text, not a foreign key - deliberately, and
+ * it is the same choice the rest of the app makes for vocabulary: deleting a
+ * category removes it from the pickers and nothing else. Last year's "Fuel"
+ * receipt still says Fuel, because what a cost was called when it was logged
+ * is a historical fact, not a live reference.
+ */
+export const expenseCategories = pgTable("expense_categories", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("expense_categories_tenant_idx").on(t.tenantOrgId)]);
+
 export const expenses = pgTable("expenses", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),

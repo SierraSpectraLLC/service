@@ -3145,3 +3145,22 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- Each workspace's own expense vocabulary. Rows are the pickers' options;
+-- expense rows store the name as text, so deleting a category never touches
+-- history. See lib/expenseCategories for the starter set.
+CREATE TABLE IF NOT EXISTS "expense_categories" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer,
+  "name" text NOT NULL,
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "expense_categories_tenant_idx" ON "expense_categories" ("tenant_org_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expense_categories_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "expense_categories" ADD CONSTRAINT "expense_categories_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+

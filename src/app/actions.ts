@@ -16,7 +16,7 @@ import {
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  expenses, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
+  expenses, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
@@ -104,6 +104,7 @@ import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catal
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
 import { resolveExpensePolicy } from "@/lib/expensePolicy";
+import { categoryKey, cleanCategoryName, missingStarters } from "@/lib/expenseCategories";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
@@ -6858,6 +6859,107 @@ export async function logTime(
  * night in a motel. Against the work order, because that is what it bills and
  * costs against.
  */
+/** This workspace's expense vocabulary, in picker order. */
+async function tenantCategories(tenant: number | null) {
+  return db.select().from(expenseCategories)
+    .where(forTenant(expenseCategories.tenantOrgId, tenant))
+    .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id));
+}
+
+/**
+ * A kind fit to store: one of this workspace's own category names, or one of
+ * the canonical slugs the app itself writes (the travel strip logs
+ * "per_diem"), else "other". Free text never lands in the column - a
+ * vocabulary that grows by typo is not a vocabulary.
+ */
+async function cleanKind(kind: string, tenant: number | null): Promise<string> {
+  if ((EXPENSE_KINDS as readonly string[]).includes(kind)) return kind;
+  const match = (await tenantCategories(tenant)).find((c) => categoryKey(c.name) === categoryKey(kind));
+  return match ? match.name : "other";
+}
+
+export async function addExpenseCategory(name: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const clean = cleanCategoryName(name);
+  if (!clean) return { error: "Give it a name" };
+  const tenant = readTenant(u);
+  const existing = await tenantCategories(tenant);
+  if (existing.some((c) => categoryKey(c.name) === categoryKey(clean))) {
+    return { error: `${clean} is already on the list` };
+  }
+  const sortOrder = Math.max(0, ...existing.map((c) => c.sortOrder)) + 1;
+  await db.insert(expenseCategories).values({ tenantOrgId: tenant, name: clean, sortOrder, createdBy: u.email });
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "expense-categories", tenantOrgId: tenant,
+    action: `added expense category "${clean}"`,
+  });
+  revalidatePath("/settings/billing");
+  return {};
+}
+
+/**
+ * Rename changes the PICKER, not history: rows already logged keep the name
+ * they were logged under, because what a cost was called is a fact about the
+ * day it happened. Same rule as delete, and worth stating twice.
+ */
+export async function renameExpenseCategory(id: number, name: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const clean = cleanCategoryName(name);
+  if (!clean) return { error: "Give it a name" };
+  const tenant = readTenant(u);
+  const rows = await tenantCategories(tenant);
+  const row = rows.find((c) => c.id === id);
+  if (!row) return { error: "Not found" };
+  if (rows.some((c) => c.id !== id && categoryKey(c.name) === categoryKey(clean))) {
+    return { error: `${clean} is already on the list` };
+  }
+  await db.update(expenseCategories).set({ name: clean }).where(eq(expenseCategories.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "expense-categories", tenantOrgId: tenant,
+    action: `renamed expense category "${row.name}" to "${clean}"`,
+  });
+  revalidatePath("/settings/billing");
+  return {};
+}
+
+export async function deleteExpenseCategory(id: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const tenant = readTenant(u);
+  const row = (await tenantCategories(tenant)).find((c) => c.id === id);
+  if (!row) return { error: "Not found" };
+  await db.delete(expenseCategories).where(eq(expenseCategories.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "expense-categories", tenantOrgId: tenant,
+    action: `deleted expense category "${row.name}" - logged rows keep the name`,
+  });
+  revalidatePath("/settings/billing");
+  return {};
+}
+
+/**
+ * Put the starter set on this workspace's shelf - only the names it does not
+ * already have, so pressing it twice adds nothing and a renamed category is
+ * never resurrected under its old name.
+ */
+export async function loadStarterCategories(): Promise<{ error?: string; added?: number }> {
+  const u = await requireOwner();
+  const tenant = readTenant(u);
+  const existing = await tenantCategories(tenant);
+  const missing = missingStarters(existing);
+  if (missing.length) {
+    const from = Math.max(0, ...existing.map((c) => c.sortOrder));
+    await db.insert(expenseCategories).values(missing.map((name, i) => ({
+      tenantOrgId: tenant, name, sortOrder: from + i + 1, createdBy: u.email,
+    })));
+    await audit({
+      actor: u.email, entityType: "settings", entityId: "expense-categories", tenantOrgId: tenant,
+      action: `loaded ${missing.length} starter expense categories`,
+    });
+  }
+  revalidatePath("/settings/billing");
+  return { added: missing.length };
+}
+
 export async function logExpense(
   workOrderId: number,
   data: {
@@ -6874,11 +6976,18 @@ export async function logExpense(
   const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
   if (!wo) return { error: "Not found" };
   await assertWorkEditable(u, wo);
-  const kind = (EXPENSE_KINDS as readonly string[]).includes(data.kind) ? data.kind : "other";
+  const kind = await cleanKind(data.kind, wo.tenantOrgId);
+  // The site must be one of THIS client's labs - a stamp that pointed at
+  // another client's building would be wrong twice over.
+  let siteId: number | null = null;
+  if (data.siteId != null) {
+    const [site] = await db.select().from(orgSites).where(eq(orgSites.id, data.siteId));
+    if (site && site.orgId === wo.orgId) siteId = site.id;
+  }
   const [row] = await db.insert(expenses).values({
-    tenantOrgId: wo.tenantOrgId, workOrderId,
+    tenantOrgId: wo.tenantOrgId, workOrderId, siteId,
     kind, description: data.description.trim(), amountCents: cents,
-    incurredOn: date, loggedBy: u.email,
+    incurredOn: date, billable: data.billable ?? true, loggedBy: u.email,
   }).returning();
   await audit({
     actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
@@ -6939,7 +7048,7 @@ export async function logOverheadExpense(
   if (!description) return { error: "Say what it was - a bare amount is unreadable in a month" };
   const person = data.person.trim();
   if (person && !(await assignableNames(u)).has(person)) return { error: "Unknown person" };
-  const kind = (EXPENSE_KINDS as readonly string[]).includes(data.kind) ? data.kind : "other";
+  const kind = await cleanKind(data.kind, readTenant(u));
   const [row] = await db.insert(expenses).values({
     tenantOrgId: readTenant(u), workOrderId: null,
     kind, description, amountCents: cents,
@@ -8362,6 +8471,11 @@ export async function createOperator(
   await db.insert(houseMembers).values({
     email: e, role: "owner", name: "", addedBy: u.email, orgId: org.id,
   });
+  // A workspace is born with a working expense vocabulary rather than an
+  // empty picker - every name deletable, renameable, theirs from day one.
+  await db.insert(expenseCategories).values(missingStarters([]).map((name, i) => ({
+    tenantOrgId: org.id, name, sortOrder: i + 1, createdBy: u.email,
+  })));
   await audit({
     actor: u.email, entityType: "org", entityId: org.id, tenantOrgId: org.id,
     action: `opened a workspace for "${n}" with ${e} as its first owner`,

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, invoiceFees, invoices, orgs, payments } from "@/db/schema";
+import { appSettings, expenseCategories, invoiceFees, invoices, orgs, payments } from "@/db/schema";
 import { requireOwner } from "@/lib/authz";
 import { myTenantOrgId } from "@/lib/authz";
 import { resolvePolicy } from "@/lib/billingPolicy";
@@ -9,6 +9,9 @@ import { monthsWithActivity } from "@/lib/accountingExport";
 import { stripeMode } from "@/lib/stripe";
 import BillingDefaultsForm from "@/components/BillingDefaultsForm";
 import ExpenseRulesForm from "@/components/ExpenseRulesForm";
+import ExpenseCategoriesCard from "@/components/ExpenseCategoriesCard";
+import { forTenant, readTenant } from "@/lib/tenancy";
+import { asc } from "drizzle-orm";
 import { resolveExpensePolicy } from "@/lib/expensePolicy";
 import { PageHead } from "@/components/ui";
 
@@ -61,6 +64,10 @@ export default async function BillingSettingsPage() {
         months={months}
       />
       <ExpenseRulesForm policy={resolveExpensePolicy(settings?.expensePolicy ?? null)} />
+      <ExpenseCategoriesCard rows={(await db.select().from(expenseCategories)
+        .where(forTenant(expenseCategories.tenantOrgId, readTenant(user)))
+        .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)))
+        .map((c) => ({ id: c.id, name: c.name }))} />
     </>
   );
 }

@@ -34,16 +34,22 @@ const monthName = (ym: string) => {
  * enforced where the rows are written (logOverheadExpense stamps billable
  * false and no work order), not by this component behaving.
  */
-export default function OverheadPanel({ rows, people, me, today }: {
+export default function OverheadPanel({ rows, people, me, today, categories = [] }: {
   rows: OverheadRow[];
+  /** This workspace's own expense vocabulary; empty falls back to the built-ins. */
+  categories?: string[];
   /** Who can be reimbursed - the directory, same list every name field uses. */
   people: { name: string; org: string }[];
   me: string;
   today: string;
 }) {
   const known = new Set(people.map((p) => p.name));
+  const kinds: { value: string; label: string }[] = categories.length
+    ? categories.map((c) => ({ value: c, label: c }))
+    : EXPENSE_KINDS.map((k) => ({ value: k, label: EXPENSE_LABEL[k] }));
   const [draft, setDraft] = useState({
-    kind: "other", description: "", amount: "", incurredOn: today,
+    // Overhead is mostly "Other" whatever the vocabulary - default to the tail.
+    kind: kinds[kinds.length - 1]?.value ?? "other", description: "", amount: "", incurredOn: today,
     person: known.has(me) ? me : "",
   });
   const [error, setError] = useState("");
@@ -74,7 +80,7 @@ export default function OverheadPanel({ rows, people, me, today }: {
           <Field label="Kind">
             <select className="t-body" value={draft.kind} style={{ width: "auto" }}
               onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-              {EXPENSE_KINDS.map((k) => <option key={k} value={k}>{EXPENSE_LABEL[k]}</option>)}
+              {kinds.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
             </select>
           </Field>
           <Field label="Amount">

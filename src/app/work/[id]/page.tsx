@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
-  appSettings, assets, attachments, auditLog, checklistItems, instruments, itemNotes, orgs, orgSites, parts, poLines,
+  appSettings, assets, attachments, auditLog, checklistItems, expenseCategories, instruments, itemNotes, orgs, orgSites, parts, poLines,
   purchaseOrders, taskNotes, tasks, timeEntries, workOrders, workOrderNotes, expenses, agreements,
   rateCards, quotes,
 } from "@/db/schema";
@@ -107,7 +107,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await visitFlag(wo.orgId, wo.instrumentId).catch(() => "")
     : "";
 
-  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows, settingsForPolicy, siteRows] = await Promise.all([
+  const [taskRows, timeRows, fileRows, people, askedByRows, brand, unitRows, noteRows, woPartRows, expenseRows, agreementRows, settingsForPolicy, siteRows, categoryRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.workOrderId, woId))
       .orderBy(asc(tasks.sortOrder), asc(tasks.id)),
     db.select().from(timeEntries).where(eq(timeEntries.workOrderId, woId))
@@ -136,6 +136,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     wo.orgId === null ? Promise.resolve([]) : db.select().from(orgSites)
       .where(and(eq(orgSites.orgId, wo.orgId), eq(orgSites.archived, false)))
       .orderBy(asc(orgSites.name), asc(orgSites.id)),
+    db.select().from(expenseCategories)
+      .where(forTenant(expenseCategories.tenantOrgId, wo.tenantOrgId))
+      .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
   ]);
 
   const taskIds = taskRows.map((t) => t.id);
@@ -429,6 +432,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         policy={resolveExpensePolicy(settingsForPolicy?.expensePolicy ?? null)}
         sites={siteRows.map((x) => ({ id: x.id, name: siteLabel(x), onewayMiles: x.onewayMiles }))}
         defaultSiteId={inst?.siteId ?? null}
+        categories={categoryRows.map((c) => c.name)}
         rows={expenseRows.map((e) => ({
           id: e.id, kind: e.kind, description: e.description,
           amountCents: e.amountCents, incurredOn: e.incurredOn, billable: e.billable,
