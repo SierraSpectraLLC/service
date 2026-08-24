@@ -4,6 +4,7 @@ import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders, users } from "@/db/schema";
 import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
+import { getModules } from "@/lib/flags";
 import { shopTime } from "@/lib/shopday";
 import { BLOCKED_STAGE, GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { expiryAttention, expiryLabel } from "@/lib/gxp";
@@ -11,13 +12,14 @@ import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
-import { requireUser, viewContext } from "@/lib/authz";
+import { currentUser, requireUser, viewContext } from "@/lib/authz";
 import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
+import Landing from "@/components/Landing";
 import MoneyCard from "@/components/MoneyCard";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
@@ -26,6 +28,14 @@ export const dynamic = "force-dynamic";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; f?: string; sort?: string }> }) {
   const initial = await searchParams;
+  // The apex answers strangers now, so a missing session is not an error here
+  // - it is the other half of this route. Bouncing to /login would have made
+  // the front door of the site a sign-in form.
+  const visitor = await currentUser();
+  if (!visitor) {
+    const [brand, modules] = await Promise.all([getBrand(), getModules()]);
+    return <Landing brandName={brand.name} tagline={brand.tagline} catalogOn={modules.publicCatalog} />;
+  }
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
