@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { boardAttention, boardTone } from "@/lib/boardRow";
 import PickOrAdd from "./PickOrAdd";
 import CatalogSelect from "./CatalogSelect";
 import { createInstrument } from "@/app/actions";
@@ -20,6 +21,8 @@ type Row = {
   /** Expired / expiring dated documents - regulated (GxP) systems only. */
   docIssues: string[];
   overdue: number; assetIssues: string[]; missingFromSheet: boolean; lastActivity: string;
+  /** Days in "Waiting / blocked", or null when it is not blocked. */
+  blockedDays: number | null;
   /** One string per module: type, maker, model, serial. Searchable, not shown. */
   assetText: string[];
   /** An open Down work order, or a unit on it marked Down. Reads red, sorts first. */
@@ -195,21 +198,13 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
     });
   };
 
-  /** Everything pulling at this system, as one quiet line rather than a pill wall. */
-  const attention = (i: Row) => [
-    ...(i.overdue > 0 ? [`${i.overdue} overdue`] : []),
-    ...(i.openParts > 0 ? [`${i.openParts} open part${i.openParts === 1 ? "" : "s"}`] : []),
-    ...i.gasIssues, ...i.assetIssues, ...i.docIssues,
-    ...(i.missingFromSheet ? ["not on sheet"] : []),
-  ];
-
   const toRow = (i: Row): DataRow => {
-    const attn = attention(i);
+    const attn = boardAttention(i);
     return {
       key: i.id,
       href: `/instruments/${i.id}`,
       cells: {
-        dot: <Dot tone={i.down ? "bad" : attn.length ? "warn" : i.queueMine ? "neutral" : "faint"} />,
+        dot: <Dot tone={boardTone(i)} />,
         id: <Id>{i.externalId}</Id>,
         system: (
           <span style={{ minWidth: 0, display: "block" }}>

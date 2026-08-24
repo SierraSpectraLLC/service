@@ -2,10 +2,10 @@ import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL 
 import { db } from "@/db";
 import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders, users } from "@/db/schema";
-import { queueView } from "@/lib/queue";
+import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
-import { GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
+import { BLOCKED_STAGE, GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { expiryAttention, expiryLabel } from "@/lib/gxp";
 import { getStageDefs } from "@/lib/stageDefs";
 import { systemLabel } from "@/lib/systemLabel";
@@ -179,6 +179,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
         .filter((a) => a.instrumentId === i.id && assetAttention(a.status))
         .map((a) => `${a.kind.toLowerCase()} ${a.status === "Down" ? "down" : "attn"}`),
       missingFromSheet: droppedFromSheet.has(i.externalId),
+      // Blocked is the one stage that MEANS something is wrong: it is the only
+      // one that demands a written reason, and a system sitting in it is a
+      // system nobody is moving. The board has to say so, with the age -
+      // "blocked" and "blocked 40d" are different problems.
+      blockedDays: i.stages.includes(BLOCKED_STAGE)
+        ? (i.blockedSince ? daysSince(i.blockedSince, new Date()) : 0)
+        : null,
       lastActivity: last ? `${last.action} - ${last.actor.split("@")[0]}` : "",
       // Whose move it is. A system parked with the client is still visible -
       // hiding it would just move the forgetting somewhere else - but it reads

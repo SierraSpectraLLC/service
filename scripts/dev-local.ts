@@ -64,6 +64,13 @@ const FIXTURE = `
     ('CA-002', 'Coastal Analytical', 'Agilent 7890B GC', 'Agilent', 'CN14320', 5, '{"Waiting / blocked"}', 'HED fault - part on order.'),
     ('CA-003', 'Coastal Analytical', 'Waters Xevo TQ-S', 'Waters', 'WAT5521', 6, '{"In service"}', '');
 
+  -- Blocking is the one stage that demands a written reason, so the fixture's
+  -- blocked system carries one - and an age, so the board can say how long.
+  UPDATE instruments
+     SET blocked_reason = 'Waiting on HED board from Agilent - no ETA.',
+         blocked_since  = now() - interval '12 days'
+   WHERE external_id = 'CA-002';
+
   INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, status, location) VALUES
     (1, 'Mass spec', '6495C', 'US2405111', 'Agilent', 'In service', 'Bench 4'),
     (1, 'Pump', '1290 Quat Pump', 'DEBA2201', 'Agilent', 'In service', 'Bench 4'),
