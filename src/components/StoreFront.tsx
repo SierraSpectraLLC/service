@@ -7,23 +7,10 @@ import {
   availabilityHint, availabilityLabel, availabilityOf, bucketTotals, filterStore, hasChoice,
   linePrice, sourceTag, splitCart, type CartLine, type StoreFacet, type StorePart,
 } from "@/lib/store";
+import { loadCart, sameLine, saveCart } from "@/lib/storeCart";
 import { formatCents } from "@/lib/money";
 import { toast } from "@/components/ui/Toast";
 import { Dot, FacetStrip, Toolbar } from "@/components/ui";
-
-const CART_KEY = "ridgeline-store-cart";
-
-/** The cart survives navigation, not failure: storage that throws is an empty cart. */
-const loadCart = (): CartLine[] => {
-  try {
-    const raw = localStorage.getItem(CART_KEY);
-    const parsed = raw ? (JSON.parse(raw) as CartLine[]) : [];
-    return Array.isArray(parsed) ? parsed.filter((l) => l && l.partNumber && l.qty > 0) : [];
-  } catch { return []; }
-};
-const saveCart = (cart: CartLine[]) => {
-  try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* per-tab nicety only */ }
-};
 
 const AVAIL_TONE = { now: "good", sourced: "info", special: "warn" } as const;
 
@@ -64,13 +51,11 @@ export default function StoreFront({ items, orgName, hasYours, termsDays }: {
   const setRow = (i: StorePart, patch: Partial<{ source?: "oem" | "alt"; qty: number }>) =>
     setDraft((d) => ({ ...d, [i.id]: { ...draftFor(i), ...patch } }));
 
-  const same = (l: CartLine, pn: string, source?: "oem" | "alt") =>
-    l.partNumber.toLowerCase() === pn.toLowerCase() && (l.source ?? "") === (source ?? "");
 
   const add = (item: StorePart) => {
     const d = draftFor(item);
     const source = hasChoice(item) ? d.source : undefined;
-    const line = cart.find((l) => same(l, item.partNumber, source));
+    const line = cart.find((l) => sameLine(l, item.partNumber, source));
     update(line
       ? cart.map((l) => (l === line ? { ...l, qty: Math.min(999, l.qty + d.qty) } : l))
       : [...cart, { partNumber: item.partNumber, qty: d.qty, ...(source ? { source } : {}) }]);
@@ -157,20 +142,24 @@ export default function StoreFront({ items, orgName, hasYours, termsDays }: {
                 display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap",
                 padding: "12px 14px", borderTop: n === 0 ? "none" : "1px solid var(--line)",
               }}>
-                {i.photoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={i.photoUrl} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, background: "#F7F9FC", flexShrink: 0 }} />
-                ) : (
-                  <div aria-hidden style={{ width: 56, height: 56, borderRadius: 8, background: "#F7F9FC", border: "1px dashed var(--line)", flexShrink: 0 }} />
-                )}
-                <div style={{ flex: "1 1 200px", minWidth: 160 }}>
+                {/* Real links, so a part opens in a tab and can be sent to
+                    whoever signs for it. */}
+                <Link href={`/store/${i.id}`} aria-label={`${i.name} details`} style={{ flexShrink: 0, display: "block" }}>
+                  {i.photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={i.photoUrl} alt="" style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, background: "#F7F9FC", display: "block" }} />
+                  ) : (
+                    <span aria-hidden style={{ width: 56, height: 56, borderRadius: 8, background: "#F7F9FC", border: "1px dashed var(--line)", display: "block" }} />
+                  )}
+                </Link>
+                <Link href={`/store/${i.id}`} style={{ flex: "1 1 200px", minWidth: 160, textDecoration: "none", color: "inherit" }}>
                   <div className="mut t-meta" style={{ textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 700 }}>{i.manufacturer}</div>
                   <div className="t-body" style={{ fontWeight: 700 }}>{i.name}</div>
                   <div className="mut t-meta">
                     <span className="mono">{i.partNumber}</span>
                     {i.fitsLabel && <> · <span style={i.fitsYours ? { color: "var(--t-good-fg)" } : undefined}>{i.fitsLabel}</span></>}
                   </div>
-                </div>
+                </Link>
                 <div style={{ flex: "0 1 170px", minWidth: 140 }}>
                   <span className="row-2" style={{ gap: 5, alignItems: "center" }}>
                     <Dot tone={AVAIL_TONE[a]} />

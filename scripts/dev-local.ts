@@ -163,6 +163,27 @@ const FIXTURE = `
     ('ED-A72401', 'nXDS tip seal kit',        'Edwards', 'kit',  '{"Vacuum pump"}', '{"Edwards nXDS10i"}', 'dev@local.test'),
     ('228-45703-91', 'LC-30 plunger seal',    'Shimadzu','consumable', '{"Pump"}', '{"LC-30AD"}', 'dev@local.test');
 
+  -- Photos on two rows, so the shelf thumbnail and the part page's hero and
+  -- thumbnail strip have something to show. Inline SVG: no blob store to run.
+  INSERT INTO part_photos (catalog_id, url, caption, sort_order, uploaded_by)
+  SELECT c.id, p.url, p.caption, p.ord, 'dev@local.test'
+  FROM part_catalog c JOIN (VALUES
+    ('WAT271066', 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="%23DCE6F2"/><text x="240" y="170" font-family="sans-serif" font-size="28" fill="%231B2A44" text-anchor="middle">ESI capillary</text></svg>', 'The capillary', 1),
+    ('WAT271066', 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320"><rect width="320" height="320" fill="%23EEF3F9"/><text x="160" y="170" font-family="sans-serif" font-size="22" fill="%231B2A44" text-anchor="middle">Label</text></svg>', 'The label', 2),
+    ('5188-5365', 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320"><rect width="480" height="320" fill="%23E7F0E8"/><text x="240" y="170" font-family="sans-serif" font-size="28" fill="%231B2A44" text-anchor="middle">Septa, 50/pk</text></svg>', 'The pack', 1)
+  ) AS p(pn, url, caption, ord) ON p.pn = c.part_number;
+
+  -- What the tip seal kit is made of, so the part page's kit panel has rows -
+  -- one of them a number the shelf also sells on its own, for the cross-link.
+  INSERT INTO part_kit_lines (kit_id, part_number, name, qty, sort_order)
+  SELECT c.id, k.pn, k.name, k.qty, k.ord
+  FROM part_catalog c JOIN (VALUES
+    ('G1960-80039', 'Oil mist filter', 1, 1),
+    ('ED-A70501',   'Tip seal, pair',  2, 2),
+    ('ED-A70502',   'O-ring set',      1, 3)
+  ) AS k(pn, name, qty, ord) ON TRUE
+  WHERE c.part_number = 'ED-A72401';
+
   -- Vendor offers with the sourcing facts, arranged so cheapest and fastest
   -- disagree: the OEM is quick but must cross-dock; the reseller drop-ships.
   INSERT INTO part_prices (part_number, vendor, is_oem, price_cents, lead_days, drop_ships, expedite_ok, url, updated_by) VALUES
