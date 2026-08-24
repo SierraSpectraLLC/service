@@ -55,6 +55,32 @@ describe("Dialog keyboard contract", () => {
     expect(document.body.style.overflow).toBe("");
   });
 
+  /**
+   * The single-character keyboard bug: every keystroke in a controlled field
+   * re-renders the caller, which hands Dialog a fresh inline onClose. When the
+   * focus effect depended on that identity it re-ran per keystroke, and its
+   * teardown/setup yanked focus back to the first field - on a phone, the
+   * keyboard closed after one character. Focus must sit still through
+   * re-renders; only open/close may move it.
+   */
+  it("keeps focus where it is when the caller re-renders with a new onClose", () => {
+    const view = render(dialog(true, () => {}));
+    const two = screen.getByRole("button", { name: "Two" });
+    two.focus();
+    view.rerender(dialog(true, () => {}));
+    expect(document.activeElement).toBe(two);
+  });
+
+  it("Escape still calls the LATEST onClose after re-renders", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const view = render(dialog(true, first));
+    view.rerender(dialog(true, second));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
   it("returns focus to the opener on close", () => {
     const opener = document.createElement("button");
     document.body.appendChild(opener);
