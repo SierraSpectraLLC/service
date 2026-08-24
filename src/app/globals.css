@@ -73,23 +73,6 @@ input, select, textarea {
 input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: none; border-color: var(--sky); box-shadow: 0 0 0 3px rgba(91, 168, 217, 0.22);
 }
-/* Touch devices type at 16px, and it is not a taste decision.
-   iOS Safari force-zooms the page whenever a focused field's text is under
-   16px - every field here was 13px, and the small ones 11px - and each zoom
-   relays the page out under the caret: the field scrolls off, focus goes with
-   it, and the keyboard drops. That is one dropped keyboard per character on a
-   phone, on every text box on every page. Desktop keeps the dense scale; a
-   coarse pointer gets the size that stops the zoom happening at all.
-   The type-scale classes are re-stated here because .t-small on an input has
-   to lose to this, and element+class beats a bare class. */
-@media (pointer: coarse) {
-  input, select, textarea,
-  input.t-meta, input.t-small, input.t-body, input.t-lead,
-  select.t-meta, select.t-small, select.t-body, select.t-lead,
-  textarea.t-meta, textarea.t-small, textarea.t-body, textarea.t-lead {
-    font-size: 16px;
-  }
-}
 label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); margin-bottom: 3px; }
 
 /* Page widths are a fixed set, not a per-page guess - blocks lined up
@@ -1143,3 +1126,40 @@ label { display: block; font-size: 11px; font-weight: 700; color: var(--mut); ma
 .savebar-status { flex: 1; font-size: 12px; color: var(--mut); min-width: 0; }
 .savebar-status .err { color: var(--t-bad-fg); }
 .savebar-status .ok { color: var(--t-good-fg); }
+
+
+/* ── Typing on a phone ───────────────────────────────────────────────────────
+   LAST BLOCK IN THIS FILE, ON PURPOSE. Read the whole comment before moving it.
+
+   iOS Safari force-zooms the page whenever a focused field's text measures
+   under 16px, and each zoom relays the page out under the caret: the field
+   scrolls off, focus goes with it, and the keyboard drops. On a dense app
+   whose base field size is 13px (and 11px for the small ones) that is one
+   dropped keyboard per character, in every text box on every page.
+
+   The first version of this rule sat near the top of the file with the other
+   element defaults, and it did not work. Two later rules quietly beat it:
+
+     .pdf-page input   { font-size: 11px }      line ~647
+     .inline-edit input{ font-size: inherit }   line ~1064
+
+   Both are (0,1,1) - exactly the specificity of `input.t-small` - so the
+   cascade fell to source order, and both come later. A rule that has to
+   outrank every descendant selector written after it cannot live at the top
+   of a 1100-line stylesheet. It lives at the bottom, where source order is
+   on its side, and it carries !important so an inline style attribute cannot
+   beat it either. That is not decoration: on a touch device this is the
+   difference between a usable text box and an unusable one, and no component
+   has standing to opt out of it.
+
+   Desktop is untouched - the dense scale is still what a mouse gets. */
+@media (pointer: coarse) {
+  input, select, textarea,
+  input.t-meta, input.t-small, input.t-body, input.t-lead,
+  select.t-meta, select.t-small, select.t-body, select.t-lead,
+  textarea.t-meta, textarea.t-small, textarea.t-body, textarea.t-lead,
+  .pdf-page input, .inline-edit input,
+  [contenteditable="true"], [contenteditable=""] {
+    font-size: 16px !important;
+  }
+}
