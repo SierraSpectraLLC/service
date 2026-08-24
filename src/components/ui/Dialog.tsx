@@ -58,9 +58,19 @@ export default function Dialog({ open, onClose, title, context, size = "md", ste
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
+  // The close handler, read through a ref so the focus effect below never
+  // depends on its identity. Callers pass `onClose={() => setOpen(false)}`
+  // inline, which is a NEW function on every render - with it in the effect's
+  // deps, every keystroke in a controlled field re-ran the effect, and its
+  // teardown/setup pair yanked focus back to the first field. On a phone that
+  // reads as "the keyboard closes after one character".
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   // Focus in on open, back out on close - and the body stops scrolling
   // underneath. All keyed on `open` so a dialog left mounted but closed
-  // costs nothing.
+  // costs nothing - and on `open` ONLY, so typing (which re-renders the
+  // caller) never moves focus.
   useEffect(() => {
     if (!open) return;
     restoreRef.current = document.activeElement as HTMLElement | null;
@@ -74,7 +84,7 @@ export default function Dialog({ open, onClose, title, context, size = "md", ste
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !panel) return;
@@ -103,7 +113,7 @@ export default function Dialog({ open, onClose, title, context, size = "md", ste
       document.body.style.overflow = prevOverflow;
       restoreRef.current?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
