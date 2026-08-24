@@ -131,13 +131,16 @@ describe("what the client is asked to do", () => {
     expect(merged[0].days).toBe(9); // the oldest wait is the one worth quoting
   });
 
-  it("words each ask as an instruction, with why it matters underneath", () => {
+  it("words each ask as an instruction, with the facts underneath and no commentary", () => {
     const v = view({ pending: [pending({ subject: "H-ESI needle seal" }), pending({ subject: "H-ESI needle" })] });
     expect(v.needs).toHaveLength(1);
     expect(v.needs[0].ask).toBe("Tracking numbers for H-ESI needle seal and H-ESI needle");
     expect(v.needs[0].why).toContain("Thermo Altis LC-MS/MS");
     expect(v.needs[0].why).toContain("ordered by Lab Zen 5d ago");
-    expect(v.needs[0].why).toContain("we cannot book the work until they land");
+    // The subline states what is true, never what it means for us: a clause
+    // like "we cannot book the work until they land" is the shop talking to
+    // itself in a client's inbox.
+    expect(v.needs[0].why).not.toMatch(/cannot book|waits on this part/);
   });
 
   it("puts a supplier wait with us, and names the date when the record has one", () => {
@@ -255,7 +258,7 @@ describe("handed back is news, not a standing list", () => {
     const v = view({ handoffs: [handoffs[1], handoffs[2]] }, 1);
     expect(v.handedBack).toHaveLength(0);
     const html = renderPartnerDigest(v, partnerPreheader(v));
-    expect(html).toContain("Nothing new came back to you");
+    expect(html).toContain("Nothing new.");
     expect(html).toContain("2 more systems are still with you");
     // The inbox line reports the standing total on a morning with no news.
     expect(partnerPreheader(v)).toContain("2 still with you");

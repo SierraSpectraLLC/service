@@ -202,9 +202,7 @@ export function renderPartnerDigest(v: PartnerDigestView, preheader: string): st
     v.blocked.length ? section(sectionHead(blockedLabel, v.blocked.length, TONE_HEX.bad.fg) + table(askRows(v.blocked))) : "",
     v.handedBack.length || v.standingHandback.count ? section(
       sectionHead(`Handed back to ${v.clientName}`, v.handedBack.length, TONE_HEX.good.fg,
-        v.handedBack.length
-          ? "Finished since the last of these went out. Nothing pending from our side."
-          : "Nothing new came back to you since the last of these went out.")
+        v.handedBack.length ? "" : "Nothing new.")
       + (v.handedBack.length
         ? table(v.handedBack.map((h, i) => `
         <tr>${idCell(h.externalId, i === 0, "7px")}
@@ -215,8 +213,7 @@ export function renderPartnerDigest(v: PartnerDigestView, preheader: string): st
       + moreLine(v.moreHandedBack, "handed back", plain)
       + standingLine(v.standingHandback, plain)) : "",
     v.inWork.length ? section(
-      sectionHead(`In work at ${v.operatorName}`, v.inWork.length, TONE_HEX.neutral.fg,
-        "One line per system: where it is and what's next.")
+      sectionHead(`In work at ${v.operatorName}`, v.inWork.length, TONE_HEX.neutral.fg)
       + table(v.inWork.map((s, i) => {
         const bits = [s.status, s.gasNeed, s.openParts > 0 ? `${s.openParts} part${s.openParts === 1 ? "" : "s"} open` : "", s.lead]
           .filter(Boolean).map(esc).join(" · ");
@@ -479,14 +476,16 @@ export function partnerView(opts: {
   const merged = mergeAsks(section.pending);
   const labelOf = new Map(section.board.map((b) => [b.externalId, b.label]));
 
+  // The subline is facts only: what it is, who ordered it and when, an ETA if
+  // there is one. It used to append a clause explaining the consequence ("we
+  // cannot book the work until they land"), which is the shop's editorial
+  // voice in a client's inbox and nothing they can act on.
   const why = (m: MergedAsk, detail = ""): string => {
     const label = labelOf.get(m.externalId) ?? "";
     const bits = [label, detail];
     if (m.court === "partner" && m.days !== null) bits.push(`ordered by ${m.who} ${age(m.days)} ago`);
     if (m.eta) bits.push(`ETA ${m.eta}`);
     if (m.court !== "partner" && m.days !== null) bits.push(age(m.days));
-    if (m.cause === "part-tracking" && m.court === "partner") bits.push("we cannot book the work until they land");
-    if (m.cause === "part-order" && m.court === "partner") bits.push("the repair waits on this part");
     return bits.filter(Boolean).join(" · ");
   };
   const asks = (list: MergedAsk[]): PartnerAsk[] =>
