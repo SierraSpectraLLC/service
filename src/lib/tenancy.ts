@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { and, asc, eq, inArray, isNull, or, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { assets, assetShares, clientAllowlist, instruments, orgs, systemShares } from "@/db/schema";
+import { assets, assetShares, clientAllowlist, instruments, orgs, systemShares, workOrders } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/houseRole";
 import {
@@ -214,7 +214,7 @@ export async function assertWorkEditable(
   user: SessionUser,
   // Undefined when the parent row is gone (an orphaned note, say) - treat that
   // as not found rather than letting a property access throw.
-  row: { instrumentId: number | null; assetId?: number | null } | null | undefined,
+  row: { instrumentId: number | null; assetId?: number | null; workOrderId?: number | null } | null | undefined,
 ) {
   if (isHouse(user.role)) return;
   if (!row) throw new Error("Not found");
@@ -224,6 +224,16 @@ export async function assertWorkEditable(
     if (!a.see) throw new Error("Not found");
     if (!a.edit) throw new Error("Read-only access to this asset");
     return;
+  }
+  // A row with no record behind it belongs to a job that has none either - a
+  // client's move or survey. The job answers for it: their own, and theirs to
+  // edit. Anyone else gets the "Not found" below.
+  if (row.workOrderId) {
+    const [wo] = await db.select({
+      instrumentId: workOrders.instrumentId, assetId: workOrders.assetId, orgId: workOrders.orgId,
+    }).from(workOrders).where(eq(workOrders.id, row.workOrderId));
+    if (wo && wo.instrumentId === null && wo.assetId === null
+      && user.orgId !== null && wo.orgId === user.orgId && user.role === "client_editor") return;
   }
   throw new Error("Not found");
 }

@@ -214,6 +214,60 @@ function lateNote(wo: { state: string; closedAt: Date | null } | null): string {
   return days ? `had been ${label} ${days} day${days === 1 ? "" : "s"}` : `was already ${label}`;
 }
 
+/**
+ * The target of a job that has no record behind it: the client it is for, and
+ * the workspace it belongs to.
+ *
+ * `null` is a real answer - the shop's own job, on nothing of anybody's - and
+ * staff only, because "no client" from a client's login is a job filed into
+ * somebody else's shop. A named client must be one this person can see AND
+ * one inside their own workspace: visibleOrgs shows every operator in the
+ * directory, which is how cross-company work gets named, but it is not a list
+ * of people you may open jobs against.
+ */
+async function resolveClientJobTarget(
+  u: SessionUser, orgId: number | null,
+): Promise<{ error: string } | {
+  instrumentId: null; assetId: null; externalId: string;
+  asset: null; workOrderId: null; settledWo: null; tenantOrgId: number | null;
+}> {
+  const empty = {
+    instrumentId: null as null, assetId: null as null, externalId: "",
+    asset: null as null, workOrderId: null as null, settledWo: null as null,
+  };
+  if (orgId === null) {
+    if (!isStaffRole(u.role)) return { error: "Pick the client this job is for" };
+    return { ...empty, tenantOrgId: myTenantOrgId(u) };
+  }
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  if (!isStaffRole(u.role)) {
+    // A client may raise their own job and nobody else's.
+    if (u.orgId !== orgId) return { error: "Not found" };
+    return { ...empty, tenantOrgId: await tenantOfOrg(orgId) };
+  }
+  const t = myTenantOrgId(u);
+  const theirs = org.isOperator ? org.id : org.parentOrgId;
+  if (t !== null && theirs !== t) return { error: "Not found" };
+  return { ...empty, tenantOrgId: t };
+}
+
+/**
+ * May this person write onto a job that has no record behind it - a client
+ * job? The order answers for itself: house staff of the workspace that owns
+ * it, or somebody at the client it was opened for. Everybody else is told
+ * "Not found", which is what they would hear about a system they cannot see.
+ */
+async function canWriteClientJob(
+  u: SessionUser, wo: { tenantOrgId: number | null; orgId: number | null },
+): Promise<boolean> {
+  if (isStaffRole(u.role)) {
+    const t = readTenant(u);
+    return t === null || wo.tenantOrgId === t;
+  }
+  return u.orgId !== null && wo.orgId === u.orgId;
+}
+
 async function resolveTarget(
   t: WorkTarget,
   opts: {
@@ -271,7 +325,14 @@ async function resolveTarget(
     asset = a;
     if (t.instrumentId === null) tenantOrgId = a.tenantOrgId;
   }
-  if (t.instrumentId === null && !asset) return { error: "Not found" };
+  // A job can belong to a CLIENT rather than to a box on the bench: a move, a
+  // site survey, a phone call that arrives before anybody knows which
+  // instrument it is about. Work filed onto one of those carries the order and
+  // nothing else, so the order is what access is decided against - there is no
+  // record to ask. Without an order in hand, a target of nothing is still
+  // nothing.
+  const clientJob = t.instrumentId === null && !asset;
+  if (clientJob && !t.workOrderId) return { error: "Not found" };
 
   // A work order tag is only valid if the order is on THIS record and still
   // taking work. Both halves matter: the first stops an id from another client's
@@ -282,10 +343,18 @@ async function resolveTarget(
   if (t.workOrderId) {
     const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, t.workOrderId));
     if (!wo) return { error: "Not found" };
-    const onThis = t.instrumentId !== null
-      ? wo.instrumentId === t.instrumentId
-      : wo.assetId === (asset?.id ?? null);
+    const onThis = clientJob
+      ? wo.instrumentId === null && wo.assetId === null
+      : t.instrumentId !== null
+        ? wo.instrumentId === t.instrumentId
+        : wo.assetId === (asset?.id ?? null);
     if (!onThis) return { error: "That work order is not on this record" };
+    if (clientJob) {
+      if (!(await canWriteClientJob(u, wo))) return { error: "Not found" };
+      // The workspace is the ORDER's, for the same reason a record's is: one
+      // job's rows must not scatter across two workspaces.
+      tenantOrgId = wo.tenantOrgId;
+    }
     if (!woAcceptsWork(wo.state)) {
       // House staff of the order's own workspace may still FILE onto it, when
       // the caller said that is what this write is. Everybody else, and every
@@ -5828,6 +5897,11 @@ async function loadWorkOrder(u: SessionUser, woId: number): Promise<
     if (!(await assetAccess(u, wo.assetId)).see) return { error: "Not found" };
     const [a] = await db.select().from(assets).where(eq(assets.id, wo.assetId));
     ownerOrgId = a?.ownerOrgId ?? null;
+  } else if (!(await canWriteClientJob(u, wo))) {
+    // Nothing behind it to check access against, so the order does it itself.
+    // Without this the record-less job would be the one kind of work order
+    // anybody signed in could load, which is exactly backwards.
+    return { error: "Not found" };
   }
 
   const staff = isHouse(u.role);
@@ -5911,23 +5985,41 @@ async function creditRefusal(
 /**
  * Somebody at the shop opens a job. The other way in is a client asking - see
  * reportIssue and requestPm, which land in the same place.
+ *
+ * The target is a system, a standalone unit, or - when neither is named - a
+ * CLIENT: the move, the site survey, the phone call that arrives before
+ * anybody knows which instrument it is about. `orgId` names the client; on a
+ * system it is ignored in favour of the record's own owner, except that it may
+ * be given for a house-owned system to say whose job the shop is doing.
  */
 export async function openWorkOrder(
-  target: WorkTarget,
+  target: WorkTarget & { orgId?: number | null },
   data: { title: string; body: string; severity: string; assignee?: string },
 ): Promise<{ error?: string; id?: number; number?: string; flag?: string; hold?: string }> {
   const u = await requireEditor();
   const title = data.title.trim().slice(0, 160);
   if (!title) return { error: "Say briefly what the job is" };
-  const t0 = await resolveTarget({ instrumentId: target.instrumentId, assetId: target.assetId });
+  const picked = target.orgId ?? null;
+  const clientJob = target.instrumentId === null && target.assetId === null;
+  const t0 = clientJob
+    ? await resolveClientJobTarget(u, picked)
+    : await resolveTarget({ instrumentId: target.instrumentId, assetId: target.assetId });
   if ("error" in t0) return t0;
 
   // Whose job it is: the record's owner, not whoever typed it. An engineer
   // opening an order on a client's instrument is opening the CLIENT's job.
-  const orgId = t0.instrumentId !== null
-    ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
-        .where(eq(instruments.id, t0.instrumentId)))[0]?.o ?? null
-    : t0.asset?.ownerOrgId ?? null;
+  // A house-owned system has no owner to speak for it, so there a named
+  // client stands - that is the refurb the shop is doing FOR somebody.
+  const owner = clientJob ? picked
+    : t0.instrumentId !== null
+      ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
+          .where(eq(instruments.id, t0.instrumentId)))[0]?.o ?? null
+      : t0.asset?.ownerOrgId ?? null;
+  if (!clientJob && picked !== null && owner !== null && picked !== owner) {
+    const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, owner));
+    return { error: `That system belongs to ${o?.name ?? "another client"} - open the job on them, or pick one of this client's systems.` };
+  }
+  const orgId = owner ?? picked;
 
   // Dispatching at intake is a dispatch like any other. The job itself is
   // never refused - the instrument is down either way - so a held client's
@@ -6081,6 +6173,65 @@ export async function updateWorkOrder(
   }
   revWo(wo);
   return {};
+}
+
+/**
+ * Point a client's job at the system it turned out to be about.
+ *
+ * The call comes in before anybody knows which instrument it is - "the LC in
+ * the back room is doing it again" - and the job is opened on the client. Two
+ * days later the engineer is standing in front of T-002. Without this the
+ * history splits: the hours are on a job nobody can find from the system, and
+ * the system's page says that week was quiet.
+ *
+ * So the job's own rows follow it across. Only rows that have no record of
+ * their own move - a row already filed against something else was filed
+ * deliberately, and this is not the place to overrule that.
+ *
+ * One way only: a job that has a record keeps it. Moving work off a system
+ * would take that week out of its history, which is the failure this exists
+ * to prevent, pointed the other way.
+ */
+export async function attachWorkOrderSystem(
+  woId: number, instrumentId: number,
+): Promise<{ error?: string; externalId?: string }> {
+  const u = await requireStaff();
+  const found = await loadWorkOrder(u, woId);
+  if ("error" in found) return found;
+  const { wo, mover } = found;
+  if (mover !== "house") return { error: "That is the service team's to change." };
+  if (wo.instrumentId !== null || wo.assetId !== null) {
+    return { error: `${wo.number} is already on a record.` };
+  }
+  if (!woAcceptsWork(wo.state)) {
+    return { error: `${wo.number} is ${WO_LABEL[wo.state]?.toLowerCase() ?? "finished"} - reopen it first.` };
+  }
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!(await canEditSystem(u, instrumentId))) return { error: "Not found" };
+  if (inst.tenantOrgId !== wo.tenantOrgId) return { error: "That system is in another workspace." };
+  // A job filed for one client cannot be moved onto another's instrument: that
+  // is somebody else's hours on somebody else's bill. The shop's own bench has
+  // no owner to disagree, so it takes the job as it stands.
+  if (wo.orgId !== null && inst.ownerOrgId !== null && inst.ownerOrgId !== wo.orgId) {
+    const [o] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, inst.ownerOrgId));
+    return { error: `${inst.externalId} belongs to ${o?.name ?? "another client"}, not to this job's client.` };
+  }
+
+  await db.update(workOrders)
+    .set({ instrumentId, orgId: wo.orgId ?? inst.ownerOrgId })
+    .where(eq(workOrders.id, woId));
+  for (const table of [tasks, timeEntries, parts, attachments]) {
+    await db.update(table).set({ instrumentId })
+      .where(and(eq(table.workOrderId, woId), isNull(table.instrumentId)));
+  }
+  await audit({
+    actor: u.email, instrumentId, entityType: "work_order", entityId: wo.id,
+    action: `put ${wo.number} on ${inst.externalId}, with the work already filed on it`,
+    field: "instrument", oldValue: "(no system)", newValue: inst.externalId,
+  });
+  revWo({ ...wo, instrumentId });
+  return { externalId: inst.externalId };
 }
 
 /**

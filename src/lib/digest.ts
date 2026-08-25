@@ -351,10 +351,18 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       inArray(tasks.instrumentId, ids),
       or(eq(tasks.state, "Blocked"), gte(tasks.completedAt, cutoff)),
     )) : none<typeof tasks.$inferSelect>(),
-    ids.length ? db.select().from(workOrders).where(and(
-      inArray(workOrders.instrumentId, ids),
+    // Jobs on this tenant's systems, plus the ones that belong to a CLIENT
+    // rather than to a system - the move, the survey, the call. Those have no
+    // instrument to scope them, so the workspace stamp does it.
+    db.select().from(workOrders).where(and(
+      ids.length
+        ? or(inArray(workOrders.instrumentId, ids),
+             and(isNull(workOrders.instrumentId), isNull(workOrders.assetId),
+                 forTenant(workOrders.tenantOrgId, tenantOrgId)))
+        : and(isNull(workOrders.instrumentId), isNull(workOrders.assetId),
+              forTenant(workOrders.tenantOrgId, tenantOrgId)),
       or(eq(workOrders.state, "waiting"), gte(workOrders.resolvedAt, cutoff), gte(workOrders.closedAt, cutoff)),
-    )) : none<typeof workOrders.$inferSelect>(),
+    )),
     // The window's EOD rows: the ones on this tenant's systems, plus the
     // off-system rows - the phone call, the walkthrough - which have no
     // instrument to scope them and so carry the workspace stamp themselves.
@@ -404,10 +412,16 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     const key = r.ownerOrgId ?? null;
     if (!owners.includes(key)) owners.push(key);
   }
-  // A client whose whole day was a phone call still had a day.
+  // A client whose whole day was a phone call still had a day - and so does
+  // one whose only job this window was a move, with no system behind it.
   for (const u of updateRows) {
     if (u.instrumentId !== null || u.assetId !== null) continue;
     const key = u.ownerOrgId ?? null;
+    if (!owners.includes(key)) owners.push(key);
+  }
+  for (const w of woRows) {
+    if (w.instrumentId !== null || w.assetId !== null) continue;
+    const key = w.orgId ?? null;
     if (!owners.includes(key)) owners.push(key);
   }
   owners.sort((a, b) => {
@@ -498,6 +512,20 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
         lines.push({ text: `${tagOf((closed ? w.closedAt : w.resolvedAt)!)}Work order${w.number ? ` ${w.number}` : ""} ${closed ? "closed" : "resolved"}: ${w.closeSummary || w.title}`, internal: false });
       }
       if (lines.length) section.work.push({ externalId: i.externalId, label, lines });
+    }
+
+    // Off the bench: this owner's jobs with no system behind them, finished in
+    // the window. A move that closed on Tuesday is the week's news for the
+    // client who asked for it, and nothing else in the digest would carry it.
+    for (const w of woRows.filter((w) => w.instrumentId === null && w.assetId === null
+      && (w.orgId ?? null) === ownerId
+      && ((w.resolvedAt && w.resolvedAt >= cutoff) || (w.closedAt && w.closedAt >= cutoff)))) {
+      const closed = w.closedAt && w.closedAt >= cutoff;
+      section.offSystem.push({
+        text: `${tagOf((closed ? w.closedAt : w.resolvedAt)!)}Work order${w.number ? ` ${w.number}` : ""} `
+          + `${closed ? "closed" : "resolved"}: ${w.closeSummary || w.title}`,
+        internal: false,
+      });
     }
 
     // Off the bench: this owner's phone calls and walkthroughs in the window.

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import {
   appSettings, assets, attachments, auditLog, checklistItems, expenseCategories, instruments, itemNotes, orgs, orgSites, parts, poLines,
@@ -18,7 +18,7 @@ import { formatCents } from "@/lib/money";
 import { PO_LABEL, PO_TONE, poTotals } from "@/lib/po";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
-import { systemLabel } from "@/lib/systemLabel";
+import { getSystemLabels, systemLabel } from "@/lib/systemLabel";
 import {
   moverOf, severityOf, targetDay, woAcceptsWork, woLate, WO_LABEL, WO_TONE,
 } from "@/lib/workOrders";
@@ -79,6 +79,11 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   // An order on a record you cannot see does not exist for you - the same
   // posture the system and asset pages take, checked against the record rather
   // than against the order, because the record is where access is decided.
+  //
+  // A job with no record behind it - a client's move, a survey, a call - has
+  // no system to ask, so the order answers for itself: staff of the workspace
+  // that owns it, or somebody at the client it was opened for. Same posture,
+  // one rung further out.
   let inst: typeof instruments.$inferSelect | null = null;
   let asset: typeof assets.$inferSelect | null = null;
   let canEdit = false;
@@ -91,8 +96,13 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     if (!acc.see) notFound();
     [asset] = await db.select().from(assets).where(eq(assets.id, wo.assetId));
     canEdit = acc.edit;
+  } else if (isHouse(user.role)) {
+    const t = readTenant(user);
+    if (t !== null && wo.tenantOrgId !== t) notFound();
+    canEdit = true;
   } else {
-    notFound();
+    if (user.orgId === null || wo.orgId !== user.orgId) notFound();
+    canEdit = user.role === "client_editor";
   }
 
   const staff = isHouse(user.role);
@@ -246,9 +256,36 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     ? await db.select().from(quotes).where(eq(quotes.workOrderId, woId)).orderBy(desc(quotes.id))
     : [];
 
+  // A job with no record could turn out to be about one - offered only while
+  // it is still taking work, and only the systems that could honestly take it:
+  // this client's own, plus the shop's own bench.
+  const adoptableRows = !inst && !asset && staff && woAcceptsWork(wo.state)
+    ? await db.select({
+        id: instruments.id, externalId: instruments.externalId, model: instruments.model,
+        ownerOrgId: instruments.ownerOrgId,
+      }).from(instruments)
+        .where(and(
+          eq(instruments.archived, false),
+          forTenant(instruments.tenantOrgId, wo.tenantOrgId),
+          wo.orgId === null ? undefined : or(eq(instruments.ownerOrgId, wo.orgId), isNull(instruments.ownerOrgId)),
+        ))
+        .orderBy(asc(instruments.externalId))
+    : [];
+  const adoptableLabels = await getSystemLabels(adoptableRows);
+  const adoptable = adoptableRows.map((r) => ({
+    id: r.id, externalId: r.externalId, label: adoptableLabels.get(r.id) ?? r.model,
+  }));
+
+  // Where the job lives. With no record it is the client's own page - which is
+  // the honest answer to "where is this job", and the page that holds the rest
+  // of their work.
   const place = inst
     ? { href: `/instruments/${inst.id}`, label: `${inst.externalId}${systemLabel(inst, unitRows) ? ` - ${systemLabel(inst, unitRows)}` : ""}` }
-    : { href: `/assets/${asset!.id}`, label: `${asset!.kind}${asset!.model ? ` - ${asset!.model}` : ""}${asset!.serial ? ` (SN ${asset!.serial})` : ""}` };
+    : asset
+      ? { href: `/assets/${asset.id}`, label: `${asset.kind}${asset.model ? ` - ${asset.model}` : ""}${asset.serial ? ` (SN ${asset.serial})` : ""}` }
+      : wo.orgId !== null && staff
+        ? { href: `/settings/organizations/${wo.orgId}`, label: askedBy }
+        : { href: "", label: "" };
 
   // Work is filed against the ORDER, which resolveTarget then checks belongs to
   // this record - so the panels below write rows that show up in both places.
@@ -273,8 +310,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
         return unitRows.some((a) => a.kind === pr.assetType
           && (pr.modelScope.length === 0 || scopeMatches(pr.modelScope, a.model)));
       }
-      return asset !== undefined && pr.assetType === asset!.kind
-        && (pr.modelScope.length === 0 || scopeMatches(pr.modelScope, asset!.model));
+      // A job on nothing has no unit to match a procedure against.
+      if (!asset) return false;
+      return pr.assetType === asset.kind
+        && (pr.modelScope.length === 0 || scopeMatches(pr.modelScope, asset.model));
     })
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((pr) => {
@@ -296,7 +335,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
 
   // Who the composer may offer for an @mention: this record's readers, and
   // nobody else - see lib/mentionAudience.
-  const mentionable = await mentionableOn(people, { instrumentId: wo.instrumentId, assetId: wo.assetId });
+  const mentionable = await mentionableOn(people, {
+    instrumentId: wo.instrumentId, assetId: wo.assetId,
+    orgId: wo.orgId, tenantOrgId: wo.tenantOrgId,
+  });
 
   const panelLayout = await getUiLayout("workorder");
   const openTasksH = taskRows.filter((t) => t.state !== "Done").length;
@@ -325,9 +367,11 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
             {staff && canAdd && wo.orgId !== null && quoteRows.length === 0 && (
               <QuoteJobButton workOrderId={wo.id} number={wo.number} title={wo.title} today={today} />
             )}
-            <Link href={place.href} className="btn sm" style={{ textDecoration: "none" }}>
-              {place.label} →
-            </Link>
+            {place.href && (
+              <Link href={place.href} className="btn sm" style={{ textDecoration: "none" }}>
+                {place.label} →
+              </Link>
+            )}
           </>
         }
         kebab={<HeroKebab arrange menuLabel={`Actions for ${wo.number}`} />}
@@ -409,6 +453,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           id={wo.id} number={wo.number} state={wo.state} mover={mover}
           title={wo.title} body={wo.body} severity={wo.severity} assignee={wo.assignee}
           people={directoryNames(people)}
+          systems={adoptable}
         />
       </div>
           ) },

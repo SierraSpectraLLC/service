@@ -435,7 +435,7 @@ export default function AttachmentsPanel({ target, attachments, canEdit, isStaff
       )}
 
       {docs.length === 0 && staged.length === 0 && (
-        <div className="mut t-body">No files attached to this system yet.</div>
+        <div className="mut t-body">No files attached yet.</div>
       )}
       {photos > 0 && (
         <div className="mut t-meta" style={{ marginBottom: 8 }}>

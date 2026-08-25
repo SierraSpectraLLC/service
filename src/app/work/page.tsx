@@ -1,10 +1,9 @@
 import { redirect } from "next/navigation";
-import { desc, inArray, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, orgs, tasks, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse } from "@/lib/tenancy";
-import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, visibleAssetIds, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { getBrand } from "@/lib/brand";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
@@ -13,6 +12,8 @@ import type { CreditStanding } from "@/lib/credit";
 import { ageDays, sortWorkOrders, woLate, woOpen, WO_LABEL, WO_TONE } from "@/lib/workOrders";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
+import NewWorkOrderButton from "@/components/NewWorkOrderButton";
+import { directoryNames, visibleDirectory } from "@/lib/directory";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,21 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
     ids === null ? undefined : ids.length ? inArray(col, ids) : sql`false`;
 
   // Null on both sides means the house, which sees everything. Otherwise: orders
-  // on a system they can see, or on a unit they can see, and nothing else.
+  // on a system they can see, on a unit they can see, or - for a job with no
+  // record behind it - one opened for their own organization. That last is not
+  // a widening: without it a client cannot see the move they asked us for,
+  // because there is no system to hang the permission on.
+  const recordless = and(isNull(workOrders.instrumentId), isNull(workOrders.assetId));
+  const mine = isHouse(user.role)
+    // The shop sees the record-less jobs its own workspace opened. Without
+    // this an operator whose scope is an id list - which is every operator
+    // but the one running the instance - could not see the moves and surveys
+    // they filed themselves.
+    ? and(recordless, forTenant(workOrders.tenantOrgId, readTenant(user)))
+    : user.orgId === null ? sql`false` : and(recordless, eq(workOrders.orgId, user.orgId));
   const where = sysIds === null && unitIds === null
     ? undefined
-    : or(scoped(workOrders.instrumentId, sysIds), scoped(workOrders.assetId, unitIds));
+    : or(scoped(workOrders.instrumentId, sysIds), scoped(workOrders.assetId, unitIds), mine);
 
   const rows = await db.select().from(workOrders).where(where)
     .orderBy(desc(workOrders.createdAt)).limit(500);
@@ -68,6 +80,10 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
 
   const placeOf = (w: typeof rows[number]) => {
+    // A job can be a client's rather than a system's - a move, a survey, a
+    // call. "No system" is the truth about it, not a missing lookup, so it
+    // says so rather than showing the "?" that means something is broken.
+    if (w.instrumentId === null && w.assetId === null) return "No system";
     if (w.instrumentId !== null) {
       const i = instRows.find((r) => r.id === w.instrumentId);
       const named = i ? sysLabels.get(i.id) ?? "" : "";
@@ -116,6 +132,28 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
   const openFor = (name: string) =>
     sorted.filter((w) => woOpen(w.state) && w.assignee.trim().toLowerCase() === name.toLowerCase()).length;
   const unassignedOpen = sorted.filter((w) => woOpen(w.state) && !w.assignee.trim()).length;
+
+  // What a new job can be opened on: the clients this person may name, and the
+  // systems they can already see. A client's login gets their own org and
+  // nothing else - the picker is not a place to discover who else we work for.
+  const mayOpen = user.role !== "client_viewer";
+  const [clientRows, sysRows, people] = await Promise.all([
+    mayOpen ? visibleOrgs(user) : [],
+    mayOpen
+      ? db.select({
+          id: instruments.id, externalId: instruments.externalId, model: instruments.model,
+          ownerOrgId: instruments.ownerOrgId, archived: instruments.archived,
+        }).from(instruments)
+          .where(scoped(instruments.id, sysIds))
+          .orderBy(asc(instruments.externalId))
+      : [],
+    mayOpen && staff ? visibleDirectory(user) : [],
+  ]);
+  const openable = sysRows.filter((r) => !r.archived);
+  const openLabels = await getSystemLabels(openable);
+  const clients = clientRows
+    .filter((o) => !o.isOperator && (staff || o.id === user.orgId))
+    .map((o) => ({ id: o.id, name: o.name }));
 
   const href = (params: { who?: string; done?: boolean }) => {
     const p = new URLSearchParams();
@@ -169,6 +207,17 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
               aria-label="Search work orders" />
           </form>
         }
+        actions={mayOpen ? (
+          <NewWorkOrderButton
+            clients={clients}
+            systems={openable.map((r) => ({
+              id: r.id, externalId: r.externalId,
+              label: openLabels.get(r.id) ?? r.model, ownerOrgId: r.ownerOrgId,
+            }))}
+            people={directoryNames(people)}
+            canPickHouse={staff}
+          />
+        ) : undefined}
         facets={
           <>
             {/* Whose queue you're looking at. Staff only - a client's list is

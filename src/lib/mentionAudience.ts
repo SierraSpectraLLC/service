@@ -17,8 +17,17 @@ import { db } from "@/db";
 import { assetShares, assets, clientAllowlist, instruments, systemShares } from "@/db/schema";
 import { houseEmails } from "@/lib/house";
 
-/** Where a note lives. One of the two ids is set. */
-export type NoteRecord = { instrumentId: number | null; assetId: number | null };
+/**
+ * Where a note lives. One of the two ids is set - or NEITHER, on a job that
+ * belongs to a client rather than to a system, where the job's own client and
+ * workspace stand in for the record that isn't there.
+ */
+export type NoteRecord = {
+  instrumentId: number | null;
+  assetId: number | null;
+  orgId?: number | null;
+  tenantOrgId?: number | null;
+};
 
 /**
  * Exact addresses on the allowlist for these orgs. `@domain` rules are doors,
@@ -47,7 +56,15 @@ export async function readersOf(rec: NoteRecord): Promise<Set<string>> {
     const orgs = [...(inst?.ownerOrgId != null ? [inst.ownerOrgId] : []), ...shares.map((s) => s.orgId)];
     return new Set([...staff, ...(await peopleOfOrgs(orgs))].map((e) => e.toLowerCase()));
   }
-  if (rec.assetId === null) return new Set();
+  if (rec.assetId === null) {
+    // No record behind it: the readers are the workspace that owns the job and
+    // the client it was opened for. Without a workspace there is nobody to
+    // name, and an empty set is the safe answer.
+    if (rec.tenantOrgId === undefined && rec.orgId === undefined) return new Set();
+    const staff = await houseEmails(rec.tenantOrgId ?? null);
+    const theirs = await peopleOfOrgs(rec.orgId != null ? [rec.orgId] : []);
+    return new Set([...staff, ...theirs].map((e) => e.toLowerCase()));
+  }
   const [a] = await db.select({ ownerOrgId: assets.ownerOrgId, tenantOrgId: assets.tenantOrgId })
     .from(assets).where(eq(assets.id, rec.assetId));
   const [staff, shares] = await Promise.all([

@@ -501,7 +501,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
         </Dialog>
       )}
 
-      {parts.length === 0 && !form && <div className="mut t-body">No parts tracked for this system.</div>}
+      {parts.length === 0 && !form && <div className="mut t-body">No parts tracked yet.</div>}
       {(() => {
         const renderRow = (p: Part) => {
           const link = trackUrl(p.carrier, p.tracking);

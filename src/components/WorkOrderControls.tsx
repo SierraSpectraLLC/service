@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
+import { attachWorkOrderSystem, deleteWorkOrder, resolveWorkOrder, setWorkOrderState, updateWorkOrder } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
 import { useRouter } from "next/navigation";
@@ -23,7 +23,7 @@ import { WO_LABEL, WO_SEVERITIES, woMoves, type Mover } from "@/lib/workOrders";
  * a service history turns into a list of dates.
  */
 export default function WorkOrderControls({
-  id, number, state, mover, title, body, severity, assignee, people,
+  id, number, state, mover, title, body, severity, assignee, people, systems = [],
 }: {
   id: number;
   number: string;
@@ -35,8 +35,15 @@ export default function WorkOrderControls({
   severity: string;
   assignee: string;
   people: string[];
+  /**
+   * Systems this job could turn out to be about - passed ONLY when it has no
+   * record of its own, which is what makes the control appear. Empty is the
+   * ordinary case: the job is already on something.
+   */
+  systems?: { id: number; externalId: string; label: string }[];
 }) {
   const [mode, setMode] = useState<"" | "resolve" | "edit">("");
+  const [systemId, setSystemId] = useState(0);
   const [summary, setSummary] = useState("");
   const [form, setForm] = useState({ title, body, severity, assignee });
   const [error, setError] = useState("");
@@ -88,6 +95,32 @@ export default function WorkOrderControls({
             {verb(to)}
           </button>
         ))}
+        {/* The call came in before anybody knew which instrument it was. Now
+            somebody does - and the job, with its hours and parts, goes onto
+            the system's history where it belongs. */}
+        {mover === "house" && systems.length > 0 && (
+          <span style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <select value={systemId || ""} aria-label="Put this job on a system" disabled={pending}
+              className="t-small" style={{ width: "auto" }}
+              onChange={(e) => setSystemId(parseInt(e.target.value) || 0)}>
+              <option value="">Put it on a system...</option>
+              {systems.map((x) => (
+                <option key={x.id} value={x.id}>{x.externalId}{x.label ? ` - ${x.label}` : ""}</option>
+              ))}
+            </select>
+            {systemId > 0 && (
+              <button className="btn sm accent" disabled={pending}
+                onClick={() => run(async () => {
+                  const res = await attachWorkOrderSystem(id, systemId);
+                  if (res.error) return res;
+                  setSystemId(0);
+                  toast({ message: `${number} is now on ${res.externalId}` });
+                })}>
+                {pending ? "Moving..." : "Move it"}
+              </button>
+            )}
+          </span>
+        )}
         {mover === "house" && (
           <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn sm" disabled={pending}
