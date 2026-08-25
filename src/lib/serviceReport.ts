@@ -473,17 +473,17 @@ async function signatures(doc: PDFDocument, page: PDFPage, F: Fonts, r: ServiceR
   }
 
   let cy = lineY - 44;
-  const centre = (s: string, f: PDFFont, size: number, color = INK) => {
+  const centered = (s: string, f: PDFFont, size: number, color = INK) => {
     page.drawText(s, { x: (PAGE.w - f.widthOfTextAtSize(s, size)) / 2, y: cy, size, font: f, color });
     cy -= 13;
   };
-  centre("Signatures acknowledge to all information in this document to be true and service to have been completed as described.",
+  centered("Signatures acknowledge to all information in this document to be true and service to have been completed as described.",
     F.boldItalic, 7);
   cy -= 8;
-  centre("THIS IS NOT AN INVOICE", F.bold, 8);
-  centre("Should you have any questions or require additional details about this service visit please don't hesitate to contact:",
+  centered("THIS IS NOT AN INVOICE", F.bold, 8);
+  centered("Should you have any questions or require additional details about this service visit please don't hesitate to contact:",
     F.bold, 7.5);
-  centre(r.contact, F.font, 7.5, MUT);
+  centered(r.contact, F.font, 7.5, MUT);
 }
 
 function footer(page: PDFPage, F: Fonts, n: number) {

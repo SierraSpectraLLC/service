@@ -37,7 +37,7 @@ export function previewPage(opts: {
     </div>`).join("");
   const recipients = opts.to.length ? opts.to.join(", ") : "nobody - no recipients configured";
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Email preview</title></head>
+<html lang="en-US"><head><meta charset="utf-8"><title>Email preview</title></head>
 <body style="margin:0;background:#F4F6F9;font-family:Helvetica,Arial,sans-serif;">
   <div style="background:#172A4A;color:#FFFFFF;font-size:12px;line-height:1.6;padding:10px 16px;">
     Preview - nothing has been sent. ${esc(opts.note)}<br/>

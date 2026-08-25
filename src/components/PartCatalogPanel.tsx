@@ -290,7 +290,7 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
         rows={facet === "undescribed"
           ? unnamed.slice(0, 80).filter((u) => !query.trim() || `${u.partNumber} ${u.name}`.toLowerCase().includes(query.trim().toLowerCase())).map(undescribedRow)
           : shownRows.map(toRow)}
-        empty={query ? "Nothing matches that" : "Nothing catalogued yet"}
+        empty={query ? "Nothing matches that" : "Nothing cataloged yet"}
       />
 
       {sheet && (

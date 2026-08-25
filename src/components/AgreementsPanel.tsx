@@ -57,7 +57,7 @@ const badNumber = (v: string) => v.trim() !== "" && !Number.isFinite(Number(v.tr
 const NUMERIC_FIELDS: { key: "partsAllowance" | "visitsIncluded" | "laborIncludedHours" | "hourlyRate" | "value" | "renewNoticeDays"; label: string; step: StepKey }[] = [
   { key: "partsAllowance", label: "Parts allowance", step: "included" },
   { key: "visitsIncluded", label: "Service visits", step: "included" },
-  { key: "laborIncludedHours", label: "Labour hours included", step: "included" },
+  { key: "laborIncludedHours", label: "Labor hours included", step: "included" },
   { key: "hourlyRate", label: "Hourly rate", step: "included" },
   { key: "value", label: "Contract value", step: "included" },
   { key: "renewNoticeDays", label: "Renewal notice days", step: "terms" },
@@ -465,7 +465,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 unlimited={r.partsUnlimited} />
               <Bar label="Visits" included={r.visitsIncluded} used={r.used.visits} fmt={(n) => String(n)}
                 unlimited={r.visitsUnlimited} />
-              <Bar label="Labour hours" included={r.laborIncludedMinutes} used={r.used.laborMinutes} fmt={formatHours} />
+              <Bar label="Labor hours" included={r.laborIncludedMinutes} used={r.used.laborMinutes} fmt={formatHours} />
             </div>
             {/* What the paper includes in kind, and how much of it is left. */}
             {(() => {
@@ -738,7 +738,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
 
               <div className="pf2" style={{ marginBottom: 8 }}>
                 <div>
-                  <label>Labour hours included</label>
+                  <label>Labor hours included</label>
                   <input value={draft.laborIncludedHours} placeholder="40"
                     onChange={(e) => up("included", { laborIncludedHours: e.target.value })} />
                   <div className="mut" style={{ fontSize: 11, marginTop: 3 }}>

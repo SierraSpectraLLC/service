@@ -126,7 +126,7 @@ export default function PriceBookCard({ prices, knownVendors, today = "" }: {
       const bits = [
         res.created ? `${res.created} added` : "",
         res.updated ? `${res.updated} updated` : "",
-        res.catalogued ? `${res.catalogued} new part${res.catalogued === 1 ? "" : "s"} catalogued` : "",
+        res.cataloged ? `${res.cataloged} new part${res.cataloged === 1 ? "" : "s"} cataloged` : "",
       ].filter(Boolean);
       setSaved(bits.join(", ") || "Nothing changed");
       const bad = new Set((res.failures ?? []).map((f) => f.row));

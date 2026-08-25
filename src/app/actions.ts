@@ -7414,7 +7414,7 @@ export async function deletePayrollEntry(id: number, reason: string): Promise<{ 
 }
 
 /**
- * Adopt what a month actually cost as the loaded labour rate job costing uses.
+ * Adopt what a month actually cost as the loaded labor rate job costing uses.
  *
  * Deliberately a button rather than a silent override. Costing has always read
  * one number from settings; this makes that number derived instead of guessed,
@@ -9162,7 +9162,7 @@ export async function setPlatformAppearance(data: {
 }): Promise<{ error?: string }> {
   const u = await requirePlatformOwner();
   const raw = data.headerColor.trim();
-  if (raw && !isValidHex(raw)) return { error: "The header colour needs to be a hex like #1D9E75" };
+  if (raw && !isValidHex(raw)) return { error: "The header color needs to be a hex like #1D9E75" };
   const headerColor = raw ? raw.toUpperCase() : "";
   const spectrumHeight = clampHeight(data.spectrumHeight);
   const spectrumStops = serializeStops(data.spectrumStops);
@@ -10691,7 +10691,7 @@ async function cleanPriceRow(r: PartPriceInput): Promise<
  */
 export async function addPartPrices(
   rows: PartPriceInput[],
-): Promise<{ error?: string; created?: number; updated?: number; catalogued?: number; failures?: { row: number; name: string; error: string }[] }> {
+): Promise<{ error?: string; created?: number; updated?: number; cataloged?: number; failures?: { row: number; name: string; error: string }[] }> {
   const u = await requireStaff();
   const usable = rows.filter((r) => r.partNumber.trim() || r.vendor.trim() || r.price.trim());
   if (!usable.length) return { error: "Nothing to save" };
@@ -10734,7 +10734,7 @@ export async function addPartPrices(
   // A pasted sheet that NAMES its parts fills the catalog as it prices them.
   // One stub per unknown PN: number, name, and - for an OEM row - the vendor
   // as maker, since the maker's own sheet is the one source that knows.
-  let catalogued = 0;
+  let cataloged = 0;
   const named = new Map<string, { partNumber: string; name: string; manufacturer: string }>();
   for (const r of usable) {
     const pn = r.partNumber.trim().slice(0, 80);
@@ -10754,14 +10754,14 @@ export async function addPartPrices(
       }).returning();
       await audit({
         actor: u.email, entityType: "catalog_part", entityId: c.id,
-        action: `catalogued PN ${stub.partNumber} (${stub.name}) from a pasted price sheet`,
+        action: `cataloged PN ${stub.partNumber} (${stub.name}) from a pasted price sheet`,
       });
-      catalogued++;
+      cataloged++;
     }
   }
   revalidatePath("/settings/catalog");
   revalidatePath("/settings/parts");
-  return { created, updated, catalogued, failures };
+  return { created, updated, cataloged, failures };
 }
 
 export async function deletePartPrice(id: number): Promise<{ error?: string }> {
@@ -11219,7 +11219,7 @@ export async function setSystemSite(instrumentId: number, siteId: number | null)
 // ---------------- Part catalog ----------------
 // What a part number IS - the spine the five tables that store part numbers as
 // bare strings were missing. Deliberately not a foreign key from any of them: a
-// part fitted at 2am must land in the record whether or not it is catalogued.
+// part fitted at 2am must land in the record whether or not it is cataloged.
 // See lib/partCatalog.
 
 export type CatalogInput = {
@@ -11658,7 +11658,7 @@ export async function addCatalogPart(data: CatalogInput): Promise<{ error?: stri
   await writeAliases(row.id, aliases);
   await audit({
     actor: u.email, entityType: "part_catalog", entityId: row.id, tenantOrgId: tenant,
-    action: `catalogued ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""} (${PART_KIND_LABEL[clean.kind].toLowerCase()})`,
+    action: `cataloged ${clean.partNumber}${clean.name ? ` - ${clean.name}` : ""} (${PART_KIND_LABEL[clean.kind].toLowerCase()})`,
   });
   revalidatePath("/settings/parts");
   return { id: row.id };

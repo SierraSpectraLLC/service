@@ -214,7 +214,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           : null;
 
   return (
-    <html lang="en">
+    /* en-US, not a bare "en". The language tag is what a browser picks a
+       SPELLCHECK DICTIONARY from, and bare English lets it fall back to
+       whichever variant the machine prefers - which is how an American shop
+       ended up with "utilizing" underlined in red on its own work orders.
+       Every free-text field in this app inherits this. */
+    <html lang="en-US">
       <body className={user ? "has-tabbar" : undefined} style={{
         ["--bg" as string]: pageTint,
         ["--spectrum-h" as string]: `${look.spectrumHeight}px`,

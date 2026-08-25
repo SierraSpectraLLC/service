@@ -144,7 +144,7 @@ export default function PayrollPanel({
                 Use {formatCents(months[0].loadedCents!)}/h for job costing
               </button>
               <span className="mut t-meta">
-                Costing reads one loaded-labour rate. This replaces the typed guess with {monthName(months[0].ym)}&apos;s real figure.
+                Costing reads one loaded-labor rate. This replaces the typed guess with {monthName(months[0].ym)}&apos;s real figure.
               </span>
             </div>
           )}

@@ -83,7 +83,7 @@ export function emailShell(opts: {
 }): string {
   const width = opts.width ?? 560;
   return `<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:${EMAIL.ground};">
+<html lang="en-US"><body style="margin:0;padding:0;background:${EMAIL.ground};">
   ${opts.preheader ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">${esc(opts.preheader)}</div>` : ""}
   <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" bgcolor="${EMAIL.ground}">
     <tr><td align="center" style="padding:24px 12px;">

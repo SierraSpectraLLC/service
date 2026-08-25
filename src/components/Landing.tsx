@@ -57,7 +57,7 @@ export default function Landing({ brandName, operatorName, catalogOn, contactEma
           {contactEmail && (
             <div style={{ marginTop: 12 }}>
               <a className="btn sm accent" style={{ textDecoration: "none" }}
-                href={`mailto:${contactEmail}?subject=${encodeURIComponent("Instrument service enquiry")}`}>
+                href={`mailto:${contactEmail}?subject=${encodeURIComponent("Instrument service inquiry")}`}>
                 Talk to us about a system
               </a>
             </div>

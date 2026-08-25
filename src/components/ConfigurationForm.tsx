@@ -158,7 +158,7 @@ export default function ConfigurationForm(props: {
     clearBar();
     if (brandDirty && !brandDraft.name.trim()) { setBarErr("The platform needs a name"); return; }
     if (lookDirty && !headerDefault && !isValidHex(header)) {
-      setBarErr("The header colour needs to be a hex like #1D9E75");
+      setBarErr("The header color needs to be a hex like #1D9E75");
       return;
     }
     startTransition(async () => {
@@ -250,9 +250,9 @@ export default function ConfigurationForm(props: {
           </Field>
         </div>
         {/* The one address a stranger can reach. Blank on purpose takes the
-            enquiry buttons off the landing page rather than mailing nowhere. */}
+            inquiry buttons off the landing page rather than mailing nowhere. */}
         <Field label="Public contact address"
-          hint="Where enquiries from the home page go. Leave blank to show no contact button.">
+          hint="Where inquiries from the home page go. Leave blank to show no contact button.">
           <input type="email" value={brandDraft.contactEmail}
             onChange={(e) => { clearBar(); setBrandDraft({ ...brandDraft, contactEmail: e.target.value }); }}
             placeholder="hello@ridgelinefield.com" />
@@ -362,11 +362,11 @@ export default function ConfigurationForm(props: {
             <span className="t-small" style={{ opacity: 0.7 }}>× a client workspace</span>
           </div>
           <div className="t-small" style={{ background: headerOk ? tint(effectiveHeader, 0.93) : "var(--bg)", padding: "12px 14px", color: "var(--mut)" }}>
-            The page behind it takes a wash of the same colour, exactly as an organization&apos;s does.
+            The page behind it takes a wash of the same color, exactly as an organization&apos;s does.
           </div>
         </div>
 
-        <SubHead>Header colour</SubHead>
+        <SubHead>Header color</SubHead>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label className="t-body" style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={headerDefault} disabled={pending}
@@ -413,14 +413,14 @@ export default function ConfigurationForm(props: {
         ))}
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
           <button className="btn sm" onClick={addStop} disabled={pending || stops.length >= MAX_STOPS}>
-            Add colour
+            Add color
           </button>
           <button className="btn link" onClick={resetLook} disabled={pending} style={{ fontSize: 12 }}>
             reset to the default look
           </button>
         </div>
         <div className="mut t-meta" style={{ marginTop: 8 }}>
-          Buttons, titles and tabs keep the house navy on purpose - one colour applied to
+          Buttons, titles and tabs keep the house navy on purpose - one color applied to
           every accent is a redesign rather than a brand, and it is how a readable interface
           stops being one.
         </div>
