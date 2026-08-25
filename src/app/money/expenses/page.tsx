@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, desc, isNull, and } from "drizzle-orm";
+import { asc, desc, eq, isNull, and } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseCategories, expenses } from "@/db/schema";
-import { requireUser } from "@/lib/authz";
+import { expenseCategories, expenses, payroll } from "@/db/schema";
+import { myTenantOrgId, requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { visibleDirectory } from "@/lib/directory";
 import { shopToday } from "@/lib/shopday";
+import { maySeePayroll, payrollForMonth, recentMonths, type PayRow } from "@/lib/payroll";
 import MoneyTabs from "@/components/MoneyTabs";
 import OverheadPanel from "@/components/OverheadPanel";
 import { PageHead } from "@/components/ui";
@@ -34,6 +35,27 @@ export default async function OverheadExpensesPage() {
       .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
   ]);
 
+  // Payroll is the other half of a month, and the bigger half - a ledger of
+  // receipts that leaves out the wages is a number somebody will believe. It
+  // is read here ONLY for the reader's own company and only for an owner (see
+  // lib/payroll): an operator's staff cannot read this, and no operator can
+  // read a client's, however this page is reached.
+  const mine = myTenantOrgId(user);
+  const mayReadPay = mine !== null && maySeePayroll({
+    email: user.email, role: user.role, orgId: user.orgId,
+    operatorOrgId: mine, canSeePayroll: false,
+  }, mine);
+  const payRows = mayReadPay
+    ? (await db.select().from(payroll).where(eq(payroll.orgId, mine))) as PayRow[]
+    : [];
+  const payByMonth: Record<string, number> = {};
+  if (payRows.length) {
+    for (const ym of recentMonths(shopToday(), 24)) {
+      const cents = payrollForMonth(payRows, ym).totalCents;
+      if (cents > 0) payByMonth[ym] = cents;
+    }
+  }
+
   return (
     <div className="container wide">
       <PageHead
@@ -44,6 +66,8 @@ export default async function OverheadExpensesPage() {
       />
       <MoneyTabs active="overhead" />
       <OverheadPanel today={shopToday()} me={user.name}
+        payrollByMonth={payByMonth}
+        payrollHref={mayReadPay ? "/payroll" : ""}
         categories={categoryRows.map((c) => c.name)}
         people={people.map((p) => ({ name: p.name, org: p.org }))}
         rows={rows.map((r) => ({

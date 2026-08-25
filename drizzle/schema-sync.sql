@@ -3266,3 +3266,38 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "calendar_token" text NOT NU
 -- A password an owner set for somebody else, and when it stops working. Null
 -- for a password the person chose themselves, which never expires.
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_temp_until" timestamp;
+
+-- What an organization pays its own people. Read only by that organization's
+-- own administrators - never by the operator hosting them. See lib/payroll.
+CREATE TABLE IF NOT EXISTS "payroll" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "person_email" text NOT NULL DEFAULT '',
+  "name" text NOT NULL DEFAULT '',
+  "title" text NOT NULL DEFAULT '',
+  "kind" text NOT NULL DEFAULT 'salary',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "hours_per_week" integer NOT NULL DEFAULT 40,
+  "fte_pct" integer NOT NULL DEFAULT 100,
+  "burden_pct" integer NOT NULL DEFAULT 0,
+  "effective_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "payroll_org_idx" ON "payroll" ("org_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payroll_org_id_orgs_id_fk') THEN
+    ALTER TABLE "payroll" ADD CONSTRAINT "payroll_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payroll_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "payroll" ADD CONSTRAINT "payroll_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+
+-- Who at an organization may read its payroll. Off until somebody says so.
+ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_payroll" boolean NOT NULL DEFAULT false;

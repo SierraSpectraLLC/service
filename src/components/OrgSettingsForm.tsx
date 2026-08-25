@@ -6,7 +6,7 @@ import {
   setOrgAppearance, updateEodRecipients, updateDigestRecipients, setDigestHour, sendDigestNow,
   addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
-  setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword,
+  setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
 } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
@@ -26,6 +26,7 @@ type Entry = {
   /** From their account row, blank until somebody fills the profile in. */
   name?: string;
   title?: string;
+  canSeePayroll?: boolean;
   /** Whether they have ever actually been here. */
   signedIn?: boolean;
   /** "their own" | "expired" | "6d left" | "" - see lib/tempPassword. */
@@ -338,6 +339,24 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
                 </label>
               ) : r.canSeeAgreements ? (
                 <span className="pill neutral">agreements</span>
+              ) : null}
+              {/* Their organization's PAYROLL - everybody's pay, not just
+                  their own, which they can always see. Off by default and
+                  turned on one person at a time; granting it gives the shop
+                  nothing, because the shop cannot read that payroll either. */}
+              {isOwner ? (
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
+                  title="Whether this person may read their own organization's payroll - what everyone there is paid. Nobody at your company can read it either way.">
+                  <input type="checkbox" checked={!!r.canSeePayroll} disabled={pending || domain} style={{ width: 14, height: 14 }}
+                    onChange={(e) => startTransition(async () => {
+                      const res = await setClientSeesPayroll(r.id, e.target.checked);
+                      if (res?.error) setPeopleError(res.error);
+                      else toast({ message: e.target.checked ? `${r.entry} may read the payroll` : `${r.entry} no longer reads the payroll` });
+                    })} />
+                  payroll
+                </label>
+              ) : r.canSeePayroll ? (
+                <span className="pill neutral">payroll</span>
               ) : null}
               {isStaff && !domain && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>

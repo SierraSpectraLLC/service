@@ -25,6 +25,10 @@ const STAMPED = [
   "catalogRefs", "validationDocs", "messageThreads", "folders", "dropLinks", "shareLinks",
   "rateCards", "expenses", "invoices", "payments", "invoiceFees", "promises",
   "disputes", "dunningEvents", "creditOverrides", "quotes", "expenseCategories", "expenseReports",
+  // Stamped for housekeeping only. Payroll's ACCESS runs off org_id and is
+  // decided in lib/payroll - the stamp is deliberately not a permission there,
+  // which is the one place in the app where those two come apart.
+  "payroll",
 ];
 
 const walk = (dir: string): string[] =>

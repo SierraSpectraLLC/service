@@ -2112,6 +2112,60 @@ export const partPrices = pgTable("part_prices", {
  * becomes $239.99999997, and this codebase keeps money in integer cents for
  * exactly that reason.
  */
+/**
+ * What an organization pays its own people, and therefore what a month of
+ * being open costs before a single job is touched.
+ *
+ * The most sensitive table in the app, and the access rule is the reverse of
+ * every other one here: a row belongs to the organization that EMPLOYS the
+ * person, and it is readable by that organization's own administrators and by
+ * nobody else - not by the operator whose workspace hosts them, not by
+ * platform staff. `tenant_org_id` is filed for housekeeping and is explicitly
+ * NOT a permission (see lib/payroll.maySeePayroll, which is where the rule
+ * lives and is tested). A client keeping payroll here must be able to trust
+ * that the shop servicing their instruments cannot read it.
+ *
+ * Rows are EFFECTIVE-DATED rather than edited in place. A raise in March must
+ * not rewrite what January cost - that is the difference between a payroll
+ * register and a guess - so a change ends one row and starts another, and any
+ * month's cost is summed from whatever was in force during it.
+ */
+export const payroll = pgTable("payroll", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** WHOSE payroll. The employing organization, and the whole access rule. */
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /**
+   * The person's account, when they have one - what lets somebody see their
+   * own row without seeing anybody else's. Blank for a person with no login,
+   * which is most of a payroll.
+   */
+  personEmail: text("person_email").notNull().default(""),
+  name: text("name").notNull().default(""),
+  title: text("title").notNull().default(""),
+  /** salary (annual) | hourly (a wage) | monthly (a retainer, a flat cost) */
+  kind: text("kind").notNull().default("salary"),
+  /** Read against `kind`: per year, per hour, or per month. */
+  amountCents: integer("amount_cents").notNull().default(0),
+  /** For hourly people, what a normal week is - the month's cost rides on it. */
+  hoursPerWeek: integer("hours_per_week").notNull().default(40),
+  /** Part time is a fraction of a person, not a different kind of one. */
+  ftePct: integer("fte_pct").notNull().default(100),
+  /**
+   * Employer costs on top of the pay itself - payroll taxes, insurance, the
+   * benefits line. Per person because a contractor carries none and an
+   * employee carries a third, and a single company-wide number would quietly
+   * overstate one of them.
+   */
+  burdenPct: integer("burden_pct").notNull().default(0),
+  effectiveOn: text("effective_on").notNull().default(""),   // YYYY-MM-DD
+  /** Blank = still in force. Set when they leave, or when a raise supersedes. */
+  endsOn: text("ends_on").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("payroll_org_idx").on(t.orgId)]);
+
 export const rateCards = pgTable("rate_cards", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
@@ -2560,6 +2614,13 @@ export const clientAllowlist = pgTable("client_allowlist", {
   // could already see: this switch exists to take the privilege away
   // deliberately, never to remove it from people by upgrading.
   canSeeAgreements: boolean("can_see_agreements").notNull().default(true),
+  /**
+   * Whether this person may read their ORGANIZATION'S PAYROLL - everybody's
+   * pay, not just their own. Defaults false and stays false until somebody
+   * deliberately turns it on, which is the opposite default from agreements
+   * and for an obvious reason.
+   */
+  canSeePayroll: boolean("can_see_payroll").notNull().default(false),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);

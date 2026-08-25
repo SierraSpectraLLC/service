@@ -169,6 +169,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           const state = a ? tempState(a, now) : { kind: "none" as const };
           return {
             id: r.id, entry: r.entry, canEdit: r.canEdit, canSeeAgreements: r.canSeeAgreements,
+            canSeePayroll: r.canSeePayroll,
             name: a ? [a.firstName, a.lastName].filter(Boolean).join(" ") || a.name || "" : "",
             title: a?.title ?? "",
             signedIn: !!a?.lastSeenAt,

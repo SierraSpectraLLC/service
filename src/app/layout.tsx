@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, sheetDiffs, notifications, stockrooms, stockroomShares } from "@/db/schema";
+import { clientAllowlist, orgs, sheetDiffs, notifications, stockrooms, stockroomShares } from "@/db/schema";
 import { and, asc, isNull, or } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -87,6 +87,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     await db.select({ on: orgs.remoteAccessEnabled }).from(orgs).where(eq(orgs.id, user.orgId))
       .catch(() => [])
   )[0]?.on === true;
+  // Payroll is in the nav only for somebody who may actually read one: the
+  // company's own owner, or a person at a client whose flag was turned on. An
+  // entry that leads to a page which redirects is worse than no entry, and
+  // here it would also be an entry that names a thing they cannot have.
+  const seesPayroll = user?.role === "owner"
+    || (user?.orgId != null && (
+      await db.select({ on: clientAllowlist.canSeePayroll }).from(clientAllowlist)
+        .where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => [])
+    )[0]?.on === true);
   const hasStock = isStaff || (user?.orgId != null && (
     await db.select({ id: stockrooms.id }).from(stockrooms)
       .leftJoin(stockroomShares, eq(stockroomShares.stockroomId, stockrooms.id))
@@ -146,6 +155,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
            here rather than under Billing because the person it serves is the
            engineer, and Billing is the owner's room. */
         { href: "/expenses", label: "Expenses" },
+        /* What the shop pays its own people, and what that makes a month
+           cost. Owners only - see lib/payroll, where the rule that keeps it
+           from the bench (and from every other workspace) lives. */
+        ...(seesPayroll ? [{ href: "/payroll", label: "Payroll" }] : []),
         /* Something you DO to a system, so it sits with the other doing - it
            was under Library, which is files and tools, and a remote session
            is neither. */
@@ -174,9 +187,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     // Same two menus as staff see, so the shape of the app does not change
     // with who is reading it - a client asking where remote support lives
     // gets the same answer as the engineer.
-    ...(orgRemoteOn ? [{
+    ...(orgRemoteOn || seesPayroll ? [{
       label: "Operations",
-      items: [{ href: "/remote", label: "Remote support" }],
+      items: [
+        ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
+        // Their own company's payroll, kept on their own side of the wall.
+        ...(seesPayroll ? [{ href: "/payroll", label: "Payroll" }] : []),
+      ],
     }] : []),
     // An organization's own tools: its file shelf and the studio. Both used
     // to be staff-only, which left a client with nowhere to keep a document

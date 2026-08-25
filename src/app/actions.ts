@@ -17,7 +17,7 @@ import {
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
-  dunningEvents, creditOverrides, quotes, quoteLines,
+  dunningEvents, creditOverrides, quotes, quoteLines, payroll,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -130,6 +130,9 @@ import { readersOf } from "@/lib/mentionAudience";
 import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { makeTempPassword, tempExpiry, TEMP_DAYS_DEFAULT } from "@/lib/tempPassword";
+import {
+  maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
+} from "@/lib/payroll";
 import { normalizePhone } from "@/lib/sms";
 import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
@@ -7230,6 +7233,205 @@ export async function setClientSeesAgreements(id: number, canSee: boolean): Prom
   });
   revalidatePath("/settings");
   revalidatePath(`/settings/organizations/${row.orgId}`);
+  return {};
+}
+
+/**
+ * Who at a client may read their organization's PAYROLL.
+ *
+ * Off by default and turned on one person at a time, unlike the agreements
+ * flag beside it, which defaults on. The asymmetry is the point: everyone at
+ * an organization could always see what their instruments cost, and nobody
+ * should ever accidentally be able to see what their colleagues earn.
+ *
+ * Staff of the workspace grant it, and granting it gives them nothing: the
+ * shop cannot read that payroll either (lib/payroll).
+ */
+export async function setClientSeesPayroll(id: number, canSee: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row || row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  if (row.canSeePayroll === canSee) return {};
+  await db.update(clientAllowlist).set({ canSeePayroll: canSee }).where(eq(clientAllowlist.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: `${row.entry} ${canSee ? "may now read" : "may no longer read"} their organization's payroll`,
+    field: "can_see_payroll", oldValue: String(row.canSeePayroll), newValue: String(canSee),
+  });
+  revalidatePath("/settings");
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  revalidatePath("/payroll");
+  return {};
+}
+
+// ---------------- Payroll ----------------
+// The most guarded rows in the app. Every one of these actions decides access
+// through lib/payroll rather than through the tenancy helpers the rest of the
+// file uses, because the rule is the opposite one: an operator's staff can
+// read everything in their workspace EXCEPT this.
+
+/**
+ * The four facts lib/payroll needs about whoever is asking, assembled from the
+ * session and the person's own allowlist row.
+ */
+async function payrollViewer(u: SessionUser): Promise<PayrollViewer> {
+  let canSeePayroll = false;
+  if (u.orgId !== null) {
+    const [row] = await db.select({ canSeePayroll: clientAllowlist.canSeePayroll })
+      .from(clientAllowlist).where(eq(clientAllowlist.entry, u.email.trim().toLowerCase()));
+    canSeePayroll = row?.canSeePayroll ?? false;
+  }
+  return {
+    email: u.email, role: u.role, orgId: u.orgId,
+    operatorOrgId: myTenantOrgId(u), canSeePayroll,
+  };
+}
+
+/**
+ * The register as this person may read it: their organization's whole payroll
+ * when they may see it, their own row when they may not, and nothing at all
+ * for anybody else - including the operator hosting them.
+ */
+export async function readPayroll(orgId: number): Promise<{
+  error?: string; rows?: PayRow[]; whole?: boolean; mayEdit?: boolean;
+}> {
+  const u = await requireUser();
+  const v = await payrollViewer(u);
+  const whole = maySeePayroll(v, orgId);
+  const all = (await db.select().from(payroll).where(eq(payroll.orgId, orgId))
+    .orderBy(asc(payroll.name), asc(payroll.effectiveOn))) as PayRow[];
+  const rows = visibleRows(v, orgId, all);
+  if (!whole && rows.length === 0) return { error: "Not found" };
+  return { rows, whole, mayEdit: mayEditPayroll(v, orgId) };
+}
+
+/**
+ * Put somebody on the payroll, or record what changed about their pay.
+ *
+ * A change is a NEW ROW, not an edit: the one in force is closed the day
+ * before the new one starts, so last quarter's overhead still says what last
+ * quarter cost. That is the difference between a register and a guess, and it
+ * is why nothing here updates an amount in place.
+ */
+export async function addPayrollEntry(orgId: number, data: {
+  name: string; personEmail: string; title: string;
+  kind: string; amount: string; hoursPerWeek: number; ftePct: number; burdenPct: number;
+  effectiveOn: string; note: string;
+}): Promise<{ error?: string; superseded?: string }> {
+  const u = await requireUser();
+  const v = await payrollViewer(u);
+  if (!mayEditPayroll(v, orgId)) return { error: "Not found" };
+
+  const name = data.name.trim().slice(0, 80);
+  if (!name) return { error: "Say whose pay this is" };
+  const kind = ["salary", "hourly", "monthly"].includes(data.kind) ? data.kind : "salary";
+  const amountCents = parseMoney(data.amount);
+  if (amountCents === null || amountCents <= 0) return { error: "Enter what they are paid" };
+  const effectiveOn = data.effectiveOn.trim();
+  if (!isIsoDay(effectiveOn)) return { error: "Pick the day this takes effect" };
+  const personEmail = data.personEmail.trim().toLowerCase().slice(0, 160);
+
+  // The row this one replaces: the same person, still in force, starting no
+  // later than this one. Closed the day before, so no month counts them twice.
+  let superseded: string | undefined;
+  const mine = await db.select().from(payroll).where(eq(payroll.orgId, orgId));
+  const previous = mine.find((r) => r.endsOn === "" && r.effectiveOn <= effectiveOn
+    && (personEmail ? r.personEmail.toLowerCase() === personEmail : r.name.toLowerCase() === name.toLowerCase()));
+  if (previous) {
+    const dayBefore = new Date(`${effectiveOn}T00:00:00Z`);
+    dayBefore.setUTCDate(dayBefore.getUTCDate() - 1);
+    const closed = dayBefore.toISOString().slice(0, 10);
+    await db.update(payroll).set({ endsOn: closed }).where(eq(payroll.id, previous.id));
+    superseded = closed;
+  }
+
+  await db.insert(payroll).values({
+    tenantOrgId: await tenantOfOrg(orgId),
+    orgId, personEmail, name, title: data.title.trim().slice(0, 80),
+    kind, amountCents,
+    hoursPerWeek: Math.min(168, Math.max(0, Math.round(data.hoursPerWeek || 40))),
+    ftePct: Math.min(100, Math.max(1, Math.round(data.ftePct || 100))),
+    burdenPct: Math.min(200, Math.max(0, Math.round(data.burdenPct || 0))),
+    effectiveOn, note: data.note.trim().slice(0, 300), createdBy: u.email,
+  });
+  // The audit line records THAT pay was set and by whom, never the figure -
+  // the audit log is read by more people than the register is.
+  await audit({
+    actor: u.email, entityType: "payroll", entityId: String(orgId), tenantOrgId: await tenantOfOrg(orgId),
+    action: previous
+      ? `changed ${name}'s pay from ${effectiveOn}`
+      : `put ${name} on the payroll from ${effectiveOn}`,
+  });
+  revalidatePath("/payroll");
+  revalidatePath("/money/expenses");
+  return { superseded };
+}
+
+/** They left, or the line stopped. The history stays; the months after it do not. */
+export async function endPayrollEntry(id: number, endsOn: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [row] = await db.select().from(payroll).where(eq(payroll.id, id));
+  if (!row) return { error: "Not found" };
+  const v = await payrollViewer(u);
+  if (!mayEditPayroll(v, row.orgId)) return { error: "Not found" };
+  const day = endsOn.trim();
+  if (!isIsoDay(day)) return { error: "Pick the last day" };
+  if (day < row.effectiveOn) return { error: "That is before the pay started" };
+  await db.update(payroll).set({ endsOn: day }).where(eq(payroll.id, id));
+  await audit({
+    actor: u.email, entityType: "payroll", entityId: String(row.orgId), tenantOrgId: row.tenantOrgId,
+    action: `ended ${row.name}'s pay on ${day}`,
+  });
+  revalidatePath("/payroll");
+  revalidatePath("/money/expenses");
+  return {};
+}
+
+/**
+ * Delete outright - for the row typed wrong, not for somebody who left. A
+ * reason is required and kept, the same discipline every other destruction in
+ * this app carries.
+ */
+export async function deletePayrollEntry(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [row] = await db.select().from(payroll).where(eq(payroll.id, id));
+  if (!row) return { error: "Not found" };
+  const v = await payrollViewer(u);
+  if (!mayEditPayroll(v, row.orgId)) return { error: "Not found" };
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  await db.delete(payroll).where(eq(payroll.id, id));
+  await audit({
+    actor: u.email, entityType: "payroll", entityId: String(row.orgId), tenantOrgId: row.tenantOrgId,
+    action: `deleted ${row.name}'s pay row from ${row.effectiveOn} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/payroll");
+  revalidatePath("/money/expenses");
+  return {};
+}
+
+/**
+ * Adopt what a month actually cost as the loaded labour rate job costing uses.
+ *
+ * Deliberately a button rather than a silent override. Costing has always read
+ * one number from settings; this makes that number derived instead of guessed,
+ * and leaves it visible and changeable where it always was.
+ */
+export async function useDerivedLaborRate(centsPerHour: number): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const cents = Math.max(0, Math.round(centsPerHour));
+  if (!cents) return { error: "There is no rate to adopt yet" };
+  await db.update(appSettings).set({ loadedLaborCents: cents }).where(eq(appSettings.id, 1));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "loaded_labor",
+    action: `set loaded labor to ${formatCents(cents)}/h from payroll and overhead`,
+    field: "loaded_labor_cents", newValue: String(cents),
+  });
+  revalidatePath("/money/costing");
+  revalidatePath("/money/expenses");
   return {};
 }
 
