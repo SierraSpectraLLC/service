@@ -28,7 +28,8 @@
 // follow-up list, the activity tally, the since-yesterday narrative and the
 // failed-test card are ours to read, and the client's EOD report is where
 // their narrative lives.
-import { and, asc, eq, gte, inArray, lt, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, or } from "drizzle-orm";
+import { forTenant } from "@/lib/tenancy";
 import { db } from "@/db";
 import {
   appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
@@ -276,7 +277,13 @@ type FailedTest = {
   days: number | null;
   required: boolean;
 };
-type WorkBlock = { externalId: string; label: string; lines: string[] };
+/**
+ * One system's window narrative. Each line knows whether it was written for
+ * the house only, so the internal edition prints everything and the client
+ * edition prints exactly what the EOD report would have shown them.
+ */
+export type WorkLine = { text: string; internal: boolean };
+export type WorkBlock = { externalId: string; label: string; lines: WorkLine[] };
 type BoardRow = {
   externalId: string; label: string; stages: string[];
   gases: { gas: string; status: string }[];
@@ -296,6 +303,12 @@ export type DigestSection = {
   gas: GasIssue[];
   failedTests: FailedTest[];
   work: WorkBlock[];
+  /**
+   * Window work with no system to hang it on - a phone call, a walkthrough.
+   * The EOD report already carries these; the digest was silently dropping
+   * them, which made a phone-support day read as no day at all.
+   */
+  offSystem: WorkLine[];
   /** "9 changes logged since yesterday by joe, chris" - internal only. */
   activity: string;
 };
@@ -342,10 +355,16 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       inArray(workOrders.instrumentId, ids),
       or(eq(workOrders.state, "waiting"), gte(workOrders.resolvedAt, cutoff), gte(workOrders.closedAt, cutoff)),
     )) : none<typeof workOrders.$inferSelect>(),
-    ids.length ? db.select().from(eodUpdates).where(and(
+    // The window's EOD rows: the ones on this tenant's systems, plus the
+    // off-system rows - the phone call, the walkthrough - which have no
+    // instrument to scope them and so carry the workspace stamp themselves.
+    db.select().from(eodUpdates).where(and(
       gte(eodUpdates.date, sinceDate), lt(eodUpdates.date, todayStr),
-      inArray(eodUpdates.instrumentId, ids),
-    )) : none<typeof eodUpdates.$inferSelect>(),
+      ids.length
+        ? or(inArray(eodUpdates.instrumentId, ids),
+             and(isNull(eodUpdates.instrumentId), forTenant(eodUpdates.tenantOrgId, tenantOrgId)))
+        : and(isNull(eodUpdates.instrumentId), forTenant(eodUpdates.tenantOrgId, tenantOrgId)),
+    )),
     db.select().from(auditLog).where(gte(auditLog.createdAt, cutoff)),
     db.select().from(orgs),
     // Every recorded verdict on these systems' tests, once: the failures
@@ -385,6 +404,12 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     const key = r.ownerOrgId ?? null;
     if (!owners.includes(key)) owners.push(key);
   }
+  // A client whose whole day was a phone call still had a day.
+  for (const u of updateRows) {
+    if (u.instrumentId !== null || u.assetId !== null) continue;
+    const key = u.ownerOrgId ?? null;
+    if (!owners.includes(key)) owners.push(key);
+  }
   owners.sort((a, b) => {
     if (a === null) return -1;
     if (b === null) return 1;
@@ -396,7 +421,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
     const systems = rows.filter((r) => (r.ownerOrgId ?? null) === ownerId);
     const section: DigestSection = {
       orgId: ownerId, name: orgName(ownerId),
-      board: [], pending: [], followUps: [], handoffs: [], gas: [], failedTests: [], work: [], activity: "",
+      board: [], pending: [], followUps: [], handoffs: [], gas: [], failedTests: [], work: [], offSystem: [], activity: "",
     };
     const sysIds = new Set(systems.map((s) => s.id));
 
@@ -450,12 +475,12 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       // What happened in the window - the hand-written updates first (they
       // are the narrative, in day order), then the record: tasks done, work
       // orders resolved. In a multi-day window every line carries its day.
-      const lines: string[] = [];
+      const lines: WorkLine[] = [];
       const ups = updateRows.filter((x) => x.instrumentId === i.id && !x.skipped)
         .sort((a, b) => a.date.localeCompare(b.date));
       for (const u of ups) {
-        if (u.systemUpdate?.trim()) lines.push(`${tagOfDay(u.date)}${u.systemUpdate.trim()}`);
-        if (u.actionItem?.trim()) lines.push(`${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`);
+        if (u.systemUpdate?.trim()) lines.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal });
+        if (u.actionItem?.trim()) lines.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal });
       }
       for (const t of taskRows.filter((t) => t.instrumentId === i.id && t.state === "Done" && t.completedAt && t.completedAt >= cutoff)) {
         // A completed test carries its verdict: "Completed: Flow Check" says
@@ -465,14 +490,23 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
           : v.passed === true ? ` - Pass${v.value && !/^pass$/i.test(v.value) ? ` (${v.value})` : ""}`
           : v.passed === false ? ` - FAIL${v.value && !/^fail$/i.test(v.value) ? ` (${v.value})` : ""}`
           : v.value ? ` - ${v.value}` : "";
-        lines.push(`${tagOf(t.completedAt!)}Completed: ${t.title}${verdict}`);
+        lines.push({ text: `${tagOf(t.completedAt!)}Completed: ${t.title}${verdict}`, internal: false });
       }
       for (const w of woRows.filter((w) => w.instrumentId === i.id
         && ((w.resolvedAt && w.resolvedAt >= cutoff) || (w.closedAt && w.closedAt >= cutoff)))) {
         const closed = w.closedAt && w.closedAt >= cutoff;
-        lines.push(`${tagOf((closed ? w.closedAt : w.resolvedAt)!)}Work order${w.number ? ` ${w.number}` : ""} ${closed ? "closed" : "resolved"}: ${w.closeSummary || w.title}`);
+        lines.push({ text: `${tagOf((closed ? w.closedAt : w.resolvedAt)!)}Work order${w.number ? ` ${w.number}` : ""} ${closed ? "closed" : "resolved"}: ${w.closeSummary || w.title}`, internal: false });
       }
       if (lines.length) section.work.push({ externalId: i.externalId, label, lines });
+    }
+
+    // Off the bench: this owner's phone calls and walkthroughs in the window.
+    for (const u of updateRows
+      .filter((x) => x.instrumentId === null && x.assetId === null && !x.skipped
+        && (x.ownerOrgId ?? null) === ownerId)
+      .sort((a, b) => a.date.localeCompare(b.date))) {
+      if (u.systemUpdate?.trim()) section.offSystem.push({ text: `${tagOfDay(u.date)}${u.systemUpdate.trim()}`, internal: u.internal });
+      if (u.actionItem?.trim()) section.offSystem.push({ text: `${tagOfDay(u.date)}Next: ${u.actionItem.trim()}`, internal: u.internal });
     }
 
     // The rest of the day's record, summarized rather than dumped: the audit
@@ -483,7 +517,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
       section.activity = `${touched.length} change${touched.length === 1 ? "" : "s"} logged in the window by ${actors.join(", ")}`;
     }
 
-    if (section.board.length || section.work.length || section.handoffs.length) sections.push(section);
+    if (section.board.length || section.work.length || section.handoffs.length || section.offSystem.length) sections.push(section);
   }
 
   return {
@@ -602,17 +636,28 @@ function renderGas(section: DigestSection): string {
 }
 
 function renderWork(section: DigestSection, internal: boolean, window: string): string {
-  if (!section.work.length && !(internal && section.activity)) return "";
-  const blocks = section.work.map((w) => `
+  // The client's copy shows only what was written for them; the house sees all.
+  const visible = (l: WorkLine) => internal || !l.internal;
+  const work = section.work
+    .map((w) => ({ ...w, lines: w.lines.filter(visible) }))
+    .filter((w) => w.lines.length);
+  const off = section.offSystem.filter(visible);
+  if (!work.length && !off.length && !(internal && section.activity)) return "";
+  const blocks = work.map((w) => `
     <div style="margin:6px 0;">
       <div>${sysId(w.externalId)} <span style="color:${EMAIL.muted};font-size:12px;">${esc(w.label)}</span></div>
-      ${w.lines.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${esc(l)}</div>`).join("")}
+      ${w.lines.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${esc(l.text)}</div>`).join("")}
     </div>`).join("");
+  const offBlock = off.length ? `
+    <div style="margin:6px 0;">
+      <div style="color:${EMAIL.muted};font-size:12px;">Off the bench</div>
+      ${off.map((l) => `<div style="margin:1px 0 1px 10px;white-space:pre-wrap;">${esc(l.text)}</div>`).join("")}
+    </div>` : "";
   const activity = internal && section.activity
     ? `<div style="color:${EMAIL.faint};font-size:12px;margin-top:6px;">${esc(section.activity)}</div>` : "";
-  const empty = !section.work.length
+  const empty = !work.length && !off.length
     ? `<div style="color:${EMAIL.muted};">Nothing written or completed in this window.</div>` : "";
-  return card(`<div style="font-weight:bold;margin-bottom:2px;">${esc(window)}</div>${blocks}${empty}${activity}`);
+  return card(`<div style="font-weight:bold;margin-bottom:2px;">${esc(window)}</div>${blocks}${offBlock}${empty}${activity}`);
 }
 
 function renderBoard(section: DigestSection, internal: boolean): string {
@@ -797,7 +842,7 @@ export async function composePartnerDigest(
   if (!section) return null;
 
   const view = partnerView({
-    section,
+    section: { ...section, work: section.work, offSystem: section.offSystem },
     operatorName,
     dateLabel: dayLabel(new Date()),
     portalUrl: appUrl(),

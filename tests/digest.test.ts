@@ -226,7 +226,7 @@ describe("grouping and totals", () => {
       handoffs: [{ systemId: 2, externalId: "P-001", label: "LC-2040C", holder: "LabZen", reason: "", days: 3 }],
       gas: [{ externalId: "T-003", gas: "Helium", status: "Low", note: "" }],
       failedTests: [{ externalId: "T-003", title: "Flow Check", value: "1.2 mL/min", days: 2, required: true }],
-      work: [], activity: "",
+      work: [], offSystem: [], activity: "",
     };
     const n = digestCounts([section]);
     expect(n).toEqual({ systems: 2, partner: 1, us: 1, supplier: 1, followUps: 1, handoffs: 1, gas: 1, failed: 1 });

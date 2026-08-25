@@ -103,6 +103,29 @@ const FIXTURE = `
          '', 'dev@local.test'
   FROM orgs o WHERE o.name = 'Harbor Biotech';
 
+  -- YESTERDAY's report, because the digest sends the previous day (one row
+  -- per system per day - eod_instrument_date): a bench day on LZ-002 whose
+  -- narrative the client edition must carry, a house-only day on LZ-001 which
+  -- it must NOT, and an off-system call for Harbor Biotech - the client whose
+  -- whole day was a phone.
+  INSERT INTO eod_updates (instrument_id, asset_id, date, owner_org_id, title, person, minutes,
+                           system_update, action_item, internal, updated_by) VALUES
+    (2, NULL, to_char(now() - interval '1 day', 'YYYY-MM-DD'), 1,
+     'Turbo recert', 'Sam Ortiz', 240,
+     'New turbo at speed; backing pressure 2.1e-2 mbar and falling. Leak-checked the foreline, all joints tight.',
+     'Cal gas tune once base pressure holds overnight', false, 'dev@local.test'),
+    (1, NULL, to_char(now() - interval '1 day', 'YYYY-MM-DD'), 1,
+     'Margin note', 'Sam Ortiz', 5,
+     'Quoted the checkout high on purpose - covers a second tune pass if we need one.',
+     '', true, 'dev@local.test');
+  INSERT INTO eod_updates (instrument_id, asset_id, date, owner_org_id, title, person, minutes,
+                           system_update, action_item, internal, updated_by)
+  SELECT NULL, NULL, to_char(now() - interval '1 day', 'YYYY-MM-DD'), o.id,
+         'Phone support - autosampler alignment', 'Bill Reyes', 25,
+         'Walked their chemist through re-teaching the autosampler arm after a crash.',
+         'Send the alignment SOP', false, 'dev@local.test'
+  FROM orgs o WHERE o.name = 'Harbor Biotech';
+
   -- Blocking is the one stage that demands a written reason, so the fixture's
   -- blocked system carries one - and an age, so the board can say how long.
   UPDATE instruments
@@ -397,6 +420,13 @@ const FIXTURE = `
   UPDATE disputes SET tenant_org_id = 3;
   UPDATE dunning_events SET tenant_org_id = 3;
   UPDATE share_links SET tenant_org_id = 3 WHERE kind <> 'files';
+  -- The workspace shape production always has and raw inserts skip: client
+  -- orgs hang off their operator, and the bench belongs to the workspace.
+  -- Without these the digest - which scopes strictly, as a send must - sees
+  -- an empty board, and the partner preview calls every org a stranger.
+  UPDATE orgs SET parent_org_id = 3 WHERE kind = 'client';
+  UPDATE instruments SET tenant_org_id = 3;
+  UPDATE eod_updates SET tenant_org_id = 3;
 
   -- A Stripe account in TEST MODE, so the portal's pay buttons render against
   -- the harness. Fixture only, and obviously fake: nothing here can move money.

@@ -9,7 +9,7 @@ const section = (over: Partial<DigestSection> = {}): DigestSection => ({
   orgId: 7, name: "LabZen",
   board: [{ externalId: "LZ-11", label: "LC-2040C", stages: [], gases: [], openParts: 0, lead: "", notes: "" }],
   pending: [], followUps: [], handoffs: [], gas: [],
-  failedTests: [], work: [], activity: "",
+  failedTests: [], work: [], offSystem: [], activity: "",
   ...over,
 });
 

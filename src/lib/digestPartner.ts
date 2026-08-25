@@ -27,7 +27,7 @@
  */
 import { EMAIL, esc } from "@/lib/emailTheme";
 import { TONE_HEX } from "@/lib/tones";
-import type { Court, PendingCause, PendingItem } from "@/lib/digest";
+import type { Court, PendingCause, PendingItem, WorkBlock, WorkLine } from "@/lib/digest";
 
 /** One line of "your move" or "with us": an imperative, and why it matters. */
 export type PartnerAsk = {
@@ -61,6 +61,13 @@ export type PartnerSystem = {
   openParts: number;
   /** First name or display name, never a username. Blank when unassigned. */
   lead: string;
+  /**
+   * What actually happened on this system in the window, in the engineer's own
+   * words: the end-of-day narrative, completed tests with their verdicts, work
+   * orders closed. Already audience-filtered - a line the engineer marked
+   * house-only never reaches this array.
+   */
+  notes: string[];
 };
 
 export type PartnerDigestView = {
@@ -80,6 +87,13 @@ export type PartnerDigestView = {
    */
   standingHandback: { count: number; oldestAge: string };
   inWork: PartnerSystem[];
+  /**
+   * Work in the window that happened off any particular system - the site
+   * walkthrough, the phone call, the planning session. Without these a day the
+   * engineer spent entirely on this client's behalf reads as a day nothing
+   * happened.
+   */
+  also: string[];
   /** Rows dropped by the size caps, so the mail can say so out loud. */
   moreHandedBack: number;
   moreInWork: number;
@@ -100,6 +114,13 @@ const BODY_INK = EMAIL.body;
  */
 export const MAX_HANDED_BACK = 40;
 export const MAX_IN_WORK = 60;
+/**
+ * EOD narrative lines shown under one system, and off-system lines in the
+ * "Also in this window" block. A week away folds into one edition, and seven
+ * days of diary under each of forty systems is the 80 KB clip again.
+ */
+export const MAX_NOTES = 4;
+export const MAX_ALSO = 8;
 
 /** "2d" / "3w" - the age of something, at the precision anybody acts on. */
 export const age = (days: number): string =>
@@ -220,13 +241,20 @@ export function renderPartnerDigest(v: PartnerDigestView, preheader: string): st
         const pill = s.stage
           ? `<span style="display:inline-block;padding:1px 7px;border-radius:999px;background:${s.stageBg};color:${s.stageFg};font-size:11px;font-weight:700;">${esc(s.stage)}</span>${bits ? "&nbsp; " : ""}`
           : "";
+        const notes = s.notes.map((n) =>
+          `<div style="font-size:12px;color:${BODY_INK};margin-top:3px;padding-left:8px;border-left:2px solid ${LINE};white-space:pre-wrap;">${esc(n)}</div>`).join("");
         return `
         <tr>${idCell(s.externalId, i === 0, "8px")}
             <td style="padding:8px 0;border-top:1px solid ${LINE};font-size:13px;color:${BODY_INK};">${esc(s.label)}${
               pill || bits ? `<div style="font-size:12px;color:${EMAIL.muted};margin-top:2px;">${pill}${bits}</div>` : ""
-            }</td></tr>`;
+            }${notes}</td></tr>`;
       }).join(""))
       + moreLine(v.moreInWork, "in work", plain)) : "",
+    v.also.length ? section(
+      sectionHead("Also in this window", v.also.length, TONE_HEX.neutral.fg,
+        "Work on your behalf that was not tied to one system.")
+      + `<div style="margin-top:8px;">${v.also.map((n) =>
+          `<div style="font-size:13px;color:${BODY_INK};padding:5px 0;border-top:1px solid ${LINE};white-space:pre-wrap;">${esc(n)}</div>`).join("")}</div>`) : "",
   ].join("");
 
   return `<!doctype html>
@@ -316,10 +344,14 @@ export function renderPartnerDigestText(v: PartnerDigestView, preheader: string)
       ...v.inWork.map((s) => {
         const bits = [s.stage, s.status, s.gasNeed, s.openParts > 0 ? `${s.openParts} part${s.openParts === 1 ? "" : "s"} open` : "", s.lead]
           .filter(Boolean).join(" - ");
-        return `  ${s.externalId}  ${s.label}${bits ? `\n          ${bits}` : ""}`;
+        const notes = s.notes.map((n) => `\n          ${n.replace(/\n/g, "\n          ")}`).join("");
+        return `  ${s.externalId}  ${s.label}${bits ? `\n          ${bits}` : ""}${notes}`;
       }),
       ...(v.moreInWork ? [`  ...and ${v.moreInWork} more in the portal.`] : []),
     ]);
+  block(`Also in this window (${v.also.length})`,
+    v.also.map((n) => `  ${n.replace(/\n/g, "\n  ")}`),
+    "Work on your behalf that was not tied to one system.");
   out.push("", rule, `Open the portal: ${v.portalUrl}`);
   out.push(`Sent each morning by ${v.operatorName}. Questions on a system? Open it in the portal and reply there.`);
   return out.join("\n");
@@ -457,6 +489,14 @@ export function partnerView(opts: {
     }[];
     pending: PendingItem[];
     handoffs: { externalId: string; label: string; holder: string; reason: string; days: number }[];
+    /**
+     * The window's narrative, straight from collectDigest: per-system EOD
+     * lines (each carrying its own `internal` flag) and the off-system rows -
+     * the phone call, the walkthrough. Optional because older callers and
+     * fixtures predate them; absent means "no narrative", not an error.
+     */
+    work?: WorkBlock[];
+    offSystem?: WorkLine[];
   };
   operatorName: string;
   dateLabel: string;
@@ -529,6 +569,21 @@ export function partnerView(opts: {
     oldestAge: older.length ? age(Math.max(...older.map((h) => h.days))) : "",
   };
 
+  // The narrative, audience-filtered TWICE: the flag the engineer set on the
+  // EOD form ("house only"), then the same phrasing heuristic every other free
+  // text in this email passes through. Over the cap the mail says so rather
+  // than clipping silently.
+  const clip = (lines: string[], max: number): string[] =>
+    lines.length <= max ? lines : [...lines.slice(0, max), `...and ${lines.length - max} more in the portal.`];
+  const sayLines = (lines: WorkLine[]): string[] =>
+    lines.filter((l) => !l.internal && !internalRemark(l.text)).map((l) => l.text);
+  const notesFor = new Map<string, string[]>();
+  for (const w of opts.section.work ?? []) {
+    const say = sayLines(w.lines);
+    if (say.length) notesFor.set(w.externalId, clip(say, MAX_NOTES));
+  }
+  const also = clip(sayLines(opts.section.offSystem ?? []), MAX_ALSO);
+
   const above = new Map<string, string>();
   for (const m of sayable) {
     const subjects = m.cause === "blocked" ? [splitReason(m.subjects[0] ?? "")[0]] : m.subjects;
@@ -551,12 +606,13 @@ export function partnerView(opts: {
       gasNeed: needsGas.length ? `needs ${needsGas.join(" + ")}` : "",
       openParts: b.openParts,
       lead,
+      notes: notesFor.get(b.externalId) ?? [],
     };
   });
 
   return {
     operatorName, clientName, dateLabel: opts.dateLabel, portalUrl: opts.portalUrl,
-    needs, blocked, handedBack, standingHandback, inWork,
+    needs, blocked, handedBack, standingHandback, inWork, also,
     moreHandedBack: Math.max(0, fresh.length - handedBack.length),
     moreInWork: Math.max(0, section.board.length - inWork.length),
   };
@@ -564,6 +620,12 @@ export function partnerView(opts: {
 
 /** The inbox line: the counts, in the order the sections come. */
 export function partnerPreheader(v: PartnerDigestView): string {
+  // An edition whose only content is off-system work would otherwise preview
+  // as a row of zeros - the inbox line that teaches a reader to delete it.
+  if (!v.needs.length && !v.blocked.length && !v.handedBack.length && !v.moreHandedBack
+    && !v.standingHandback.count && !v.inWork.length && !v.moreInWork && v.also.length) {
+    return `${v.also.length} update${v.also.length === 1 ? "" : "s"} from ${v.operatorName}'s day on your account`;
+  }
   const parts = [
     `${v.needs.length} thing${v.needs.length === 1 ? " needs" : "s need"} ${v.clientName}`,
     `${v.blocked.length} blocked with us`,
