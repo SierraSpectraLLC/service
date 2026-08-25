@@ -208,6 +208,15 @@ const FIXTURE = `
     (NULL, 'other', 'Internet, August', 8999, to_char(now() - interval '3 days', 'YYYY-MM-DD'), false, 'Bill Reyes', '${OWNER}'),
     (NULL, 'other', 'CAD seat, monthly', 21500, to_char(date_trunc('month', now()), 'YYYY-MM-DD'), false, '', '${OWNER}');
 
+  -- A reimbursement claim mid-flight: Bill's hotel and per diem submitted and
+  -- waiting on the owner, so /expenses opens with a queue on one side and a
+  -- pool (the owner's own mileage rows above) on the other.
+  INSERT INTO expense_reports (person, status, submitted_by, note) VALUES
+    ('Bill Reyes', 'submitted', 'bill@sierraspectra.test', 'Sacramento install week');
+  INSERT INTO expenses (work_order_id, kind, description, amount_cents, incurred_on, billable, person, logged_by, report_id) VALUES
+    (2, 'Lodging', 'Hampton Inn, 2 nights', 31800, to_char(now() - interval '8 days', 'YYYY-MM-DD'), true, 'Bill Reyes', 'bill@sierraspectra.test', 1),
+    (2, 'Per diem', 'Install week per diem', 9000, to_char(now() - interval '8 days', 'YYYY-MM-DD'), true, 'Bill Reyes', 'bill@sierraspectra.test', 1);
+
   -- Lab Zen pays on paper and has a live PO with room on it. Coastal has no PO
   -- at all and a punitive policy - short grace, a flat late fee, a hold that
   -- trips early - so the credit-hold and dunning paths have something to fire

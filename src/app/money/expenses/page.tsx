@@ -39,7 +39,8 @@ export default async function OverheadExpensesPage() {
       <PageHead
         crumb={<><Link href="/money">Billing</Link> › <b>Overhead</b></>}
         title="Overhead"
-        sub="What no job caused: reimbursements and running costs, by month. Job expenses live on their work orders."
+        sub={<>What no job caused: running costs, by month. Job expenses live on their work orders;
+          engineers claim payouts at <Link href="/expenses">Reimbursements</Link>.</>}
       />
       <MoneyTabs active="overhead" />
       <OverheadPanel today={shopToday()} me={user.name}

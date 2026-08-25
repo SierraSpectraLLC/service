@@ -2193,8 +2193,43 @@ export const expenses = pgTable("expenses", {
    */
   siteId: integer("site_id").references(() => orgSites.id, { onDelete: "set null" }),
   loggedBy: text("logged_by").notNull().default(""),
+  /**
+   * The reimbursement report this row was submitted on. Null = still in the
+   * engineer's pool. Set null on report delete so a withdrawn report returns
+   * its rows to the pool instead of taking the receipts with it.
+   */
+  reportId: integer("report_id").references((): AnyPgColumn => expenseReports.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("expenses_wo_idx").on(t.workOrderId)]);
+}, (t) => [index("expenses_wo_idx").on(t.workOrderId), index("expenses_report_idx").on(t.reportId)]);
+
+/**
+ * An engineer's reimbursement claim: a batch of their expenses, submitted as
+ * one thing to be paid as one thing.
+ *
+ * The report's total is NOT a column - it is summed from its expense rows at
+ * render, the same no-stored-balances rule invoices follow, so editing a row
+ * before payout can never leave a stale total for the payout to trust.
+ *
+ * status: submitted | paid | returned. Returning a report clears report_id on
+ * its rows (they go back to the pool, editable, resubmittable) and keeps the
+ * report as the record of the round-trip, with the reason on it.
+ */
+export const expenseReports = pgTable("expense_reports", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Whose money is owed - a directory name, same convention as expenses.person. */
+  person: text("person").notNull(),
+  status: text("status").notNull().default("submitted"),
+  submittedBy: text("submitted_by").notNull().default(""),
+  submittedAt: timestamp("submitted_at").notNull().defaultNow(),
+  /** Payout facts, written when it is paid. */
+  paidOn: text("paid_on").notNull().default(""),        // YYYY-MM-DD
+  paidBy: text("paid_by").notNull().default(""),
+  paidRef: text("paid_ref").notNull().default(""),      // check number, payroll run
+  /** Why it came back, when it did. */
+  returnedReason: text("returned_reason").notNull().default(""),
+  note: text("note").notNull().default(""),
+}, (t) => [index("expense_reports_person_idx").on(t.person)]);
 
 /**
  * A bill. Nothing here is a balance: what is owed is

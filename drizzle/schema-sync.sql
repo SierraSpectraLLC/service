@@ -3215,3 +3215,36 @@ ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_day_of_month" integer NO
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_lead_days" integer NOT NULL DEFAULT 7;
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_next_on" text NOT NULL DEFAULT '';
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_last_on" text NOT NULL DEFAULT '';
+
+-- ── Expense reports ─────────────────────────────────────────────────────────
+-- An engineer's reimbursement claim: a batch of their expenses submitted as
+-- one thing to be paid as one thing. The total is summed from the rows at
+-- render, never stored. Returning a report sends its rows back to the pool.
+CREATE TABLE IF NOT EXISTS "expense_reports" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "person" text NOT NULL,
+  "status" text NOT NULL DEFAULT 'submitted',
+  "submitted_by" text NOT NULL DEFAULT '',
+  "submitted_at" timestamp NOT NULL DEFAULT now(),
+  "paid_on" text NOT NULL DEFAULT '',
+  "paid_by" text NOT NULL DEFAULT '',
+  "paid_ref" text NOT NULL DEFAULT '',
+  "returned_reason" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS "expense_reports_person_idx" ON "expense_reports" ("person");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expense_reports_tenant_org_id_orgs_id_fk') THEN
+    ALTER TABLE "expense_reports" ADD CONSTRAINT "expense_reports_tenant_org_id_orgs_id_fk"
+      FOREIGN KEY ("tenant_org_id") REFERENCES "orgs"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "report_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_report_id_expense_reports_id_fk') THEN
+    ALTER TABLE "expenses" ADD CONSTRAINT "expenses_report_id_expense_reports_id_fk"
+      FOREIGN KEY ("report_id") REFERENCES "expense_reports"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS "expenses_report_idx" ON "expenses" ("report_id");

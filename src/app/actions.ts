@@ -16,7 +16,7 @@ import {
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  driveCache, expenses, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
+  driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
@@ -56,6 +56,7 @@ import {
 import {
   addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
 } from "@/lib/recurring";
+import { reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
@@ -7222,6 +7223,118 @@ export async function logOverheadExpense(
     action: `logged ${formatCents(cents)} of overhead - ${description}${person ? ` (${person})` : ""}`,
   });
   revalidatePath("/money/expenses");
+  return {};
+}
+
+// ── Expense reports ─────────────────────────────────────────────────────────
+// The reimbursement lifecycle: an engineer batches their expenses into a
+// report, the owner pays it or returns it. The report never stores a total -
+// it is summed from its rows, so an edit before payout can never leave a
+// stale number for the payout to trust. lib/expenseReports owns the rules.
+
+/**
+ * Submit my expenses as one reimbursement claim.
+ *
+ * The ids are re-checked against MY pool on the server: rows already on a
+ * report are refused (the same receipt on two reports is the same money paid
+ * twice), and rows that belong to somebody else are not mine to claim,
+ * whatever the client sent.
+ */
+export async function submitExpenseReport(
+  expenseIds: number[], note = "",
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const ids = [...new Set(expenseIds)].filter((n) => Number.isInteger(n));
+  if (!ids.length) return { error: "Pick at least one expense" };
+  const t = readTenant(u);
+  const rows = await db.select().from(expenses)
+    .where(and(inArray(expenses.id, ids), forTenant(expenses.tenantOrgId, t)));
+  const mine = reimbursementPool(rows, { name: u.name, email: u.email });
+  if (mine.length !== ids.length) {
+    return { error: "Some of those are not yours to claim, or are already on a report" };
+  }
+  const total = reportTotalCents(mine);
+  const [report] = await db.insert(expenseReports).values({
+    tenantOrgId: t, person: u.name, status: "submitted",
+    submittedBy: u.email, note: note.trim().slice(0, 500),
+  }).returning();
+  await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: t,
+    action: `submitted ${ids.length} expense${ids.length === 1 ? "" : "s"} (${formatCents(total)}) for reimbursement`,
+  });
+  revalidatePath("/expenses");
+  revalidatePath("/money/expenses");
+  return { id: report.id };
+}
+
+/** Take my own unpaid report back - its rows return to the pool, editable. */
+export async function withdrawExpenseReport(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
+  if (!report) return { error: "Not found" };
+  if (report.person !== u.name && u.role !== "owner") return { error: "Not yours to withdraw" };
+  if (report.status === "paid") return { error: "It has been paid - there is nothing to take back" };
+  await db.update(expenses).set({ reportId: null }).where(eq(expenses.reportId, id));
+  await db.delete(expenseReports).where(eq(expenseReports.id, id));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
+    action: `withdrew ${report.person}'s expense report - its expenses are back in the pool`,
+  });
+  revalidatePath("/expenses");
+  return {};
+}
+
+/**
+ * Pay a report. Owner only: this is the company writing a check.
+ *
+ * It marks, it does not move money - the check or the payroll run happens
+ * wherever it happens, and this records that it did, with the reference the
+ * engineer can chase it by.
+ */
+export async function payExpenseReport(
+  id: number, data: { paidOn: string; reference: string },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
+  if (!report) return { error: "Not found" };
+  if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
+  const day = data.paidOn.trim();
+  if (!isIsoDay(day)) return { error: "Pick the date it was paid" };
+  if (day > shopToday()) return { error: "That date is in the future" };
+  const rows = await db.select().from(expenses).where(eq(expenses.reportId, id));
+  const total = reportTotalCents(rows);
+  await db.update(expenseReports).set({
+    status: "paid", paidOn: day, paidBy: u.email, paidRef: data.reference.trim().slice(0, 120),
+  }).where(eq(expenseReports.id, id));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
+    action: `paid ${report.person} ${formatCents(total)} for ${rows.length} expense${rows.length === 1 ? "" : "s"}`
+      + (data.reference.trim() ? ` (${data.reference.trim()})` : "") + `, ${day}`,
+  });
+  revalidatePath("/expenses");
+  return {};
+}
+
+/**
+ * Send a report back. Its rows return to the pool so the engineer can fix
+ * and resubmit; the report stays, wearing the reason, as the record that the
+ * round-trip happened.
+ */
+export async function returnExpenseReport(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
+  if (!report) return { error: "Not found" };
+  if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
+  await db.update(expenses).set({ reportId: null }).where(eq(expenses.reportId, id));
+  await db.update(expenseReports).set({ status: "returned", returnedReason: why }).where(eq(expenseReports.id, id));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
+    action: `returned ${report.person}'s expense report - ${why}`,
+  });
+  revalidatePath("/expenses");
   return {};
 }
 
