@@ -10,7 +10,8 @@ import { reimbursementPool } from "@/lib/expenseReports";
 import { shopToday } from "@/lib/shopday";
 import { WO_LABEL } from "@/lib/workOrders";
 import ExpenseReportsPanel, { type ReportRow } from "@/components/ExpenseReportsPanel";
-import { PageHead } from "@/components/ui";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
 
 export const dynamic = "force-dynamic";
 
@@ -23,12 +24,16 @@ export const dynamic = "force-dynamic";
  * every submitted report, ready to mark paid or send back.
  *
  * Expenses are LOGGED elsewhere, where they happen: on the work order for a
- * job, at Billing › Overhead for the rest. This page only claims them.
+ * job, at Financial › Overhead for the rest. This page only claims them.
  */
-export default async function ExpensesPage() {
+export default async function ExpensesPage({ searchParams }: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
+  const { period, seesPayroll, figures: fig } =
+    await financeContext(user, (await searchParams).period);
   const isOwner = user.role === "owner";
   const t = readTenant(user);
 
@@ -68,14 +73,17 @@ export default async function ExpensesPage() {
   });
 
   return (
-    <div className="container wide">
-      <PageHead
-        title="Expenses"
-        sub={<>
-          Log what you have fronted, claim it, and watch the payout land. Shop-wide overhead
-          lives at <Link href="/money/expenses">Billing › Overhead</Link>.
-        </>}
-      />
+    <FinanceShell
+      rail={{ active: "reimbursements", amounts: fig.amounts, seesPayroll }}
+      period={period}
+      path="/expenses"
+      title="Reimbursements"
+      sub={<>
+        Out-of-pocket spend, attached to the job it was spent on: log what you have fronted,
+        claim it, and watch the payout land. What the business spends on itself is
+        <Link href="/money/expenses"> Overhead</Link>.
+      </>}
+    >
       <ExpenseReportsPanel
         pool={pool}
         mine={reportRows.filter((r) => r.person === user.name).map(shape)}
@@ -89,6 +97,6 @@ export default async function ExpensesPage() {
             + (["closed", "resolved", "cancelled"].includes(w.state) ? ` (${WO_LABEL[w.state] ?? w.state})` : ""),
         }))}
       />
-    </div>
+    </FinanceShell>
   );
 }

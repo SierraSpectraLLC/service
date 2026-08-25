@@ -223,10 +223,13 @@ async function hydrate(rows: (typeof invoices.$inferSelect)[]): Promise<FullInvo
 }
 
 /** Every invoice in the workspace, newest first. Internal surfaces only. */
-export async function allInvoices(): Promise<FullInvoice[]> {
+/* Request-cached: the financial section computes its rail badges from the same
+   rows the page under it is already reading, and React's cache dedupes the two
+   within one render rather than running the query twice. */
+export const allInvoices = cache(async (): Promise<FullInvoice[]> => {
   const rows = await db.select().from(invoices);
   return (await hydrate(rows)).sort((a, b) => b.row.id - a.row.id);
-}
+});
 
 /** One invoice by id, for a staff surface that has already been authz-checked. */
 export async function invoiceById(id: number): Promise<FullInvoice | null> {
@@ -309,7 +312,7 @@ export type UnbilledJob = {
  * which is slower and is the point: the number on this list is the number the
  * draft page will show, because it came from the same function.
  */
-export async function unbilledJobs(limit = 25): Promise<UnbilledJob[]> {
+export const unbilledJobs = cache(async (limit = 25): Promise<UnbilledJob[]> => {
   const closed = await db.select().from(workOrders).where(eq(workOrders.state, "closed"));
   const billed = new Set(
     (await db.select({ woId: invoices.workOrderId, status: invoices.status }).from(invoices))
@@ -343,7 +346,7 @@ export async function unbilledJobs(limit = 25): Promise<UnbilledJob[]> {
     });
   }
   return out;
-}
+});
 
 /**
  * Where one client stands on credit, computed from their open invoices.
@@ -508,10 +511,10 @@ async function hydrateQuotes(rows: (typeof quotes.$inferSelect)[]): Promise<Full
 }
 
 /** Every quote in the workspace, newest first. Internal surfaces only. */
-export async function allQuotes(): Promise<FullQuote[]> {
+export const allQuotes = cache(async (): Promise<FullQuote[]> => {
   const rows = await db.select().from(quotes);
   return (await hydrateQuotes(rows)).sort((a, b) => b.row.id - a.row.id);
-}
+});
 
 export async function quoteById(id: number): Promise<FullQuote | null> {
   return (await hydrateQuotes(await db.select().from(quotes).where(eq(quotes.id, id))))[0] ?? null;

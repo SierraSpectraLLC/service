@@ -5,8 +5,10 @@ import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { costingBoard } from "@/lib/invoiceData";
-import { short, WINDOWS, WINDOW_LABEL, SLOW_PAY_DAYS } from "@/lib/costing";
-import MoneyTabs from "@/components/MoneyTabs";
+import { short, SLOW_PAY_DAYS } from "@/lib/costing";
+import { periodDays, periodSpan } from "@/lib/finance";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
 import { EmptyState, Id, PageHead, Panel, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -23,37 +25,30 @@ export const dynamic = "force-dynamic";
  * is no costing table.
  */
 export default async function CostingPage({ searchParams }: {
-  searchParams: Promise<{ w?: string }>;
+  searchParams: Promise<{ period?: string }>;
 }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
 
-  const { w = "90" } = await searchParams;
-  const windowDays = (WINDOWS as readonly number[]).includes(Number(w)) ? Number(w) : 90;
+  // This page used to keep its own ?w= window of 30/90/365 days, which meant
+  // the section had two answers to "over what period" and no way to carry one
+  // across a click. It reads the section's window now - see lib/finance.
+  const { period, seesPayroll, figures: fig } =
+    await financeContext(user, (await searchParams).period);
   const today = shopToday();
-  const { jobs, clients, loadedLaborCents } = await costingBoard(today, windowDays);
+  const { jobs, clients, loadedLaborCents } = await costingBoard(today, periodDays(today, period));
 
-  const label = WINDOW_LABEL[windowDays];
+  const label = periodSpan(today, period);
 
   return (
-    <div className="container wide">
-      <PageHead
-        crumb={<><Link href="/money">Billing</Link> › <b>Costing</b></>}
-        title="Job costing"
-        sub="Revenue against cost."
-        actions={
-          <div className="seg" role="group" aria-label="Reporting window">
-            {WINDOWS.map((d) => (
-              <Link key={d} href={`/money/costing?w=${d}`}
-                aria-current={d === windowDays ? "true" : undefined}>
-                {WINDOW_LABEL[d]}
-              </Link>
-            ))}
-          </div>
-        }
-      />
-      <MoneyTabs active="costing" />
+    <FinanceShell
+      rail={{ active: "costing", amounts: fig.amounts, seesPayroll }}
+      period={period}
+      path="/money/costing"
+      title="Job costing"
+      sub="Where money in meets money out: every closed job, what it billed and what it cost."
+    >
 
       {loadedLaborCents <= 0 && (
         <div className="card" style={{ borderLeft: "3px solid var(--t-warn-fg)" }}>
@@ -68,9 +63,9 @@ export default async function CostingPage({ searchParams }: {
         title="By work order"
         count={jobs.length}
         hint={loadedLaborCents > 0
-          ? `Closed in the last ${label} · loaded labor ${formatCents(loadedLaborCents)}/h`
-          : `Closed in the last ${label}`}
-        empty={`Nothing closed in the last ${label}.`}
+          ? `Closed in ${label} · loaded labor ${formatCents(loadedLaborCents)}/h`
+          : `Closed in ${label}`}
+        empty={`Nothing closed in ${label}.`}
       >
         {jobs.length > 0 && jobs.map((j) => (
           <div key={j.woId} className="row-2" style={{ alignItems: "baseline", padding: "7px 0", borderTop: "1px solid var(--line)" }}>
@@ -94,7 +89,7 @@ export default async function CostingPage({ searchParams }: {
       <Panel
         title="By client"
         count={clients.length}
-        hint={`Trailing ${label}`}
+        hint={label}
         empty="Nothing yet."
       >
         {clients.length > 0 && clients.map((c) => (
@@ -131,6 +126,6 @@ export default async function CostingPage({ searchParams }: {
       {jobs.length === 0 && clients.length === 0 && (
         <EmptyState title="Nothing closed in this window." />
       )}
-    </div>
+    </FinanceShell>
   );
 }

@@ -62,7 +62,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   return (
     <div className="container">
       <div className="crumb">
-        <Link href="/money">Billing</Link> › <Link href="/money/quotes">Quotes</Link> › <b>{row.number}</b>
+        <Link href="/money">Financial</Link> › <Link href="/money/quotes">Quotes</Link> › <b>{row.number}</b>
       </div>
       <RecordHero
         eyebrow={<>Quote · {org?.name ?? "client gone"}</>}

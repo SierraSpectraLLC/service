@@ -21,13 +21,6 @@
 import { formatCents } from "@/lib/money";
 import type { Tone } from "@/lib/tones";
 
-export const WINDOWS = [30, 90, 365] as const;
-export type Window = (typeof WINDOWS)[number];
-
-export const WINDOW_LABEL: Record<number, string> = {
-  30: "30 d", 90: "90 d", 365: "YTD",
-};
-
 export type JobRow = {
   woId: number;
   number: string;

@@ -1241,14 +1241,17 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
              contexts. useMeasuredHeight publishes it; nothing assumes it.
    --rail-h  the rail, MEASURED. Only meaningful below 960px, where the rail
              stops being a side column and stacks above the pane.
-   --spine   the record's current standing, set once by tone on the page root. The
-             pane wears it as a left border: instrument racks are read by their
-             rails, and this one carries state in peripheral vision so you
-             never scroll far enough to forget the machine is down. */
-:root { --head-h: 0px; --rail-h: 0px; --spine: var(--line); --spine-bg: var(--t-neutral-bg); }
-[data-standing="good"] { --spine: var(--t-good-fg); --spine-bg: var(--t-good-bg); }
-[data-standing="warn"] { --spine: var(--t-warn-fg); --spine-bg: var(--t-warn-bg); }
-[data-standing="bad"]  { --spine: var(--t-bad-fg);  --spine-bg: var(--t-bad-bg); }
+   --tone-fg the current standing of whatever is under it, as a tone, set by
+   --tone-bg one `data-tone` attribute. Two things wear it: the working pane's
+             left border (instrument racks are read by their rails, and this
+             one carries state in peripheral vision so you never scroll far
+             enough to forget the machine is down), and the status line. On a
+             record page the attribute rides the page root so both agree; a
+             status line elsewhere carries its own. */
+:root { --head-h: 0px; --rail-h: 0px; --tone-fg: var(--line); --tone-bg: var(--t-neutral-bg); }
+[data-tone="good"] { --tone-fg: var(--t-good-fg); --tone-bg: var(--t-good-bg); }
+[data-tone="warn"] { --tone-fg: var(--t-warn-fg); --tone-bg: var(--t-warn-bg); }
+[data-tone="bad"]  { --tone-fg: var(--t-bad-fg);  --tone-bg: var(--t-bad-bg); }
 
 /* The band anchor's scroll offset, from the measured head. */
 .band-anchor { scroll-margin-top: calc(var(--head-h) + 8px); }
@@ -1256,21 +1259,32 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .rail-body { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 960px) { .rail-body { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
 
+/* One rail, two users. The system page drives it with buttons (the contexts
+   are on the same page); the financial section drives it with links (they are
+   separate routes). Everything else about it is identical on purpose - a
+   person who has learned one should get the other for free, which is the whole
+   return on having a kit at all. */
 .rail { position: sticky; top: calc(var(--head-h) + 12px); align-self: start; }
 .railhead {
   font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.9px;
   font-weight: 700; color: var(--slate); padding: 0 8px 8px;
 }
+/* A second group in the same rail needs air above its heading; a rail with
+   only one heading never matches this. */
+.rail ul + .railhead { padding-top: 14px; }
 .rail ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.rail button {
+.rail button, .rail a {
   width: 100%; display: flex; align-items: center; gap: 8px;
   background: none; border: 0; border-radius: 8px; cursor: pointer;
-  padding: 7px 8px 7px 12px; text-align: left;
+  padding: 7px 8px 7px 12px; text-align: left; text-decoration: none;
   font: inherit; font-size: var(--fs-body); color: var(--ink);
   border-left: 3px solid transparent;
 }
-.rail button:hover { background: #EDF1F7; }
-.rail button[aria-current="true"] { background: #E9EEF6; font-weight: 700; border-left-color: var(--navy); }
+.rail button:hover, .rail a:hover { background: #EDF1F7; }
+/* Buttons report the current context as "true", links as "page". */
+.rail button[aria-current="true"], .rail a[aria-current="page"] {
+  background: #E9EEF6; font-weight: 700; border-left-color: var(--navy);
+}
 .rail .lbl { flex: 1 1 auto; min-width: 0; }
 .rail .cnt {
   font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700;
@@ -1281,29 +1295,50 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .rail .cnt.good { background: var(--t-good-bg); color: var(--t-good-fg); }
 .rail .cnt.warn { background: var(--t-warn-bg); color: var(--t-warn-fg); }
 .rail .cnt.bad { background: var(--t-bad-bg); color: var(--t-bad-fg); }
+/* A money figure, not a count: bare rather than in a pill, because a pill
+   around "$9,800" reads as a status and this is a quantity. */
+.rail .amt {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-micro); font-weight: 700; letter-spacing: -0.3px;
+  color: var(--mut); flex-shrink: 0;
+}
+.rail a[aria-current="page"] .amt { color: var(--ink); }
+.rail .amt.warn { color: var(--t-warn-fg); }
+.rail .amt.bad { color: var(--t-bad-fg); }
 
 /* On a phone the rail is ONE row that scrolls sideways. It must never wrap:
    wrapping is what turned the band layout's jump bar into a three-row sticky
    block eating a third of a 380px viewport. */
 @media (max-width: 960px) {
+  /* The RAIL is the scroller, not each list inside it: the financial rail has
+     four lists and they have to read as one continuous row, not four rows or
+     four separate scrollers. */
   .rail {
     position: sticky; top: var(--head-h); z-index: 25; background: var(--bg);
     padding: 8px 0; box-shadow: 0 6px 8px -8px rgba(23, 42, 74, 0.28);
-  }
-  .railhead { display: none; }
-  .rail ul {
-    flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
+    display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
   }
-  .rail ul::-webkit-scrollbar { display: none; }
-  .rail button {
+  .rail::-webkit-scrollbar { display: none; }
+  .railhead, .rail ul + .railhead { display: none; }
+  .rail ul { flex-direction: row; flex-wrap: nowrap; gap: 4px; }
+  .rail button, .rail a {
     width: auto; white-space: nowrap; border-left: 0;
     border-bottom: 2px solid transparent; border-radius: 6px; padding: 6px 10px;
   }
-  .rail button[aria-current="true"] { border-left: 0; border-bottom-color: var(--navy); }
+  .rail button[aria-current="true"], .rail a[aria-current="page"] {
+    border-left: 0; border-bottom-color: var(--navy);
+  }
+  /* No room for a figure beside a label in a single phone-width row, and a
+     truncated one is worse than none. */
+  .rail .amt { display: none; }
 }
 
-.pane { border-left: 3px solid var(--spine); padding-left: 16px; min-width: 0; }
+/* The rail's other side. A RECORD's pane wears the rack spine; a section's
+   does not - there is no single standing for "everything about money", and a
+   coloured border down a list of invoices would be decoration. */
+.rail-main { min-width: 0; }
+.pane { border-left: 3px solid var(--tone-fg); padding-left: 16px; min-width: 0; }
 @media (max-width: 960px) {
   .pane { border-left-width: 2px; padding-left: 12px; }
   /* Where the rail is stuck above the pane rather than beside it, scrolling
@@ -1315,21 +1350,101 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 @keyframes pane-rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .pane .view { animation: none; } }
 
-/* ── The standing line ──────────────────────────────────────────────────────
-   One sentence saying whose move it is and how long it has been theirs, plus
-   the single control that ends the wait. It is the answer to "why is nothing
-   happening on this machine", which the banded page made you scroll to a
-   queue card to find. */
-.standing {
+/* ── The status line ────────────────────────────────────────────────────────
+   One sentence saying what is true right now, plus the control that changes
+   it. On a system it is whose move it is; on the financial section it is what
+   is actually true about cash. Both answer a question the page used to make
+   you assemble for yourself out of four cards. */
+.status-line {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 8px 12px; margin: 0 0 12px;
-  background: var(--spine-bg); border-left: 3px solid var(--spine);
+  background: var(--tone-bg); border-left: 3px solid var(--tone-fg);
   border-radius: 0 8px 8px 0; font-size: var(--fs-body);
 }
-.standing .txt { flex: 1 1 240px; min-width: 0; color: var(--ink); }
-.standing .txt b { color: var(--spine); }
-.standing .dur { font-family: var(--mono); font-weight: 700; color: var(--spine); }
+.status-line .txt { flex: 1 1 240px; min-width: 0; color: var(--ink); }
+.status-line .txt b { color: var(--tone-fg); }
+/* A measured value inside the sentence - a duration, a sum. Mono so the eye
+   catches it as a quantity rather than reading it as more prose. */
+.status-line .fig { font-family: var(--mono); font-weight: 700; color: var(--tone-fg); }
+
+/* ── Money ──────────────────────────────────────────────────────────────────
+   Money is measurement. Mono and tabular-nums so digits line up in a column
+   and two figures can be compared by eye without reading them - which is the
+   one thing a finance screen exists to let you do. Right-alignment is a
+   separate class because a sum inside a sentence must not be pushed to the
+   right margin of the sentence. */
+.money {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px; font-weight: 700; white-space: nowrap;
+}
+/* Owing, not owned. A negative figure earns the colour; a positive one does
+   not get a green one, because being owed money is the ordinary state. */
+.money.neg { color: var(--t-bad-fg); }
+.num { text-align: right; }
 /* A lone card takes the whole width rather than one of two columns - half a
    pane of white space beside a single panel reads as a page that failed to
    finish loading. */
 .panel-flow.one { columns: 1; }
+
+/* ── The three lanes ────────────────────────────────────────────────────────
+   Money in, money out, and the difference. The overview used to be five tiles
+   that did not sum: Quoted, Unbilled, Current, Past due, Paid, side by side,
+   with no arithmetic between any two of them. A person wanting "what is left"
+   had to hold five figures in their head and subtract. Lanes are the same
+   figures arranged so the subtraction is on the page. */
+/* Two cards that are read together, one above the other until there is room. */
+.pair { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1080px) { .pair { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.lanes { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1080px) {
+  .lanes { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.85fr); }
+}
+.lane {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-sm); overflow: hidden; display: flex; flex-direction: column;
+}
+.lane > h3 {
+  margin: 0; font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 1px;
+  font-weight: 700; padding: 9px 16px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.lane > h3 .tot { margin-left: auto; font-size: var(--fs-body); }
+.lane.in > h3 { background: var(--t-good-bg); color: var(--t-good-fg); }
+.lane.out > h3 { background: var(--t-neutral-bg); color: var(--t-neutral-fg); }
+.lane.net > h3 { background: var(--navy); color: #fff; }
+.lane .inner { padding: 4px 16px 12px; flex: 1 1 auto; }
+
+/* One line of a ledger: what it is on the left, what it comes to on the right,
+   so a column of them can be read down rather than across. */
+.ledger { display: flex; align-items: baseline; gap: 12px; padding: 7px 0;
+  border-top: 1px solid var(--line); font-size: var(--fs-body); }
+.ledger:first-child { border-top: 0; }
+.ledger .grow { flex: 1 1 auto; min-width: 0; }
+.ledger .grow .sub { display: block; font-size: var(--fs-meta); color: var(--mut); }
+.ledger .money { flex-shrink: 0; }
+.ledger.total { border-top: 2px solid var(--ink); font-weight: 750; padding-top: 9px; }
+
+.bignum {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-metric); font-weight: 700; letter-spacing: -1.2px;
+  line-height: 1.1; color: var(--navy);
+}
+.bignum.neg { color: var(--t-bad-fg); }
+.biglab { font-size: var(--fs-meta); color: var(--mut); margin-top: 2px; }
+
+/* Where the receivable actually sits, as one bar - collected, inside terms,
+   past terms. Three figures in a row of text compare badly; as widths they
+   compare instantly. */
+.bar { display: flex; height: 9px; border-radius: 999px; overflow: hidden;
+  background: var(--t-neutral-bg); margin: 8px 0; }
+.bar > span { display: block; height: 100%; }
+.bar-key { display: flex; flex-wrap: wrap; gap: 12px; font-size: var(--fs-meta); color: var(--mut); }
+.bar-key i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.rule { height: 1px; background: var(--line); margin: 12px 0; }
+
+/* A link that is styled as the text around it. Fifty call sites spelled this
+   out as an inline textDecoration:"none" - a row title that happens to
+   navigate should look like a row title, not like a link. */
+.plain { text-decoration: none; color: inherit; }
+.plain:hover { text-decoration: underline; }

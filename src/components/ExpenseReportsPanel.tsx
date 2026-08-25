@@ -201,7 +201,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
         ))}
         {pool.length === 0 && (
           <div className="mut t-small">
-            Nothing to claim. Job expenses are logged on their work orders; overhead at Billing › Overhead.
+            Nothing to claim. Job expenses are logged on their work orders; overhead at Financial › Overhead.
           </div>
         )}
         {picked.size > 0 && (

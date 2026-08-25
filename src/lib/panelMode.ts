@@ -40,8 +40,8 @@ export const modeFor = (viewKey: string, saved: { mode?: unknown } | null): Pane
  * The record's standing, as a tone.
  *
  * Pure and shared because two things read it and they must agree: the standing
- * line's own colours, and the `data-standing` attribute on the page root that
- * publishes --spine down to the working pane's rack rail. Custom properties
+ * line's own colours, and the `data-tone` attribute on the page root that
+ * publishes --tone-fg down to the working pane's rack rail. Custom properties
  * inherit downward, not sideways - so the attribute has to sit on an ancestor
  * of BOTH, which means the page sets it and this is the one rule it sets it by.
  *

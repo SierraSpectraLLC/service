@@ -4,6 +4,9 @@ import { asc, eq, inArray, isNull, and, gte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { clientAllowlist, expenses, houseMembers, orgs, payroll, timeEntries, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { isStaffRole } from "@/lib/tenants";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
 import { myTenantOrgId } from "@/lib/authz";
 import { forTenant } from "@/lib/tenancy";
 import { shopToday } from "@/lib/shopday";
@@ -30,7 +33,9 @@ export const dynamic = "force-dynamic";
  * Somebody with no right to the register still gets their own row, because a
  * payroll you cannot check is a payroll kept about you rather than for you.
  */
-export default async function PayrollPage() {
+export default async function PayrollPage({ searchParams }: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
 
@@ -47,6 +52,16 @@ export default async function PayrollPage() {
   };
 
   const whole = maySeePayroll(viewer, mine);
+  /* The rail belongs here only for somebody for whom this page IS the
+     section's payroll room. Everyone else who can reach it is reading their
+     OWN row - a client contact with the flag, or a staff member who may not
+     read the register but may always check their own pay - and a rail into
+     the operator's books does not belong beside a pay stub. It would also be
+     nine links that redirect them. */
+  const fin = isStaffRole(user.role)
+    ? await financeContext(user, (await searchParams).period)
+    : null;
+  const inSection = fin?.seesPayroll === true;
   const all = (await db.select().from(payroll).where(eq(payroll.orgId, mine))
     .orderBy(asc(payroll.name), asc(payroll.effectiveOn))) as PayRow[];
   const rows = visibleRows(viewer, mine, all);
@@ -139,14 +154,18 @@ export default async function PayrollPage() {
   });
 
   return (
-    <div className="container page">
-      <PageHead
-        title="Payroll"
-        sub={whole
-          ? <>What {org?.name ?? "this organization"} pays its people, and what that makes a month cost.
-              {isHouseOfThis && <> Running costs with a receipt live in <Link href="/money/expenses">Overhead</Link>.</>}</>
-          : <>Your own pay, as it is recorded. Nobody else&apos;s is shown here.</>}
-      />
+    <FinanceShell
+      rail={inSection && fin
+        ? { active: "payroll", amounts: fin.figures.amounts, seesPayroll: fin.seesPayroll }
+        : null}
+      period={fin?.period ?? "month"}
+      path="/payroll"
+      title="Payroll"
+      sub={whole
+        ? <>What {org?.name ?? "this organization"} pays its people, and what that makes a month cost.
+            {isHouseOfThis && <> Running costs with a receipt live in <Link href="/money/expenses">Overhead</Link>.</>}</>
+        : <>Your own pay, as it is recorded. Nobody else&apos;s is shown here.</>}
+    >
       {all.length === 0 && whole ? (
         <EmptyState title="Nobody on the payroll yet"
           body="Add the first person below. Pay is dated, so a raise later does not rewrite what this month cost." />
@@ -167,6 +186,6 @@ export default async function PayrollPage() {
         showRate={isHouseOfThis && whole}
         staff={staff}
       />
-    </div>
+    </FinanceShell>
   );
 }

@@ -90,7 +90,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   return (
     <div className="container">
       <div className="crumb">
-        <Link href="/money">Billing</Link> › <Link href="/money/invoices">Invoices</Link> › <b>{row.number}</b>
+        <Link href="/money">Financial</Link> › <Link href="/money/invoices">Invoices</Link> › <b>{row.number}</b>
       </div>
       <RecordHero
         eyebrow={<>Invoice · {org?.name ?? "client gone"}</>}

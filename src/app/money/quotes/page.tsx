@@ -8,7 +8,8 @@ import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { allQuotes, quoteTotal } from "@/lib/invoiceData";
 import { daysToExpiry, quoteStanding, STANDING_LABEL, STANDING_TONE } from "@/lib/quotes";
-import MoneyTabs from "@/components/MoneyTabs";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
 import { NewQuoteButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
@@ -19,12 +20,13 @@ export const dynamic = "force-dynamic";
 
 /** Priced work waiting on a client's yes, and what it is worth. */
 export default async function QuotesPage({ searchParams }: {
-  searchParams: Promise<{ q?: string; standing?: string }>;
+  searchParams: Promise<{ q?: string; standing?: string; period?: string }>;
 }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
-  const { q = "", standing = "" } = await searchParams;
+  const { q = "", standing = "", period: periodParam } = await searchParams;
+  const { period, seesPayroll, figures: fig } = await financeContext(user, periodParam);
 
   const today = shopToday();
   const [full, orgRows] = await Promise.all([
@@ -87,18 +89,18 @@ export default async function QuotesPage({ searchParams }: {
   };
 
   return (
-    <div className="container wide">
-      <PageHead
-        crumb={<><Link href="/money">Billing</Link> › <b>Quotes</b></>}
-        title="Quotes"
-        sub=""
-        actions={<>
-          <BackfillButton kind="quote" today={today}
-            clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
-          <NewQuoteButton today={today} clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
-        </>}
-      />
-      <MoneyTabs active="quotes" counts={{ quotes: awaiting.length }} />
+    <FinanceShell
+      rail={{ active: "quotes", amounts: fig.amounts, seesPayroll }}
+      period={period}
+      path="/money/quotes"
+      title="Quotes"
+      sub="Work priced but not yet won. Not revenue until it is accepted."
+      actions={<>
+        <BackfillButton kind="quote" today={today}
+          clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
+        <NewQuoteButton today={today} clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
+      </>}
+    >
       <Toolbar
         search={
           <form action="/money/quotes">
@@ -128,6 +130,6 @@ export default async function QuotesPage({ searchParams }: {
         rows={shown.map(toRow)}
         empty="No quotes."
       />
-    </div>
+    </FinanceShell>
   );
 }

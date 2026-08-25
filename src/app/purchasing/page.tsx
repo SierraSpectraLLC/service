@@ -13,7 +13,10 @@ import { canSeeCosts } from "@/lib/redact";
 import { forTenant, isHouse, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import NeededPartsCard from "@/components/NeededPartsCard";
 import NewPoButton from "@/components/NewPoButton";
-import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
+import { DataTable, Dot, FacetStrip, Id, Legend, Pill, Toolbar } from "@/components/ui";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
+import { isStaffRole } from "@/lib/tenants";
 import type { DataRow } from "@/components/ui/DataTable";
 import DeleteRowAction from "@/components/DeleteRowAction";
 
@@ -24,10 +27,19 @@ export const dynamic = "force-dynamic";
  * destination room's access, so a client's own purchasing shows up in their
  * portal and a provider only sees orders for rooms they can stock.
  */
-export default async function PurchasingPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
+export default async function PurchasingPage({ searchParams }: {
+  searchParams: Promise<{ q?: string; status?: string; period?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  const { q = "", status = "" } = await searchParams;
+  const { q = "", status = "", period: periodParam } = await searchParams;
+
+  /* A client contact sees their own orders here and always has. They do NOT
+     get the financial section's rail: nine of its ten links redirect them to
+     the front page, and an entry that leads nowhere is worse than no entry.
+     The figures are not computed for them either - a number they may not have
+     never enters the request. */
+  const fin = isStaffRole(user.role) ? await financeContext(user, periodParam) : null;
 
   const [rooms, myShares, orgRows] = await Promise.all([
     db.select().from(stockrooms).where(forTenant(stockrooms.tenantOrgId, readTenant(user))).orderBy(asc(stockrooms.name)),
@@ -126,19 +138,18 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
   };
 
   return (
-    <div className="container wide">
-      <PageHead
-        crumb={<>Operations › <b>Purchasing</b></>}
-        title="Purchasing"
-        sub="Orders and receiving."
-        actions={
-          <>
-            <NewPoButton rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))}
-              vendors={isHouse(user.role) ? await makerNames(readTenant(user)) : []} />
-            <Link href="/stock" className="btn sm" style={{ textDecoration: "none" }}>Inventory →</Link>
-          </>
-        }
-      />
+    <FinanceShell
+      rail={fin && { active: "purchasing", amounts: fin.figures.amounts, seesPayroll: fin.seesPayroll }}
+      period={fin?.period ?? "month"}
+      path="/purchasing"
+      title="Purchasing"
+      sub="Vendor orders and committed spend, whether or not it has been received."
+      actions={<>
+        <NewPoButton rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))}
+          vendors={isHouse(user.role) ? await makerNames(readTenant(user)) : []} />
+        <Link href="/stock" className="btn sm plain">Inventory →</Link>
+      </>}
+    >
       <Toolbar
         search={
           <form action="/purchasing">
@@ -189,6 +200,6 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         { tone: "good", label: "received" },
         { tone: "faint", label: "cancelled" },
       ]} />
-    </div>
+    </FinanceShell>
   );
 }

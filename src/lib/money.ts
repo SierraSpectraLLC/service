@@ -34,3 +34,18 @@ export function formatCents(cents: number): string {
     maximumFractionDigits: 2,
   });
 }
+
+/**
+ * The same money, to the nearest dollar.
+ *
+ * For places where the figure is a glance rather than a reconciliation - a
+ * rail badge, a lane heading - the cents are noise: nobody decides whether to
+ * click "Collections" differently at $9,847.23 than at $9,847. Anywhere a
+ * person would check the number against a bank statement, use formatCents.
+ */
+export function formatDollars(cents: number): string {
+  return Math.round(cents / 100).toLocaleString("en-US", {
+    style: "currency", currency: "USD",
+    minimumFractionDigits: 0, maximumFractionDigits: 0,
+  });
+}

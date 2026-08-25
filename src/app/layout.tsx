@@ -135,8 +135,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     { href: "/assets", label: "Assets" },
     ...(hasStock ? [{ href: "/stock", label: "Inventory" }] : []),
     /* Money is staff work: a client sees their own bills through their own
-       portal token, never through a nav word that lists everybody's. */
-    ...(isStaff ? [{ href: "/money", label: "Billing" }] : []),
+       portal token, never through a nav word that lists everybody's.
+       "Financial" rather than "Billing" because the section stopped being
+       about billing the moment purchasing, reimbursements, overhead and
+       payroll joined it - see lib/finance. */
+    ...(isStaff ? [{ href: "/money", label: "Financial" }] : []),
     /* The store is the client's door; staff buy through Purchasing. Orders
        sits beside it: what they asked for, and what is waiting on them. */
     ...(!isStaff ? [{ href: "/store", label: "Parts" }, { href: "/orders", label: "Orders" }] : []),
@@ -151,10 +154,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         { href: "/calendar", label: "Calendar" },
         { href: "/maintenance", label: "Maintenance" },
         { href: "/purchasing", label: "Purchasing" },
-        /* Money an engineer fronted, and where the payout stands. It lives
-           here rather than under Billing because the person it serves is the
-           engineer, and Billing is the owner's room. */
-        { href: "/expenses", label: "Expenses" },
+        /* Money an engineer fronted, and where the payout stands. It keeps
+           its place in Operations because the person it serves is the
+           engineer, and it carries the financial rail as well - the two
+           doors reach the same page. "Reimbursements", not "Expenses":
+           Overhead is also expenses, and two things by one name in one
+           section is the confusion this merge exists to remove. */
+        { href: "/expenses", label: "Reimbursements" },
         /* What the shop pays its own people, and what that makes a month
            cost. Owners only - see lib/payroll, where the rule that keeps it
            from the bench (and from every other workspace) lives. */

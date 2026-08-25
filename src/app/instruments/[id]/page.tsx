@@ -408,12 +408,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   ];
 
   return (
-    /* data-standing rides the page root because custom properties inherit
-       DOWN and not sideways: --spine has to be set on an ancestor of the
-       working pane for the pane's rack rail to read it, and the standing line
-       and the panels are siblings. One attribute, one source of tone. */
+    /* data-tone rides the page root because custom properties inherit DOWN and
+       not sideways: --tone-fg has to be set on an ancestor of the working pane
+       for the pane's rack rail to read it, and the standing line and the
+       panels are siblings. One attribute, one source of tone. */
     <div className="container split"
-      data-standing={standingTone({ isMine: queueMine, overdue: overdueTasks > 0 })}>
+      data-tone={standingTone({ isMine: queueMine, overdue: overdueTasks > 0 })}>
       <div className="crumb">
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
       </div>

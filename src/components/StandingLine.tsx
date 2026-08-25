@@ -1,6 +1,7 @@
 "use client";
 
 import { QUEUE_EVENT } from "@/components/QueuePanel";
+import StatusLine from "@/components/ui/StatusLine";
 import { standingTone } from "@/lib/panelMode";
 
 /**
@@ -35,32 +36,29 @@ export default function StandingLine({
   /** Something behind this wait is already late - the wait is now costing. */
   overdue: boolean;
 }) {
-  // The same rule the page used to set data-standing on the wrapper above -
-  // one function, so the line and the pane's spine can never disagree.
+  // The same rule the page sets data-tone by on its root - one function, so
+  // this line and the pane's rack spine can never disagree.
   const tone = standingTone({ isMine, overdue });
   const dur = days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"}`;
 
   return (
-    <div className="standing" data-standing={tone}>
-      <div className="txt">
-        {isMine ? (
-          <>
-            Ours to move{days > 0 ? <> for <span className="dur">{dur}</span></> : <> — landed <span className="dur">today</span></>}
-            {reason ? <> — {reason}</> : <>. Nobody is waiting on anyone else.</>}
-          </>
-        ) : (
-          <>
-            Waiting on <b>{holderName}</b>{reason ? <> — {reason}</> : null}.
-            {" "}Theirs for <span className="dur">{dur}</span>, since {since}.
-          </>
-        )}
-      </div>
-      {canMove && (
-        <button className={`btn sm${isMine ? "" : " accent"}`}
-          onClick={() => window.dispatchEvent(new Event(QUEUE_EVENT))}>
-          {isMine ? "Hand it on" : "Move it"}
-        </button>
+    <StatusLine tone={tone} actions={canMove && (
+      <button className={`btn sm${isMine ? "" : " accent"}`}
+        onClick={() => window.dispatchEvent(new Event(QUEUE_EVENT))}>
+        {isMine ? "Hand it on" : "Move it"}
+      </button>
+    )}>
+      {isMine ? (
+        <>
+          Ours to move{days > 0 ? <> for <span className="fig">{dur}</span></> : <> — landed <span className="fig">today</span></>}
+          {reason ? <> — {reason}</> : <>. Nobody is waiting on anyone else.</>}
+        </>
+      ) : (
+        <>
+          Waiting on <b>{holderName}</b>{reason ? <> — {reason}</> : null}.
+          {" "}Theirs for <span className="fig">{dur}</span>, since {since}.
+        </>
       )}
-    </div>
+    </StatusLine>
   );
 }

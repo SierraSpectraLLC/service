@@ -12,7 +12,8 @@ import { usageForAll } from "@/lib/agreementUsage";
 import { resolveRate } from "@/lib/rates";
 import { contractProposal, renewalFromBurn } from "@/lib/quotes";
 import { allInvoices } from "@/lib/invoiceData";
-import MoneyTabs from "@/components/MoneyTabs";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import RetainerCard from "@/components/RetainerCard";
 import { FacetStrip, PageHead, Panel, Toolbar } from "@/components/ui";
@@ -30,12 +31,13 @@ export const dynamic = "force-dynamic";
  * question, not an archives one.
  */
 export default async function ContractsPage({ searchParams }: {
-  searchParams: Promise<{ f?: string }>;
+  searchParams: Promise<{ f?: string; period?: string }>;
 }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
-  const { f = "" } = await searchParams;
+  const { f = "", period: periodParam } = await searchParams;
+  const { period, seesPayroll, figures: fig } = await financeContext(user, periodParam);
 
   const today = shopToday();
   const [rows, orgRows, cards, billed, systemRows] = await Promise.all([
@@ -141,13 +143,13 @@ export default async function ContractsPage({ searchParams }: {
     .filter((x) => x.proposal !== null);
 
   return (
-    <div className="container wide">
-      <PageHead
-        crumb={<><Link href="/money">Billing</Link> › <b>Contracts</b></>}
-        title="Contracts"
-        sub=""
-      />
-      <MoneyTabs active="contracts" counts={{ contracts: inForce.length }} />
+    <FinanceShell
+      rail={{ active: "contracts", amounts: fig.amounts, seesPayroll }}
+      period={period}
+      path="/money/contracts"
+      title="Contracts"
+      sub="Recurring revenue, and when each agreement comes up for renewal."
+    >
       <Toolbar
         facets={
           <FacetStrip facets={[
@@ -188,6 +190,6 @@ export default async function ContractsPage({ searchParams }: {
           ))}
         </Panel>
       )}
-    </div>
+    </FinanceShell>
   );
 }

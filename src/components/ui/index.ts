@@ -29,6 +29,7 @@ export { default as RecordHero } from "@/components/ui/RecordHero";
 export { default as PrintHeader } from "@/components/ui/PrintHeader";
 export { default as PublicShell } from "@/components/ui/PublicShell";
 export { default as HeroKebab } from "@/components/ui/HeroKebab";
+export { default as StatusLine } from "@/components/ui/StatusLine";
 export type { HeroStat } from "@/components/ui/RecordHero";
 export type { HeroKebabItem } from "@/components/ui/HeroKebab";
 export type { Tone } from "@/lib/tones";

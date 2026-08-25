@@ -10,7 +10,8 @@ import { collectionsBoard } from "@/lib/invoiceData";
 import { brokenPromiseLine, CHANNEL_LABEL, ladderFor } from "@/lib/dunning";
 import { feeClause } from "@/lib/billingPolicy";
 import { STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
-import MoneyTabs from "@/components/MoneyTabs";
+import FinanceShell from "@/components/FinanceShell";
+import { financeContext } from "@/lib/financeData";
 import DunningRungButton from "@/components/DunningRungButton";
 import { EmptyState, Id, PageHead, Panel, Pill } from "@/components/ui";
 
@@ -24,10 +25,14 @@ export const dynamic = "force-dynamic";
  * the contact who has ignored the first three is how an invoice ages out; the
  * ladder in lib/dunning encodes that, and this page is where it is read.
  */
-export default async function CollectionsPage() {
+export default async function CollectionsPage({ searchParams }: {
+  searchParams: Promise<{ period?: string }>;
+}) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
+  const { period, seesPayroll, figures: fig } =
+    await financeContext(user, (await searchParams).period);
 
   const today = shopToday();
   const [board, orgRows] = await Promise.all([
@@ -42,13 +47,13 @@ export default async function CollectionsPage() {
   const owed = late.reduce((n, b) => n + b.view.balanceCents, 0);
 
   return (
-    <div className="container wide">
-      <PageHead
-        crumb={<><Link href="/money">Billing</Link> › <b>Collections</b></>}
-        title="Collections"
-        sub=""
-      />
-      <MoneyTabs active="collections" counts={{ collections: late.length }} />
+    <FinanceShell
+      rail={{ active: "collections", amounts: fig.amounts, seesPayroll }}
+      period={period}
+      path="/money/collections"
+      title="Collections"
+      sub="Invoices past terms, and where each one is in the ladder."
+    >
 
       {late.length === 0
         ? <EmptyState title="Nothing in collections." />
@@ -158,6 +163,6 @@ export default async function CollectionsPage() {
             })}
           </>
         )}
-    </div>
+    </FinanceShell>
   );
 }
