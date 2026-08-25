@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
-import { orgSites, instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
+import { orgSites, instruments, orgs, systemShares, assets, accessRequests, engagementRecords, users } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
 import { visibleOrgs } from "@/lib/tenancy";
+import { tempState } from "@/lib/tempPassword";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
 import HouseMembersPanel from "@/components/HouseMembersPanel";
@@ -54,6 +55,16 @@ export default async function AdminSettingsPage() {
   // Who we are, before who owns what: this is the list that decides who can
   // change everything else on this page.
   const houseRows = await listHouseMembers();
+  // Whether a password is standing in for the codes on each of them, and how
+  // much longer - the same fact the client people list shows.
+  const houseEmailList = houseRows.map((m) => m.email.toLowerCase());
+  const houseAccounts = houseEmailList.length
+    ? await db.select({
+        email: users.email, passwordHash: users.passwordHash, passwordTempUntil: users.passwordTempUntil,
+      }).from(users).where(inArray(users.email, houseEmailList))
+    : [];
+  const nowStamp = new Date();
+  const houseAccountOf = new Map(houseAccounts.map((a) => [a.email.toLowerCase(), a]));
 
   const byId = new Map(rows.map((i) => [i.id, i]));
   const pendingBySystem = new Map<number, typeof requestRows>();
@@ -67,7 +78,17 @@ export default async function AdminSettingsPage() {
       <PageHead title="People & ownership"
         sub="People, access and ownership." />
 
-      <HouseMembersPanel members={houseRows} myEmail={user.email}
+      <HouseMembersPanel
+        members={houseRows.map((m) => {
+          const a = houseAccountOf.get(m.email.toLowerCase());
+          const st = a ? tempState(a, nowStamp) : { kind: "none" as const };
+          return {
+            ...m,
+            password: st.kind === "none" ? "" : st.kind === "own" ? "their own"
+              : st.kind === "expired" ? "expired" : `${st.daysLeft}d left`,
+          };
+        })}
+        myEmail={user.email}
         sites={siteRows.map((x) => {
           const site = x.name || x.address.split("\n")[0] || "site";
           // Some shops name sites with the client already in them.

@@ -129,6 +129,7 @@ import { canDeleteNote, canEditNote, isAuthor } from "@/lib/notes";
 import { readersOf } from "@/lib/mentionAudience";
 import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
+import { makeTempPassword, tempExpiry, TEMP_DAYS_DEFAULT } from "@/lib/tempPassword";
 import { normalizePhone } from "@/lib/sms";
 import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
@@ -6976,6 +6977,178 @@ export async function sendDigestNow(orgId: number | null): Promise<{
 const ALLOW_EMAIL = /^[^\s@]+@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 const ALLOW_DOMAIN = /^@[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/;
 
+/**
+ * A whole person at a client, in one go: who they are, what they may do, where
+ * they sit - and, when email cannot be trusted to arrive, a temporary password
+ * to read down the phone.
+ *
+ * The one-line "invite an address" that this sits beside is still the fast
+ * path, and still what a client's own editor uses for a colleague. This is for
+ * the moment somebody is setting a company up: five people, each with a name, a
+ * job title, a lab, and a role - typed once, from the page that already knows
+ * which organization they belong to.
+ *
+ * The profile row is written even though they have never signed in, exactly as
+ * updatePersonProfile does: their first sign-in finds it by address. That is
+ * also what a password can hang on, which is why the two are one action.
+ */
+export async function addClientPerson(orgId: number, data: {
+  firstName: string; lastName: string; title: string; email: string;
+  siteId: number | null; canEdit: boolean; canSeeAgreements: boolean;
+  invite: boolean;
+  /** Mint a temporary password and hand it back, once, to be said out loud. */
+  withPassword?: boolean;
+  tempDays?: number;
+}): Promise<{ error?: string; password?: string; expiresOn?: string; invited?: boolean }> {
+  const u = await requireEditor();
+  const email = data.email.trim().toLowerCase();
+  if (!ALLOW_EMAIL.test(email)) return { error: 'Enter their email, like "jane@company.com"' };
+
+  // The same two routes in as addClientAccess: an operator's staff for a client
+  // they administer, or an organization's own editors for their own people.
+  const asStaff = isStaffRole(u.role);
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  if (asStaff) {
+    if (!mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  } else if (u.orgId === null || orgId !== u.orgId) {
+    return { error: "Not found" };
+  }
+
+  const [taken] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.entry, email));
+  if (taken) {
+    const [where] = taken.orgId === null ? [] : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, taken.orgId));
+    return { error: `${email} already signs in${where ? ` as ${where.name}` : ""}.` };
+  }
+
+  // Where they sit has to be one of this organization's own labs.
+  let siteId: number | null = null;
+  if (data.siteId !== null) {
+    const [site] = await db.select().from(orgSites).where(eq(orgSites.id, data.siteId));
+    if (!site || site.orgId !== orgId) return { error: "That site is not one of theirs" };
+    siteId = site.id;
+  }
+
+  const first = data.firstName.trim().slice(0, 60);
+  const last = data.lastName.trim().slice(0, 60);
+  const title = data.title.trim().slice(0, 80);
+  const display = [first, last].filter(Boolean).join(" ");
+
+  await db.insert(clientAllowlist).values({
+    entry: email, orgId, canEdit: data.canEdit,
+    canSeeAgreements: data.canSeeAgreements, addedBy: u.name,
+  });
+  const profile = { firstName: first, lastName: last, title, siteId, ...(display ? { name: display } : {}) };
+  const [existing] = await db.select().from(users).where(eq(users.email, email));
+  if (existing) await db.update(users).set(profile).where(eq(users.id, existing.id));
+  else await db.insert(users).values({ email, ...profile });
+
+  await audit({
+    actor: u.email, entityType: "settings", entityId: email,
+    action: `added ${display || email} to ${org.name} as ${data.canEdit ? "an editor" : "a viewer"}`
+      + `${title ? ` (${title})` : ""}`,
+  });
+
+  // The temporary password. Staff only: a client's own editor may invite a
+  // colleague, but minting a credential that skips the mailbox entirely is the
+  // shop's call, and it is the shop that will be asked who let somebody in.
+  let password: string | undefined;
+  let expiresOn: string | undefined;
+  if (data.withPassword) {
+    if (!asStaff) return { error: "Only the service team can set a temporary password." };
+    const made = await mintTempPassword(u, email, data.tempDays ?? TEMP_DAYS_DEFAULT);
+    if ("error" in made) return made;
+    password = made.password;
+    expiresOn = made.expiresOn;
+  }
+
+  let invited = false;
+  if (data.invite) {
+    await notifyInvite({ to: email, inviterName: u.name, orgName: org.name, tempPassword: !!password });
+    invited = true;
+  }
+  revalidatePath("/settings");
+  revalidatePath(`/settings/organizations/${orgId}`);
+  rev();
+  return { password, expiresOn, invited };
+}
+
+/**
+ * Mint a temporary password for somebody, and hand it back exactly once.
+ *
+ * Never mailed, never stored in the clear, never written to the audit line -
+ * the row records THAT one was set, by whom, and until when. The plaintext
+ * lives in one HTTP response and then only in the head of the person who is
+ * going to read it down a phone.
+ */
+async function mintTempPassword(
+  u: SessionUser, email: string, days: number,
+): Promise<{ error: string } | { password: string; expiresOn: string }> {
+  const [row] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+  if (!row) return { error: "Add them first, then set a password." };
+  const until = tempExpiry(days, new Date());
+  // Generated rather than invented: an owner in a hurry types "Welcome2026",
+  // and a password somebody can guess from the company name is not a stopgap,
+  // it is a door. Four tries is a formality - the words are unique per pick -
+  // but the loop means a rejected one is a retry, never a thrown error.
+  let password = "";
+  for (let i = 0; i < 4 && !password; i++) {
+    const candidate = makeTempPassword((max) => crypto.randomInt(max));
+    const res = await setPasswordFor(email, candidate, until);
+    if (!res.error) password = candidate;
+  }
+  if (!password) return { error: "Could not set a password for them - try again." };
+  await audit({
+    actor: u.email, entityType: "auth", entityId: email,
+    action: `set a temporary sign-in password for ${email}, good until ${until.toISOString().slice(0, 10)}`,
+  });
+  return { password, expiresOn: until.toISOString().slice(0, 10) };
+}
+
+/**
+ * A temporary password for somebody who is already here - the other half of the
+ * same problem. Their address was approved weeks ago and the codes are landing
+ * in a spam folder nobody can reach.
+ */
+export async function setClientTempPassword(
+  allowlistId: number, days?: number,
+): Promise<{ error?: string; password?: string; expiresOn?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, allowlistId));
+  if (!row || row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  const email = row.entry.trim().toLowerCase();
+  if (email.startsWith("@")) return { error: "That is a whole domain, not a person." };
+
+  // A password needs a row to hang on. Somebody approved but never signed in
+  // has none yet, and this is the moment to make it - the same row their first
+  // sign-in would have created, with the same address on it.
+  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+  if (!existing) await db.insert(users).values({ email });
+  const made = await mintTempPassword(u, email, days ?? TEMP_DAYS_DEFAULT);
+  if ("error" in made) return made;
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  return made;
+}
+
+/** Take it back. Codes never stopped working, so this takes nothing away. */
+export async function clearClientTempPassword(allowlistId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, allowlistId));
+  if (!row || row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  const email = row.entry.trim().toLowerCase();
+  await clearPasswordFor(email);
+  await audit({
+    actor: u.email, entityType: "auth", entityId: email,
+    action: `removed the sign-in password from ${email}`,
+  });
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  return {};
+}
+
 export async function addClientAccess(raw: string, orgId: number, canEdit = false): Promise<{ error?: string }> {
   // Two routes in, and they are the two halves of the product's story: an
   // operator's staff invite anyone into an organization THEY administer - their
@@ -9186,8 +9359,15 @@ export async function createOperator(
  */
 export async function setHouseMember(
   email: string, role: string, name?: string,
-  extra: { homeAddress?: string; invite?: boolean } = {},
-): Promise<{ error?: string; invited?: boolean; homeLabel?: string }> {
+  extra: {
+    homeAddress?: string; invite?: boolean;
+    /** Mint a temporary password too, for when mail is not arriving at all. */
+    withPassword?: boolean; tempDays?: number;
+  } = {},
+): Promise<{
+  error?: string; invited?: boolean; homeLabel?: string;
+  password?: string; expiresOn?: string;
+}> {
   const u = await requireOwner();
   const want = role === "owner" ? "owner" : "staff";
   const e = email.trim().toLowerCase();
@@ -9229,6 +9409,20 @@ export async function setHouseMember(
     homeLabel = hit?.label;
   }
 
+  // A way in that does not depend on mail arriving. Same rules as a client's:
+  // generated, shown once, and dead on its own date. The account row is made
+  // here if they have never signed in, which is the whole point of offering it.
+  let password: string | undefined;
+  let expiresOn: string | undefined;
+  if (extra.withPassword) {
+    const [row] = await db.select({ id: users.id }).from(users).where(eq(users.email, e));
+    if (!row) await db.insert(users).values({ email: e, ...(label ? { name: label } : {}) });
+    const made = await mintTempPassword(u, e, extra.tempDays ?? TEMP_DAYS_DEFAULT);
+    if ("error" in made) return made;
+    password = made.password;
+    expiresOn = made.expiresOn;
+  }
+
   // The invitation: they are IN either way - sign-in is by email code, so
   // access exists the moment the row does. The email is how they find out.
   let invited = false;
@@ -9241,7 +9435,9 @@ export async function setHouseMember(
         `You're set up on ${who}'s service portal`,
         `<p>${label || e},</p>
          <p>${u.name || u.email} added you to <b>${who}</b>'s service portal as ${want === "owner" ? "an owner" : "staff"}.</p>
-         <p>Sign in at <a href="${url}">${url}</a> with this email address - a code arrives by mail; there is no password.</p>
+         <p>Sign in at <a href="${url}">${url}</a> with this email address - ${password
+            ? "a temporary password has been set for you, and whoever added you will pass it on. A code by mail works too."
+            : "a code arrives by mail; there is no password."}</p>
          ${home ? `<p>Your home base is set to <b>${home}</b> - trips and the expense stipend radius measure from it. You can change it under your own settings.</p>` : ""}`,
         { from: reportFrom(), replyTo: replyToAddress() });
       invited = true;
@@ -9257,7 +9453,48 @@ export async function setHouseMember(
   // Their next session read picks the new role up (src/auth.ts) - no redeploy,
   // and no need for them to sign out and back in.
   revHouse();
-  return { invited: extra.invite ? invited : undefined, homeLabel };
+  return { invited: extra.invite ? invited : undefined, homeLabel, password, expiresOn };
+}
+
+/**
+ * A temporary password for somebody already on the house list - the engineer
+ * hired last week whose codes are landing nowhere. Owner-only, like every
+ * other change to who works here.
+ */
+export async function setHouseTempPassword(
+  email: string, days?: number,
+): Promise<{ error?: string; password?: string; expiresOn?: string }> {
+  const u = await requireOwner();
+  const e = email.trim().toLowerCase();
+  const [member] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  if (!member || member.role === "none") return { error: "Not found" };
+  // Their own workspace's people, nobody else's - the same line every other
+  // house change is drawn on.
+  const mine = myTenantOrgId(u);
+  if (mine !== null && member.orgId !== null && member.orgId !== mine) return { error: "Not found" };
+  const [row] = await db.select({ id: users.id }).from(users).where(eq(users.email, e));
+  if (!row) await db.insert(users).values({ email: e, ...(member.name ? { name: member.name } : {}) });
+  const made = await mintTempPassword(u, e, days ?? TEMP_DAYS_DEFAULT);
+  if ("error" in made) return made;
+  revHouse();
+  return made;
+}
+
+/** Take it back; they go back to codes. */
+export async function clearHouseTempPassword(email: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const e = email.trim().toLowerCase();
+  const [member] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  if (!member) return { error: "Not found" };
+  const mine = myTenantOrgId(u);
+  if (mine !== null && member.orgId !== null && member.orgId !== mine) return { error: "Not found" };
+  await clearPasswordFor(e);
+  await audit({
+    actor: u.email, entityType: "auth", entityId: e,
+    action: `removed the sign-in password from ${e}`,
+  });
+  revHouse();
+  return {};
 }
 
 /**

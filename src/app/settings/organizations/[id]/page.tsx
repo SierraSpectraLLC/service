@@ -2,7 +2,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
-import { agreements, appSettings, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares } from "@/db/schema";
+import { agreements, appSettings, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { shopDay } from "@/lib/shopday";
@@ -15,6 +15,8 @@ import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
 import { isHouse, maySeeAgreements } from "@/lib/tenancy";
+import { siteLabel } from "@/lib/sites";
+import { tempState } from "@/lib/tempPassword";
 import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +55,21 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   ]);
   if (!org) notFound();
   const quota = await storeQuota(orgId);
+
+  // What each person's account already has on it: the profile they will be
+  // called by, and whether a password is standing in for the codes. Read here
+  // rather than guessed in the panel - "temporary, 6 days left" is a fact about
+  // a row, and a stale one would send somebody to reset a password that works.
+  const now = new Date();
+  const emails = allowRows.map((r) => r.entry.trim().toLowerCase()).filter((e) => !e.startsWith("@"));
+  const accountRows = emails.length
+    ? await db.select({
+        email: users.email, name: users.name, firstName: users.firstName, lastName: users.lastName,
+        title: users.title, passwordHash: users.passwordHash, passwordTempUntil: users.passwordTempUntil,
+        lastSeenAt: users.lastSeenAt,
+      }).from(users).where(inArray(users.email, emails))
+    : [];
+  const accountOf = new Map(accountRows.map((a) => [a.email.toLowerCase(), a]));
 
   // Sites, with how many systems sit at each - which is what makes closing one
   // a decision rather than a tidy-up.
@@ -147,7 +164,20 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           resaleEnabled: org.resaleEnabled, remoteDevices: deviceCount,
           isOperator: s?.operatorOrgId === org.id, isSheetOrg: s?.sheetOrgId === org.id,
         }}
-        people={allowRows.map((r) => ({ id: r.id, entry: r.entry, canEdit: r.canEdit, canSeeAgreements: r.canSeeAgreements }))}
+        people={allowRows.map((r) => {
+          const a = accountOf.get(r.entry.trim().toLowerCase());
+          const state = a ? tempState(a, now) : { kind: "none" as const };
+          return {
+            id: r.id, entry: r.entry, canEdit: r.canEdit, canSeeAgreements: r.canSeeAgreements,
+            name: a ? [a.firstName, a.lastName].filter(Boolean).join(" ") || a.name || "" : "",
+            title: a?.title ?? "",
+            signedIn: !!a?.lastSeenAt,
+            password: state.kind === "none" ? "" : state.kind === "own" ? "their own"
+              : state.kind === "expired" ? "expired" : `${state.daysLeft}d left`,
+          };
+        })}
+        sites={siteRows.filter((x) => !x.archived).map((x) => ({ id: x.id, name: siteLabel(x) }))}
+        isStaff={user.role === "owner" || user.role === "staff"}
         platformName={brand.name}
         isOwner={isOwner}
         showRecipients={s?.eodEnabled ?? false}

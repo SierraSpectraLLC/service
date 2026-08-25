@@ -64,6 +64,14 @@ export default async function LoginPage({ searchParams }: {
 
     const allowed = await signInAllowed(e);
     const found = allowed ? await checkPassword(e, password) : null;
+    // A temporary password past its date. They typed it correctly, so this
+    // tells a guesser nothing - and tells the person reading it off a sticky
+    // note the only thing that helps them. It still counts as a failure, so a
+    // stale password is not an unlimited oracle.
+    if (found && "expired" in found) {
+      await recordFailure(e);
+      return { error: "That temporary password has expired. Ask for a new one, or sign in with a code." };
+    }
     if (!found) {
       const { locked } = await recordFailure(e);
       return {

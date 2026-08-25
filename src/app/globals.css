@@ -906,6 +906,13 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
   border-top: 1px solid var(--line); flex-shrink: 0; background: var(--card);
 }
 .dialog-status { flex: 1; font-size: var(--fs-small); color: var(--mut); min-width: 0; }
+/* Three buttons and a sentence do not fit across a phone. The sentence takes
+   its own line rather than being squeezed to one word per row - measured at
+   390px, which is the only way anybody finds out. */
+@media (max-width: 560px) {
+  .dialog-foot { flex-wrap: wrap; justify-content: flex-end; }
+  .dialog-status { flex: 1 0 100%; order: -1; }
+}
 .dialog-status.err { color: var(--t-bad-fg); }
 .dialog-status.ok { color: var(--t-good-fg); }
 

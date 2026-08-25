@@ -4,10 +4,12 @@ import { useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   setOrgAppearance, updateEodRecipients, updateDigestRecipients, setDigestHour, sendDigestNow,
-  addClientAccess, removeClientAccess,
+  addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
-  setOrgRemoteAccess, setOrgResale,
+  setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword,
 } from "@/app/actions";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { toast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
@@ -19,7 +21,16 @@ import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
 
 const MAX_LOGO_BYTES = 1024 * 1024; // a header logo, not a tune file
 
-type Entry = { id: number; entry: string; canEdit: boolean; canSeeAgreements: boolean };
+type Entry = {
+  id: number; entry: string; canEdit: boolean; canSeeAgreements: boolean;
+  /** From their account row, blank until somebody fills the profile in. */
+  name?: string;
+  title?: string;
+  /** Whether they have ever actually been here. */
+  signedIn?: boolean;
+  /** "their own" | "expired" | "6d left" | "" - see lib/tempPassword. */
+  password?: string;
+};
 
 /** A stored recipient list as addresses; the store is text, this is the list. */
 const splitEmails = (s: string) => s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -35,7 +46,7 @@ const clockLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "
  * report recipients, sheet sync, removal) rather than hiding them behind a
  * second page that would drift from this one.
  */
-export default function OrgSettingsForm({ org, people, platformName, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
+export default function OrgSettingsForm({ org, people, sites = [], isStaff = false, platformName, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
     eodRecipients: string; digestRecipients: string; digestHour: number; digestDays: string;
@@ -49,6 +60,14 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
   /** Whether the instance has the daily-digest module on at all. */
   showDigest?: boolean;
   people: Entry[];
+  /** This organization's own labs, for saying where a person sits. */
+  sites?: { id: number; name: string }[];
+  /**
+   * Whether the viewer is the service team rather than the client themselves.
+   * Temporary passwords are theirs alone to mint: a client's editor may invite
+   * a colleague, but a credential that skips the mailbox is the shop's call.
+   */
+  isStaff?: boolean;
   platformName: string;
   isOwner: boolean;
   showRecipients: boolean;
@@ -231,18 +250,71 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
     });
   };
 
+  // The whole person, typed once. The one-line invite above stays for the fast
+  // case - an address, a role, done - and this is for setting a company up.
+  const BLANK = {
+    first: "", last: "", title: "", email: "", siteId: 0,
+    role: "viewer", agreements: true, withPassword: false, days: TEMP_DAYS_DEFAULT,
+  };
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState(BLANK);
+  const [addError, setAddError] = useState("");
+  /**
+   * A password, held on screen exactly as long as the person who set it needs
+   * to read it out. It is never mailed and never stored in the clear, so this
+   * is the only moment it exists anywhere a human can see it - which is the
+   * whole point, and the reason the card says so out loud.
+   */
+  const [minted, setMinted] = useState<null | { who: string; password: string; expiresOn: string }>(null);
+  const addPerson = (invite: boolean) => {
+    setAddError("");
+    startTransition(async () => {
+      const res = await addClientPerson(org.id, {
+        firstName: draft.first, lastName: draft.last, title: draft.title, email: draft.email,
+        siteId: draft.siteId || null, canEdit: draft.role === "editor",
+        canSeeAgreements: draft.agreements, invite,
+        withPassword: draft.withPassword, tempDays: draft.days,
+      });
+      if (res?.error) { setAddError(res.error); return; }
+      const who = [draft.first, draft.last].filter(Boolean).join(" ") || draft.email.trim();
+      toast({
+        message: invite ? `Added ${who} and sent their invitation` : `Added ${who}`,
+      });
+      if (res.password && res.expiresOn) setMinted({ who, password: res.password, expiresOn: res.expiresOn });
+      setAdding(false); setDraft(BLANK);
+    });
+  };
+  const addProblem = !draft.email.trim() ? "their email address" : null;
+
   const [dangerError, setDangerError] = useState("");
 
   return (
     <>
       <Panel title={<>People at {org.name}</>}
-        hint="Sign-in is by email code. Editors change; viewers read.">
+        hint="Sign-in is by email code. Editors change; viewers read."
+        actions={
+          <button className="btn sm primary" onClick={() => { setDraft(BLANK); setAddError(""); setAdding(true); }}>
+            + New
+          </button>
+        }>
         {people.map((r) => {
           const domain = r.entry.trim().startsWith("@");
           return (
             <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>
+              {r.name ? (
+                <span className="t-body" style={{ fontWeight: 600 }}>
+                  {r.name}
+                  {r.title && <span className="mut t-meta" style={{ fontWeight: 400 }}> · {r.title}</span>}
+                </span>
+              ) : null}
               <span className="mono t-body">{r.entry}</span>
               {domain && <span className="pill info">whole domain</span>}
+              {/* Whether a password is standing in for the codes, and how much
+                  longer. A loan nobody can see is a loan nobody takes back. */}
+              {r.password === "expired" && <span className="pill bad" title="Their temporary password has expired">password expired</span>}
+              {r.password && r.password !== "expired" && r.password !== "their own" && (
+                <span className="pill warn" title="A temporary password an owner set">temp password · {r.password}</span>
+              )}
               {isOwner ? (
                 <select value={r.canEdit ? "editor" : "viewer"} disabled={pending} aria-label={`Role for ${r.entry}`}
                   onChange={(e) => startTransition(async () => { await setClientAccessRole(r.id, e.target.value === "editor"); })}
@@ -267,8 +339,39 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
               ) : r.canSeeAgreements ? (
                 <span className="pill neutral">agreements</span>
               ) : null}
+              {isStaff && !domain && (
+                <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="btn link" disabled={pending}
+                    title="Set a password they can use while sign-in codes are not arriving"
+                    onClick={() => {
+                      setPeopleError("");
+                      startTransition(async () => {
+                        const res = await setClientTempPassword(r.id);
+                        if (res?.error) { setPeopleError(res.error); return; }
+                        setMinted({ who: r.name || r.entry, password: res.password!, expiresOn: res.expiresOn! });
+                      });
+                    }}>
+                    {r.password && r.password !== "their own" ? "new temp password" : "temp password"}
+                  </button>
+                  {r.password && r.password !== "their own" && (
+                    <button className="btn link mut" disabled={pending}
+                      onClick={async () => {
+                        if (!(await confirmDialog({
+                          title: `Remove ${r.entry}'s password?`,
+                          body: "They go back to signing in by emailed code. Their access is unchanged.",
+                          action: "Remove it",
+                        }))) return;
+                        startTransition(async () => {
+                          const res = await clearClientTempPassword(r.id);
+                          if (res?.error) { setPeopleError(res.error); return; }
+                          toast({ message: `${r.entry} is back to codes` });
+                        });
+                      }}>clear</button>
+                  )}
+                </span>
+              )}
               {(isOwner || !domain) && (
-                <button className="btn link" style={{ marginLeft: "auto", color: "var(--t-bad-fg)" }} disabled={pending}
+                <button className="btn link" style={{ marginLeft: isStaff && !domain ? 0 : "auto", color: "var(--t-bad-fg)" }} disabled={pending}
                   onClick={async () => {
                     if (!(await confirmDialog({
                       title: `Remove ${r.entry}?`,
@@ -303,7 +406,126 @@ export default function OrgSettingsForm({ org, people, platformName, isOwner, sh
         </div>
         {sent && <div className="t-small" style={{ color: "var(--t-good-fg)", marginTop: 6 }}>Invited {sent} - they got an email with a sign-in link.</div>}
         {peopleError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 6 }}>{peopleError}</div>}
+
+        {/* The one moment the password exists in the open. It was never mailed
+            - mail is the thing that is broken - so this card is where somebody
+            reads it off and says it down a phone. Dismissing it is the end of
+            it: nothing here can show it again. */}
+        {minted && (
+          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#FAF0DC", border: "1px solid #E4CFA1" }}>
+            <div className="t-small" style={{ fontWeight: 700, color: "var(--t-warn-fg)" }}>
+              Temporary password for {minted.who}
+            </div>
+            <div className="mono t-page" style={{ letterSpacing: "0.02em", margin: "6px 0", userSelect: "all" }}>
+              {minted.password}
+            </div>
+            <div className="mut t-meta">
+              Works until {minted.expiresOn}, then sign-in goes back to emailed codes. Read it to them -
+              it is not in any email, and this is the only time it is shown.
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button className="btn sm" onClick={() => {
+                navigator.clipboard?.writeText(minted.password)
+                  .then(() => toast({ message: "Copied" }))
+                  .catch(() => toast({ message: "Select it and copy by hand", tone: "bad" }));
+              }}>Copy</button>
+              <button className="btn sm" onClick={() => setMinted(null)}>Done</button>
+            </div>
+          </div>
+        )}
       </Panel>
+
+      {adding && (
+        <Dialog open onClose={() => setAdding(false)} title={`Add somebody at ${org.name}`} size="md"
+          context="Their profile, what they may see, and how they get in."
+          footer={
+            <>
+              <DialogStatus error={addError} problem={addProblem} ok="Ready to add." />
+              <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
+              <button className="btn" disabled={pending || !!addProblem} onClick={() => addPerson(false)}>
+                Add quietly
+              </button>
+              <button className="btn accent" disabled={pending || !!addProblem} onClick={() => addPerson(true)}>
+                {pending ? "Adding..." : "Add & invite"}
+              </button>
+            </>
+          }>
+          <div className="dialog-section">Who they are</div>
+          <div className="pf3" style={{ marginBottom: 8 }}>
+            <div>
+              <label>First name</label>
+              <input value={draft.first} autoFocus placeholder="Rita"
+                onChange={(e) => setDraft({ ...draft, first: e.target.value })} />
+            </div>
+            <div>
+              <label>Last name</label>
+              <input value={draft.last} placeholder="Alvarez"
+                onChange={(e) => setDraft({ ...draft, last: e.target.value })} />
+            </div>
+            <div>
+              <label>Job title</label>
+              <input value={draft.title} placeholder="Lab manager"
+                onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+            </div>
+          </div>
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Email *</label>
+              <input value={draft.email} inputMode="email" className="mono" placeholder="rita@company.com"
+                onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+            </div>
+            {sites.length > 0 && (
+              <div>
+                <label>Which lab</label>
+                <select value={draft.siteId || ""} aria-label="Which lab they sit at"
+                  onChange={(e) => setDraft({ ...draft, siteId: parseInt(e.target.value) || 0 })}>
+                  <option value="">Not saying</option>
+                  {sites.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="dialog-section">What they may do</div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+              aria-label="Privileges" style={{ width: "auto" }}>
+              <option value="viewer">Viewer - reads their systems and jobs</option>
+              <option value="editor">Editor - reads, and asks for work</option>
+            </select>
+            <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 6, margin: 0, fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+              <input type="checkbox" checked={draft.agreements} style={{ width: 15, height: 15 }}
+                onChange={(e) => setDraft({ ...draft, agreements: e.target.checked })} />
+              may read the agreements
+            </label>
+          </div>
+
+          {isStaff && (
+            <>
+              <div className="dialog-section">How they get in</div>
+              <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 4px", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                <input type="checkbox" checked={draft.withPassword} style={{ width: 15, height: 15 }}
+                  onChange={(e) => setDraft({ ...draft, withPassword: e.target.checked })} />
+                Also set a temporary password
+              </label>
+              <div className="mut t-meta" style={{ marginBottom: draft.withPassword ? 8 : 0 }}>
+                Normally they type their email and we mail a code. Tick this when mail is not
+                getting through: we generate a password, show it to you once to read out, and it
+                stops working on its own.
+              </div>
+              {draft.withPassword && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <label style={{ margin: 0 }}>Good for</label>
+                  <input type="number" min={1} max={TEMP_DAYS_MAX} value={draft.days} aria-label="Days the password lasts"
+                    onChange={(e) => setDraft({ ...draft, days: parseInt(e.target.value) || TEMP_DAYS_DEFAULT })}
+                    style={{ width: 80 }} />
+                  <span className="mut t-meta">days, then codes only</span>
+                </div>
+              )}
+            </>
+          )}
+        </Dialog>
+      )}
 
       <Panel title="Workspace appearance"
         hint={<>Applies to everyone signing in as {org.name}. Nobody else&apos;s workspace changes.</>}>

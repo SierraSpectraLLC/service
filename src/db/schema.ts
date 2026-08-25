@@ -29,6 +29,15 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull().default(""),
   passwordSetAt: timestamp("password_set_at"),
   /**
+   * When a password stops working, for one an OWNER set rather than the person
+   * themselves - the way in while email is not arriving at all. Null is the
+   * ordinary case: a password somebody chose for their own account never
+   * expires. A date here is a loan, and lib/passwordAuth refuses it the moment
+   * it passes, so a credential handed over the phone cannot quietly become a
+   * permanent one.
+   */
+  passwordTempUntil: timestamp("password_temp_until"),
+  /**
    * Where to text a sign-in code, E.164. Set by the person themselves from
    * inside the app, so it is a second way back into an account rather than a way
    * to get one. Blank means codes go by email as they always have.

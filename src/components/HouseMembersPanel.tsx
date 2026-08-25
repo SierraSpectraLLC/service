@@ -2,13 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
-import { revokeHouseMember, setHouseMember } from "@/app/actions";
+import { clearHouseTempPassword, revokeHouseMember, setHouseMember, setHouseTempPassword } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import AddressField from "@/components/AddressField";
 import { toast } from "@/components/ui/Toast";
+import { confirmDialog } from "@/components/ui/ConfirmDialog";
+import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
 
 export type HouseRow = {
   email: string; role: string; name: string; fromEnv: boolean; isRoot: boolean; locked: boolean;
+  /** "their own" | "expired" | "6d left" | "" - see lib/tempPassword. */
+  password?: string;
 };
 
 const ROLE = {
@@ -30,8 +34,13 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
   sites?: { label: string; address: string }[];
 }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ email: "", first: "", last: "", role: "staff", homeAddress: "" });
+  const [draft, setDraft] = useState({
+    email: "", first: "", last: "", role: "staff", homeAddress: "",
+    withPassword: false, days: TEMP_DAYS_DEFAULT,
+  });
   const [error, setError] = useState("");
+  /** Shown once, to be read down a phone. Never mailed, never stored plain. */
+  const [minted, setMinted] = useState<null | { who: string; password: string; expiresOn: string }>(null);
   const [pending, startTransition] = useTransition();
 
   const run = (fn: () => Promise<{ error?: string }>, after?: () => void) =>
@@ -65,7 +74,7 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
         const save = (invite: boolean) => run(
           async () => {
             const res = await setHouseMember(draft.email, draft.role, fullName,
-              { homeAddress: draft.homeAddress, invite });
+              { homeAddress: draft.homeAddress, invite, withPassword: draft.withPassword, tempDays: draft.days });
             if (!res?.error) {
               toast({
                 message: invite
@@ -74,14 +83,20 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
                     : `Added ${fullName || draft.email.trim()} - the invitation email did not go out; they can still sign in`
                   : `Added ${fullName || draft.email.trim()}`,
               });
+              if (res.password && res.expiresOn) {
+                setMinted({ who: fullName || draft.email.trim(), password: res.password, expiresOn: res.expiresOn });
+              }
             }
             return res;
           },
-          () => { setAdding(false); setDraft({ email: "", first: "", last: "", role: "staff", homeAddress: "" }); },
+          () => {
+            setAdding(false);
+            setDraft({ email: "", first: "", last: "", role: "staff", homeAddress: "", withPassword: false, days: TEMP_DAYS_DEFAULT });
+          },
         );
         return (
         <Dialog open onClose={() => setAdding(false)} title="Add a person" size="md"
-          context="Fill in their profile now; they sign in by email code - no password to share."
+          context="Fill in their profile now. They sign in by email code, or with a temporary password when mail is not arriving."
           footer={
             <>
               <DialogStatus error={error} problem={!draft.email.trim() ? "their email address" : null} />
@@ -118,6 +133,26 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
               <option value="owner">Owner - staff plus settings, money and deletions</option>
             </select>
           </div>
+          <div className="dialog-section">How they get in</div>
+          <label className="t-body" style={{ display: "flex", alignItems: "center", gap: 6, margin: "0 0 4px", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+            <input type="checkbox" checked={draft.withPassword} style={{ width: 15, height: 15 }}
+              onChange={(e) => setDraft({ ...draft, withPassword: e.target.checked })} />
+            Also set a temporary password
+          </label>
+          <div className="mut t-meta" style={{ marginBottom: draft.withPassword ? 8 : 0 }}>
+            Sign-in is by emailed code. Tick this when mail is not getting through: we generate a
+            password, show it to you once to read out, and it stops working on its own.
+          </div>
+          {draft.withPassword && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <label style={{ margin: 0 }}>Good for</label>
+              <input type="number" min={1} max={TEMP_DAYS_MAX} value={draft.days} aria-label="Days the password lasts"
+                onChange={(e) => setDraft({ ...draft, days: parseInt(e.target.value) || TEMP_DAYS_DEFAULT })}
+                style={{ width: 80 }} />
+              <span className="mut t-meta">days, then codes only</span>
+            </div>
+          )}
+
           <div className="dialog-section">Where their trips start</div>
           <label>Home base</label>
           {/* The point zero for the stipend radius and routed mileage. An
@@ -179,7 +214,39 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
             </select>
           )}
 
-          <span style={{ marginLeft: "auto" }}>
+          {m.password === "expired" && <span className="pill bad">password expired</span>}
+          {m.password && m.password !== "expired" && m.password !== "their own" && (
+            <span className="pill warn">temp password · {m.password}</span>
+          )}
+
+          <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+            {m.role !== "none" && (
+              <>
+                <button className="btn link" disabled={pending}
+                  title="Set a password they can use while sign-in codes are not arriving"
+                  onClick={() => run(async () => {
+                    const res = await setHouseTempPassword(m.email);
+                    if (!res.error && res.password && res.expiresOn) {
+                      setMinted({ who: m.name || m.email, password: res.password, expiresOn: res.expiresOn });
+                    }
+                    return res;
+                  })}>
+                  {m.password && m.password !== "their own" ? "new temp password" : "temp password"}
+                </button>
+                {m.password && m.password !== "their own" && (
+                  <button className="btn link mut" disabled={pending}
+                    onClick={async () => {
+                      if (!(await confirmDialog({
+                        title: `Remove ${m.email}'s password?`,
+                        body: "They go back to signing in by emailed code. Their access is unchanged.",
+                        action: "Remove it",
+                      }))) return;
+                      run(() => clearHouseTempPassword(m.email),
+                        () => toast({ message: `${m.email} is back to codes` }));
+                    }}>clear</button>
+                )}
+              </>
+            )}
             {m.locked ? (
               <span className="mut t-meta">
                 {m.isRoot ? "set by STAFF_EMAILS"
@@ -202,6 +269,29 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
           </span>
         </div>
       ))}
+
+      {minted && (
+        <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "#FAF0DC", border: "1px solid #E4CFA1" }}>
+          <div className="t-small" style={{ fontWeight: 700, color: "var(--t-warn-fg)" }}>
+            Temporary password for {minted.who}
+          </div>
+          <div className="mono t-page" style={{ letterSpacing: "0.02em", margin: "6px 0", userSelect: "all" }}>
+            {minted.password}
+          </div>
+          <div className="mut t-meta">
+            Works until {minted.expiresOn}, then sign-in goes back to emailed codes. Read it to them -
+            it is not in any email, and this is the only time it is shown.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button className="btn sm" onClick={() => {
+              navigator.clipboard?.writeText(minted.password)
+                .then(() => toast({ message: "Copied" }))
+                .catch(() => toast({ message: "Select it and copy by hand", tone: "bad" }));
+            }}>Copy</button>
+            <button className="btn sm" onClick={() => setMinted(null)}>Done</button>
+          </div>
+        </div>
+      )}
 
       {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
 

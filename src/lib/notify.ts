@@ -470,16 +470,28 @@ export async function notifyHandoff(opts: {
 // Invitations stay plain email, not deliver(): the recipient has never signed
 // in, so an inbox row would greet them with old news and an opt-out would be
 // self-defeating - the email IS the invitation.
-export async function notifyInvite(opts: { to: string; inviterName: string; orgName: string }) {
+export async function notifyInvite(opts: {
+  to: string; inviterName: string; orgName: string;
+  /**
+   * Whether a temporary password was set for them at the same time. The
+   * password itself is NEVER in here: it goes to the person who set it, to be
+   * said out loud, because this email is exactly the channel that is not
+   * working when somebody needs one.
+   */
+  tempPassword?: boolean;
+}) {
   try {
     const brand = (await getBrand()).name;
     const url = appUrl();
+    const how = opts.tempPassword
+      ? "Use this email address. A temporary password has been set for you - whoever added you will pass it on. You can set your own once you are in."
+      : "Use this email address - no password, a sign-in code is emailed to you.";
     await sendEmail(
       [opts.to],
       `${opts.inviterName} invited you to ${brand}`,
       await wrap(`${esc(opts.inviterName)} added you to <b>${esc(opts.orgName)}</b>'s workspace on ${esc(brand)}.
         ${url ? `${btn(`${url}/login`, "Sign in")}
-        ${mutedLine("Use this email address - no password, a sign-in code is emailed to you.")}` : ""}`,
+        ${mutedLine(how)}` : ""}`,
       { preheader: `${opts.inviterName} added you to ${opts.orgName}'s workspace`, prefsFooter: false }),
     );
   } catch (e) {

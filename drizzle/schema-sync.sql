@@ -3262,3 +3262,7 @@ ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "booked_note" text NOT NULL 
 
 -- The company calendar's feed secret. Blank = no feed; regenerate to rotate.
 ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "calendar_token" text NOT NULL DEFAULT '';
+
+-- A password an owner set for somebody else, and when it stops working. Null
+-- for a password the person chose themselves, which never expires.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_temp_until" timestamp;
