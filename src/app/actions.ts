@@ -50,7 +50,7 @@ import {
   INVOICE_OUTCOMES, QUOTE_OUTCOMES, invoiceProblem, openingStatus, quoteProblem,
 } from "@/lib/backfill";
 import {
-  asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
+  asStatementRow, billingContext, creditFor, depositOffsetsFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
   invoicesForOrg,
 } from "@/lib/invoiceData";
 import {
@@ -11264,8 +11264,15 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
   const { wo } = found;
   if (wo.orgId === null) return { error: "This job has no client on it - an invoice needs somebody to bill." };
 
-  const existing = await db.select().from(invoices)
-    .where(and(eq(invoices.workOrderId, workOrderId), ne(invoices.status, "void")));
+  // A deposit invoice raised by a quote's approval carries this job's id, but
+  // it is not THE job's invoice - it is half the money arriving early. It
+  // must neither block the final bill nor be forgotten by it; the arithmetic
+  // and its reasoning live in lib/invoiceData.depositOffsetsFor.
+  const { depositInvoiceIds, offsets } = await depositOffsetsFor(workOrderId);
+
+  const existing = (await db.select().from(invoices)
+    .where(and(eq(invoices.workOrderId, workOrderId), ne(invoices.status, "void"))))
+    .filter((i) => !depositInvoiceIds.has(i.id));
   if (existing.length) {
     return { error: `${wo.number} is already on ${existing[0].number}.` };
   }
@@ -11295,11 +11302,21 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
           sourceId: l.sourceId, position: i,
         })));
       }
-      const total = linesTotal(src.lines);
+      if (offsets.length) {
+        await db.insert(invoiceLines).values(offsets.map((o, i) => ({
+          invoiceId: inv.id, kind: "fee_ref",
+          description: `Less deposit invoiced on ${o.quoteNumber}`,
+          detail: `${o.number} - ${formatCents(o.cents)} billed at approval`,
+          qty: 1000, unitCents: -o.cents, covered: false,
+          sourceId: null, position: src.lines.length + i,
+        })));
+      }
+      const total = linesTotal(src.lines) - offsets.reduce((n, o) => n + o.cents, 0);
       await audit({
         actor: u.email, instrumentId: wo.instrumentId, assetId: wo.assetId,
         entityType: "invoice", entityId: inv.id, tenantOrgId: wo.tenantOrgId,
         action: `drafted ${number} from ${wo.number}: ${src.lines.length} line${src.lines.length === 1 ? "" : "s"}, ${formatCents(total)}`
+          + (offsets.length ? ` after ${formatCents(offsets.reduce((n, o) => n + o.cents, 0))} of deposit` : "")
           + (src.coverage.agreementNumber && total === 0 ? ` - covered by ${src.coverage.agreementNumber}` : ""),
       });
       revInvoice(inv);
@@ -11967,9 +11984,11 @@ export async function draftQuote(
 
   const src = await draftSourceFor(workOrderId);
   if (!src) return { error: "Not found" };
-  if (!src.lines.length) {
-    return { error: "There is nothing to price yet - add the parts and the hours you expect." };
-  }
+  // An empty job quotes fine: a fixed-price move or install is priced by
+  // TYPING lines on the quote draft, not by pre-logging hours nobody has
+  // worked. What matters is keeping the quote ON the job either way - that
+  // link is what flips the job active on approval and what lets the final
+  // invoice subtract the deposit.
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {

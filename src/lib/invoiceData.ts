@@ -254,6 +254,36 @@ export async function invoicesForOrg(orgId: number): Promise<FullInvoice[]> {
 }
 
 /** The due date this client's terms give an invoice issued today. */
+/**
+ * The deposits already raised against a job, for its final invoice.
+ *
+ * A quote approved with a deposit raises its own invoice carrying the job's
+ * id. That invoice is half the money arriving early, not THE job's invoice -
+ * so the final bill must skip it when checking "is this job already billed"
+ * and subtract what it BILLED (not what has been paid: the two invoices must
+ * sum to the job's total whatever the payment timing, or a slow payer gets
+ * billed 150%). A voided deposit invoice offsets nothing and blocks nothing.
+ */
+export async function depositOffsetsFor(workOrderId: number): Promise<{
+  depositInvoiceIds: Set<number>;
+  offsets: { number: string; quoteNumber: string; cents: number }[];
+}> {
+  const quotesHere = await db.select().from(quotes)
+    .where(and(eq(quotes.workOrderId, workOrderId), eq(quotes.status, "approved")));
+  const depositInvoiceIds = new Set(
+    quotesHere.map((q) => q.depositInvoiceId).filter((x): x is number => x !== null));
+  const offsets: { number: string; quoteNumber: string; cents: number }[] = [];
+  for (const q of quotesHere) {
+    if (q.depositInvoiceId === null) continue;
+    const [dep] = await db.select().from(invoices).where(eq(invoices.id, q.depositInvoiceId));
+    if (!dep || dep.status === "void") continue;
+    const depLines = await db.select().from(invoiceLines).where(eq(invoiceLines.invoiceId, dep.id));
+    const cents = depLines.reduce((n, l) => n + Math.round((l.qty / 1000) * l.unitCents), 0);
+    if (cents > 0) offsets.push({ number: dep.number, quoteNumber: q.number, cents });
+  }
+  return { depositInvoiceIds, offsets };
+}
+
 export const dueFor = (org: { termsDays: number } | null, issuedOn: string): string =>
   dueDate(issuedOn, org?.termsDays ?? 30);
 
