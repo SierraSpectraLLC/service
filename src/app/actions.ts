@@ -8698,6 +8698,24 @@ export async function setModule(
   return {};
 }
 
+/**
+ * Turn the calendar feed on (minting or rotating its secret) or off.
+ *
+ * The URL is the credential, so this is owner work: minting hands out a key
+ * to every dated fact in the shop, and rotating revokes every copy at once.
+ */
+export async function setCalendarFeed(on: boolean): Promise<{ error?: string; token?: string }> {
+  const u = await requireOwner();
+  const token = on ? crypto.randomBytes(18).toString("base64url") : "";
+  await db.update(appSettings).set({ calendarToken: token }).where(eq(appSettings.id, 1));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: "calendar_feed",
+    action: on ? "minted a calendar feed link (any old link is dead)" : "turned the calendar feed off",
+  });
+  revalidatePath("/calendar");
+  return { token };
+}
+
 export async function setSheetOrg(orgId: number | null) {
   const u = await requirePlatformOwner();
   const [org] = orgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, orgId));

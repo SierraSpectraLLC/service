@@ -137,6 +137,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       label: "Operations",
       items: [
         ...(modules.eod ? [{ href: "/eod", label: "EOD update" }] : []),
+        /* What is happening WHEN, across everything - the field crew's
+           morning question, so it leads the group. */
+        { href: "/calendar", label: "Calendar" },
         { href: "/maintenance", label: "Maintenance" },
         { href: "/purchasing", label: "Purchasing" },
         /* Money an engineer fronted, and where the payout stands. It lives

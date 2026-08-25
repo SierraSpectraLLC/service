@@ -1174,6 +1174,12 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .savebar-status .ok { color: var(--t-good-fg); }
 
 
+/* The month grid earns its room on a desk; a phone reads the agenda list
+   below it instead of squinting at forty-two 50px cells. */
+@media (max-width: 700px) {
+  .cal-grid-wrap { display: none; }
+}
+
 /* ── Typing on a phone ───────────────────────────────────────────────────────
    LAST BLOCK IN THIS FILE, ON PURPOSE. Read the whole comment before moving it.
 

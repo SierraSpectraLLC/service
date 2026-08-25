@@ -2669,6 +2669,12 @@ export const appSettings = pgTable("app_settings", {
   digestHour: integer("digest_hour").notNull().default(7),
   digestDays: text("digest_days").notNull().default(""),
   digestLastSentOn: text("digest_last_sent_on").notNull().default(""),
+  /**
+   * The calendar feed's secret. Blank = no feed. A subscribed phone calendar
+   * cannot sign in, so the URL itself is the credential - generated once,
+   * rotatable by generating again, and the whole feed dies with a blank.
+   */
+  calendarToken: text("calendar_token").notNull().default(""),
   // Remote support: reaching a lab PC from the portal. Off until an operator
   // stands up the relay host and sets REMOTE_URL - the pages check both, so a
   // flag flipped before the infrastructure exists says so instead of failing.

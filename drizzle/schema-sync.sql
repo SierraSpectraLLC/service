@@ -3259,3 +3259,6 @@ ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "receipt_name" text NOT NULL DEF
 -- truth, and rewriting the due date to hide the nag would erase it.
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "booked_on" text NOT NULL DEFAULT '';
 ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "booked_note" text NOT NULL DEFAULT '';
+
+-- The company calendar's feed secret. Blank = no feed; regenerate to rotate.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "calendar_token" text NOT NULL DEFAULT '';
