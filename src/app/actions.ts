@@ -45,7 +45,10 @@ import { cleanItem, parseChecklist, serializeChecklist } from "@/lib/checklist";
 import { signoffGate, snapshotOf } from "@/lib/signoff";
 import { completionBlocked, evaluateResult, needsResult, parseAcceptance, resultIsRecorded, serializeAcceptance, type Acceptance } from "@/lib/testResult";
 import { TIME_CATEGORIES } from "@/lib/rates";
-import { sellPrice, EXPENSE_KINDS, linesTotal } from "@/lib/billing";
+import { sellPrice, EXPENSE_KINDS, LINE_KINDS, linesTotal } from "@/lib/billing";
+import {
+  INVOICE_OUTCOMES, QUOTE_OUTCOMES, invoiceProblem, openingStatus, quoteProblem,
+} from "@/lib/backfill";
 import {
   asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
   invoicesForOrg,
@@ -12476,6 +12479,205 @@ export async function raiseRetainerCycle(
       revalidatePath("/money/invoices");
       revalidatePath("/money");
       return { id: inv.id, number };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+// ── Backfill ────────────────────────────────────────────────────────────────
+// Paper that was already resolved before this app existed.
+//
+// Every other path in here walks a document through its life - draft, send,
+// answer, pay - because that is what the app is FOR. History has none of that
+// to walk: last March's invoice was issued in March, paid in April, and the
+// only useful thing to do with it now is write down what happened. Making
+// somebody draft it, "send" it (mailing the client a bill they settled a year
+// ago), and then record a payment against today is not a migration path, it is
+// a hazard.
+//
+// So these write the finished state directly, and are defined by what they
+// REFUSE to do: no share link, no email, no card, no deposit invoice, no
+// dunning ladder. Nothing leaves the building. The audit line says the
+// document was recorded as history rather than issued from here, because a
+// year from now the difference between "we sent this" and "we typed this in"
+// is the difference between evidence and a note.
+
+/** Shared shape: what a historical document's lines look like coming in. */
+export type HistoricalLine = { kind: string; description: string; qty: number; unitCents: number };
+
+const cleanHistoricalLines = (rows: HistoricalLine[]) =>
+  rows
+    .filter((l) => l.description.trim() || l.unitCents)
+    .slice(0, 200)
+    .map((l, i) => ({
+      kind: (LINE_KINDS as readonly string[]).includes(l.kind) ? l.kind : "part",
+      description: l.description.trim().slice(0, 200),
+      detail: "",
+      // Thousandths, the same convention every other line uses.
+      qty: Math.max(0, Math.round((Number.isFinite(l.qty) ? l.qty : 1) * 1000)),
+      unitCents: Math.round(l.unitCents),
+      position: i,
+    }));
+
+/**
+ * An invoice that was already issued, and possibly already paid.
+ *
+ * The number is THEIRS: a migration whose invoice numbers do not match the
+ * client's own records is a migration that makes every future conversation
+ * about an old bill harder. Blank falls back to our sequence.
+ *
+ * Payment is recorded as a real payments row rather than by setting the
+ * status, so the invoice's balance is summed from the same ledger as every
+ * other invoice - the app has no stored balances, and history must not be the
+ * one exception that disagrees with the rest.
+ */
+export async function recordHistoricalInvoice(
+  orgId: number,
+  data: {
+    number: string; issuedOn: string; dueOn: string; poNumber: string; note: string;
+    lines: HistoricalLine[];
+    /** paid | open | void - what became of it. */
+    outcome: string;
+    paidOn: string; method: string; reference: string;
+  },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  const today = shopToday();
+
+  const issuedOn = data.issuedOn.trim();
+  const outcome = (INVOICE_OUTCOMES as readonly string[]).includes(data.outcome) ? data.outcome : "paid";
+  // One authority for the rules, shared with the dialog, so the two cannot
+  // drift into different answers about the same paperwork.
+  const bad = invoiceProblem({ issuedOn, outcome, paidOn: data.paidOn, lines: data.lines }, today);
+  if (bad) return { error: bad };
+
+  const lines = cleanHistoricalLines(data.lines);
+  const dueOn = isIsoDay(data.dueOn.trim()) ? data.dueOn.trim() : dueFor(org, issuedOn);
+  const total = lines.reduce((n, l) => n + Math.round((l.qty / 1000) * l.unitCents), 0);
+  const paidOn = outcome === "paid" ? (data.paidOn.trim() || issuedOn) : "";
+  const method = (PAYMENT_METHODS as readonly string[]).includes(data.method) ? data.method : "check";
+
+  const typed = data.number.trim().slice(0, 40);
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: invoices.number }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, tenant));
+    if (typed && used.some((r) => r.number.toLowerCase() === typed.toLowerCase())) {
+      return { error: `${typed} is already on file` };
+    }
+    const { invoicePrefix } = await billingContext(orgId);
+    const number = typed || nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: tenant, orgId, number,
+        // Issued, not draft: it really did go out, just not from here.
+        status: openingStatus(outcome),
+        issuedOn, dueOn, poNumber: data.poNumber.trim() || (org.poNumber ?? ""),
+        note: data.note.trim(), createdBy: u.email,
+      }).returning();
+      await db.insert(invoiceLines).values(lines.map((l) => ({ ...l, invoiceId: inv.id })));
+
+      if (outcome === "paid") {
+        await db.insert(payments).values({
+          tenantOrgId: tenant, invoiceId: inv.id, method, amountCents: total,
+          reference: data.reference.trim(), receivedOn: paidOn, recordedBy: u.email,
+        });
+        // Let the ledger decide the status, exactly as recordPayment does.
+        const full = await invoiceById(inv.id);
+        const view = full ? invoiceView(asStatementRow(full), today) : null;
+        if (view) {
+          await db.update(invoices).set({ status: view.balanceCents <= 0 ? "paid" : "partial" })
+            .where(eq(invoices.id, inv.id));
+        }
+      }
+
+      await audit({
+        actor: u.email, entityType: "invoice", entityId: inv.id, tenantOrgId: tenant,
+        action: `recorded ${number} for ${org.name} as history: ${formatCents(total)}, issued ${issuedOn}`
+          + (outcome === "paid" ? `, paid ${paidOn} by ${METHOD_LABEL[method].toLowerCase()}` : "")
+          + (outcome === "void" ? ", voided" : "")
+          + (outcome === "open" ? ", still open" : "")
+          + " - entered from the old records, not issued from here",
+      });
+      revInvoice(inv);
+      revalidatePath("/money/invoices");
+      revalidatePath("/money");
+      return { id: inv.id, number };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/**
+ * A quote that was already answered.
+ *
+ * Approving one through the normal path can raise a deposit invoice and mails
+ * the client; both are wrong for a job that was quoted, won and finished two
+ * years ago. This writes the answer and the day it came, and raises nothing.
+ */
+export async function recordHistoricalQuote(
+  orgId: number,
+  data: {
+    number: string; title: string; sentOn: string; answeredOn: string;
+    lines: HistoricalLine[];
+    /** approved | declined | expired. */
+    outcome: string;
+    answeredBy: string; answerNote: string;
+  },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  const today = shopToday();
+
+  const title = data.title.trim();
+  const sentOn = data.sentOn.trim();
+  const bad = quoteProblem({ title, sentOn, answeredOn: data.answeredOn, lines: data.lines }, today);
+  if (bad) return { error: bad };
+
+  const lines = cleanHistoricalLines(data.lines);
+  const outcome = (QUOTE_OUTCOMES as readonly string[]).includes(data.outcome) ? data.outcome : "approved";
+  const answeredOn = data.answeredOn.trim() || sentOn;
+
+  const typed = data.number.trim().slice(0, 40);
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: quotes.number }).from(quotes)
+      .where(forTenant(quotes.tenantOrgId, tenant));
+    if (typed && used.some((r) => r.number.toLowerCase() === typed.toLowerCase())) {
+      return { error: `${typed} is already on file` };
+    }
+    const number = typed || nextWoNumber(used.map((r) => r.number), "Q-");
+    try {
+      const [q] = await db.insert(quotes).values({
+        tenantOrgId: tenant, orgId, number, status: outcome, title,
+        sentOn, expiresOn: answeredOn,
+        // No deposit: whatever was owed on approval was settled outside this
+        // app, and raising an invoice for it now would invent a receivable.
+        depositPct: 0,
+        answeredOn, answeredBy: data.answeredBy.trim().slice(0, 120),
+        answerNote: data.answerNote.trim().slice(0, 500), createdBy: u.email,
+      }).returning();
+      await db.insert(quoteLines).values(lines.map((l) => ({ ...l, quoteId: q.id })));
+
+      const total = lines.reduce((n, l) => n + Math.round((l.qty / 1000) * l.unitCents), 0);
+      await audit({
+        actor: u.email, entityType: "quote", entityId: q.id, tenantOrgId: tenant,
+        action: `recorded ${number} for ${org.name} as history: ${title}, ${formatCents(total)}`
+          + `, sent ${sentOn}, ${outcome} ${answeredOn}`
+          + " - entered from the old records, never sent from here",
+      });
+      revQuote(q);
+      revalidatePath("/money/quotes");
+      return { id: q.id, number };
     } catch (e) {
       last = e;
     }
