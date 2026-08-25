@@ -111,6 +111,13 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
         stats={heroStats}
       />
 
+      <div className="row-2" style={{ marginBottom: 10 }}>
+        {/* The shop's own Excel layout, filled - templates/POTemplate.xlsx. */}
+        <a className="btn sm" href={`/api/export/po/${po.id}`} download>
+          Excel
+        </a>
+      </div>
+
       {(canRoute || po.shipToSiteId !== null || po.urgent) && (
         <PoShippingCard
           poId={po.id}

@@ -82,6 +82,10 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
 
       <div className="row-2" style={{ marginBottom: 10 }}>
         <Pill tone={STANDING_TONE[standing]}>{STANDING_LABEL[standing]}</Pill>
+        {/* The shop's own Excel layout, filled - templates/QuoteTemplate.xlsx. */}
+        <a className="btn sm" href={`/api/export/quote/${id}`} download>
+          Excel
+        </a>
         {link && (
           <Link className="btn sm" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
             Open as the client

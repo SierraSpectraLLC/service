@@ -6,6 +6,15 @@ const nextConfig = {
   // PGlite ships its own wasm and reads it off disk; bundling breaks that.
   // Only the dev:local harness (LOCAL_DB=1) ever loads it - see src/db/index.ts.
   serverExternalPackages: ["@electric-sql/pglite"],
+  // The Excel document layouts (templates/*.xlsx) are read off disk at request
+  // time by the /api/export routes. Serverless bundling only traces what code
+  // imports, so the files must be named here or the deployed function finds an
+  // empty directory where the layouts should be.
+  outputFileTracingIncludes: {
+    "/api/export/invoice/[id]": ["./templates/InvoiceTemplate.xlsx"],
+    "/api/export/quote/[id]": ["./templates/QuoteTemplate.xlsx"],
+    "/api/export/po/[id]": ["./templates/POTemplate.xlsx"],
+  },
   env: {
     // Evaluated once at build time; Vercel injects VERCEL_GIT_COMMIT_SHA.
     NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || "dev").slice(0, 7),

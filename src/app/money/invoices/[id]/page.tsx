@@ -119,6 +119,10 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         <Link className="btn sm" href={`/money/invoices/${id}/print`} style={{ textDecoration: "none" }}>
           Preview PDF
         </Link>
+        {/* The shop's own Excel layout, filled - templates/InvoiceTemplate.xlsx. */}
+        <a className="btn sm" href={`/api/export/invoice/${id}`} download>
+          Excel
+        </a>
         {link && (
           <Link className="btn sm" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
             Open as the client
