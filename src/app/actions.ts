@@ -56,7 +56,7 @@ import {
 import {
   addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
 } from "@/lib/recurring";
-import { reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
+import { editableReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
@@ -7248,7 +7248,12 @@ export async function logOverheadExpense(
  * personal claim.
  */
 export async function logMyExpense(
-  data: { kind: string; description: string; amount: string; incurredOn: string; workOrderId: number | null },
+  data: {
+    kind: string; description: string; amount: string; incurredOn: string; workOrderId: number | null;
+    receiptUrl?: string; receiptName?: string;
+    /** Land it straight on one of my open reports instead of the pool. */
+    reportId?: number | null;
+  },
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
   const cents = parseMoney(data.amount);
@@ -7267,12 +7272,21 @@ export async function logMyExpense(
     workOrderId = wo.id;
   }
   const kind = await cleanKind(data.kind, t);
+  let reportId: number | null = null;
+  if (data.reportId != null) {
+    const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, data.reportId));
+    if (!report || report.person !== u.name) return { error: "Not your report" };
+    if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
+    reportId = report.id;
+  }
   const [row] = await db.insert(expenses).values({
     tenantOrgId: t, workOrderId, kind, description, amountCents: cents, incurredOn: date,
     // On a job it defaults to rebillable, same as the work order form; with no
     // job there is nobody to rebill - it is overhead, like the internet bill.
     billable: workOrderId !== null,
-    person: u.name, loggedBy: u.email,
+    person: u.name, loggedBy: u.email, reportId,
+    receiptUrl: (data.receiptUrl ?? "").trim().slice(0, 500),
+    receiptName: (data.receiptName ?? "").trim().slice(0, 200),
   }).returning();
   await audit({
     actor: u.email, entityType: "expense", entityId: row.id, tenantOrgId: row.tenantOrgId,
@@ -7280,8 +7294,101 @@ export async function logMyExpense(
       + (workOrderId !== null ? ` on a work order` : " (no job - overhead)"),
   });
   revalidatePath("/expenses");
+  if (reportId !== null) revalidatePath(`/expenses/${reportId}`);
   revalidatePath("/money/expenses");
   if (workOrderId !== null) revalidatePath(`/work/${workOrderId}`);
+  return {};
+}
+
+/** Open a fresh draft report to fill - the container the receipts land in. */
+export async function createExpenseReport(): Promise<{ error?: string; id?: number }> {
+  const u = await requireStaff();
+  const [report] = await db.insert(expenseReports).values({
+    tenantOrgId: readTenant(u), person: u.name, status: "draft", submittedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
+    action: "opened a draft expense report",
+  });
+  revalidatePath("/expenses");
+  return { id: report.id };
+}
+
+/** Pull rows from my unclaimed pool onto one of my open reports. */
+export async function attachPoolExpenses(
+  reportId: number, expenseIds: number[],
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, reportId));
+  if (!report || report.person !== u.name) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
+  const ids = [...new Set(expenseIds)].filter((n) => Number.isInteger(n));
+  if (!ids.length) return { error: "Pick at least one expense" };
+  const rows = await db.select().from(expenses)
+    .where(and(inArray(expenses.id, ids), forTenant(expenses.tenantOrgId, readTenant(u))));
+  const mine = reimbursementPool(rows, { name: u.name, email: u.email });
+  if (mine.length !== ids.length) {
+    return { error: "Some of those are not yours to claim, or are already on a report" };
+  }
+  await db.update(expenses).set({ reportId }).where(inArray(expenses.id, ids));
+  revalidatePath("/expenses");
+  revalidatePath(`/expenses/${reportId}`);
+  return {};
+}
+
+/** Take a row off one of my open reports - back to the pool, not deleted. */
+export async function removeReportExpense(expenseId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(expenses).where(eq(expenses.id, expenseId));
+  if (!row || row.reportId === null) return {};
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, row.reportId));
+  if (!report || (report.person !== u.name && u.role !== "owner")) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `That report is ${report.status} - its rows are fixed` };
+  await db.update(expenses).set({ reportId: null }).where(eq(expenses.id, expenseId));
+  revalidatePath("/expenses");
+  revalidatePath(`/expenses/${report.id}`);
+  return {};
+}
+
+/**
+ * Send my draft (or a returned report, fixed) in for payout.
+ *
+ * Same word from either starting point on purpose: a returned report is not a
+ * different kind of thing, it is the same claim going around again.
+ */
+export async function submitDraftReport(reportId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, reportId));
+  if (!report || report.person !== u.name) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `It is already ${report.status}` };
+  const rows = await db.select().from(expenses).where(eq(expenses.reportId, reportId));
+  if (!rows.length) return { error: "There is nothing on this report to submit" };
+  await db.update(expenseReports).set({ status: "submitted", returnedReason: "" })
+    .where(eq(expenseReports.id, reportId));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
+    action: `submitted ${rows.length} expense${rows.length === 1 ? "" : "s"} (${formatCents(reportTotalCents(rows))}) for reimbursement`
+      + (report.status === "returned" ? " (resubmitted after a return)" : ""),
+  });
+  revalidatePath("/expenses");
+  revalidatePath(`/expenses/${reportId}`);
+  return {};
+}
+
+/** Throw away one of my empty-handed drafts. Its rows return to the pool first. */
+export async function deleteExpenseReport(id: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
+  if (!report) return {};
+  if (report.person !== u.name && u.role !== "owner") return { error: "Not yours to delete" };
+  if (!editableReport(report.status)) return { error: `It is ${report.status} - withdraw it first` };
+  await db.update(expenses).set({ reportId: null }).where(eq(expenses.reportId, id));
+  await db.delete(expenseReports).where(eq(expenseReports.id, id));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
+    action: `deleted ${report.person}'s draft expense report - its expenses are back in the pool`,
+  });
+  revalidatePath("/expenses");
   return {};
 }
 
@@ -7321,20 +7428,20 @@ export async function submitExpenseReport(
   return { id: report.id };
 }
 
-/** Take my own unpaid report back - its rows return to the pool, editable. */
+/** Take my own unpaid report back to draft - rows stay on it, editable again. */
 export async function withdrawExpenseReport(id: number): Promise<{ error?: string }> {
   const u = await requireStaff();
   const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
   if (!report) return { error: "Not found" };
   if (report.person !== u.name && u.role !== "owner") return { error: "Not yours to withdraw" };
-  if (report.status === "paid") return { error: "It has been paid - there is nothing to take back" };
-  await db.update(expenses).set({ reportId: null }).where(eq(expenses.reportId, id));
-  await db.delete(expenseReports).where(eq(expenseReports.id, id));
+  if (report.status !== "submitted") return { error: `It is ${report.status} - there is nothing to take back` };
+  await db.update(expenseReports).set({ status: "draft" }).where(eq(expenseReports.id, id));
   await audit({
     actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
-    action: `withdrew ${report.person}'s expense report - its expenses are back in the pool`,
+    action: `withdrew ${report.person}'s expense report back to draft`,
   });
   revalidatePath("/expenses");
+  revalidatePath(`/expenses/${id}`);
   return {};
 }
 
@@ -7366,13 +7473,14 @@ export async function payExpenseReport(
       + (data.reference.trim() ? ` (${data.reference.trim()})` : "") + `, ${day}`,
   });
   revalidatePath("/expenses");
+  revalidatePath(`/expenses/${id}`);
   return {};
 }
 
 /**
- * Send a report back. Its rows return to the pool so the engineer can fix
- * and resubmit; the report stays, wearing the reason, as the record that the
- * round-trip happened.
+ * Send a report back. Its rows STAY on it - the engineer fixes the claim in
+ * place and resubmits the same report, rather than reassembling it from the
+ * pool - and the reason rides on the report where they will read it.
  */
 export async function returnExpenseReport(id: number, reason: string): Promise<{ error?: string }> {
   const u = await requireOwner();
@@ -7381,13 +7489,13 @@ export async function returnExpenseReport(id: number, reason: string): Promise<{
   const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
   if (!report) return { error: "Not found" };
   if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
-  await db.update(expenses).set({ reportId: null }).where(eq(expenses.reportId, id));
   await db.update(expenseReports).set({ status: "returned", returnedReason: why }).where(eq(expenseReports.id, id));
   await audit({
     actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
     action: `returned ${report.person}'s expense report - ${why}`,
   });
   revalidatePath("/expenses");
+  revalidatePath(`/expenses/${id}`);
   return {};
 }
 

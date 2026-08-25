@@ -2199,6 +2199,9 @@ export const expenses = pgTable("expenses", {
    * its rows to the pool instead of taking the receipts with it.
    */
   reportId: integer("report_id").references((): AnyPgColumn => expenseReports.id, { onDelete: "set null" }),
+  /** The receipt: a photo shot at the counter, or an emailed PDF. Blob URL. */
+  receiptUrl: text("receipt_url").notNull().default(""),
+  receiptName: text("receipt_name").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("expenses_wo_idx").on(t.workOrderId), index("expenses_report_idx").on(t.reportId)]);
 
@@ -2210,9 +2213,11 @@ export const expenses = pgTable("expenses", {
  * render, the same no-stored-balances rule invoices follow, so editing a row
  * before payout can never leave a stale total for the payout to trust.
  *
- * status: submitted | paid | returned. Returning a report clears report_id on
- * its rows (they go back to the pool, editable, resubmittable) and keeps the
- * report as the record of the round-trip, with the reason on it.
+ * status: draft | submitted | paid | returned. A report starts as a DRAFT the
+ * engineer fills - receipts added straight onto it, or pulled from their
+ * unclaimed pool - and submits when the trip is emptied out. Returning keeps
+ * the rows ON the report, wearing the reason, so it is fixed in place and
+ * resubmitted rather than reassembled.
  */
 export const expenseReports = pgTable("expense_reports", {
   id: serial("id").primaryKey(),

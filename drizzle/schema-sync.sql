@@ -3248,3 +3248,8 @@ DO $$ BEGIN
   END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS "expenses_report_idx" ON "expenses" ("report_id");
+
+-- The receipt on an expense row: a photo shot at the counter, or an emailed
+-- PDF. Draft expense reports ride on the existing status column.
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "receipt_url" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "receipt_name" text NOT NULL DEFAULT '';

@@ -45,20 +45,26 @@ export function reimbursementPool(
 export const reportTotalCents = (rows: { amountCents: number }[]): number =>
   rows.reduce((n, r) => n + r.amountCents, 0);
 
-export const REPORT_STATUSES = ["submitted", "paid", "returned"] as const;
+export const REPORT_STATUSES = ["draft", "submitted", "paid", "returned"] as const;
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
 export const REPORT_LABEL: Record<string, string> = {
+  draft: "Draft",
   submitted: "Awaiting payout",
   paid: "Paid",
   returned: "Returned",
 };
 
-export const REPORT_TONE: Record<string, "warn" | "good" | "bad"> = {
+export const REPORT_TONE: Record<string, "neutral" | "warn" | "good" | "bad"> = {
+  draft: "neutral",
   submitted: "warn",
   paid: "good",
   returned: "bad",
 };
+
+/** The statuses whose rows the engineer may still edit in place. */
+export const editableReport = (status: string): boolean =>
+  status === "draft" || status === "returned";
 
 /**
  * A date span like "Jul 12 - Aug 3" for a report's rows, so a list of

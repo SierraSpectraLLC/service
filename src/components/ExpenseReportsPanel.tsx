@@ -1,13 +1,16 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import {
-  logMyExpense, payExpenseReport, returnExpenseReport, submitExpenseReport, withdrawExpenseReport,
+  createExpenseReport, logMyExpense, payExpenseReport, returnExpenseReport,
+  submitExpenseReport, withdrawExpenseReport,
 } from "@/app/actions";
 import { REPORT_LABEL, REPORT_TONE, reportSpan, reportTotalCents } from "@/lib/expenseReports";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
-import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
+import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
@@ -54,6 +57,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
   const [payDraft, setPayDraft] = useState({ paidOn: "", reference: "" });
   const [payErr, setPayErr] = useState("");
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const chosen = useMemo(() => pool.filter((p) => picked.has(p.id)), [pool, picked]);
   const chosenCents = reportTotalCents(chosen);
@@ -74,11 +78,14 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
     return (
       <div key={r.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+          <Link href={`/expenses/${r.id}`} className="btn link" style={{ order: 99, marginLeft: "auto" }}>
+            open
+          </Link>
           {side === "queue" && <span className="t-body" style={{ fontWeight: 700 }}>{r.person}</span>}
           {/* A returned report has no rows left - they went back to the pool -
               so a count and a $0 would read as an empty claim, not a bounce. */}
-          {r.status === "returned" ? (
-            <span className="mut t-small">sent back {r.submittedAt} - its expenses returned to the pool</span>
+          {r.status === "returned" && r.expenses.length === 0 ? (
+            <span className="mut t-small">sent back {r.submittedAt}</span>
           ) : (
             <>
               <span className="t-body" style={{ fontWeight: side === "queue" ? 400 : 700 }}>
@@ -94,7 +101,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
         </div>
         {r.status === "returned" && r.returnedReason && (
           <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 2 }}>
-            Returned: {r.returnedReason}
+            Returned: {r.returnedReason} - open it, fix it, resubmit.
           </div>
         )}
         {r.expenses.length > 0 && (
@@ -105,18 +112,11 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
         )}
         {side === "mine" && r.status === "submitted" && (
           <button className="btn link" disabled={pending}
-            onClick={async () => {
-              if (!(await confirmDialog({
-                title: "Take this report back?",
-                body: "Its expenses return to your pool, editable. Submit again when they're right.",
-                action: "Withdraw it",
-              }))) return;
-              startTransition(async () => {
-                const res = await withdrawExpenseReport(r.id);
-                if (res?.error) { toast({ message: res.error }); return; }
-                toast({ message: "Withdrawn - the expenses are back in your pool" });
-              });
-            }}>withdraw</button>
+            onClick={() => startTransition(async () => {
+              const res = await withdrawExpenseReport(r.id);
+              if (res?.error) { toast({ message: res.error }); return; }
+              toast({ message: "Back to draft - open it to edit" });
+            })}>withdraw</button>
         )}
         {side === "queue" && r.status === "submitted" && (
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -157,14 +157,25 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
           )}
           {/* Marking one paid should visibly MOVE the row, not vanish it -
               this is where it lands, so the click has a receipt on screen. */}
-          {queue.some((r) => r.status !== "submitted") && (
+          {queue.some((r) => r.status === "paid" || r.status === "returned") && (
             <>
               <div className="eyebrow" style={{ marginTop: 12 }}>Recently settled</div>
-              {queue.filter((r) => r.status !== "submitted").slice(0, 5).map((r) => reportCard(r, "queue"))}
+              {queue.filter((r) => r.status === "paid" || r.status === "returned").slice(0, 5).map((r) => reportCard(r, "queue"))}
             </>
           )}
         </Panel>
       )}
+
+      <Panel title="Start here" hint="A report is the folder a trip's receipts go into. Open one, scan receipts into it as they happen, submit when the pocket is empty.">
+        <button className="btn primary" disabled={pending}
+          onClick={() => startTransition(async () => {
+            const res = await createExpenseReport();
+            if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
+            router.push(`/expenses/${res.id}`);
+          })}>
+          {pending ? "Opening..." : "+ New expense report"}
+        </button>
+      </Panel>
 
       <Panel title="My unclaimed expenses" count={pool.length || undefined}
         hint="Everything of yours not yet on a report. Tick what this claim should cover and submit it.">
