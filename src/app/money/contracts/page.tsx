@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { asc, desc, eq } from "drizzle-orm";
+import { inArray, asc, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { agreements, instruments, orgs, rateCards } from "@/db/schema";
+import { attachments, agreements, instruments, orgs, rateCards } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
-import { shopToday } from "@/lib/shopday";
+import { shopDay, shopToday } from "@/lib/shopday";
 import { standing } from "@/lib/agreements";
 import { usageForAll } from "@/lib/agreementUsage";
 import { resolveRate } from "@/lib/rates";
@@ -78,6 +78,20 @@ export default async function ContractsPage({ searchParams }: {
   // Standing billing reads the raw rows, not the shaped ones: it needs the
   // schedule columns, and it only ever concerns contracts still in force.
   const inForceIds = new Set(inForce.map((a) => a.id));
+  // The signed papers, so an attach performed here is VISIBLE here.
+  const papers = rows.length
+    ? (await db.select({
+        id: attachments.id, agreementId: attachments.agreementId,
+        fileName: attachments.fileName, kind: attachments.kind, size: attachments.size,
+        uploadedBy: attachments.uploadedBy, createdAt: attachments.createdAt,
+      }).from(attachments)
+        .where(inArray(attachments.agreementId, rows.map((r) => r.id)))
+        .orderBy(asc(attachments.createdAt))
+      ).map((a) => ({
+        id: a.id, agreementId: a.agreementId!, fileName: a.fileName, kind: a.kind,
+        size: a.size, uploadedBy: a.uploadedBy, when: shopDay(a.createdAt),
+      }))
+    : [];
   const retainers = rows.filter((r) => inForceIds.has(r.id)).map((r) => ({
     id: r.id, orgId: r.orgId, orgName: orgName.get(r.orgId) ?? "an organization",
     number: r.number, title: r.title, status: r.status,
@@ -147,7 +161,7 @@ export default async function ContractsPage({ searchParams }: {
       <RetainerCard rows={retainers} today={today} canEdit />
 
       <AgreementsPanel
-        rows={shown} today={today} systems={systems} orgs={clientOrgs}
+        rows={shown} today={today} systems={systems} orgs={clientOrgs} papers={papers}
         canEdit extra={extra}
         title={f === "ended" ? "Ended" : f === "all" ? "All contracts" : "In force"}
       />

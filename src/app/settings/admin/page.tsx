@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
-import { instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
+import { orgSites, instruments, orgs, systemShares, assets, accessRequests, engagementRecords } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
@@ -30,6 +30,10 @@ export default async function AdminSettingsPage() {
   if (user.role !== "owner") redirect("/");
   const isPlatform = isPlatformStaff(tenantViewer(user));
 
+  const siteRows = await db.select({
+    name: orgSites.name, address: orgSites.address, orgName: orgs.name,
+  }).from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
+    .where(eq(orgSites.archived, false)).orderBy(asc(orgs.name), asc(orgSites.name));
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
     db.select().from(instruments).orderBy(asc(instruments.archived), asc(instruments.externalId)),
     visibleOrgs(user),
@@ -63,7 +67,12 @@ export default async function AdminSettingsPage() {
       <PageHead title="People & ownership"
         sub="People, access and ownership." />
 
-      <HouseMembersPanel members={houseRows} myEmail={user.email} />
+      <HouseMembersPanel members={houseRows} myEmail={user.email}
+        sites={siteRows.map((x) => {
+          const site = x.name || x.address.split("\n")[0] || "site";
+          // Some shops name sites with the client already in them.
+          return { label: site.startsWith(x.orgName) ? site : `${x.orgName} - ${site}`, address: x.address };
+        })} />
 
       {requestRows.length > 0 && (
         <Panel title="Waiting on a decision" count={requestRows.length}>

@@ -9001,9 +9001,24 @@ export async function createOperator(
 }
 
 /** Add somebody to the house, or change what they already are. */
+/**
+ * Add or update one of our own people - now with the whole profile in one
+ * motion, and optionally the invitation too.
+ *
+ * homeAddress: the engineer's point zero for the stipend radius and routed
+ * miles. Historically self-set only; the hiring flow is the exception the
+ * rule always meant to allow - the owner filling in the profile BEFORE the
+ * person's first sign-in is setting up their account, not typing someone
+ * else's home behind their back, and the engineer can change it on their own
+ * settings page any time.
+ *
+ * invite: sends the email that tells them they're in and where the door is.
+ * Separate flag because re-saving a role must never re-spam an inbox.
+ */
 export async function setHouseMember(
   email: string, role: string, name?: string,
-): Promise<{ error?: string }> {
+  extra: { homeAddress?: string; invite?: boolean } = {},
+): Promise<{ error?: string; invited?: boolean; homeLabel?: string }> {
   const u = await requireOwner();
   const want = role === "owner" ? "owner" : "staff";
   const e = email.trim().toLowerCase();
@@ -9033,10 +9048,47 @@ export async function setHouseMember(
       field: "role", newValue: want,
     });
   }
+  // The profile's other half: where their trips start from.
+  let homeLabel: string | undefined;
+  const home = (extra.homeAddress ?? "").trim().slice(0, 300);
+  if (home) {
+    const hit = await geocode(home).catch(() => null);
+    await db.update(houseMembers).set({
+      homeAddress: home, homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null,
+    }).where(eq(houseMembers.email, e));
+    await db.delete(driveCache).where(eq(driveCache.memberEmail, e));
+    homeLabel = hit?.label;
+  }
+
+  // The invitation: they are IN either way - sign-in is by email code, so
+  // access exists the moment the row does. The email is how they find out.
+  let invited = false;
+  if (extra.invite) {
+    const brand = await getBrand();
+    const url = appUrl();
+    const who = brand.operatorName || brand.name;
+    try {
+      await sendEmail([e],
+        `You're set up on ${who}'s service portal`,
+        `<p>${label || e},</p>
+         <p>${u.name || u.email} added you to <b>${who}</b>'s service portal as ${want === "owner" ? "an owner" : "staff"}.</p>
+         <p>Sign in at <a href="${url}">${url}</a> with this email address - a code arrives by mail; there is no password.</p>
+         ${home ? `<p>Your home base is set to <b>${home}</b> - trips and the expense stipend radius measure from it. You can change it under your own settings.</p>` : ""}`,
+        { from: reportFrom(), replyTo: replyToAddress() });
+      invited = true;
+      await audit({
+        actor: u.email, entityType: "house", entityId: e,
+        action: `sent ${e} their invitation`,
+      });
+    } catch {
+      // The account stands; only the mail failed. Say so instead of undoing.
+    }
+  }
+
   // Their next session read picks the new role up (src/auth.ts) - no redeploy,
   // and no need for them to sign out and back in.
   revHouse();
-  return {};
+  return { invited: extra.invite ? invited : undefined, homeLabel };
 }
 
 /**

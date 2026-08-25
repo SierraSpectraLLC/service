@@ -1,13 +1,13 @@
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { agreements, instruments, orgs } from "@/db/schema";
+import { attachments, agreements, instruments, orgs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { needsAttention } from "@/lib/agreements";
 import { usageForAll } from "@/lib/agreementUsage";
-import { shopToday } from "@/lib/shopday";
+import { shopDay, shopToday } from "@/lib/shopday";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
@@ -43,6 +43,22 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
     }).from(instruments).orderBy(asc(instruments.externalId)),
   ]);
   const name = new Map(orgRows.map((o) => [o.id, o.name]));
+  // The signed papers filed against these agreements. Without this the attach
+  // flow WORKED and showed nothing - the document went to the database and
+  // the page had nowhere to put it, which reads exactly like a failure.
+  const papers = rows.length
+    ? (await db.select({
+        id: attachments.id, agreementId: attachments.agreementId,
+        fileName: attachments.fileName, kind: attachments.kind, size: attachments.size,
+        uploadedBy: attachments.uploadedBy, createdAt: attachments.createdAt,
+      }).from(attachments)
+        .where(inArray(attachments.agreementId, rows.map((r) => r.id)))
+        .orderBy(asc(attachments.createdAt))
+      ).map((a) => ({
+        id: a.id, agreementId: a.agreementId!, fileName: a.fileName, kind: a.kind,
+        size: a.size, uploadedBy: a.uploadedBy, when: shopDay(a.createdAt),
+      }))
+    : [];
   const systems = systemRows
     .filter((r) => r.ownerOrgId !== null)
     .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
@@ -116,13 +132,13 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
       />
 
       {chase.length > 0 && (
-        <AgreementsPanel rows={chase} today={today} systems={systems}
+        <AgreementsPanel rows={chase} today={today} systems={systems} papers={papers}
           orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
           title={`Needs attention · ${chase.length}`} />
       )}
 
       {(rest.length > 0 || shown.length === 0) && (
-        <AgreementsPanel rows={rest} today={today} systems={systems}
+        <AgreementsPanel rows={rest} today={today} systems={systems} papers={papers}
           orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
           title={chase.length ? "Everything else" : "In force"} />
       )}

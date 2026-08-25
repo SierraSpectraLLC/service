@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { revokeHouseMember, setHouseMember } from "@/app/actions";
-import Dialog from "@/components/ui/Dialog";
+import Dialog, { DialogStatus } from "@/components/ui/Dialog";
+import AddressField from "@/components/AddressField";
 import { toast } from "@/components/ui/Toast";
 
 export type HouseRow = {
@@ -22,12 +23,14 @@ const ROLE = {
  * this is the superuser list, and it's why every rule here is also enforced
  * server-side rather than just greyed out.
  */
-export default function HouseMembersPanel({ members, myEmail }: {
+export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
   members: HouseRow[];
   myEmail: string;
+  /** Client labs, offered as a home base for an engineer stationed on-site. */
+  sites?: { label: string; address: string }[];
 }) {
   const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState({ email: "", name: "", role: "staff" });
+  const [draft, setDraft] = useState({ email: "", first: "", last: "", role: "staff", homeAddress: "" });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -57,40 +60,87 @@ export default function HouseMembersPanel({ members, myEmail }: {
         take effect on their next page load - no redeploy, no signing out.
       </div>
 
-      {adding && (
-        <Dialog open onClose={() => setAdding(false)} title="Add a house member"
-          context="Exact address only - no @domain wildcards. They sign in with a magic link; no password to share."
+      {adding && (() => {
+        const fullName = [draft.first.trim(), draft.last.trim()].filter(Boolean).join(" ");
+        const save = (invite: boolean) => run(
+          async () => {
+            const res = await setHouseMember(draft.email, draft.role, fullName,
+              { homeAddress: draft.homeAddress, invite });
+            if (!res?.error) {
+              toast({
+                message: invite
+                  ? res.invited
+                    ? `Added ${fullName || draft.email.trim()} and sent their invitation`
+                    : `Added ${fullName || draft.email.trim()} - the invitation email did not go out; they can still sign in`
+                  : `Added ${fullName || draft.email.trim()}`,
+              });
+            }
+            return res;
+          },
+          () => { setAdding(false); setDraft({ email: "", first: "", last: "", role: "staff", homeAddress: "" }); },
+        );
+        return (
+        <Dialog open onClose={() => setAdding(false)} title="Add a person" size="md"
+          context="Fill in their profile now; they sign in by email code - no password to share."
           footer={
             <>
-              <span className="dialog-status" />
+              <DialogStatus error={error} problem={!draft.email.trim() ? "their email address" : null} />
               <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending || !draft.email.trim()}
-                onClick={() => run(
-                  () => setHouseMember(draft.email, draft.role, draft.name),
-                  () => { setAdding(false); setDraft({ email: "", name: "", role: "staff" }); toast({ message: `Added ${draft.email.trim()}` }); },
-                )}>{pending ? "Saving..." : "Add member"}</button>
+              <button className="btn" disabled={pending || !draft.email.trim()} onClick={() => save(false)}>
+                Add quietly
+              </button>
+              <button className="btn accent" disabled={pending || !draft.email.trim()} onClick={() => save(true)}>
+                {pending ? "Saving..." : "Add & send invite"}
+              </button>
             </>
           }>
+          <div className="dialog-section">Who they are</div>
           <div className="pf3" style={{ marginBottom: 8 }}>
+            <div>
+              <label>First name</label>
+              <input value={draft.first} onChange={(e) => setDraft({ ...draft, first: e.target.value })} placeholder="Bill" autoFocus />
+            </div>
+            <div>
+              <label>Last name</label>
+              <input value={draft.last} onChange={(e) => setDraft({ ...draft, last: e.target.value })} placeholder="Harner" />
+            </div>
             <div>
               <label>Email *</label>
               <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })}
                 placeholder="wjharner@example.com" inputMode="email" />
             </div>
-            <div>
-              <label>Name</label>
-              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Bill Harner" />
-            </div>
-            <div>
-              <label>Role</label>
-              <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })}>
-                <option value="staff">Staff</option>
-                <option value="owner">Owner</option>
+          </div>
+          <div className="dialog-section">What they may do</div>
+          <div style={{ marginBottom: 8 }}>
+            <label>Privileges</label>
+            <select value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} style={{ width: "auto" }}>
+              <option value="staff">Staff - every system, every job</option>
+              <option value="owner">Owner - staff plus settings, money and deletions</option>
+            </select>
+          </div>
+          <div className="dialog-section">Where their trips start</div>
+          <label>Home base</label>
+          {/* The point zero for the stipend radius and routed mileage. An
+              address of their own, or a client lab for somebody stationed
+              on-site - and theirs to change later on their own settings. */}
+          <AddressField value={draft.homeAddress} ariaLabel="Home base address"
+            onChange={(homeAddress) => setDraft({ ...draft, homeAddress })}
+            placeholder="Street address - autocompletes when maps are configured" />
+          {sites.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <select value="" aria-label="Use a client site"
+                onChange={(e) => { if (e.target.value) setDraft({ ...draft, homeAddress: e.target.value }); }}
+                className="t-small" style={{ width: "auto" }}>
+                <option value="">...or use a client lab&apos;s address</option>
+                {sites.filter((x) => x.address.trim()).map((x) => (
+                  <option key={x.label} value={x.address}>{x.label}</option>
+                ))}
               </select>
             </div>
-          </div>
+          )}
         </Dialog>
-      )}
+        );
+      })()}
 
       {members.map((m) => (
         <div key={m.email} style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0", borderTop: "1px solid var(--line)", flexWrap: "wrap" }}>

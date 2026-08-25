@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { settingsEntryFor, visibleSettingsGroups } from "@/lib/settingsNav";
 
@@ -17,6 +18,12 @@ export default function SettingsNav({ isOwner, isPlatform }: {
   const path = usePathname();
   const groups = visibleSettingsGroups(isOwner, isPlatform);
   const current = settingsEntryFor(path);
+  // The drilldown is a <details> that survives client navigation, so without
+  // this the open menu sat on top of the page you had just picked and only
+  // fell shut on some later render. Navigation IS the choice being made -
+  // the menu's job is done the moment the path changes.
+  const mobnav = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (mobnav.current) mobnav.current.open = false; }, [path]);
 
   const list = groups.map((g) => (
     <span key={g.name}>
@@ -34,7 +41,7 @@ export default function SettingsNav({ isOwner, isPlatform }: {
   return (
     <>
       <aside className="settings-side" aria-label="Settings sections">{list}</aside>
-      <details className="settings-mobnav">
+      <details className="settings-mobnav" ref={mobnav}>
         <summary>
           Settings{current ? ` · ${current.entry.label}` : ""}
           <span aria-hidden="true">▾</span>

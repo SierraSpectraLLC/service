@@ -432,11 +432,13 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                         const why = await attachPaper(r.id, [], [f]);
                         if (why) { setError(why); return; }
                         setFiling(null);
+                        toast({ message: `Filed ${f.fileName} against ${r.number || r.title || "the agreement"}` });
                       })}
                       onFiles={(files) => startTransition(async () => {
                         const why = await attachPaper(r.id, files, []);
                         if (why) { setError(why); return; }
                         setFiling(null);
+                        toast({ message: `Filed ${files.length === 1 ? files[0].name : `${files.length} documents`} against ${r.number || r.title || "the agreement"}` });
                       })} />
                   )}
                 </div>
