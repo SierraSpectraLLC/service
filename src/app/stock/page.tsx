@@ -93,7 +93,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
           <>
             {/* Reachable for org editors too, who don't get the staff nav menu. */}
             {visible.some((v) => v.acc.issue) && (
-              <Link href="/purchasing" className="btn sm" style={{ textDecoration: "none" }}>Purchase orders</Link>
+              <Link href="/money/purchasing" className="btn sm" style={{ textDecoration: "none" }}>Purchase orders</Link>
             )}
             {(isHouse(user.role) || (user.orgId !== null && user.role === "client_editor")) && (
               <NewStockroomForm

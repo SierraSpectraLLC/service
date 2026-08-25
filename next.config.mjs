@@ -20,6 +20,21 @@ const nextConfig = {
     NEXT_PUBLIC_BUILD_SHA: (process.env.VERCEL_GIT_COMMIT_SHA || "dev").slice(0, 7),
     NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
   },
+  // Purchasing, reimbursements and payroll moved under /money when the five
+  // money nav entries became one Financial section. Bookmarks and emailed
+  // links exist - a digest sent last month links straight at an expense
+  // report - so the old paths are permanent redirects rather than 404s.
+  // Sub-paths come along: /expenses/12 is somebody's report.
+  async redirects() {
+    return [
+      { source: "/purchasing", destination: "/money/purchasing", permanent: true },
+      { source: "/purchasing/:path*", destination: "/money/purchasing/:path*", permanent: true },
+      { source: "/expenses", destination: "/money/reimbursements", permanent: true },
+      { source: "/expenses/:path*", destination: "/money/reimbursements/:path*", permanent: true },
+      { source: "/payroll", destination: "/money/payroll", permanent: true },
+      { source: "/payroll/:path*", destination: "/money/payroll/:path*", permanent: true },
+    ];
+  },
 };
 
 export default function config(phase) {

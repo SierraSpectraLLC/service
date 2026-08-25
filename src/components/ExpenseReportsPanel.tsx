@@ -78,7 +78,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
     return (
       <div key={r.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
         <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-          <Link href={`/expenses/${r.id}`} className="btn link" style={{ order: 99, marginLeft: "auto" }}>
+          <Link href={`/money/reimbursements/${r.id}`} className="btn link" style={{ order: 99, marginLeft: "auto" }}>
             open
           </Link>
           {side === "queue" && <span className="t-body" style={{ fontWeight: 700 }}>{r.person}</span>}
@@ -171,7 +171,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
           onClick={() => startTransition(async () => {
             const res = await createExpenseReport();
             if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
-            router.push(`/expenses/${res.id}`);
+            router.push(`/money/reimbursements/${res.id}`);
           })}>
           {pending ? "Opening..." : "+ New expense report"}
         </button>

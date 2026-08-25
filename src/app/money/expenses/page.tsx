@@ -65,11 +65,11 @@ export default async function OverheadExpensesPage({ searchParams }: {
       path="/money/expenses"
       title="Overhead"
       sub={<>What no job caused: running costs, by month. Job expenses live on their work orders;
-        engineers claim their own at <Link href="/expenses">Reimbursements</Link>.</>}
+        engineers claim their own at <Link href="/money/reimbursements">Reimbursements</Link>.</>}
     >
       <OverheadPanel today={shopToday()} me={user.name}
         payrollByMonth={payByMonth}
-        payrollHref={seesPayroll ? "/payroll" : ""}
+        payrollHref={seesPayroll ? "/money/payroll" : ""}
         categories={categoryRows.map((c) => c.name)}
         people={people.map((p) => ({ name: p.name, org: p.org }))}
         rows={rows.map((r) => ({

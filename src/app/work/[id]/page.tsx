@@ -549,7 +549,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
                 display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
                 padding: "8px 4px", borderTop: "1px solid var(--line)",
               }}>
-                <Link href={`/purchasing/${p.id}`} className="mono t-small"
+                <Link href={`/money/purchasing/${p.id}`} className="mono t-small"
                   style={{ fontWeight: 700, color: "var(--navy)", textDecoration: "none" }}>
                   {p.number}
                 </Link>

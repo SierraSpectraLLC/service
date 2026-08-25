@@ -177,7 +177,7 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
                 }))) return;
                 const res = await deleteExpenseReport(report.id);
                 if (res?.error) { toast({ message: res.error }); return; }
-                router.push("/expenses");
+                router.push("/money/reimbursements");
               }}>
               Delete
             </button>

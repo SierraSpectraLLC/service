@@ -11,12 +11,12 @@ import { FINANCE_LABEL, type FinanceAmounts, type FinanceKey, type Period } from
  * page's own work in the pane. Somebody who learns Invoices gets Purchasing
  * for free, which is the only reason to have a kit.
  *
- * The rail is optional and that is not a convenience. `/purchasing` and
- * `/payroll` are reachable by people who are not staff - a client contact sees
- * their own orders, and one with the payroll flag reads their own register.
- * Handing them a rail into Collections and Job costing would be handing them
- * nine links that redirect to the front page. They get the page, not the
- * section.
+ * The rail is optional and that is not a convenience. `/money/purchasing` and
+ * `/money/payroll` are reachable by people who are not staff - a client contact
+ * sees their own orders, and one with the payroll flag reads their own
+ * register. Handing them a rail into Collections and Job costing would be
+ * handing them nine links that redirect to the front page. They get the page,
+ * not the section.
  */
 export default function FinanceShell({
   rail, period, path, title, sub, actions, banner, children,

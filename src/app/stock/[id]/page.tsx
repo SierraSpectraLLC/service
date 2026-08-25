@@ -169,7 +169,7 @@ export default async function StockroomPage({ params, searchParams }: {
         meta={[room.keeper, room.location, room.note].filter(Boolean).join(" · ")}
         stats={heroStats}
         actions={acc.issue ? (
-          <Link href="/purchasing" className="btn sm" style={{ textDecoration: "none" }}>
+          <Link href="/money/purchasing" className="btn sm" style={{ textDecoration: "none" }}>
             Purchase orders
           </Link>
         ) : undefined}

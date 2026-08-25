@@ -295,7 +295,7 @@ export default function PoPanel({ po, lines, canManage, canDelete = false, maker
                 action: "Delete order", cancel: "Keep it", tone: "bad",
               });
               if (!why) return;
-              run(() => deletePurchaseOrder(po.id, why), () => { window.location.href = "/purchasing"; });
+              run(() => deletePurchaseOrder(po.id, why), () => { window.location.href = "/money/purchasing"; });
             }}>Delete this order</button>
         )}
         {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}

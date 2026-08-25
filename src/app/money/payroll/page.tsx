@@ -159,7 +159,7 @@ export default async function PayrollPage({ searchParams }: {
         ? { active: "payroll", amounts: fin.figures.amounts, seesPayroll: fin.seesPayroll }
         : null}
       period={fin?.period ?? "month"}
-      path="/payroll"
+      path="/money/payroll"
       title="Payroll"
       sub={whole
         ? <>What {org?.name ?? "this organization"} pays its people, and what that makes a month cost.

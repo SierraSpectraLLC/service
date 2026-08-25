@@ -34,7 +34,7 @@ export default function NewPoButton({ rooms, vendors }: {
       });
       if (res.error || !res.id) { setError(res.error ?? "That didn't save"); return; }
       toast({ message: `Drafted an order on ${vendor.trim()}` });
-      router.push(`/purchasing/${res.id}`);
+      router.push(`/money/purchasing/${res.id}`);
     });
   };
 

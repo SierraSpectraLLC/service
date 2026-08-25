@@ -21,7 +21,7 @@ export default async function StorePage() {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   // Staff order through Purchasing; this door is the client's.
-  if (isStaffRole(user.role) && user.orgId === null) redirect("/purchasing");
+  if (isStaffRole(user.role) && user.orgId === null) redirect("/money/purchasing");
   if (user.orgId === null) redirect("/");
   const [org] = await db.select().from(orgs).where(eq(orgs.id, user.orgId));
   if (!org || org.kind !== "client") redirect("/");

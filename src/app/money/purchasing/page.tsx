@@ -98,7 +98,7 @@ export default async function PurchasingPage({ searchParams }: {
     const p = new URLSearchParams();
     if (needle) p.set("q", needle);
     if (s && s !== status) p.set("status", s);
-    return `/purchasing${p.size ? `?${p}` : ""}`;
+    return `/money/purchasing${p.size ? `?${p}` : ""}`;
   };
 
   const isOwner = user.role === "owner";
@@ -109,7 +109,7 @@ export default async function PurchasingPage({ searchParams }: {
     const showCosts = canSeeCosts(user, p.stockroomId === null ? null : roomOrg.get(p.stockroomId) ?? null, p.tenantOrgId);
     return {
       key: p.id,
-      href: `/purchasing/${p.id}`,
+      href: `/money/purchasing/${p.id}`,
       group: isOpen(p) ? "Open" : "Closed",
       cells: {
         dot: <Dot tone={PO_TONE[p.status] ?? "neutral"} />,
@@ -141,7 +141,7 @@ export default async function PurchasingPage({ searchParams }: {
     <FinanceShell
       rail={fin && { active: "purchasing", amounts: fin.figures.amounts, seesPayroll: fin.seesPayroll }}
       period={fin?.period ?? "month"}
-      path="/purchasing"
+      path="/money/purchasing"
       title="Purchasing"
       sub="Vendor orders and committed spend, whether or not it has been received."
       actions={<>
@@ -152,7 +152,7 @@ export default async function PurchasingPage({ searchParams }: {
     >
       <Toolbar
         search={
-          <form action="/purchasing">
+          <form action="/money/purchasing">
             {status && <input type="hidden" name="status" value={status} />}
             <input name="q" defaultValue={q} placeholder="PO number, vendor or room" aria-label="Search orders" />
           </form>

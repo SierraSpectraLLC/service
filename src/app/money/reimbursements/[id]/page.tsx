@@ -54,7 +54,7 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
   return (
     <div className="container">
       <PageHead
-        crumb={<><Link href="/expenses">Expenses</Link> › <b>Report</b></>}
+        crumb={<><Link href="/money">Financial</Link> › <Link href="/money/reimbursements">Reimbursements</Link> › <b>Report</b></>}
         title={`${report.person} - ${reportSpan(rows) || "expense report"}`}
         sub={`${REPORT_LABEL[report.status] ?? report.status}${total ? ` · ${formatCents(total)}` : ""}${report.status === "paid" ? ` · paid ${report.paidOn}${report.paidRef ? ` (${report.paidRef})` : ""}` : ""}`}
       />

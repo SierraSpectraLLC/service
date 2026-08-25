@@ -76,7 +76,7 @@ export default async function ExpensesPage({ searchParams }: {
     <FinanceShell
       rail={{ active: "reimbursements", amounts: fig.amounts, seesPayroll }}
       period={period}
-      path="/expenses"
+      path="/money/reimbursements"
       title="Reimbursements"
       sub={<>
         Out-of-pocket spend, attached to the job it was spent on: log what you have fronted,

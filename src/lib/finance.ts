@@ -93,10 +93,10 @@ const ENTRIES: (FinanceEntry & { group: string })[] = [
   { group: "Money in", key: "collections", label: "Collections", href: "/money/collections", tone: "bad" },
   { group: "Money in", key: "contracts", label: "Contracts", href: "/money/contracts" },
 
-  { group: "Money out", key: "purchasing", label: "Purchasing", href: "/purchasing" },
-  { group: "Money out", key: "reimbursements", label: "Reimbursements", href: "/expenses", tone: "warn" },
+  { group: "Money out", key: "purchasing", label: "Purchasing", href: "/money/purchasing" },
+  { group: "Money out", key: "reimbursements", label: "Reimbursements", href: "/money/reimbursements", tone: "warn" },
   { group: "Money out", key: "overhead", label: "Overhead", href: "/money/expenses" },
-  { group: "Money out", key: "payroll", label: "Payroll", href: "/payroll" },
+  { group: "Money out", key: "payroll", label: "Payroll", href: "/money/payroll" },
 
   { group: "Analysis", key: "costing", label: "Job costing", href: "/money/costing" },
 ];

@@ -265,7 +265,7 @@ export default function DevUiGallery() {
             groups={[
               { label: "Operations", items: [
                 { href: "/eod", label: "EOD update" }, { href: "/maintenance", label: "Maintenance" },
-                { href: "/purchasing", label: "Purchasing" }, { href: "/remote", label: "Remote support" },
+                { href: "/money/purchasing", label: "Purchasing" }, { href: "/remote", label: "Remote support" },
                 { href: "/metrics", label: "Metrics" }, { href: "/archive", label: "Archived" },
               ] },
               { label: "Library", items: [

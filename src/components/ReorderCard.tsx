@@ -59,7 +59,7 @@ export default function ReorderCard({ stockroomId, groups, mode = "cheapest", ur
       });
       if (res?.error) { setError(res.error); return; }
       toast({ message: `Raised a PO on ${g.vendor || "TBD"} with ${lines.length} line${lines.length === 1 ? "" : "s"}` });
-      if (res.id) router.push(`/purchasing/${res.id}`);
+      if (res.id) router.push(`/money/purchasing/${res.id}`);
     });
   };
 

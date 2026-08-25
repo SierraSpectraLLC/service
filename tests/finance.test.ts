@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import {
   FINANCE_KEYS, FINANCE_LABEL, PAST_DUE_SERIOUS, PERIODS,
   daysBetween, financeRail, isPeriod, periodDays, periodFor, periodSpan, periodStart,
@@ -106,15 +106,14 @@ describe("the rail", () => {
     }
   });
 
-  it("points at the paths these pages live at today", () => {
+  it("points every room at /money, where they all now live", () => {
     const byKey = new Map(financeRail({ seesPayroll: true })
       .flatMap((g) => g.entries).map((e) => [e.key, e.href]));
-    // PR 1 moves no routes. If these ever change, the redirects in PR 2 have
-    // to land in the same commit.
-    expect(byKey.get("purchasing")).toBe("/purchasing");
-    expect(byKey.get("reimbursements")).toBe("/expenses");
-    expect(byKey.get("payroll")).toBe("/payroll");
+    expect(byKey.get("purchasing")).toBe("/money/purchasing");
+    expect(byKey.get("reimbursements")).toBe("/money/reimbursements");
+    expect(byKey.get("payroll")).toBe("/money/payroll");
     expect(byKey.get("overhead")).toBe("/money/expenses");
+    for (const href of byKey.values()) expect(href.startsWith("/money")).toBe(true);
   });
 
   it("names every room exactly once", () => {
@@ -200,8 +199,8 @@ describe("the section is a rail, not a permission boundary", () => {
     }
   });
 
-  it("leaves /payroll's own rule exactly as it was", () => {
-    const src = read("src/app/payroll/page.tsx");
+  it("leaves payroll's own rule exactly as it was through the move", () => {
+    const src = read("src/app/money/payroll/page.tsx");
     // Tenant-gated and row-filtered, NOT staff-gated: this is the rule the
     // whole section was shaped around.
     expect(src).toMatch(/maySeePayroll\(viewer, mine\)/);
@@ -210,7 +209,7 @@ describe("the section is a rail, not a permission boundary", () => {
   });
 
   it("gives a non-staff reader no rail on the two pages they can reach", () => {
-    for (const p of ["src/app/purchasing/page.tsx", "src/app/payroll/page.tsx"]) {
+    for (const p of ["src/app/money/purchasing/page.tsx", "src/app/money/payroll/page.tsx"]) {
       // The figures are not even computed for them - a number they may not
       // have never enters the request.
       expect(read(p), p).toMatch(/isStaffRole\(user\.role\)\s*\n?\s*\?\s*await financeContext|isStaffRole\(user\.role\) \? await financeContext/);
@@ -222,7 +221,7 @@ describe("the section is a rail, not a permission boundary", () => {
     // row. That is a pay stub, not a section room: a rail whose nine other
     // links they can follow but whose tenth does not exist, with nothing
     // highlighted, is worse than no rail.
-    const src = read("src/app/payroll/page.tsx");
+    const src = read("src/app/money/payroll/page.tsx");
     expect(src).toMatch(/const inSection = fin\?\.seesPayroll === true;/);
     expect(src).toMatch(/rail=\{inSection && fin/);
   });
@@ -241,11 +240,11 @@ describe("the section is a rail, not a permission boundary", () => {
       "src/app/money/page.tsx", "src/app/money/quotes/page.tsx",
       "src/app/money/invoices/page.tsx", "src/app/money/collections/page.tsx",
       "src/app/money/contracts/page.tsx", "src/app/money/costing/page.tsx",
-      "src/app/money/expenses/page.tsx", "src/app/expenses/page.tsx",
-      "src/app/purchasing/page.tsx", "src/app/payroll/page.tsx",
+      "src/app/money/expenses/page.tsx", "src/app/money/reimbursements/page.tsx",
+      "src/app/money/purchasing/page.tsx", "src/app/money/payroll/page.tsx",
     ];
     for (const p of pages) expect(read(p), p).toMatch(/financeContext\(user,/);
-    for (const p of pages.filter((x) => x !== "src/app/payroll/page.tsx")) {
+    for (const p of pages.filter((x) => x !== "src/app/money/payroll/page.tsx")) {
       expect(read(p), p).not.toMatch(/maySeePayroll/);
     }
   });
@@ -255,8 +254,8 @@ describe("the section is a rail, not a permission boundary", () => {
       "src/app/money/page.tsx", "src/app/money/quotes/page.tsx",
       "src/app/money/invoices/page.tsx", "src/app/money/collections/page.tsx",
       "src/app/money/contracts/page.tsx", "src/app/money/costing/page.tsx",
-      "src/app/money/expenses/page.tsx", "src/app/expenses/page.tsx",
-      "src/app/purchasing/page.tsx", "src/app/payroll/page.tsx",
+      "src/app/money/expenses/page.tsx", "src/app/money/reimbursements/page.tsx",
+      "src/app/money/purchasing/page.tsx", "src/app/money/payroll/page.tsx",
     ]) {
       expect(read(p), p).toMatch(/<FinanceShell/);
     }
@@ -264,3 +263,70 @@ describe("the section is a rail, not a permission boundary", () => {
     expect(existsSync("src/components/MoneyTabs.tsx")).toBe(false);
   });
 });
+
+describe("the route move", () => {
+  const read = (p: string) => readFileSync(p, "utf8");
+  const OLD = ["/purchasing", "/expenses", "/payroll"] as const;
+
+  it("leaves no source reference to an old path", () => {
+    // A missed revalidatePath does NOT error: the mutation succeeds and the
+    // page quietly serves stale data. That is why this is a scan and not a
+    // memory of having checked.
+    const files = walk("src");
+    const misses: string[] = [];
+    for (const f of files) {
+      for (const line of read(f).split("\n")) {
+        for (const old of OLD) {
+          // Quoted or template-interpolated, but not as a prefix of the new
+          // path and not inside a next.config redirect.
+          const re = new RegExp(`["\`]${old}(?![\\w-])`);
+          if (re.test(line) && !line.includes("/money" + old)) misses.push(`${f}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(misses).toEqual([]);
+  });
+
+  it("converts every revalidatePath, including the interpolated ones", () => {
+    const src = read("src/app/actions.ts");
+    expect(src).not.toMatch(/revalidatePath\(["`]\/(purchasing|expenses|payroll)/);
+    // And the new ones are actually there, so this cannot pass by deletion.
+    expect((src.match(/revalidatePath\(["`]\/money\/purchasing/g) ?? [])).toHaveLength(5);
+    expect((src.match(/revalidatePath\(["`]\/money\/reimbursements/g) ?? [])).toHaveLength(17);
+    expect((src.match(/revalidatePath\(["`]\/money\/payroll/g) ?? [])).toHaveLength(4);
+  });
+
+  it("redirects every old path permanently, sub-paths included", () => {
+    const cfg = read("next.config.mjs");
+    for (const [from, to] of [
+      ["/purchasing", "/money/purchasing"],
+      ["/expenses", "/money/reimbursements"],
+      ["/payroll", "/money/payroll"],
+    ]) {
+      expect(cfg).toContain(`source: "${from}", destination: "${to}", permanent: true`);
+      expect(cfg).toContain(`source: "${from}/:path*", destination: "${to}/:path*", permanent: true`);
+    }
+  });
+
+  it("put the pages where the rail says they are", () => {
+    for (const p of [
+      "src/app/money/purchasing/page.tsx", "src/app/money/purchasing/[id]/page.tsx",
+      "src/app/money/reimbursements/page.tsx", "src/app/money/reimbursements/[id]/page.tsx",
+      "src/app/money/payroll/page.tsx",
+    ]) expect(existsSync(p), p).toBe(true);
+    for (const p of ["src/app/purchasing", "src/app/expenses", "src/app/payroll"]) {
+      expect(existsSync(p), p).toBe(false);
+    }
+  });
+});
+
+/** Every .ts/.tsx under a directory, so a scan cannot miss a new file. */
+function walk(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = `${dir}/${e.name}`;
+    if (e.isDirectory()) out.push(...walk(p));
+    else if (/\.tsx?$/.test(e.name)) out.push(p);
+  }
+  return out;
+}

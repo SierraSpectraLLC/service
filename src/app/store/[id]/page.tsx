@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 export default async function StorePartPage({ params }: { params: Promise<{ id: string }> }) {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
-  if (isStaffRole(user.role) && user.orgId === null) redirect("/purchasing");
+  if (isStaffRole(user.role) && user.orgId === null) redirect("/money/purchasing");
   if (user.orgId === null) redirect("/");
   const [org] = await db.select().from(orgs).where(eq(orgs.id, user.orgId));
   if (!org || org.kind !== "client") redirect("/");

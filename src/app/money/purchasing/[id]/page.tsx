@@ -98,7 +98,7 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
   return (
     <div className="container page">
       <div className="crumb">
-        Operations › <Link href="/purchasing" style={{ textDecoration: "none", color: "inherit" }}>Purchasing</Link> › <b>{po.number}</b>
+        <Link href="/money" className="plain">Financial</Link> › <Link href="/money/purchasing" className="plain">Purchasing</Link> › <b>{po.number}</b>
       </div>
 
       <RecordHero

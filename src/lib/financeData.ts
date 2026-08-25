@@ -237,7 +237,7 @@ export async function financeFigures(
         tone: "warn" as Decision["tone"],
         title: `${formatCents(reimbursementsCents)} of field spend is waiting on you`,
         detail: `${reportRows.length} report${reportRows.length === 1 ? "" : "s"} submitted and not paid out`,
-        href: "/expenses",
+        href: "/money/reimbursements",
       }] : []),
     ]),
   };

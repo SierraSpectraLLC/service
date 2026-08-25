@@ -7284,7 +7284,7 @@ export async function setClientSeesPayroll(id: number, canSee: boolean): Promise
   });
   revalidatePath("/settings");
   revalidatePath(`/settings/organizations/${row.orgId}`);
-  revalidatePath("/payroll");
+  revalidatePath("/money/payroll");
   return {};
 }
 
@@ -7386,7 +7386,7 @@ export async function addPayrollEntry(orgId: number, data: {
       ? `changed ${name}'s pay from ${effectiveOn}`
       : `put ${name} on the payroll from ${effectiveOn}`,
   });
-  revalidatePath("/payroll");
+  revalidatePath("/money/payroll");
   revalidatePath("/money/expenses");
   return { superseded };
 }
@@ -7406,7 +7406,7 @@ export async function endPayrollEntry(id: number, endsOn: string): Promise<{ err
     actor: u.email, entityType: "payroll", entityId: String(row.orgId), tenantOrgId: row.tenantOrgId,
     action: `ended ${row.name}'s pay on ${day}`,
   });
-  revalidatePath("/payroll");
+  revalidatePath("/money/payroll");
   revalidatePath("/money/expenses");
   return {};
 }
@@ -7430,7 +7430,7 @@ export async function deletePayrollEntry(id: number, reason: string): Promise<{ 
     action: `deleted ${row.name}'s pay row from ${row.effectiveOn} - reason: ${why}`,
     field: "reason", newValue: why,
   });
-  revalidatePath("/payroll");
+  revalidatePath("/money/payroll");
   revalidatePath("/money/expenses");
   return {};
 }
@@ -7918,8 +7918,8 @@ export async function logMyExpense(
     action: `logged ${formatCents(cents)} - ${description}`
       + (workOrderId !== null ? ` on a work order` : " (no job - overhead)"),
   });
-  revalidatePath("/expenses");
-  if (reportId !== null) revalidatePath(`/expenses/${reportId}`);
+  revalidatePath("/money/reimbursements");
+  if (reportId !== null) revalidatePath(`/money/reimbursements/${reportId}`);
   revalidatePath("/money/expenses");
   if (workOrderId !== null) revalidatePath(`/work/${workOrderId}`);
   return {};
@@ -7935,7 +7935,7 @@ export async function createExpenseReport(): Promise<{ error?: string; id?: numb
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
     action: "opened a draft expense report",
   });
-  revalidatePath("/expenses");
+  revalidatePath("/money/reimbursements");
   return { id: report.id };
 }
 
@@ -7956,8 +7956,8 @@ export async function attachPoolExpenses(
     return { error: "Some of those are not yours to claim, or are already on a report" };
   }
   await db.update(expenses).set({ reportId }).where(inArray(expenses.id, ids));
-  revalidatePath("/expenses");
-  revalidatePath(`/expenses/${reportId}`);
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${reportId}`);
   return {};
 }
 
@@ -7970,8 +7970,8 @@ export async function removeReportExpense(expenseId: number): Promise<{ error?: 
   if (!report || (report.person !== u.name && u.role !== "owner")) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - its rows are fixed` };
   await db.update(expenses).set({ reportId: null }).where(eq(expenses.id, expenseId));
-  revalidatePath("/expenses");
-  revalidatePath(`/expenses/${report.id}`);
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${report.id}`);
   return {};
 }
 
@@ -7995,8 +7995,8 @@ export async function submitDraftReport(reportId: number): Promise<{ error?: str
     action: `submitted ${rows.length} expense${rows.length === 1 ? "" : "s"} (${formatCents(reportTotalCents(rows))}) for reimbursement`
       + (report.status === "returned" ? " (resubmitted after a return)" : ""),
   });
-  revalidatePath("/expenses");
-  revalidatePath(`/expenses/${reportId}`);
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${reportId}`);
   return {};
 }
 
@@ -8013,7 +8013,7 @@ export async function deleteExpenseReport(id: number): Promise<{ error?: string 
     actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
     action: `deleted ${report.person}'s draft expense report - its expenses are back in the pool`,
   });
-  revalidatePath("/expenses");
+  revalidatePath("/money/reimbursements");
   return {};
 }
 
@@ -8048,7 +8048,7 @@ export async function submitExpenseReport(
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: t,
     action: `submitted ${ids.length} expense${ids.length === 1 ? "" : "s"} (${formatCents(total)}) for reimbursement`,
   });
-  revalidatePath("/expenses");
+  revalidatePath("/money/reimbursements");
   revalidatePath("/money/expenses");
   return { id: report.id };
 }
@@ -8065,8 +8065,8 @@ export async function withdrawExpenseReport(id: number): Promise<{ error?: strin
     actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
     action: `withdrew ${report.person}'s expense report back to draft`,
   });
-  revalidatePath("/expenses");
-  revalidatePath(`/expenses/${id}`);
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${id}`);
   return {};
 }
 
@@ -8097,8 +8097,8 @@ export async function payExpenseReport(
     action: `paid ${report.person} ${formatCents(total)} for ${rows.length} expense${rows.length === 1 ? "" : "s"}`
       + (data.reference.trim() ? ` (${data.reference.trim()})` : "") + `, ${day}`,
   });
-  revalidatePath("/expenses");
-  revalidatePath(`/expenses/${id}`);
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${id}`);
   return {};
 }
 
@@ -8119,8 +8119,8 @@ export async function returnExpenseReport(id: number, reason: string): Promise<{
     actor: u.email, entityType: "expense_report", entityId: id, tenantOrgId: report.tenantOrgId,
     action: `returned ${report.person}'s expense report - ${why}`,
   });
-  revalidatePath("/expenses");
-  revalidatePath(`/expenses/${id}`);
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${id}`);
   return {};
 }
 
@@ -10137,8 +10137,8 @@ export async function receiveStock(itemId: number, qty: number, note?: string): 
 // has the order; from then on the only writes are receipts against it.
 
 const revPo = (id?: number) => {
-  revalidatePath("/purchasing");
-  if (id) revalidatePath(`/purchasing/${id}`);
+  revalidatePath("/money/purchasing");
+  if (id) revalidatePath(`/money/purchasing/${id}`);
   revalidatePath("/stock");
 };
 
@@ -10506,7 +10506,7 @@ export async function orderNeededParts(
     });
     revWork(r);
   }
-  revalidatePath("/purchasing");
+  revalidatePath("/money/purchasing");
   // Whose money this order draws on: sum the committed cost per owning org and
   // ask each allowance whether it can absorb its share. Worst answer travels.
   let flag = "";
@@ -10576,7 +10576,7 @@ export async function sendPartsRequest(
       instrumentId: r.instrumentId, assetId: r.assetId,
     })),
   });
-  revalidatePath("/purchasing");
+  revalidatePath("/money/purchasing");
   return { sent: rows.length };
 }
 
@@ -10632,7 +10632,7 @@ export async function deletePurchaseOrder(id: number, reason: string): Promise<{
       + ` - reason: ${why}`,
     field: "reason", newValue: why,
   });
-  revalidatePath("/purchasing");
+  revalidatePath("/money/purchasing");
   if (po.workOrderId) revalidatePath(`/work/${po.workOrderId}`);
   return {};
 }
