@@ -11,14 +11,26 @@ export type HeroKebabItem = { label: string; href?: string; onClick?: () => void
  * instead of as a standing button above the panels.
  */
 export const ARRANGE_EVENT = "ridgeline:arrange";
+/** Same channel, for flipping the page between its two shapes. */
+export const LAYOUT_EVENT = "ridgeline:layout";
 
-export default function HeroKebab({ items = [], arrange = false, menuLabel = "Page actions" }: {
+export default function HeroKebab({ items = [], arrange = false, layoutMode, menuLabel = "Page actions" }: {
   items?: HeroKebabItem[];
   arrange?: boolean;
+  /**
+   * The shape this page is in right now, when it has two. Present, the menu
+   * offers the OTHER one - a server page can pass the current mode because it
+   * already read the saved arrangement, and the flip itself rides the event.
+   */
+  layoutMode?: "rail" | "bands";
   menuLabel?: string;
 }) {
   const all: HeroKebabItem[] = [
     ...items,
+    ...(layoutMode ? [{
+      label: layoutMode === "rail" ? "Use the band layout" : "Use the rail layout",
+      onClick: () => window.dispatchEvent(new Event(LAYOUT_EVENT)),
+    }] : []),
     ...(arrange ? [{ label: "Rearrange panels", onClick: () => window.dispatchEvent(new Event(ARRANGE_EVENT)) }] : []),
   ];
   if (all.length === 0) return null;

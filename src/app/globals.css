@@ -1227,3 +1227,109 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
     font-size: 16px !important;
   }
 }
+
+/* ── The rail layout ────────────────────────────────────────────────────────
+   One working context at a time, the rest a click away down the side. The
+   band layout is still here and still the default everywhere but the system
+   page - see lib/panelMode for who gets which.
+
+   Two tokens are published rather than assumed:
+
+   --head-h  the band layout's section bar, MEASURED. Anchor offsets used to
+             hard-code 52px, which is wrong the moment the bar wraps to a
+             second row - which it does at 380px on any record with six
+             contexts. useMeasuredHeight publishes it; nothing assumes it.
+   --rail-h  the rail, MEASURED. Only meaningful below 960px, where the rail
+             stops being a side column and stacks above the pane.
+   --spine   the record's current standing, set once by tone on the page root. The
+             pane wears it as a left border: instrument racks are read by their
+             rails, and this one carries state in peripheral vision so you
+             never scroll far enough to forget the machine is down. */
+:root { --head-h: 0px; --rail-h: 0px; --spine: var(--line); --spine-bg: var(--t-neutral-bg); }
+[data-standing="good"] { --spine: var(--t-good-fg); --spine-bg: var(--t-good-bg); }
+[data-standing="warn"] { --spine: var(--t-warn-fg); --spine-bg: var(--t-warn-bg); }
+[data-standing="bad"]  { --spine: var(--t-bad-fg);  --spine-bg: var(--t-bad-bg); }
+
+/* The band anchor's scroll offset, from the measured head. */
+.band-anchor { scroll-margin-top: calc(var(--head-h) + 8px); }
+
+.rail-body { display: grid; grid-template-columns: 196px minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 960px) { .rail-body { grid-template-columns: minmax(0, 1fr); gap: 12px; } }
+
+.rail { position: sticky; top: calc(var(--head-h) + 12px); align-self: start; }
+.railhead {
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.9px;
+  font-weight: 700; color: var(--slate); padding: 0 8px 8px;
+}
+.rail ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail button {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  background: none; border: 0; border-radius: 8px; cursor: pointer;
+  padding: 7px 8px 7px 12px; text-align: left;
+  font: inherit; font-size: var(--fs-body); color: var(--ink);
+  border-left: 3px solid transparent;
+}
+.rail button:hover { background: #EDF1F7; }
+.rail button[aria-current="true"] { background: #E9EEF6; font-weight: 700; border-left-color: var(--navy); }
+.rail .lbl { flex: 1 1 auto; min-width: 0; }
+.rail .cnt {
+  font-family: var(--mono); font-size: var(--fs-micro); font-weight: 700;
+  padding: 2px 6px; border-radius: 999px; flex-shrink: 0;
+}
+.rail .cnt.neutral { background: var(--t-neutral-bg); color: var(--t-neutral-fg); }
+.rail .cnt.info { background: var(--t-info-bg); color: var(--t-info-fg); }
+.rail .cnt.good { background: var(--t-good-bg); color: var(--t-good-fg); }
+.rail .cnt.warn { background: var(--t-warn-bg); color: var(--t-warn-fg); }
+.rail .cnt.bad { background: var(--t-bad-bg); color: var(--t-bad-fg); }
+
+/* On a phone the rail is ONE row that scrolls sideways. It must never wrap:
+   wrapping is what turned the band layout's jump bar into a three-row sticky
+   block eating a third of a 380px viewport. */
+@media (max-width: 960px) {
+  .rail {
+    position: sticky; top: var(--head-h); z-index: 25; background: var(--bg);
+    padding: 8px 0; box-shadow: 0 6px 8px -8px rgba(23, 42, 74, 0.28);
+  }
+  .railhead { display: none; }
+  .rail ul {
+    flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .rail ul::-webkit-scrollbar { display: none; }
+  .rail button {
+    width: auto; white-space: nowrap; border-left: 0;
+    border-bottom: 2px solid transparent; border-radius: 6px; padding: 6px 10px;
+  }
+  .rail button[aria-current="true"] { border-left: 0; border-bottom-color: var(--navy); }
+}
+
+.pane { border-left: 3px solid var(--spine); padding-left: 16px; min-width: 0; }
+@media (max-width: 960px) {
+  .pane { border-left-width: 2px; padding-left: 12px; }
+  /* Where the rail is stuck above the pane rather than beside it, scrolling
+     the pane back to the top has to stop below the rail, not underneath it. */
+  .pane { scroll-margin-top: calc(var(--rail-h) + 8px); }
+}
+.pane .view[hidden] { display: none; }
+.pane .view { animation: pane-rise 0.16s ease-out; }
+@keyframes pane-rise { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .pane .view { animation: none; } }
+
+/* ── The standing line ──────────────────────────────────────────────────────
+   One sentence saying whose move it is and how long it has been theirs, plus
+   the single control that ends the wait. It is the answer to "why is nothing
+   happening on this machine", which the banded page made you scroll to a
+   queue card to find. */
+.standing {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 12px; margin: 0 0 12px;
+  background: var(--spine-bg); border-left: 3px solid var(--spine);
+  border-radius: 0 8px 8px 0; font-size: var(--fs-body);
+}
+.standing .txt { flex: 1 1 240px; min-width: 0; color: var(--ink); }
+.standing .txt b { color: var(--spine); }
+.standing .dur { font-family: var(--mono); font-weight: 700; color: var(--spine); }
+/* A lone card takes the whole width rather than one of two columns - half a
+   pane of white space beside a single panel reads as a page that failed to
+   finish loading. */
+.panel-flow.one { columns: 1; }

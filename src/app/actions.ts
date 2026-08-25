@@ -130,6 +130,7 @@ import { readersOf } from "@/lib/mentionAudience";
 import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { makeTempPassword, tempExpiry, TEMP_DAYS_DEFAULT } from "@/lib/tempPassword";
+import { isPanelMode, type PanelMode } from "@/lib/panelMode";
 import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
@@ -4401,10 +4402,26 @@ export async function markThreadRead(threadId: number) {
 
 // ── Page layout ─────────────────────────────────────────────────────────────
 
-/** Views whose arrangement is saveable. Anything else is rejected outright. */
-const PANEL_VIEWS = ["system", "asset"] as const;
+/**
+ * Views whose arrangement is saveable. Anything else is rejected outright.
+ *
+ * "workorder" was missing while the work order page was already passing it,
+ * so every rearrangement there was refused and silently dropped - the caller
+ * catches a rejected promise, and this returns a resolved error nobody read.
+ */
+const PANEL_VIEWS = ["system", "asset", "workorder"] as const;
 
-export type PanelArrangement = { order: string[]; right: string[]; hidden: string[] };
+/**
+ * How one person arranged one record page - and, now, which SHAPE of page they
+ * want. Bands lay every panel down one scroll with a jump bar; the rail shows
+ * one working context at a time. Absent means "the page's default for this
+ * view", which is deliberately not the same answer everywhere: see
+ * lib/panelMode.
+ */
+export type PanelArrangement = {
+  order: string[]; right: string[]; hidden: string[];
+  mode?: PanelMode;
+};
 
 /**
  * Remember how this person arranged a record page. Their own row only - the
@@ -4421,7 +4438,12 @@ export async function saveUiLayout(viewKey: string, data: PanelArrangement): Pro
     Array.isArray(list)
       ? [...new Set(list.filter((k): k is string => typeof k === "string" && k.length > 0 && k.length <= 40))].slice(0, 60)
       : [];
-  const clean: PanelArrangement = { order: keys(data?.order), right: keys(data?.right), hidden: keys(data?.hidden) };
+  const clean: PanelArrangement = {
+    order: keys(data?.order), right: keys(data?.right), hidden: keys(data?.hidden),
+    // Sanitised like every other field: one of the two literals, or absent.
+    // An unknown string would otherwise persist forever and read as neither.
+    ...(isPanelMode(data?.mode) ? { mode: data.mode } : {}),
+  };
   const email = u.email.toLowerCase();
   await db.insert(uiLayouts)
     .values({ email, viewKey, data: clean, updatedAt: new Date() })

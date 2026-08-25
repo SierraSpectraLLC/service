@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { kickToQueue } from "@/app/actions";
 import Dialog from "@/components/ui/Dialog";
 import { toast } from "@/components/ui/Toast";
+
+/** How the standing line above the record opens this panel's move dialog. */
+export const QUEUE_EVENT = "ridgeline:queue-move";
 
 export type QueueLegRow = {
   id: number; fromName: string; toName: string; reason: string; actor: string; when: string;
@@ -38,6 +41,15 @@ export default function QueuePanel({
   const [why, setWhy] = useState("");
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+
+  // The standing line above the record carries the same one decision and no
+  // room for the form, so it opens this one rather than growing a second copy
+  // of it. Same channel the hero kebab uses to reach the layout.
+  useEffect(() => {
+    const on = () => { if (canKick) { setOpen(true); setError(""); } };
+    window.addEventListener(QUEUE_EVENT, on);
+    return () => window.removeEventListener(QUEUE_EVENT, on);
+  }, [canKick]);
 
   const parked = !isMine;
   const target = toOrgId === "" ? null : toOrgId === "us" ? null : parseInt(toOrgId);

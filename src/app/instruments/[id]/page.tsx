@@ -59,6 +59,8 @@ import AssetsPanel from "@/components/AssetsPanel";
 import CustodyPanel from "@/components/CustodyPanel";
 import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
+import StandingLine from "@/components/StandingLine";
+import { modeFor, standingTone } from "@/lib/panelMode";
 import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
@@ -391,6 +393,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const pmDue = pmRows.filter((sc) => !sc.paused && sc.nextDue <= today).length;
   const queueMine = queueView(user, inst) === "mine";
   const queueDays = daysSince(inst.queueSince ?? inst.createdAt, new Date());
+  // Which shape this reader gets. Resolved here as well as inside the layout,
+  // from the one rule in lib/panelMode, so the kebab can name the OTHER shape
+  // and the page never renders one layout and swaps to the other on hydrate.
+  const panelMode = modeFor("system", panelLayout);
   const heroStats: HeroStat[] = [
     { value: openWos.length, label: `open WO${openWos.length === 1 ? "" : "s"}`, tone: openWos.length ? "warn" : undefined },
     { value: openTasks.length, label: "open tasks", tone: overdueTasks ? "bad" : undefined },
@@ -402,7 +408,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   ];
 
   return (
-    <div className="container split">
+    /* data-standing rides the page root because custom properties inherit
+       DOWN and not sideways: --spine has to be set on an ancestor of the
+       working pane for the pane's rack rail to read it, and the standing line
+       and the panels are siblings. One attribute, one source of tone. */
+    <div className="container split"
+      data-standing={standingTone({ isMine: queueMine, overdue: overdueTasks > 0 })}>
       <div className="crumb">
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>Instruments</Link> › <b>{inst.externalId}</b>
       </div>
@@ -433,7 +444,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   style={{ textDecoration: "none", flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <span aria-hidden style={{
                     width: 7, height: 7, borderRadius: 999,
-                    background: pcOnline ? "#2E6B2E" : "#94A3B8",
+                    background: pcOnline ? "var(--t-good-fg)" : "var(--t-faint-fg)",
                   }} />
                   {pcConsent?.mode === "consent" ? "Request session" : "Connect"}
                 </Link>
@@ -445,13 +456,31 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           </>
         }
         kebab={
-          <HeroKebab arrange menuLabel={`Actions for ${inst.externalId}`}
+          <HeroKebab arrange layoutMode={panelMode} menuLabel={`Actions for ${inst.externalId}`}
             items={isStaff ? [
               { label: `Sign-off packet${signRows.length ? ` (signed${signRows.length > 1 ? ` ×${signRows.length}` : ""})` : ""}`, href: `/instruments/${inst.id}/signoff` },
               { label: "Label", href: `/instruments/${inst.id}/label` },
               { label: "Binder", href: `/instruments/${inst.id}/binder` },
             ] : []} />
         }
+      />
+
+      {/* Whose move it is, before anything else on the record. A system parked
+          with a client for three weeks used to look exactly like one being
+          worked on this morning - you had to scroll to the Queue card to find
+          out, and mostly nobody did. Its tone drives the rack spine down the
+          working pane, so the standing stays in view however far you scroll. */}
+      <StandingLine
+        holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
+        isMine={queueMine}
+        days={queueDays}
+        since={shopTime(inst.queueSince ?? inst.createdAt)}
+        reason={inst.queueReason}
+        canMove={canKick(user, inst)}
+        // A wait is amber on its own and red once it is costing something:
+        // an overdue task behind it means the wait has already run past a date
+        // somebody committed to.
+        overdue={overdueTasks > 0}
       />
 
       {/* One 760px column wasted a wide monitor and buried half the record
