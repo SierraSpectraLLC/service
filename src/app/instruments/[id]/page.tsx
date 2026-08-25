@@ -642,6 +642,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 return {
                   id: s.id, title: s.title, body: s.body, assignee: s.assignee,
                   everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+                  bookedOn: s.bookedOn, bookedNote: s.bookedNote,
                   parts: schedulePartsOf(s),
                   onAsset: onAsset ? `${onAsset.kind} - ${onAsset.model || onAsset.serial || "?"}` : undefined,
                   assetId: s.assetId,

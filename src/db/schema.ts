@@ -753,6 +753,16 @@ export const pmSchedules = pgTable("pm_schedules", {
   nextDue: text("next_due").notNull(), // YYYY-MM-DD in shop time
   lastDone: text("last_done").notNull().default(""), // blank = never yet done
   paused: boolean("paused").notNull().default(false),
+  /**
+   * The appointment: the day the CLIENT agreed to have us in. Not the due
+   * date - nextDue keeps saying when the cycle fell due, because "due Aug 12,
+   * booked Sep 12" is the truth and "due Sep 12" is not. A booked schedule
+   * stops nagging until the appointment day; a booked day that passes
+   * unworked starts nagging again, wearing the missed date. Cleared when the
+   * cycle completes.
+   */
+  bookedOn: text("booked_on").notNull().default(""),   // YYYY-MM-DD
+  bookedNote: text("booked_note").notNull().default(""), // "per J. Alvarez, window 9-12"
   // The part(s) the job takes, carried onto every generated task. `parts` is
   // JSON [{name, number}]; the single name/number pair predates it and is
   // still written by hand-made schedules - readers go through

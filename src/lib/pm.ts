@@ -50,3 +50,35 @@ export function parseCadence(raw: string | number): { days: number } | { error: 
   }
   return { days: n };
 }
+
+/**
+ * What a schedule's status pill should say, appointment included.
+ *
+ * The appointment answers the complaint a due date cannot: the client asked
+ * for a specific day, so until that day the row is INFORMATION ("booked
+ * 9/12"), not a nag - and the truth is preserved, because nextDue still says
+ * when the cycle actually fell due. A booked day that passes unworked turns
+ * back into the loudest state of all, wearing the missed date, since a missed
+ * appointment is worse than a missed cycle.
+ */
+export type PmStanding =
+  | { kind: "paused" }
+  | { kind: "booked"; on: string }
+  | { kind: "missed"; on: string }
+  | { kind: "overdue"; since: string }
+  | { kind: "dueToday" }
+  | { kind: "upcoming"; on: string };
+
+export function pmStanding(
+  s: { paused: boolean; nextDue: string; bookedOn?: string },
+  today: string,
+): PmStanding {
+  if (s.paused) return { kind: "paused" };
+  const booked = (s.bookedOn ?? "").trim();
+  if (booked) {
+    return booked >= today ? { kind: "booked", on: booked } : { kind: "missed", on: booked };
+  }
+  if (s.nextDue < today) return { kind: "overdue", since: s.nextDue };
+  if (s.nextDue === today) return { kind: "dueToday" };
+  return { kind: "upcoming", on: s.nextDue };
+}

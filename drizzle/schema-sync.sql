@@ -3253,3 +3253,9 @@ CREATE INDEX IF NOT EXISTS "expenses_report_idx" ON "expenses" ("report_id");
 -- PDF. Draft expense reports ride on the existing status column.
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "receipt_url" text NOT NULL DEFAULT '';
 ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "receipt_name" text NOT NULL DEFAULT '';
+
+-- The maintenance appointment: the day the client agreed to have us in.
+-- Distinct from next_due on purpose - "due Aug 12, booked Sep 12" is the
+-- truth, and rewriting the due date to hide the nag would erase it.
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "booked_on" text NOT NULL DEFAULT '';
+ALTER TABLE "pm_schedules" ADD COLUMN IF NOT EXISTS "booked_note" text NOT NULL DEFAULT '';

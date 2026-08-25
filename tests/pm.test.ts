@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, advance, isDue, cadenceLabel, parseCadence } from "@/lib/pm";
+import { addDays, advance, isDue, cadenceLabel, parseCadence , pmStanding } from "@/lib/pm";
 
 describe("PM date arithmetic", () => {
   it("adds days across month ends", () => {
@@ -42,5 +42,34 @@ describe("cadence input", () => {
     expect(cadenceLabel(7)).toBe("weekly");
     expect(cadenceLabel(90)).toBe("quarterly");
     expect(cadenceLabel(45)).toBe("every 45 days");
+  });
+});
+
+describe("pmStanding - the appointment in the pill", () => {
+  const T = "2026-08-25";
+  const s = (p: { paused?: boolean; nextDue: string; bookedOn?: string }) =>
+    ({ paused: p.paused ?? false, nextDue: p.nextDue, bookedOn: p.bookedOn });
+
+  it("a booked visit is a plan, not a nag - even when the cycle is overdue", () => {
+    expect(pmStanding(s({ nextDue: "2026-08-12", bookedOn: "2026-09-12" }), T))
+      .toEqual({ kind: "booked", on: "2026-09-12" });
+    expect(pmStanding(s({ nextDue: "2026-08-25", bookedOn: "2026-08-25" }), T))
+      .toEqual({ kind: "booked", on: "2026-08-25" });
+  });
+
+  it("a booked day that passed unworked is the loudest state of all", () => {
+    expect(pmStanding(s({ nextDue: "2026-08-12", bookedOn: "2026-08-20" }), T))
+      .toEqual({ kind: "missed", on: "2026-08-20" });
+  });
+
+  it("without an appointment, the cycle date speaks as before", () => {
+    expect(pmStanding(s({ nextDue: "2026-08-12" }), T)).toEqual({ kind: "overdue", since: "2026-08-12" });
+    expect(pmStanding(s({ nextDue: "2026-08-25" }), T)).toEqual({ kind: "dueToday" });
+    expect(pmStanding(s({ nextDue: "2026-09-01" }), T)).toEqual({ kind: "upcoming", on: "2026-09-01" });
+  });
+
+  it("paused outranks everything, booking included", () => {
+    expect(pmStanding(s({ paused: true, nextDue: "2026-08-12", bookedOn: "2026-09-12" }), T))
+      .toEqual({ kind: "paused" });
   });
 });

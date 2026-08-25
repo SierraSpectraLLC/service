@@ -436,6 +436,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               schedules={pmRows.map((s) => ({
                 id: s.id, title: s.title, body: s.body, assignee: s.assignee,
                 everyDays: s.everyDays, nextDue: s.nextDue, lastDone: s.lastDone, paused: s.paused,
+                  bookedOn: s.bookedOn, bookedNote: s.bookedNote,
                 parts: schedulePartsOf(s),
                 openTaskId: taggedTasks.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
               }))} />

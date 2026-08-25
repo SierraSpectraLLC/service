@@ -147,8 +147,13 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     if (onSystem !== null && advisory.has(onSystem)) continue;
     // The parts travel on the task, so whoever picks it up has the numbers in
     // front of them instead of in a binder.
-    const t = await createPmTask(s, onSystem, s.nextDue, actor,
-      `scheduled maintenance came due: '${s.title}'${s.assignee ? ` (assigned ${s.assignee})` : ""} - due ${s.nextDue}`);
+    // A booked visit dates the task for the APPOINTMENT, not the cycle day:
+    // the client chose the day, and a task dated before it would nag everyone
+    // about work that is already on the calendar.
+    const taskDue = s.bookedOn && s.bookedOn >= s.nextDue ? s.bookedOn : s.nextDue;
+    const t = await createPmTask(s, onSystem, taskDue, actor,
+      `scheduled maintenance came due: '${s.title}'${s.assignee ? ` (assigned ${s.assignee})` : ""} - due ${s.nextDue}`
+      + (taskDue !== s.nextDue ? `, booked for ${taskDue}` : ""));
     created++;
     if (s.assignee) {
       await notifyTaskAssigned({

@@ -6,7 +6,7 @@ import { assets, instruments, pmSchedules, tasks } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { getSystemLabels } from "@/lib/systemLabel";
-import { cadenceLabel } from "@/lib/pm";
+import { cadenceLabel, pmStanding } from "@/lib/pm";
 import { pmGroups } from "@/lib/pmGroups";
 import { shopToday } from "@/lib/shopday";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
@@ -80,7 +80,12 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
     const place = placeOf(s);
     const overdue = !s.paused && s.nextDue < today;
     const dueToday = !s.paused && s.nextDue === today;
-    const tone: Tone = s.paused ? "faint"
+    // The appointment speaks first: a booked visit is a plan whatever else is
+    // true of the row, and a missed one is worse than a missed cycle.
+    const st = pmStanding(s, today);
+    const tone: Tone = st.kind === "booked" ? "info"
+      : st.kind === "missed" ? "bad"
+      : s.paused ? "faint"
       : s.openTaskId !== null ? "info"
       : overdue ? "bad" : dueToday ? "warn" : "neutral";
     return {
@@ -102,7 +107,11 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
         title: <span style={{ fontWeight: 600 }}>{s.title}</span>,
         cadence: <span className="mut">{cadenceLabel(s.everyDays)}</span>,
         who: <span className="mut">{s.assignee}</span>,
-        due: s.paused ? (
+        due: st.kind === "booked" ? (
+          <Pill tone="info">booked {mdy(st.on)}</Pill>
+        ) : st.kind === "missed" ? (
+          <Pill tone="bad">missed {mdy(st.on)}</Pill>
+        ) : s.paused ? (
           <Pill tone="faint">paused</Pill>
         ) : s.openTaskId !== null ? (
           <Pill tone="info">task open</Pill>

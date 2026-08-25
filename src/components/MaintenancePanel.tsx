@@ -7,8 +7,9 @@ import type { WorkTarget } from "@/app/actions";
 import {
   addPmSchedule, updatePmSchedule, setPmPaused, removePmSchedule, requestPmPart, runPmNow,
   alignMaintenance, undoRunPmNow, logPastPm, setPmPosture,
+  schedulePmVisit, unschedulePmVisit,
 } from "@/app/actions";
-import { addDays, cadenceLabel } from "@/lib/pm";
+import { addDays, cadenceLabel, pmStanding } from "@/lib/pm";
 import { postureIsDefault, type PmPosture } from "@/lib/pmPosture";
 import { partLabel, type ProcPart } from "@/lib/procedures";
 import { pmAssetGroups, pmFolds, pmGroups } from "@/lib/pmGroups";
@@ -17,6 +18,8 @@ import PartNumberField from "./PartNumberField";
 export type PmRow = {
   id: number; title: string; body: string; assignee: string;
   everyDays: number; nextDue: string; lastDone: string; paused: boolean;
+  /** The appointment, when the client has picked a day. */
+  bookedOn?: string; bookedNote?: string;
   /** All parts the job takes (procedure-stamped or the hand-made single pair). */
   parts: ProcPart[];
   /** Set when a schedule shown on a system page actually lives on one of its assets. */
@@ -76,6 +79,8 @@ export default function MaintenancePanel({ target, schedules, people, today, can
   // Per-schedule backfill: one past completion, filed as the Done task it
   // would have left behind.
   const [logging, setLogging] = useState<number | null>(null);
+  const [booking, setBooking] = useState<number | null>(null);
+  const [bookDraft, setBookDraft] = useState({ date: "", note: "" });
   const [logDraft, setLogDraft] = useState({ date: "", note: "", doneBy: "", advanceSchedule: true });
   const [pending, startTransition] = useTransition();
 
@@ -128,7 +133,16 @@ export default function MaintenancePanel({ target, schedules, people, today, can
           <span className="pill accent">{cadenceLabel(s.everyDays)}</span>
           {s.paused ? (
             <span className="pill neutral">paused</span>
-          ) : s.openTaskId !== null ? (
+          ) : s.bookedOn ? (() => {
+            /* Booked outranks "task open": the task exists BECAUSE the visit
+               is booked, and the date is the thing everyone wants to read. */
+            const st = pmStanding(s, today);
+            return st.kind === "missed"
+              ? <span className="pill bad" title={s.bookedNote || undefined}>missed the {mdy(st.on)} visit</span>
+              : <span className="pill info" title={s.bookedNote || undefined}>
+                  booked {mdy(s.bookedOn)}{s.nextDue < s.bookedOn ? ` (was due ${mdy(s.nextDue)})` : ""}
+                </span>;
+          })() : s.openTaskId !== null ? (
             <span className="pill info">task open</span>
           ) : (
             /* Advisory: the same date without the siren. A passed date on a
@@ -138,11 +152,26 @@ export default function MaintenancePanel({ target, schedules, people, today, can
               <span className="pill neutral">
                 {overdue || dueToday ? `cycle elapsed ${mdy(s.nextDue)}` : `next cycle ${mdy(s.nextDue)}`}
               </span>
-            ) : (
-            <span className={`pill ${overdue ? "bad" : dueToday ? "warn" : "neutral"}`}>
-              {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
-            </span>
-            )
+            ) : (() => {
+              /* The appointment outranks the due date in the pill: a booked
+                 visit is a plan, not a nag - and a missed one is worse than a
+                 missed cycle, so it comes back loudest. The due date is still
+                 printed beside it; the truth of when it fell due survives. */
+              const st = pmStanding(s, today);
+              if (st.kind === "booked") return (
+                <span className="pill info" title={s.bookedNote || undefined}>
+                  booked {mdy(st.on)}{s.nextDue < st.on ? ` (was due ${mdy(s.nextDue)})` : ""}
+                </span>
+              );
+              if (st.kind === "missed") return (
+                <span className="pill bad" title={s.bookedNote || undefined}>missed the {mdy(st.on)} visit</span>
+              );
+              return (
+                <span className={`pill ${overdue ? "bad" : dueToday ? "warn" : "neutral"}`}>
+                  {overdue ? `overdue ${mdy(s.nextDue)}` : dueToday ? "due today" : `next ${mdy(s.nextDue)}`}
+                </span>
+              );
+            })()
           )}
           {s.onAsset && !inGroup && <span className="pill neutral">{s.onAsset}</span>}
           {s.assignee && <span className="mut t-meta">{s.assignee}</span>}
@@ -177,6 +206,22 @@ export default function MaintenancePanel({ target, schedules, people, today, can
                     if (res?.error) setError(res.error);
                     else toast({ message: "Removed the task" });
                   })}>undo start</button>
+              )}
+              {!s.paused && (
+                <button className="btn link" disabled={pending}
+                  title="The client picked a day - put the visit on it. The due date is not touched."
+                  onClick={() => {
+                    setBooking(booking === s.id ? null : s.id);
+                    setBookDraft({ date: s.bookedOn || "", note: s.bookedNote || "" });
+                  }}>{s.bookedOn ? "rebook" : "schedule"}</button>
+              )}
+              {!s.paused && s.bookedOn && (
+                <button className="btn link" disabled={pending}
+                  onClick={() => startTransition(async () => {
+                    const res = await unschedulePmVisit(s.id);
+                    if (res?.error) setError(res.error);
+                    else toast({ message: "Called the visit off - back on the cycle date" });
+                  })}>unbook</button>
               )}
               {canEdit && (
                 <button className="btn link" disabled={pending}
@@ -216,6 +261,28 @@ export default function MaintenancePanel({ target, schedules, people, today, can
         {s.body && <div className="mut t-small" style={{ marginTop: 2, whiteSpace: "pre-wrap" }}>{s.body}</div>}
         {/* One past completion, filed as the Done task it would have left
             behind - so the vendor's 2024 visit exists as history, not memory. */}
+        {booking === s.id && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
+            <input type="date" value={bookDraft.date} min={today} aria-label="Visit day"
+              onChange={(ev) => setBookDraft({ ...bookDraft, date: ev.target.value })}
+              className="t-small" style={{ width: "auto" }} />
+            <input value={bookDraft.note} placeholder='Note - "per J. Alvarez, window 9-12" (optional)'
+              onChange={(ev) => setBookDraft({ ...bookDraft, note: ev.target.value })}
+              className="t-small" style={{ width: "auto", flex: "1 1 180px" }} />
+            <button className="btn sm accent" disabled={pending || !bookDraft.date}
+              onClick={() => startTransition(async () => {
+                const res = await schedulePmVisit(s.id, bookDraft);
+                if (res?.error) { setError(res.error); return; }
+                setBooking(null);
+                toast({ message: `Booked for ${bookDraft.date} - the due date was not touched` });
+              })}>
+              Book the visit
+            </button>
+            <span className="mut t-meta">
+              Quiet until the day; the cycle still reads as due {mdy(s.nextDue)}.
+            </span>
+          </div>
+        )}
         {logging === s.id && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 8, background: "#FAFBFD" }}>
             <input type="date" value={logDraft.date} aria-label="Date it was done"

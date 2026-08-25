@@ -1736,7 +1736,10 @@ export async function setTaskState(taskId: number, state: string): Promise<{ err
     if (s) {
       const today = shopToday();
       const nextDue = advancePm(today, s.everyDays);
-      await db.update(pmSchedules).set({ lastDone: today, nextDue }).where(eq(pmSchedules.id, s.id));
+      // The appointment is spent: the visit happened (or the work did, which
+      // is better). The next cycle books itself fresh if the client asks.
+      await db.update(pmSchedules).set({ lastDone: today, nextDue, bookedOn: "", bookedNote: "" })
+        .where(eq(pmSchedules.id, s.id));
       await audit({
         actor: u.email, instrumentId: s.instrumentId, assetId: s.assetId, entityType: "pm", entityId: s.id,
         action: `maintenance '${s.title}' done - next due ${nextDue} (${cadenceLabel(s.everyDays)})`,
@@ -1948,6 +1951,80 @@ export async function alignMaintenance(
  * Completing the task it creates advances the cadence from today, exactly as it
  * does for a task the cron made - the schedule does not need touching by hand.
  */
+/**
+ * Book the visit for the day the client asked for.
+ *
+ * This is the answer to "maintenance is due but they want us on the 12th"
+ * that does not involve lying to the calendar: nextDue stays where it fell,
+ * the appointment is its own fact, and the nag goes quiet until the day -
+ * lib/pm.pmStanding renders "booked 9/12" instead of "overdue". The task is
+ * materialized now (or its date moved if it already exists), dated for the
+ * appointment, so the dashboard's overdue count clears too and the engineer
+ * sees the day they are actually expected.
+ */
+export async function schedulePmVisit(
+  scheduleId: number, data: { date: string; note: string },
+): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [sched] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!sched) return { error: "Not found" };
+  const onSystem = sched.instrumentId ?? (sched.assetId === null
+    ? null
+    : (await db.select({ instrumentId: assets.instrumentId }).from(assets).where(eq(assets.id, sched.assetId)))[0]?.instrumentId ?? null);
+  if (onSystem !== null) {
+    try { await assertSystemEditable(u, onSystem); } catch { return { error: "Not found" }; }
+  }
+  const date = data.date.trim();
+  if (!isIsoDay(date)) return { error: "Pick the day" };
+  if (date < shopToday()) return { error: "That day has passed - book a real one, or log the work as done" };
+  const note = data.note.trim().slice(0, 200);
+
+  await db.update(pmSchedules).set({ bookedOn: date, bookedNote: note }).where(eq(pmSchedules.id, scheduleId));
+  const [open] = await db.select().from(tasks)
+    .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done"))).limit(1);
+  if (open) {
+    await db.update(tasks).set({ dueDate: date }).where(eq(tasks.id, open.id));
+  } else {
+    await createPmTask(sched, onSystem, date,
+      u.email, `booked '${sched.title}' for ${date}${note ? ` (${note})` : ""}`);
+  }
+  await audit({
+    actor: u.email, instrumentId: sched.instrumentId, assetId: sched.assetId,
+    entityType: "pm", entityId: scheduleId,
+    action: `booked '${sched.title}' for ${date}${note ? ` - ${note}` : ""}`
+      + (sched.nextDue < date ? ` (cycle fell due ${sched.nextDue})` : ""),
+    field: "bookedOn", oldValue: sched.bookedOn, newValue: date,
+  });
+  if (sched.instrumentId !== null) rev(sched.instrumentId);
+  else if (sched.assetId !== null) revalidatePath(`/assets/${sched.assetId}`);
+  revalidatePath("/maintenance");
+  return {};
+}
+
+/** Call the appointment off. The task and its nag go back to the cycle date. */
+export async function unschedulePmVisit(scheduleId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [sched] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
+  if (!sched) return { error: "Not found" };
+  if (!sched.bookedOn) return {};
+  await db.update(pmSchedules).set({ bookedOn: "", bookedNote: "" }).where(eq(pmSchedules.id, scheduleId));
+  const [open] = await db.select().from(tasks)
+    .where(and(eq(tasks.pmScheduleId, scheduleId), ne(tasks.state, "Done"))).limit(1);
+  if (open && open.dueDate === sched.bookedOn) {
+    await db.update(tasks).set({ dueDate: sched.nextDue }).where(eq(tasks.id, open.id));
+  }
+  await audit({
+    actor: u.email, instrumentId: sched.instrumentId, assetId: sched.assetId,
+    entityType: "pm", entityId: scheduleId,
+    action: `called off the ${sched.bookedOn} visit for '${sched.title}'`,
+    field: "bookedOn", oldValue: sched.bookedOn, newValue: "",
+  });
+  if (sched.instrumentId !== null) rev(sched.instrumentId);
+  else if (sched.assetId !== null) revalidatePath(`/assets/${sched.assetId}`);
+  revalidatePath("/maintenance");
+  return {};
+}
+
 export async function runPmNow(scheduleId: number): Promise<{ error?: string; taskId?: number }> {
   const u = await requireEditor();
   const [s] = await db.select().from(pmSchedules).where(eq(pmSchedules.id, scheduleId));
