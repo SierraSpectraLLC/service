@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import PartNumberField from "./PartNumberField";
 import {
-  addPoLine, cancelPurchaseOrder, deletePoLine, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
+  addPoLine, cancelPurchaseOrder, deletePoLine, deletePurchaseOrder, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
 } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { formatCents, centsToInput } from "@/lib/money";
@@ -20,8 +20,10 @@ export type PoLineRow = {
   unitCents: number | null; note: string;
 };
 
-export default function PoPanel({ po, lines, canManage, makers }: {
+export default function PoPanel({ po, lines, canManage, canDelete = false, makers }: {
   po: PoRow; lines: PoLineRow[]; canManage: boolean;
+  /** Owners only: deleting an order is not the same power as running one. */
+  canDelete?: boolean;
   /** The maker/vendor book (Settings → Catalog), suggested on the Vendor field. */
   makers?: string[];
 }) {
@@ -278,6 +280,23 @@ export default function PoPanel({ po, lines, canManage, makers }: {
               if (!why) return;
               run(() => cancelPurchaseOrder(po.id, why));
             }}>Cancel this order</button>
+        )}
+        {/* For the order raised by mistake, as opposed to one that was real
+            and called off. Refused by the server once anything has been
+            received - said here too, so nobody reaches for it first. */}
+        {canDelete && (
+          <button className="btn link" style={{ color: "var(--t-bad-fg)", fontSize: 12, marginTop: 10, marginLeft: 12, fontWeight: 700 }} disabled={pending}
+            onClick={async () => {
+              const why = await confirmReason({
+                title: `Delete ${po.number}?`,
+                body: totals.received > 0
+                  ? `${totals.received} item${totals.received === 1 ? " is" : "s are"} already received against this order, so it cannot be deleted - cancel it instead.`
+                  : "For an order raised by mistake. Its lines go with it; any file or part that names it keeps the paperwork and loses the link.",
+                action: "Delete order", cancel: "Keep it", tone: "bad",
+              });
+              if (!why) return;
+              run(() => deletePurchaseOrder(po.id, why), () => { window.location.href = "/purchasing"; });
+            }}>Delete this order</button>
         )}
         {error && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{error}</div>}
       </div>

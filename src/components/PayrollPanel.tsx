@@ -39,7 +39,7 @@ const unitOf = (k: string) => PAY_KINDS.find((x) => x.key === k)?.unit ?? "";
  * month total is the place that proves it.
  */
 export default function PayrollPanel({
-  orgId, orgName, rows, months, today, whole, mayEdit, showRate,
+  orgId, orgName, rows, months, today, whole, mayEdit, showRate, staff = [],
 }: {
   orgId: number;
   orgName: string;
@@ -51,6 +51,13 @@ export default function PayrollPanel({
   mayEdit: boolean;
   /** The derived cost of a sold hour - only the shop has jobs to divide by. */
   showRate: boolean;
+  /**
+   * People this organization already knows about - its own staff, or a
+   * client's own list. Picking one fills the form and, more importantly,
+   * ATTACHES the row to their account, which is what lets them see their own
+   * pay and nobody else's.
+   */
+  staff?: { email: string; name: string; title: string; already: boolean }[];
 }) {
   const BLANK = {
     name: "", personEmail: "", title: "", kind: "salary", amount: "",
@@ -224,6 +231,36 @@ export default function PayrollPanel({
             </>
           }>
           <div className="dialog-section">Who</div>
+          {/* The list the app already has. Choosing somebody fills the three
+              fields below AND ties the row to their login - a payroll row with
+              nobody's address on it is one that person can never check. */}
+          {staff.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <label>Pick somebody</label>
+              <select value={draft.personEmail} aria-label="Pick somebody"
+                onChange={(e) => {
+                  const hit = staff.find((x) => x.email === e.target.value);
+                  if (!hit) { setDraft({ ...draft, personEmail: "" }); return; }
+                  setDraft({
+                    ...draft, personEmail: hit.email,
+                    name: hit.name, title: hit.title || draft.title,
+                  });
+                }}>
+                <option value="">Somebody not on the list - type them below</option>
+                {staff.map((x) => (
+                  <option key={x.email} value={x.email}>
+                    {x.name}{x.title ? ` - ${x.title}` : ""}{x.already ? " · already on the payroll" : ""}
+                  </option>
+                ))}
+              </select>
+              {draft.personEmail && staff.some((x) => x.email === draft.personEmail && x.already) && (
+                <div className="mut t-meta" style={{ marginTop: 4 }}>
+                  They already have a line. Saving this closes it the day before and starts a new one,
+                  so the months already counted stay as they were.
+                </div>
+              )}
+            </div>
+          )}
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Name *</label>

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { asc, eq, isNull, and, gte } from "drizzle-orm";
+import { asc, eq, inArray, isNull, and, gte, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { clientAllowlist, expenses, orgs, payroll, timeEntries } from "@/db/schema";
+import { clientAllowlist, expenses, houseMembers, orgs, payroll, timeEntries, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { myTenantOrgId } from "@/lib/authz";
 import { forTenant } from "@/lib/tenancy";
@@ -57,6 +57,44 @@ export default async function PayrollPage() {
 
   const [org] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, mine));
   const today = shopToday();
+
+  // Who this organization's payroll could be about, so nobody retypes a name
+  // the app already knows. The shop's own house list, or a client's own
+  // people - the same wall as everything else on this page.
+  const candidates = whole
+    ? user.orgId === null
+      ? await db.select({ email: houseMembers.email, name: houseMembers.name })
+          .from(houseMembers).where(and(eq(houseMembers.orgId, mine), ne(houseMembers.role, "none")))
+          .orderBy(asc(houseMembers.name))
+      : await db.select({ email: clientAllowlist.entry, name: clientAllowlist.entry })
+          .from(clientAllowlist).where(eq(clientAllowlist.orgId, mine))
+          .orderBy(asc(clientAllowlist.entry))
+    : [];
+  // Their profile fills the rest of the form: the name they are called and the
+  // job they do are already on their account.
+  const profiles = candidates.length
+    ? await db.select({
+        email: users.email, name: users.name, firstName: users.firstName,
+        lastName: users.lastName, title: users.title,
+      }).from(users).where(inArray(users.email, candidates.map((c) => c.email.toLowerCase())))
+    : [];
+  const profileOf = new Map(profiles.map((p) => [p.email.toLowerCase(), p]));
+  const onPayroll = new Set(all.filter((r) => !r.endsOn || r.endsOn >= today)
+    .map((r) => r.personEmail.toLowerCase()).filter(Boolean));
+  const staff = candidates
+    // A whole-domain allowlist rule is a door, not a person, so it is nobody
+    // to put on a payroll.
+    .filter((c) => !c.email.trim().startsWith("@"))
+    .map((c) => {
+      const p = profileOf.get(c.email.toLowerCase());
+      const named = p ? [p.firstName, p.lastName].filter(Boolean).join(" ") || p.name || "" : "";
+      return {
+        email: c.email,
+        name: named || c.name || c.email.split("@")[0],
+        title: p?.title ?? "",
+        already: onPayroll.has(c.email.toLowerCase()),
+      };
+    });
   const months = recentMonths(today, 6);
 
   // What else the month cost, and what sold in it - only for the organization
@@ -127,6 +165,7 @@ export default async function PayrollPage() {
         whole={whole}
         mayEdit={mayEditPayroll(viewer, mine)}
         showRate={isHouseOfThis && whole}
+        staff={staff}
       />
     </div>
   );

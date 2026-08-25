@@ -15,6 +15,7 @@ import NeededPartsCard from "@/components/NeededPartsCard";
 import NewPoButton from "@/components/NewPoButton";
 import { DataTable, Dot, FacetStrip, Id, Legend, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
+import DeleteRowAction from "@/components/DeleteRowAction";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
     return `/purchasing${p.size ? `?${p}` : ""}`;
   };
 
+  const isOwner = user.role === "owner";
   const toRow = (p: typeof pos[number]): DataRow => {
     const mine = lines.filter((l) => l.poId === p.id);
     const t = poTotals(mine);
@@ -112,6 +114,13 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         recd: <span className="mut">{t.received} of {t.ordered}{p.expectedAt ? ` · exp ${p.expectedAt}` : ""}</span>,
         total: showCosts && t.priced > 0 ? <b className="t-body">{formatCents(t.cents)}</b> : null,
         when: <span className="mut">{shopMonthDay(p.createdAt)}</span>,
+        // Only where it could actually work: an order with goods received
+        // against it is refused by the server, and offering the button anyway
+        // would be offering a refusal.
+        act: isOwner && t.received === 0 && p.status !== "received" && p.status !== "partial" ? (
+          <DeleteRowAction kind="po" id={p.id} number={p.number} what="the order"
+            note="For an order raised by mistake. Its lines go with it; any file or part that names it keeps the paperwork and loses the link." />
+        ) : null,
       },
     };
   };
@@ -168,6 +177,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
           { key: "recd", label: "Received", width: "minmax(120px, 1fr)", hideMobile: true },
           { key: "total", label: "Total", width: "90px", align: "right", hideMobile: true },
           { key: "when", label: "Raised", width: "70px", align: "right", hideMobile: true },
+          ...(isOwner ? [{ key: "act", label: "", width: "64px" }] : []),
         ]}
         rows={[...open.map(toRow), ...closed.map(toRow)]}
         empty="No orders."

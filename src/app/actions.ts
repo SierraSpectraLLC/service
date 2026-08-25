@@ -10558,6 +10558,63 @@ export async function sendPartsRequest(
   return { sent: rows.length };
 }
 
+/**
+ * Delete a purchase order outright - for the one raised by mistake, the
+ * duplicate, the test. Cancelling is for an order that was real and called
+ * off; this is for one that should never have existed, and it takes its lines
+ * with it.
+ *
+ * REFUSED once anything has been received, and that is the whole design. A
+ * receipt put goods on a shelf, set that shelf's held cost, and closed the
+ * open part requests on somebody's job - none of which this could undo. An
+ * order somebody can delete after receiving it is an order that leaves the
+ * stockroom holding parts no paperwork explains, which is the exact failure
+ * purchasing records exist to prevent. Cancel it instead: that stops what is
+ * outstanding and leaves what arrived arrived.
+ *
+ * The paperwork filed against it - the vendor's receipt, the parts that name
+ * it - survives with the link nulled rather than being deleted along with it.
+ */
+export async function deletePurchaseOrder(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const { po, manage, see } = await poAccess(u, id);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't delete this order" : "Not found" };
+
+  // Two independent signals that goods arrived, and either one refuses. The
+  // line quantities are the ledger; the status is what the rest of the app
+  // reads. A row where they disagree is exactly the row not to delete.
+  const lines = await db.select().from(poLines).where(eq(poLines.poId, id));
+  const received = lines.reduce((n, l) => n + l.qtyReceived, 0);
+  if (received > 0 || po.status === "received" || po.status === "partial") {
+    return {
+      error: `${po.number} has been received against`
+        + `${received > 0 ? ` (${received} item${received === 1 ? "" : "s"})` : ""}.`
+        + ` Cancel it instead - deleting would leave stock nothing explains.`,
+    };
+  }
+
+  const total = poTotals(lines).cents;
+  // The lines explicitly, then the order. The cascade exists (schema-sync
+  // grew the key that had been declared and never enforced), but a delete
+  // that depends on a constraint being present in every environment is a
+  // delete that leaves rows behind in the one where it is not.
+  await db.delete(poLines).where(eq(poLines.poId, id));
+  await db.delete(purchaseOrders).where(eq(purchaseOrders.id, id));
+  await audit({
+    actor: u.email, entityType: "po", entityId: id, tenantOrgId: po.tenantOrgId,
+    action: `deleted ${po.number} to ${po.vendor}`
+      + `${lines.length ? ` (${lines.length} line${lines.length === 1 ? "" : "s"}${total ? `, ${formatCents(total)}` : ""})` : ""}`
+      + ` - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
+  revalidatePath("/purchasing");
+  if (po.workOrderId) revalidatePath(`/work/${po.workOrderId}`);
+  return {};
+}
+
 export async function cancelPurchaseOrder(id: number, reason: string): Promise<{ error?: string }> {
   const u = await requireEditor();
   const why = requireReason(reason);

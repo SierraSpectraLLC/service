@@ -13,6 +13,7 @@ import { NewInvoiceButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
+import DeleteRowAction from "@/components/DeleteRowAction";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ export default async function InvoicesPage({ searchParams }: {
     return `/money/invoices${p.size ? `?${p}` : ""}`;
   };
 
+  const isOwner = user.role === "owner";
   const toRow = ({ f, v }: typeof rows[number]): DataRow => ({
     key: f.row.id,
     href: `/money/invoices/${f.row.id}`,
@@ -71,6 +73,15 @@ export default async function InvoicesPage({ searchParams }: {
       ),
       total: <b className="t-body">{formatCents(v.linesCents + v.feesCents)}</b>,
       balance: v.balanceCents > 0 ? <b className="t-body">{formatCents(v.balanceCents)}</b> : <span className="mut">-</span>,
+      // The store puts a client's parts order here as a draft invoice, which
+      // is what makes a delete on the LIST worth having: the four test orders
+      // somebody wants gone are four rows, not four pages to open.
+      act: isOwner ? (
+        <DeleteRowAction kind="invoice" id={f.row.id} number={f.row.number} what="the invoice"
+          note={v.paidCents > 0
+            ? `${formatCents(v.paidCents)} has been paid against this invoice. Deleting it destroys that record too.`
+            : "Its lines, fees and payments go with it. The work order it came from is untouched."} />
+      ) : null,
     },
   });
 
@@ -111,6 +122,7 @@ export default async function InvoicesPage({ searchParams }: {
           { key: "due", label: "Due", width: "minmax(110px, 1fr)", hideMobile: true },
           { key: "total", label: "Total", width: "110px" },
           { key: "balance", label: "Open", width: "110px" },
+          ...(isOwner ? [{ key: "act", label: "", width: "64px" }] : []),
         ]}
         rows={shown.map(toRow)}
         empty="No invoices."

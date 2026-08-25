@@ -13,6 +13,7 @@ import { NewQuoteButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
 import type { DataRow } from "@/components/ui/DataTable";
+import DeleteRowAction from "@/components/DeleteRowAction";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,7 @@ export default async function QuotesPage({ searchParams }: {
     return `/money/quotes${p.size ? `?${p}` : ""}`;
   };
 
+  const isOwner = user.role === "owner";
   const toRow = ({ f, s, total }: typeof rows[number]): DataRow => {
     const left = daysToExpiry(f.row.expiresOn, today);
     return {
@@ -74,6 +76,12 @@ export default async function QuotesPage({ searchParams }: {
         ),
         deposit: f.row.depositPct > 0 ? <span className="mut">{f.row.depositPct}%</span> : null,
         total: <b className="t-body">{formatCents(total)}</b>,
+        // A store order whose price had to be confirmed lands here as a quote,
+        // so this is the other half of deleting one - see DeleteRowAction.
+        act: isOwner ? (
+          <DeleteRowAction kind="quote" id={f.row.id} number={f.row.number} what="the quote"
+            note="Its lines go with it. Anything already invoiced from it stays." />
+        ) : null,
       },
     };
   };
@@ -115,6 +123,7 @@ export default async function QuotesPage({ searchParams }: {
           { key: "expiry", label: "Good to", width: "minmax(100px, 1fr)", hideMobile: true },
           { key: "deposit", label: "Deposit", width: "80px", hideMobile: true },
           { key: "total", label: "Total", width: "110px" },
+          ...(isOwner ? [{ key: "act", label: "", width: "64px" }] : []),
         ]}
         rows={shown.map(toRow)}
         empty="No quotes."

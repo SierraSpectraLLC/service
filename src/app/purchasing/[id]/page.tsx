@@ -142,6 +142,9 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
           qtyReceived: l.qtyReceived, unitCents: l.unitCents, note: l.note,
         }))}
         canManage={manage}
+        // Running an order and destroying one are different powers: an owner
+        // deletes, staff cancel. Same line every other hard delete draws.
+        canDelete={manage && user.role === "owner"}
         // Vendor suggestions come from the maker book - house only: a client
         // who can issue their own POs still shouldn't be handed the shop's
         // whole supplier list as autocomplete.

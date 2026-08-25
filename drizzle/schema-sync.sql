@@ -3301,3 +3301,17 @@ END $$;
 
 -- Who at an organization may read its payroll. Off until somebody says so.
 ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_payroll" boolean NOT NULL DEFAULT false;
+
+-- po_lines has always DECLARED a cascading parent in schema.ts and never had
+-- the constraint here, so nothing enforced it: deleting an order would have
+-- left its lines behind forever. Orphans are unreachable garbage by
+-- definition - no order names them - so they go before the key goes on.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'po_lines_po_id_purchase_orders_id_fk') THEN
+    DELETE FROM "po_lines" l WHERE NOT EXISTS (
+      SELECT 1 FROM "purchase_orders" p WHERE p.id = l.po_id
+    );
+    ALTER TABLE "po_lines" ADD CONSTRAINT "po_lines_po_id_purchase_orders_id_fk"
+      FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE CASCADE;
+  END IF;
+END $$;
