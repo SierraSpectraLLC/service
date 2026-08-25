@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import {
-  payExpenseReport, returnExpenseReport, submitExpenseReport, withdrawExpenseReport,
+  logMyExpense, payExpenseReport, returnExpenseReport, submitExpenseReport, withdrawExpenseReport,
 } from "@/app/actions";
 import { REPORT_LABEL, REPORT_TONE, reportSpan, reportTotalCents } from "@/lib/expenseReports";
 import { formatCents } from "@/lib/money";
@@ -34,16 +34,23 @@ export type ReportRow = {
  * total - never a stored one - and two honest buttons. Mark paid records
  * that a check went out; it does not move money.
  */
-export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today }: {
+export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today, categories, workOrders }: {
   pool: PoolRow[];
   mine: ReportRow[];
   /** Everyone's submitted reports - owner only, [] otherwise. */
   queue: ReportRow[];
   isOwner: boolean;
   today: string;
+  /** The tenant's expense categories, for the new-expense picker. */
+  categories: string[];
+  /** Every work order, open or closed - a receipt often surfaces after the job wraps. */
+  workOrders: { id: number; label: string }[];
 }) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [paying, setPaying] = useState<ReportRow | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [addDraft, setAddDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
+  const [addErr, setAddErr] = useState("");
   const [payDraft, setPayDraft] = useState({ paidOn: "", reference: "" });
   const [payErr, setPayErr] = useState("");
   const [pending, startTransition] = useTransition();
@@ -161,6 +168,14 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today 
 
       <Panel title="My unclaimed expenses" count={pool.length || undefined}
         hint="Everything of yours not yet on a report. Tick what this claim should cover and submit it.">
+        <div style={{ marginBottom: 6 }}>
+          <button className="btn sm primary" onClick={() => {
+            setAddDraft({ kind: categories[0] ?? "Other", description: "", amount: "", incurredOn: today, workOrderId: "" });
+            setAddErr(""); setAdding(true);
+          }}>
+            + Expense
+          </button>
+        </div>
         {pool.map((p) => (
           <label key={p.id} className="row-hover"
             style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)", cursor: "pointer", margin: 0 }}>
@@ -192,6 +207,69 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today 
         {mine.map((r) => reportCard(r, "mine"))}
         {mine.length === 0 && <div className="mut t-small">No claims yet.</div>}
       </Panel>
+
+      {adding && (
+        <Dialog open onClose={() => setAdding(false)} size="sm" title="New expense"
+          context="Logged with your name on it - it lands in your pool above, ready to claim"
+          footer={
+            <>
+              <DialogStatus error={addErr}
+                problem={!addDraft.description.trim() ? "say what it was"
+                  : !addDraft.amount.trim() ? "enter the amount"
+                  : !addDraft.incurredOn ? "pick the date" : null} />
+              <button className="btn" onClick={() => setAdding(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent"
+                disabled={pending || !addDraft.description.trim() || !addDraft.amount.trim() || !addDraft.incurredOn}
+                onClick={() => startTransition(async () => {
+                  const res = await logMyExpense({
+                    kind: addDraft.kind, description: addDraft.description,
+                    amount: addDraft.amount, incurredOn: addDraft.incurredOn,
+                    workOrderId: addDraft.workOrderId ? parseInt(addDraft.workOrderId, 10) : null,
+                  });
+                  if (res?.error) { setAddErr(res.error); return; }
+                  toast({ message: "Logged - it is in your pool, ready to claim" });
+                  setAdding(false);
+                })}>
+                {pending ? "Logging..." : "Log it"}
+              </button>
+            </>
+          }>
+          <div className="pf2" style={{ marginBottom: 8 }}>
+            <div>
+              <label>Category</label>
+              <select value={addDraft.kind} aria-label="Category"
+                onChange={(e) => setAddDraft({ ...addDraft, kind: e.target.value })}>
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Amount ($)</label>
+              <input value={addDraft.amount} aria-label="Amount" inputMode="decimal" placeholder="43.00" autoFocus
+                onChange={(e) => setAddDraft({ ...addDraft, amount: e.target.value })} />
+            </div>
+          </div>
+          <label>What it was</label>
+          <input value={addDraft.description} aria-label="What it was" placeholder="Parking, downtown site"
+            onChange={(e) => setAddDraft({ ...addDraft, description: e.target.value })} style={{ marginBottom: 8 }} />
+          <div className="pf2">
+            <div>
+              <label>Date</label>
+              <input type="date" value={addDraft.incurredOn} max={today} aria-label="Date incurred"
+                onChange={(e) => setAddDraft({ ...addDraft, incurredOn: e.target.value })} />
+            </div>
+            <div>
+              <label>For the job</label>
+              {/* Open or closed alike - a receipt often surfaces after the job
+                  wraps - and "none" files it as overhead. */}
+              <select value={addDraft.workOrderId} aria-label="Work order"
+                onChange={(e) => setAddDraft({ ...addDraft, workOrderId: e.target.value })}>
+                <option value="">No job - overhead</option>
+                {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}
+              </select>
+            </div>
+          </div>
+        </Dialog>
+      )}
 
       {paying && (
         <Dialog open onClose={() => setPaying(null)} size="sm"

@@ -7233,6 +7233,59 @@ export async function logOverheadExpense(
 // stale number for the payout to trust. lib/expenseReports owns the rules.
 
 /**
+ * Log an expense from the Expenses desk itself.
+ *
+ * The desk is where an engineer empties their pockets at the end of a trip,
+ * so it takes the receipt right here instead of sending them to find the
+ * right work order page first. The job is a PICKER, not a requirement: any
+ * work order in the tenant, open or closed - a receipt often surfaces after
+ * the job it belongs to is wrapped - or none at all, which files it as
+ * overhead the way the internet bill is.
+ *
+ * The row is stamped with MY name whichever way it goes, so it lands in my
+ * reimbursement pool - that is the difference from logExpense on the work
+ * order, which leaves person blank because it is recording job cost, not a
+ * personal claim.
+ */
+export async function logMyExpense(
+  data: { kind: string; description: string; amount: string; incurredOn: string; workOrderId: number | null },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const cents = parseMoney(data.amount);
+  if (cents === null || cents <= 0) return { error: "Enter an amount like 43.00" };
+  const date = data.incurredOn.trim();
+  if (!isIsoDay(date)) return { error: "Pick the date it was incurred" };
+  if (date > shopToday()) return { error: "That date is in the future" };
+  const description = data.description.trim();
+  if (!description) return { error: "Say what it was - a bare amount is unreadable in a month" };
+  const t = readTenant(u);
+  let workOrderId: number | null = null;
+  if (data.workOrderId !== null) {
+    const [wo] = await db.select().from(workOrders)
+      .where(and(eq(workOrders.id, data.workOrderId), forTenant(workOrders.tenantOrgId, t)));
+    if (!wo) return { error: "That work order is not one of ours" };
+    workOrderId = wo.id;
+  }
+  const kind = await cleanKind(data.kind, t);
+  const [row] = await db.insert(expenses).values({
+    tenantOrgId: t, workOrderId, kind, description, amountCents: cents, incurredOn: date,
+    // On a job it defaults to rebillable, same as the work order form; with no
+    // job there is nobody to rebill - it is overhead, like the internet bill.
+    billable: workOrderId !== null,
+    person: u.name, loggedBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "expense", entityId: row.id, tenantOrgId: row.tenantOrgId,
+    action: `logged ${formatCents(cents)} - ${description}`
+      + (workOrderId !== null ? ` on a work order` : " (no job - overhead)"),
+  });
+  revalidatePath("/expenses");
+  revalidatePath("/money/expenses");
+  if (workOrderId !== null) revalidatePath(`/work/${workOrderId}`);
+  return {};
+}
+
+/**
  * Submit my expenses as one reimbursement claim.
  *
  * The ids are re-checked against MY pool on the server: rows already on a

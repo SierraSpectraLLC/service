@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { desc, eq, inArray } from "drizzle-orm";
+import { asc, desc, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseReports, expenses, workOrders } from "@/db/schema";
+import { expenseCategories, expenseReports, expenses, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { reimbursementPool } from "@/lib/expenseReports";
 import { shopToday } from "@/lib/shopday";
+import { WO_LABEL } from "@/lib/workOrders";
 import ExpenseReportsPanel, { type ReportRow } from "@/components/ExpenseReportsPanel";
 import { PageHead } from "@/components/ui";
 
@@ -31,11 +32,18 @@ export default async function ExpensesPage() {
   const isOwner = user.role === "owner";
   const t = readTenant(user);
 
-  const [expenseRows, reportRows] = await Promise.all([
+  const [expenseRows, reportRows, categoryRows, allWos] = await Promise.all([
     db.select().from(expenses).where(forTenant(expenses.tenantOrgId, t))
       .orderBy(desc(expenses.incurredOn), desc(expenses.id)),
     db.select().from(expenseReports).where(forTenant(expenseReports.tenantOrgId, t))
       .orderBy(desc(expenseReports.submittedAt)),
+    db.select().from(expenseCategories).where(forTenant(expenseCategories.tenantOrgId, t))
+      .orderBy(asc(expenseCategories.sortOrder), asc(expenseCategories.id)),
+    // Every job, open or closed, newest first - the picker for a receipt that
+    // surfaced after its job wrapped.
+    db.select({ id: workOrders.id, number: workOrders.number, title: workOrders.title, state: workOrders.state })
+      .from(workOrders).where(forTenant(workOrders.tenantOrgId, t))
+      .orderBy(desc(workOrders.id)).limit(200),
   ]);
   const woIds = [...new Set(expenseRows.map((e) => e.workOrderId).filter((x): x is number => x !== null))];
   const wos = woIds.length
@@ -62,10 +70,10 @@ export default async function ExpensesPage() {
   return (
     <div className="container wide">
       <PageHead
-        title="Reimbursements"
+        title="Expenses"
         sub={<>
-          Claim what you have fronted, and watch the payout land. Log job expenses on their work
-          orders and overhead at <Link href="/money/expenses">Billing › Overhead</Link>.
+          Log what you have fronted, claim it, and watch the payout land. Shop-wide overhead
+          lives at <Link href="/money/expenses">Billing › Overhead</Link>.
         </>}
       />
       <ExpenseReportsPanel
@@ -74,6 +82,12 @@ export default async function ExpensesPage() {
         queue={isOwner ? reportRows.map(shape) : []}
         isOwner={isOwner}
         today={shopToday()}
+        categories={categoryRows.map((c) => c.name)}
+        workOrders={allWos.map((w) => ({
+          id: w.id,
+          label: `${w.number} - ${w.title}`.slice(0, 70)
+            + (["closed", "resolved", "cancelled"].includes(w.state) ? ` (${WO_LABEL[w.state] ?? w.state})` : ""),
+        }))}
       />
     </div>
   );

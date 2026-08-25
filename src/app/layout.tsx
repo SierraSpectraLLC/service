@@ -142,7 +142,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         /* Money an engineer fronted, and where the payout stands. It lives
            here rather than under Billing because the person it serves is the
            engineer, and Billing is the owner's room. */
-        { href: "/expenses", label: "Reimbursements" },
+        { href: "/expenses", label: "Expenses" },
         /* Something you DO to a system, so it sits with the other doing - it
            was under Library, which is files and tools, and a remote session
            is neither. */
