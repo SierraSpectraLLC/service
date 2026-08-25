@@ -18,7 +18,7 @@ export type LineTarget = { kind: "invoice" | "quote"; id: number };
 
 const KIND_LABEL: Record<string, string> = {
   part: "Part", labor: "Labor", travel: "Travel",
-  expense: "Expense", tax: "Tax", fee_ref: "Charge",
+  expense: "Expense", tax: "Tax", fee_ref: "Charge", retainer: "Retainer",
 };
 
 /** The kinds somebody may type in by hand; tax and fee rows come from the system. */

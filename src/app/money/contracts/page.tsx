@@ -14,6 +14,7 @@ import { contractProposal, renewalFromBurn } from "@/lib/quotes";
 import { allInvoices } from "@/lib/invoiceData";
 import MoneyTabs from "@/components/MoneyTabs";
 import AgreementsPanel from "@/components/AgreementsPanel";
+import RetainerCard from "@/components/RetainerCard";
 import { FacetStrip, PageHead, Panel, Toolbar } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +75,17 @@ export default async function ContractsPage({ searchParams }: {
   const inForce = shaped.filter((a) => ["active", "expiring"].includes(standing(a, today)));
   const ended = shaped.filter((a) => ["expired", "cancelled"].includes(standing(a, today)));
   const shown = f === "ended" ? ended : f === "all" ? shaped : inForce;
+  // Standing billing reads the raw rows, not the shaped ones: it needs the
+  // schedule columns, and it only ever concerns contracts still in force.
+  const inForceIds = new Set(inForce.map((a) => a.id));
+  const retainers = rows.filter((r) => inForceIds.has(r.id)).map((r) => ({
+    id: r.id, orgId: r.orgId, orgName: orgName.get(r.orgId) ?? "an organization",
+    number: r.number, title: r.title, status: r.status,
+    startsOn: r.startsOn, endsOn: r.endsOn,
+    billEveryMonths: r.billEveryMonths, billAmountCents: r.billAmountCents,
+    billDescription: r.billDescription, billDayOfMonth: r.billDayOfMonth,
+    billLeadDays: r.billLeadDays, billNextOn: r.billNextOn, billLastOn: r.billLastOn,
+  }));
 
   // The renewal figure, priced off what the term actually cost to serve.
   const extra: Record<number, string> = {};
@@ -131,6 +143,8 @@ export default async function ContractsPage({ searchParams }: {
           ]} />
         }
       />
+
+      <RetainerCard rows={retainers} today={today} canEdit />
 
       <AgreementsPanel
         rows={shown} today={today} systems={systems} orgs={clientOrgs}

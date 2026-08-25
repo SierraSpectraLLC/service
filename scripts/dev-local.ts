@@ -167,6 +167,18 @@ const FIXTURE = `
       to_char(now() - interval '320 days', 'YYYY-MM-DD'),
       to_char(now() + interval '39 days', 'YYYY-MM-DD'), 4, 250000, 2400, 1800000, '${OWNER}');
 
+  -- A retainer: $20,000 a month with no job behind it, which is the one kind
+  -- of revenue nothing else in the fixture produces. Its cursor is left a
+  -- cycle in the past so Contracts opens with a cycle ready to raise and the
+  -- overnight pass has something to catch up on.
+  INSERT INTO agreements (org_id, kind, number, title, status, starts_on, value_cents,
+      bill_every_months, bill_amount_cents, bill_description, bill_day_of_month,
+      bill_lead_days, bill_next_on, created_by) VALUES
+    (2, 'contract', 'AGR-2026-07', 'Coastal Analytical retainer', 'active',
+      to_char(now() - interval '200 days', 'YYYY-MM-DD'), 24000000,
+      1, 2000000, 'Monthly service retainer', 1, 7,
+      to_char(date_trunc('month', now()) - interval '1 month', 'YYYY-MM-DD'), '${OWNER}');
+
   -- ── Billing ───────────────────────────────────────────────────────────────
   -- Three rungs of rate card so resolveRate's precedence is visible in the app:
   -- the agreement wins for Lab Zen contract work, the org card covers Lab Zen's

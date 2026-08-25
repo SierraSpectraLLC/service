@@ -29,7 +29,10 @@ export const EXPENSE_LABEL: Record<string, string> = {
   mileage: "Mileage", shipping: "Shipping", per_diem: "Per diem", lodging: "Lodging", other: "Other",
 };
 
-export const LINE_KINDS = ["part", "labor", "travel", "expense", "tax", "fee_ref"] as const;
+// "retainer" is a flat charge with no unit behind it - not an hour, not a
+// thing. It exists because a $20,000 month billed as "1 h" is a line a client
+// queries, and rightly.
+export const LINE_KINDS = ["part", "labor", "travel", "expense", "tax", "fee_ref", "retainer"] as const;
 export type LineKind = (typeof LINE_KINDS)[number];
 
 export type DraftLine = {

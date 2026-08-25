@@ -3202,3 +3202,16 @@ ALTER TABLE "parts" ADD COLUMN IF NOT EXISTS "module_kind" text NOT NULL DEFAULT
 -- Who to tell we are coming: the en-route email's recipient, per site.
 ALTER TABLE "org_sites" ADD COLUMN IF NOT EXISTS "contact_email" text NOT NULL DEFAULT '';
 
+
+-- ── Recurring billing on an agreement ───────────────────────────────────────
+-- A retainer bills the same amount every cycle with no work order behind it.
+-- bill_every_months is the standing instruction (0 = not recurring, the same
+-- reading the entitlement columns use); bill_next_on is the cursor, and the
+-- only thing that stops a re-run raising the same month twice.
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_every_months" integer NOT NULL DEFAULT 0;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_amount_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_description" text NOT NULL DEFAULT '';
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_day_of_month" integer NOT NULL DEFAULT 1;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_lead_days" integer NOT NULL DEFAULT 7;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_next_on" text NOT NULL DEFAULT '';
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "bill_last_on" text NOT NULL DEFAULT '';

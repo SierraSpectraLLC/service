@@ -50,6 +50,9 @@ import {
   asStatementRow, billingContext, creditFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
   invoicesForOrg,
 } from "@/lib/invoiceData";
+import {
+  addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
+} from "@/lib/recurring";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
@@ -12404,6 +12407,149 @@ export async function createBlankInvoice(orgId: number): Promise<{ error?: strin
     }
   }
   throw last;
+}
+
+/**
+ * Raise one cycle of a retainer as a draft invoice.
+ *
+ * The one piece of money in this app with no job behind it: nobody drove out,
+ * nobody logged an hour, and the month falls due anyway. Two rules it does not
+ * bend:
+ *
+ *   IT DRAFTS, IT DOES NOT SEND. A $20,000 invoice leaving for a client
+ *   because a cron fired at 3am is a decision nobody made. The draft is the
+ *   automation; pressing send stays a person's job - the same line the dunning
+ *   pass draws.
+ *
+ *   ONE CYCLE, ONCE. bill_last_on is written in the same breath as the
+ *   invoice, and a cycle at or before it is refused. Re-running the pass, or
+ *   pressing the button twice, cannot bill a month twice.
+ *
+ * `actor` is who to credit: the cron passes its own name because there is no
+ * session behind it.
+ */
+export async function raiseRetainerCycle(
+  agreementId: number, cycleOn: string, actor: string,
+): Promise<{ error?: string; id?: number; number?: string }> {
+  if (!isIsoDay(cycleOn)) return { error: "That is not a day" };
+  const [ag] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!ag) return { error: "Not found" };
+  if (!recurring(ag)) return { error: "This agreement does not bill on its own" };
+  // The refusal that makes a re-run safe.
+  if (ag.billLastOn && cycleOn <= ag.billLastOn) {
+    return { error: `${cycleOn} was already raised on this agreement` };
+  }
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
+  if (!org) return { error: "Not found" };
+  const tenant = orgTenant(org) ?? ag.tenantOrgId;
+  const { invoicePrefix } = await billingContext(ag.orgId);
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const used = await db.select({ number: invoices.number }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, tenant));
+    const number = nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: tenant, orgId: ag.orgId, agreementId: ag.id, number,
+        status: "draft", issuedOn: cycleOn, dueOn: dueFor(org, cycleOn),
+        poNumber: org.poNumber ?? "", createdBy: actor,
+        note: ag.number ? `Under ${ag.number}` : "",
+      }).returning();
+      await db.insert(invoiceLines).values({
+        invoiceId: inv.id, kind: "retainer",
+        description: ag.billDescription.trim() || ag.title.trim() || "Service retainer",
+        detail: `${billCadenceLabel(ag.billEveryMonths)} - cycle of ${cycleOn}`,
+        qty: 1000, unitCents: ag.billAmountCents,
+      });
+      // Cursor forward in the same breath as the invoice.
+      await db.update(agreements).set({
+        billLastOn: cycleOn,
+        billNextOn: addMonths(cycleOn, ag.billEveryMonths, ag.billDayOfMonth),
+      }).where(eq(agreements.id, ag.id));
+      await audit({
+        actor, entityType: "invoice", entityId: inv.id, tenantOrgId: tenant,
+        action: `raised ${number} for ${org.name}: ${billCadenceLabel(ag.billEveryMonths)} retainer`
+          + `${ag.number ? ` under ${ag.number}` : ""}, cycle of ${cycleOn} - draft, not sent`,
+      });
+      revInvoice(inv);
+      revalidatePath("/money/invoices");
+      revalidatePath("/money");
+      return { id: inv.id, number };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/**
+ * Raise a cycle from the card, rather than waiting for the overnight pass.
+ *
+ * Same guard rails, a session behind it instead of the cron: the person is
+ * checked, and the cycle still has to be one dueCycles agrees is due, so this
+ * cannot be used to run a contract forward past its own schedule.
+ */
+export async function raiseRetainerCycleNow(
+  agreementId: number, cycleOn: string,
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const [ag] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!ag) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  if (!dueCycles(ag, shopToday()).includes(cycleOn)) {
+    return { error: `The ${cycleOn} cycle is not due yet` };
+  }
+  return raiseRetainerCycle(agreementId, cycleOn, u.email);
+}
+
+/**
+ * The standing instruction itself: how much, how often, and from when.
+ *
+ * Turning it on opens the cursor at the NEXT cycle rather than the contract's
+ * start - a contract signed in January does not raise eight drafts because
+ * somebody ticked a box in August. Backfilling those months is a separate,
+ * deliberate act.
+ */
+export async function saveRecurringTerms(
+  agreementId: number,
+  data: { everyMonths: number; amountCents: number; description: string; dayOfMonth: number; leadDays: number },
+): Promise<{ error?: string; nextOn?: string }> {
+  const u = await requireStaff();
+  const [ag] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!ag) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+
+  const every = Math.max(0, Math.min(60, Math.round(data.everyMonths)));
+  const cents = Math.max(0, Math.round(data.amountCents));
+  const day = Math.max(1, Math.min(31, Math.round(data.dayOfMonth)));
+  const lead = Math.max(0, Math.min(60, Math.round(data.leadDays)));
+  if (every > 0 && cents <= 0) return { error: "Say what each cycle bills" };
+
+  const today = shopToday();
+  // Keep the cursor where it is once it is running: retuning the amount must
+  // not silently re-bill a month, and must not skip one either.
+  const nextOn = every === 0 ? ""
+    : ag.billNextOn || openingCursor({ startsOn: ag.startsOn, billDayOfMonth: day }, today);
+
+  await db.update(agreements).set({
+    billEveryMonths: every, billAmountCents: cents,
+    billDescription: data.description.trim().slice(0, 200),
+    billDayOfMonth: day, billLeadDays: lead, billNextOn: nextOn,
+  }).where(eq(agreements.id, ag.id));
+
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: ag.id, tenantOrgId: ag.tenantOrgId,
+    action: every === 0
+      ? `stopped billing ${ag.number || "this agreement"} on a schedule`
+      : `${ag.number || "this agreement"} now bills ${formatCents(cents)} ${billCadenceLabel(every)}`
+        + `, next cycle ${nextOn}, drafted ${lead} day${lead === 1 ? "" : "s"} ahead`,
+  });
+  revalidatePath(`/clients/${ag.orgId}`);
+  revalidatePath("/money");
+  return { nextOn };
 }
 
 /** A priced offer with no job behind it yet. Lines are typed onto the draft. */

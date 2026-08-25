@@ -1714,6 +1714,27 @@ export const agreements = pgTable("agreements", {
   // another, each drawing down separately.
   instrumentIds: integer("instrument_ids").array().notNull().default([]),
   note: text("note").notNull().default(""),
+  // ── Recurring billing ────────────────────────────────────────────────────
+  // A retainer is the agreement, not a work order: nobody drives out, nobody
+  // logs an hour, and the same amount falls due every month regardless. These
+  // columns are the standing instruction; billNextOn is the cursor that says
+  // which cycle is next and is the ONLY thing that stops a re-run billing the
+  // same month twice.
+  //
+  // 0 months means not recurring - not "every zero months" - the same reading
+  // the entitlement columns above already use.
+  billEveryMonths: integer("bill_every_months").notNull().default(0),
+  billAmountCents: integer("bill_amount_cents").notNull().default(0),
+  billDescription: text("bill_description").notNull().default(""),
+  // Which day the cycle falls on. A month shorter than the number clamps to
+  // its last day, so a contract billed on the 31st bills Feb 28 rather than
+  // skipping February.
+  billDayOfMonth: integer("bill_day_of_month").notNull().default(1),
+  // How far ahead the draft is raised, so somebody has time to look at it
+  // before the day it is dated.
+  billLeadDays: integer("bill_lead_days").notNull().default(7),
+  billNextOn: text("bill_next_on").notNull().default(""),   // YYYY-MM-DD
+  billLastOn: text("bill_last_on").notNull().default(""),   // the cycle last raised
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("agreements_org_idx").on(t.orgId), index("agreements_ends_idx").on(t.endsOn)]);
