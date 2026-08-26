@@ -3,6 +3,7 @@ import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { notifications } from "@/db/schema";
 import { currentUser } from "@/lib/authz";
+import { flushOutbox } from "@/lib/outboxData";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,16 @@ export async function GET(req: Request) {
   const email = user.email.toLowerCase();
 
   const after = parseInt(new URL(req.url).searchParams.get("after") ?? "0", 10) || 0;
+
+  /* The held-email queue's real clock.
+     A serverless function cannot hold a timer open for thirty seconds, so the
+     thing that decides when a burst has gone quiet has to be something that
+     ticks anyway - and this already does, from every open tab, about every
+     forty-five seconds. Awaited rather than fired and forgotten: the work is
+     two indexed queries on an empty table almost every time, and a floating
+     promise in a serverless function is a promise that may never run.
+     /api/cron/outbox is the backstop for when no tab is open at all. */
+  await flushOutbox();
 
   const [unreadRows, fresh] = await Promise.all([
     db.select({ id: notifications.id }).from(notifications)

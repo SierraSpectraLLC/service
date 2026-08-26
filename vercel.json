@@ -25,6 +25,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/outbox",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/recurring",
       "schedule": "0 13 * * *"
     }

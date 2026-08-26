@@ -27,8 +27,22 @@ export const DESKTOP_KEY = "notify:desktop";
  */
 export type NotifyAudience = "house" | "all";
 
+/**
+ * A kind whose email waits for the burst to finish, and the plural it uses
+ * when several arrive together.
+ *
+ * Only bursty kinds get one. Assigning is bursty - a person sits down and
+ * writes out an install list - while a gas going empty or a contract coming up
+ * for renewal happens once and should interrupt at once. Holding a solitary
+ * event buys nothing and costs it thirty seconds of lateness.
+ */
+export type NotifyHold = { seconds: number; plural: string };
+
 export const NOTIFY_KINDS = [
-  { kind: "task_assigned", label: "A task is assigned to me", audience: "all" },
+  {
+    kind: "task_assigned", label: "A task is assigned to me", audience: "all",
+    hold: { seconds: 30, plural: "tasks" },
+  },
   { kind: "system_assigned", label: "I'm made lead on a system", audience: "all" },
   { kind: "discussion", label: "Discussion posts and @mentions", audience: "all" },
   { kind: "mention", label: "I'm @mentioned in a task note", audience: "all" },
@@ -50,7 +64,9 @@ export const NOTIFY_KINDS = [
   { kind: "model_proposal", label: "A model not in the catalog gets recorded", audience: "house" },
   { kind: "sign_in", label: "Somebody signs in to the portal for the first time", audience: "house" },
   { kind: "usage_report", label: "The weekly report of who is using the portal", audience: "house" },
-] as const satisfies readonly { kind: string; label: string; audience: NotifyAudience }[];
+] as const satisfies readonly {
+  kind: string; label: string; audience: NotifyAudience; hold?: NotifyHold;
+}[];
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];
 
@@ -70,6 +86,15 @@ export const mayReceiveKind = (kind: string, isStaff: boolean): boolean =>
 
 export const isNotifyKind = (k: string): k is NotifyKind =>
   NOTIFY_KINDS.some((n) => n.kind === k);
+
+/**
+ * How long this kind's email waits for the rest of its burst, or null to send
+ * at once - which is every kind but one, and the honest default.
+ */
+export const holdFor = (kind: string): NotifyHold | null => {
+  const k = NOTIFY_KINDS.find((n) => n.kind === kind);
+  return k && "hold" in k ? k.hold : null;
+};
 
 /**
  * May this kind email this person? No stored row means yes - prefs only

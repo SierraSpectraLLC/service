@@ -8,11 +8,13 @@ import { db } from "@/db";
 import { users, notifications, notificationPrefs } from "@/db/schema";
 import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
-import { emailAllowed, type NotifyKind } from "@/lib/inbox";
+import { emailAllowed, holdFor, type NotifyKind } from "@/lib/inbox";
+import { queueEmail } from "@/lib/outboxData";
 import { getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
 import { namedLogins } from "@/lib/directory";
-import { emailShell, esc, btn, quote, mutedLine } from "@/lib/emailTheme";
+import { esc, btn, quote, mutedLine } from "@/lib/emailTheme";
+import { wrapNotification } from "@/lib/notifyShell";
 import { STATUS_LABEL, sinceWords, type PersonUsage } from "@/lib/loginLog";
 
 export type Person = { name: string; email: string };
@@ -69,29 +71,43 @@ async function deliver(opts: {
   /** Body HTML only - deliver dresses it in the shared shell, with the inbox
    * title as the preview line, so no notification can forget the envelope. */
   body: string;
+  /**
+   * The three facts a HELD email is grouped and worded by when several of them
+   * arrive together: who did it, what to, and the bare thing itself. Only the
+   * kinds that wait need them (lib/inbox.holdFor); everything else sends at
+   * once and never reads them. See lib/outbox.
+   */
+  actor?: string;
+  context?: string;
+  item?: string;
 }) {
   const emails = [...new Set(opts.to.map((e) => e.trim().toLowerCase()).filter(Boolean))];
   if (!emails.length) return;
+  /* THE RECORD IS NEVER HELD. Whatever the email does, the inbox row is
+     written now: the bell lights up on the fifth assignment as it did on the
+     first, and what waits is the interruption alone. */
   await db.insert(notifications).values(emails.map((email) => ({
     email, kind: opts.kind, title: opts.title.slice(0, 200), href: opts.href,
   })));
   const prefRows = await db.select().from(notificationPrefs).where(inArray(notificationPrefs.email, emails));
   const wantEmail = emails.filter((e) => emailAllowed(prefRows.filter((p) => p.email === e), opts.kind));
-  if (wantEmail.length) await sendEmail(wantEmail, opts.subject, await wrap(opts.body, { preheader: opts.title }));
+  if (!wantEmail.length) return;
+
+  // A bursty kind goes to the waiting room; everything else leaves now.
+  if (holdFor(opts.kind)) {
+    await queueEmail(wantEmail.map((email) => ({
+      email, kind: opts.kind, title: opts.title.slice(0, 200), href: opts.href,
+      subject: opts.subject, body: opts.body,
+      actor: opts.actor ?? "", context: opts.context ?? "", item: opts.item ?? "",
+    })));
+    return;
+  }
+  await sendEmail(wantEmail, opts.subject, await wrap(opts.body, { preheader: opts.title }));
 }
 
-// System notifications are sent by the platform, so they carry its name rather
-// than any one service company's - see lib/brand.ts. The footer points at the
-// inbox because that is where the email switches live - except on the invite,
-// whose recipient has never signed in and has no inbox to manage yet.
-const wrap = async (body: string, opts: { preheader?: string; prefsFooter?: boolean } = {}) => {
-  const brand = (await getBrand()).name;
-  const url = appUrl();
-  const footer = `Sent by ${esc(brand)}.${opts.prefsFooter !== false && url
-    ? ` <a href="${url}/inbox" style="color:#94A3B8;">Choose which emails you get</a>.`
-    : ""}`;
-  return emailShell({ brand, preheader: opts.preheader, body, footer });
-};
+/* The envelope every notification leaves in, shared with the outbox so a held
+   email and an immediate one are the same email in every respect but timing. */
+const wrap = wrapNotification;
 
 export async function notifyTaskAssigned(opts: {
   actorEmail: string; actorName: string; assignee: string;
@@ -116,6 +132,8 @@ export async function notifyTaskAssigned(opts: {
       to: [to], kind: "task_assigned", href,
       title: `${opts.actorName} assigned you "${opts.taskTitle}" on ${opts.externalId}`,
       subject: `${opts.externalId}: assigned "${opts.taskTitle}"`,
+      // What a batch of these is grouped by, and what each line of one says.
+      actor: opts.actorName, context: opts.externalId, item: opts.taskTitle,
       body: `${esc(opts.actorName)} assigned you <b>${esc(opts.taskTitle)}</b> on <b>${esc(opts.externalId)}</b>.
         ${url && href ? btn(`${url}${href}`, `Open ${opts.externalId}`) : ""}`,
     });

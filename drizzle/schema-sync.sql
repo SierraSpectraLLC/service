@@ -459,6 +459,26 @@ CREATE TABLE IF NOT EXISTS "notifications" (
   "created_at" timestamp NOT NULL DEFAULT now(),
   "read_at" timestamp
 );
+-- Emails waiting for the burst they belong to to finish. Never load-bearing:
+-- the inbox row is written first and this only defers the interruption, so
+-- losing the whole table costs some emails and no facts. See src/lib/outbox.ts.
+CREATE TABLE IF NOT EXISTS "email_outbox" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "email" text NOT NULL,
+  "kind" text NOT NULL,
+  "title" text NOT NULL DEFAULT '',
+  "href" text NOT NULL DEFAULT '',
+  "subject" text NOT NULL DEFAULT '',
+  "body" text NOT NULL DEFAULT '',
+  "actor" text NOT NULL DEFAULT '',
+  "context" text NOT NULL DEFAULT '',
+  "item" text NOT NULL DEFAULT '',
+  "send_after" timestamp NOT NULL,
+  "send_by" timestamp NOT NULL,
+  "sent_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "email_outbox_due_idx" ON "email_outbox" ("sent_at","send_after");
 CREATE TABLE IF NOT EXISTS "notification_prefs" (
   "id" serial PRIMARY KEY NOT NULL,
   "email" text NOT NULL,

@@ -1982,6 +1982,43 @@ export const notifications = pgTable("notifications", {
 // Per-kind email opt-outs. No row = email on: the table only records
 // departures from the default, so a fresh install (and every existing user)
 // starts with everything enabled and the inbox always gets a row regardless.
+/**
+ * Emails waiting for the burst they belong to to finish.
+ *
+ * A row here is an email that HAS NOT been sent and a notification that has
+ * already been recorded - lib/notify writes the inbox row first, always, so
+ * nothing in this table is load-bearing for what the app knows. Losing the
+ * whole table would cost some emails and no facts.
+ *
+ * `send_after` slides: every new item in the same burst pushes it out again,
+ * so the wait measures silence rather than elapsed time. `send_by` does not,
+ * and is what stops a burst that never goes quiet from holding its first item
+ * forever. See lib/outbox for both.
+ *
+ * `sent_at` rather than a delete, so a flush that runs twice cannot send
+ * twice, and so "why did this arrive late" has an answer on the row.
+ */
+export const emailOutbox = pgTable("email_outbox", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  kind: text("kind").notNull(),
+  /** The inbox sentence - stands alone, and is the fallback in a batch. */
+  title: text("title").notNull().default(""),
+  href: text("href").notNull().default(""),
+  /** What one of these says on its own, kept so a single item is unchanged. */
+  subject: text("subject").notNull().default(""),
+  body: text("body").notNull().default(""),
+  /* The three facts a batch is grouped and worded by: who did it, what to,
+     and the bare thing itself. See lib/outbox.batchKey. */
+  actor: text("actor").notNull().default(""),
+  context: text("context").notNull().default(""),
+  item: text("item").notNull().default(""),
+  sendAfter: timestamp("send_after").notNull(),
+  sendBy: timestamp("send_by").notNull(),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("email_outbox_due_idx").on(t.sentAt, t.sendAfter)]);
+
 export const notificationPrefs = pgTable("notification_prefs", {
   id: serial("id").primaryKey(),
   email: text("email").notNull(),
