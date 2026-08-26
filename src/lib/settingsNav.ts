@@ -16,6 +16,11 @@ export type SettingsEntry = {
   label: string;
   ownerOnly: boolean;
   platformOnly?: boolean;
+  /**
+   * One named address, not a role. For the one entry whose contents are other
+   * companies' employees moving around their own portal - see lib/trail.
+   */
+  trailAdminOnly?: boolean;
 };
 export type SettingsGroup = { name: string; entries: SettingsEntry[] };
 
@@ -52,15 +57,23 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { href: "/settings/admin", label: "People & ownership", ownerOnly: true },
       // Whether the people we let in ever come in. See lib/loginLog.
       { href: "/settings/activity", label: "Usage", ownerOnly: true },
+      // Where the errors are. Not a role gate: see lib/trail.
+      { href: "/settings/trail", label: "Trail", ownerOnly: true, platformOnly: true, trailAdminOnly: true },
     ],
   },
 ];
 
-export function visibleSettingsGroups(isOwner: boolean, isPlatform: boolean): SettingsGroup[] {
+export function visibleSettingsGroups(
+  isOwner: boolean, isPlatform: boolean, isTrailAdmin = false,
+): SettingsGroup[] {
   return SETTINGS_GROUPS
     .map((g) => ({
       ...g,
-      entries: g.entries.filter((e) => (isOwner || !e.ownerOnly) && (isPlatform || !e.platformOnly)),
+      entries: g.entries.filter((e) =>
+        (isOwner || !e.ownerOnly)
+        && (isPlatform || !e.platformOnly)
+        // A door nobody else may open should not be a door they can see.
+        && (isTrailAdmin || !e.trailAdminOnly)),
     }))
     .filter((g) => g.entries.length > 0);
 }

@@ -2,14 +2,14 @@
 
 import crypto from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { eq, and, asc, desc, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { redirect } from "next/navigation";
 import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
-  stageEvents, discussionPosts, assets, serviceVisits, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries,
+  stageEvents, discussionPosts, assets, serviceVisits, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries, trailEvents,
   engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
@@ -136,6 +136,8 @@ import {
 } from "@/lib/payroll";
 import { normalizePhone } from "@/lib/sms";
 import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { maySeeTrail } from "@/lib/trail";
+import { pruneTrail, recordTrail } from "@/lib/trailData";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
 import { copyable, copyPlan, copySummary } from "@/lib/taskCopy";
 import { alreadyHas, procedureCopy, refilePlan, refileSummary } from "@/lib/procedureMove";
@@ -9275,6 +9277,8 @@ const MODULES = {
   digest: { col: "digestEnabled", label: "daily digest" },
   remote: { col: "remoteEnabled", label: "remote support" },
   publicCatalog: { col: "publicCatalogEnabled", label: "public equipment library" },
+  // The one that watches people rather than machines. See lib/trail.
+  trail: { col: "trailEnabled", label: "activity trail" },
 } as const;
 
 export async function setModule(
@@ -11903,6 +11907,64 @@ export async function setKitLines(
   });
   revalidatePath("/settings/parts");
   return {};
+}
+
+// ---------------- The trail ----------------
+
+/**
+ * Report a page opened, or an error thrown at somebody.
+ *
+ * Called from the browser, so it is written as if it were: it trusts nothing
+ * from the caller except the route and the message, takes WHO from the session
+ * rather than the payload, and cannot fail anything. A visitor with no session
+ * records nothing - the sign-in page is not where bugs hide, and an unnamed
+ * row helps nobody.
+ *
+ * The identity is the REAL one. An owner viewing as a client still records as
+ * themselves, which is what the banner over that mode promises.
+ */
+export async function reportTrail(input: {
+  kind: string; route: string; search?: string; message?: string; detail?: string;
+}): Promise<void> {
+  try {
+    const { real, persona } = await viewContext();
+    if (!real) return;
+    const h = await headers();
+    await recordTrail({
+      kind: input.kind,
+      email: real.email,
+      role: real.role,
+      orgId: real.orgId,
+      orgName: real.orgName ?? "",
+      operatorOrgId: real.operatorOrgId,
+      viewingAs: persona ? persona.orgName : "",
+      route: input.route,
+      search: input.search,
+      message: input.message,
+      detail: input.detail,
+      userAgent: h.get("user-agent") ?? "",
+    });
+    /* One page in a few hundred pays for the sweep, so the table cannot grow
+       without an end and nothing has to be scheduled to stop it. Errors never
+       draw the short straw: the row somebody came here to read is not the one
+       that should wait on a delete. */
+    if (input.kind === "page" && Math.random() < 0.005) await pruneTrail();
+  } catch {
+    // Nothing here may surface to a person. See lib/trailData.
+  }
+}
+
+/** Empty the trail. Only whoever may read it may clear it. */
+export async function clearTrail(): Promise<{ error?: string; cleared?: number }> {
+  const u = await requireUser();
+  if (!maySeeTrail(u.email)) return { error: "Not found" };
+  const gone = await db.delete(trailEvents).returning({ id: trailEvents.id });
+  await audit({
+    actor: u.email, entityType: "trail", entityId: 0,
+    action: `cleared the activity trail - ${gone.length} row${gone.length === 1 ? "" : "s"}`,
+  });
+  revalidatePath("/settings/trail");
+  return { cleared: gone.length };
 }
 
 // ---------------- Service agreements ----------------

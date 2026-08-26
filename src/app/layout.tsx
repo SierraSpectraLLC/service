@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -19,6 +20,7 @@ import ViewAsBar from "@/components/ViewAsBar";
 import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmHost } from "@/components/ui/ConfirmDialog";
 import { ToastHost } from "@/components/ui/Toast";
+import TrailReporter from "@/components/TrailReporter";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { getAppearance } from "@/lib/appearanceData";
@@ -346,6 +348,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             page. Both render nothing until asked. */}
         <ConfirmHost />
         <ToastHost />
+        {/* Records the page and any error thrown on it - only when the module
+            is on, so an instance that has not asked for it pays nothing. It
+            reads the URL, so it needs the Suspense boundary useSearchParams
+            wants; there is nothing to fall back to because it renders null. */}
+        {modules.trail && user && (
+          <Suspense fallback={null}><TrailReporter /></Suspense>
+        )}
         <Analytics />
       </body>
     </html>

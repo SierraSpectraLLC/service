@@ -11,12 +11,14 @@ import { settingsEntryFor, visibleSettingsGroups } from "@/lib/settingsNav";
  * list. Replaces the two-row tab stack; same role filtering as before, so a
  * staff member sees fewer entries rather than a different component.
  */
-export default function SettingsNav({ isOwner, isPlatform }: {
+export default function SettingsNav({ isOwner, isPlatform, isTrailAdmin = false }: {
   isOwner: boolean;
   isPlatform: boolean;
+  /** The one named address that may read the trail. See lib/trail. */
+  isTrailAdmin?: boolean;
 }) {
   const path = usePathname();
-  const groups = visibleSettingsGroups(isOwner, isPlatform);
+  const groups = visibleSettingsGroups(isOwner, isPlatform, isTrailAdmin);
   const current = settingsEntryFor(path);
   // The drilldown is a <details> that survives client navigation, so without
   // this the open menu sat on top of the page you had just picked and only

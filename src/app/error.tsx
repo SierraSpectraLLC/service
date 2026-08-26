@@ -1,0 +1,54 @@
+"use client";
+
+import { useEffect } from "react";
+import { reportTrail } from "@/app/actions";
+
+/**
+ * The page that appears when a page throws, and the one place a render error
+ * can be caught at all.
+ *
+ * Two jobs, and the second is the one that was missing: say something a person
+ * can act on, and FILE THE ERROR. A React render error never reaches
+ * window.onerror - the boundary swallows it - so before this, the most
+ * common kind of failure in a Next app was the one kind nothing recorded.
+ *
+ * The report is best-effort and silent. A trail that could fail this boundary
+ * would replace a broken page with a blank one.
+ */
+export default function ErrorPage({ error, reset }: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    void reportTrail({
+      kind: "error",
+      route: window.location.pathname,
+      search: window.location.search,
+      message: error.message || "Render error",
+      // The digest is how a server-side message, which production replaces
+      // with a generic string, is matched back to the server log.
+      detail: `${error.digest ? `digest ${error.digest}\n` : ""}${error.stack ?? ""}`.trim(),
+    }).catch(() => {});
+  }, [error]);
+
+  return (
+    <div className="container">
+      <div className="card" style={{ marginTop: 40, padding: "22px 24px" }}>
+        <div className="card-title" style={{ marginBottom: 6 }}>That page did not load.</div>
+        <div className="t-body mut" style={{ marginBottom: 14 }}>
+          The failure has been recorded with the page you were on. Trying again
+          often works - the same page twice in a row means it is not you.
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn accent" onClick={() => reset()}>Try again</button>
+          <a className="btn" href="/">Back to the start</a>
+        </div>
+        {error.digest && (
+          <div className="mut t-meta" style={{ marginTop: 12 }}>
+            Reference <span className="mono">{error.digest}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

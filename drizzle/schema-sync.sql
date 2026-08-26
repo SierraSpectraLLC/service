@@ -3326,3 +3326,27 @@ ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_ack_by" text NOT NULL 
 -- which is what every agreement written before this column meant, so there is
 -- nothing to backfill.
 ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "provider_org_id" integer;
+
+-- What somebody did and what went wrong while they did it. Off by default:
+-- this is the one module that watches people rather than machines.
+ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "trail_enabled" boolean NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS "trail_events" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "kind" text NOT NULL DEFAULT 'page',
+  "email" text NOT NULL DEFAULT '',
+  "role" text NOT NULL DEFAULT '',
+  "org_id" integer,
+  "org_name" text NOT NULL DEFAULT '',
+  "operator_org_id" integer,
+  "viewing_as" text NOT NULL DEFAULT '',
+  "route" text NOT NULL DEFAULT '',
+  "query" text NOT NULL DEFAULT '',
+  "message" text NOT NULL DEFAULT '',
+  "detail" text NOT NULL DEFAULT '',
+  "user_agent" text NOT NULL DEFAULT '',
+  "at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "trail_events_at_idx" ON "trail_events" ("at");
+CREATE INDEX IF NOT EXISTS "trail_events_kind_idx" ON "trail_events" ("kind");
+CREATE INDEX IF NOT EXISTS "trail_events_email_idx" ON "trail_events" ("email");

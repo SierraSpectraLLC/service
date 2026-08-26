@@ -1,5 +1,6 @@
 import { currentUser } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
+import { maySeeTrail } from "@/lib/trail";
 import SettingsNav, { SettingsCrumb } from "@/components/SettingsNav";
 
 /**
@@ -17,7 +18,8 @@ export default async function SettingsLayout({ children }: { children: React.Rea
   return (
     <div className="container settings">
       <div className="settings-shell">
-        <SettingsNav isOwner={isOwner} isPlatform={isPlatform} />
+        <SettingsNav isOwner={isOwner} isPlatform={isPlatform}
+          isTrailAdmin={maySeeTrail(user?.email)} />
         <div className="settings-main">
           <SettingsCrumb />
           {children}

@@ -1509,6 +1509,53 @@ export const serviceVisits = pgTable("service_visits", {
   index("service_visits_asset_idx").on(t.assetId),
 ]);
 
+/**
+ * What somebody did, and what went wrong while they did it.
+ *
+ * Built for one question - "where are the errors" - which is why an ERROR row
+ * carries a stack and a page row carries almost nothing. Clicks are
+ * deliberately not here: a DOM click tells you a button was pressed, not what
+ * broke, and at one row per press it would bury the rows that answer the
+ * question. What earns a row is a page somebody opened and a thing that failed
+ * on them.
+ *
+ * The shape follows login_events: who they were AT THAT MOMENT, stamped rather
+ * than joined, so a person promoted in March does not rewrite what they were
+ * in January.
+ */
+export const trailEvents = pgTable("trail_events", {
+  id: serial("id").primaryKey(),
+  // page | error. Two kinds, because two questions: what were they doing, and
+  // what blew up. A third for clicks was considered and refused - see above.
+  kind: text("kind").notNull().default("page"),
+  email: text("email").notNull().default(""),
+  role: text("role").notNull().default(""),
+  orgId: integer("org_id").references(() => orgs.id, { onDelete: "set null" }),
+  orgName: text("org_name").notNull().default(""),
+  operatorOrgId: integer("operator_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /**
+   * Whose shoes they were standing in, when an owner was viewing as somebody.
+   * The banner promises "anything you change is still recorded as you", and a
+   * trail that recorded the persona instead would break that promise in the
+   * one place somebody goes to find out who did something.
+   */
+  viewingAs: text("viewing_as").notNull().default(""),
+  // The pathname, and the query with identifying values stripped - see
+  // lib/trail.safeQuery. Never the raw URL: "?q=<a client's name>" is a
+  // search somebody typed, and it is not what finds a bug.
+  route: text("route").notNull().default(""),
+  query: text("query").notNull().default(""),
+  // Errors only: the message, and as much stack as is worth keeping.
+  message: text("message").notNull().default(""),
+  detail: text("detail").notNull().default(""),
+  userAgent: text("user_agent").notNull().default(""),
+  at: timestamp("at").notNull().defaultNow(),
+}, (t) => [
+  index("trail_events_at_idx").on(t.at),
+  index("trail_events_kind_idx").on(t.kind),
+  index("trail_events_email_idx").on(t.email),
+]);
+
 // A work order: one job, from the ask to the close-out.
 //
 // The thing this table adds is not storage - tasks, hours, parts and files were
@@ -2779,6 +2826,15 @@ export const appSettings = pgTable("app_settings", {
   // operator decides to be on the open web - and off means OFF: the pages 404
   // and the sitemap empties, not merely that the publish button is hidden.
   publicCatalogEnabled: boolean("public_catalog_enabled").notNull().default(false),
+  /**
+   * Record what people do - pages opened, and every error thrown at them.
+   *
+   * OFF by default and deliberately so. This is the one module that watches
+   * PEOPLE rather than machines, and on a multi-tenant instance most of those
+   * people work for somebody else's company. Turning it on is a decision with
+   * a disclosure attached to it, not a default. See lib/trail.
+   */
+  trailEnabled: boolean("trail_enabled").notNull().default(false),
   // Billing. The prefix is what invoice numbers are built on; the number
   // itself is allocated by scanning the highest one in use, the same
   // read-max-and-retry the work order numbers have always used.
