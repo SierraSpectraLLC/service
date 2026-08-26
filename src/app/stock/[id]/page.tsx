@@ -8,7 +8,7 @@ import {
   stockrooms, stockroomShares,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { forTenant, isHouse, readTenant, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
+import { forTenant, isHouse, scopeFor, visibleAssetIds, visibleOrgs } from "@/lib/tenancy";
 import { canSeeCosts } from "@/lib/redact";
 import { shopTime } from "@/lib/shopday";
 import { KIND_LABEL, MOVE_LABEL, reorderLines, stockAccess, stockTotals } from "@/lib/stock";
@@ -55,11 +55,16 @@ export default async function StockroomPage({ params, searchParams }: {
     db.select({ orgId: stockroomShares.orgId, access: stockroomShares.access, name: orgs.name, kind: orgs.kind })
       .from(stockroomShares).innerJoin(orgs, eq(orgs.id, stockroomShares.orgId))
       .where(eq(stockroomShares.stockroomId, roomId)).orderBy(asc(orgs.name)),
+    // The price book behind the reorder card - scoped to the ROOM's workspace,
+    // not the reader's. That is the same rule the vocabulary follows: a client
+    // reading a shelf shared with them reads the price book of whoever keeps
+    // it. Unscoped this was every vendor quote on the instance, which is one
+    // service company's negotiated pricing read straight off another's page.
     db.select({
       partNumber: partPrices.partNumber, vendor: partPrices.vendor,
       isOem: partPrices.isOem, priceCents: partPrices.priceCents,
       leadDays: partPrices.leadDays, dropShips: partPrices.dropShips, expediteOk: partPrices.expediteOk,
-    }).from(partPrices),
+    }).from(partPrices).where(forTenant(partPrices.tenantOrgId, room.tenantOrgId ?? null)),
   ]);
   const [buySettings] = await db.select({ crossDockDays: appSettings.crossDockDays })
     .from(appSettings).where(eq(appSettings.id, 1));
@@ -67,7 +72,7 @@ export default async function StockroomPage({ params, searchParams }: {
   // The parts catalog: what each number IS. A shelf line whose number the book
   // knows borrows its name, and the add-grid offers the book's numbers.
   const bookRows = await db.select({ id: partCatalog.id, partNumber: partCatalog.partNumber, name: partCatalog.name })
-    .from(partCatalog).where(and(forTenant(partCatalog.tenantOrgId, readTenant(user)), eq(partCatalog.archived, false)))
+    .from(partCatalog).where(and(forTenant(partCatalog.tenantOrgId, room.tenantOrgId ?? null), eq(partCatalog.archived, false)))
     .orderBy(asc(partCatalog.partNumber)).catch(() => []);
   const bookName = new Map(bookRows.map((b) => [b.partNumber.trim().toLowerCase(), b.name]));
 

@@ -250,7 +250,13 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   // What this job bills at when it is not covered, and whether AP has a PO to
   // quote. Both are cheap questions before dispatch and expensive ones at day
   // forty-five.
-  const rateCardRows = staff ? await db.select().from(rateCards) : [];
+  // The JOB's workspace, the way lib/invoiceData.draftSourceFor already scopes
+  // it. `staff` is true for every operator's people, so unscoped this let
+  // resolveRate settle on another company's card and quote their hourly rate
+  // for this job - a leak on the way in and a wrong number on the way out.
+  const rateCardRows = staff
+    ? await db.select().from(rateCards).where(forTenant(rateCards.tenantOrgId, wo.tenantOrgId))
+    : [];
   const orgBilling = staff && wo.orgId !== null
     ? await db.select().from(orgs).where(eq(orgs.id, wo.orgId)).then((r) => r[0] ?? null)
     : null;

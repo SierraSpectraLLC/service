@@ -7,7 +7,7 @@ import { getBrand } from "@/lib/brand";
 import { attachments, agreements, instruments, orgs, rateCards } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
-import { forTenant, readTenant } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { formatCents } from "@/lib/money";
 import { shopDay, shopToday } from "@/lib/shopday";
 import { standing } from "@/lib/agreements";
@@ -49,13 +49,19 @@ export default async function ContractsPage({ searchParams }: {
     db.select().from(agreements)
       .where(and(eq(agreements.kind, "contract"), forTenant(agreements.tenantOrgId, readTenant(user))))
       .orderBy(asc(agreements.endsOn), desc(agreements.id)),
-    db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs),
-    db.select().from(rateCards),
+    visibleOrgs(user),
+    // Rate cards are the price of the work. One service company reading
+    // another's is the plainest competitive leak in the application, and this
+    // read had no predicate at all.
+    db.select().from(rateCards).where(forTenant(rateCards.tenantOrgId, readTenant(user))),
     allInvoices(readTenant(user)),
+    // The system picker beside the contract - this workspace's fleet only.
     db.select({
       id: instruments.id, ownerOrgId: instruments.ownerOrgId,
       externalId: instruments.externalId, model: instruments.model,
-    }).from(instruments).orderBy(asc(instruments.externalId)),
+    }).from(instruments)
+      .where(forTenant(instruments.tenantOrgId, readTenant(user)))
+      .orderBy(asc(instruments.externalId)),
   ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const clientOrgs = orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }));

@@ -29,13 +29,20 @@ export default async function BillingSettingsPage() {
   try { user = await requireOwner(); } catch { redirect("/"); }
 
   const orgId = myTenantOrgId(user);
+  const tenant = readTenant(user);
   const [[settings], operator, invoiceRows, payRows, feeRows] = await Promise.all([
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
     orgId === null ? Promise.resolve(null)
       : db.select().from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0] ?? null),
-    db.select({ issuedOn: invoices.issuedOn }).from(invoices),
-    db.select({ receivedOn: payments.receivedOn }).from(payments),
-    db.select({ postedOn: invoiceFees.postedOn }).from(invoiceFees),
+    // Which months this workspace has anything to export. Unscoped it offered
+    // months that only another operator had activity in - a month list is a
+    // small leak, but it is also just wrong: picking one exported nothing.
+    db.select({ issuedOn: invoices.issuedOn }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, tenant)),
+    db.select({ receivedOn: payments.receivedOn }).from(payments)
+      .where(forTenant(payments.tenantOrgId, tenant)),
+    db.select({ postedOn: invoiceFees.postedOn }).from(invoiceFees)
+      .where(forTenant(invoiceFees.tenantOrgId, tenant)),
   ]);
 
   const policy = resolvePolicy(settings?.billingPolicy ?? null, null);

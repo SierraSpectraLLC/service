@@ -970,7 +970,7 @@ export async function createAssets(
   instrumentId: number | null,
   rows: AssetInput[],
 ): Promise<{ error?: string; created?: number; failures?: { row: number; error: string }[] }> {
-  await requireEditor();
+  const u = await requireEditor();
   const usable = rows.filter((r) => r.kind.trim() && (r.model.trim() || r.serial.trim()));
   if (!usable.length) return { error: "Nothing to save - each row needs a type and either a model or a serial" };
   if (usable.length > 200) return { error: "Save 200 rows at a time" };
@@ -978,8 +978,11 @@ export async function createAssets(
   // reported per row rather than silently skipped, because this is deliberate
   // entry and the person needs to know their paste overlapped. Serial-LESS rows
   // are left alone: three identical seal-less pumps are three real pumps.
+  // This workspace's serials. Unscoped, "already on file as a Turbo HiPace 80"
+  // answered a question about another operator's shelf - paste a serial, learn
+  // whether they have it and what it is.
   const taken = new Map((await db.select({ serial: assets.serial, kind: assets.kind, model: assets.model })
-    .from(assets)).filter((a) => a.serial.trim())
+    .from(assets).where(forTenant(assets.tenantOrgId, readTenant(u)))).filter((a) => a.serial.trim())
     .map((a) => [normalizeSerial(a.serial), `${a.kind}${a.model ? ` ${a.model}` : ""}`]));
   const failures: { row: number; error: string }[] = [];
   let created = 0;
@@ -3343,11 +3346,35 @@ async function folderStoreGate(u: Awaited<ReturnType<typeof requireEditor>>, org
   return "error" in gate ? gate : {};
 }
 
-/** Every folder in one store, for the rules in lib/folders to reason over. */
-async function storeFolders(orgId: number | null) {
+/**
+ * Every folder in one store, for the rules in lib/folders to reason over.
+ *
+ * The tenant is load-bearing and not a belt-and-braces extra: EVERY workspace's
+ * house shelf has org_id NULL, so `isNull(folders.orgId)` alone matches all of
+ * them at once. A NULL is not a scope; the stamp is.
+ */
+async function storeFolders(orgId: number | null, tenant: number | null) {
   return db.select().from(folders)
-    .where(orgId === null ? isNull(folders.orgId) : eq(folders.orgId, orgId))
+    .where(and(
+      orgId === null ? isNull(folders.orgId) : eq(folders.orgId, orgId),
+      forTenant(folders.tenantOrgId, tenant),
+    ))
     .catch(() => []);
+}
+
+/**
+ * One folder by id, or undefined when it is gone OR belongs to another
+ * workspace. The id arrives from a URL, so on its own it authorizes nothing -
+ * and every caller below pairs it with folderStoreGate, which answers for the
+ * store but cannot answer for the house shelf, where org_id is NULL on all of
+ * them.
+ */
+async function folderById(u: SessionUser, id: number) {
+  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  if (!row) return undefined;
+  const tenant = readTenant(u);
+  if (tenant !== null && row.tenantOrgId !== tenant) return undefined;
+  return row;
 }
 
 export async function createFolder(
@@ -3358,7 +3385,7 @@ export async function createFolder(
   if ("error" in gate) return gate;
   const clean = cleanFolderName(name);
   if ("error" in clean) return clean;
-  const all = await storeFolders(orgId);
+  const all = await storeFolders(orgId, readTenant(u));
   if (parentId !== null && !all.some((f) => f.id === parentId)) return { error: "That folder is gone" };
   if (depthOf(all, parentId) >= MAX_DEPTH) return { error: `Folders only nest ${MAX_DEPTH} deep` };
   if (nameTaken(all, parentId, clean.name)) return { error: `There is already a "${clean.name}" here` };
@@ -3381,13 +3408,13 @@ export async function createFolder(
 
 export async function renameFolder(id: number, name: string): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  const row = await folderById(u, id);
   if (!row) return { error: "Not found" };
   const gate = await folderStoreGate(u, row.orgId);
   if ("error" in gate) return gate;
   const clean = cleanFolderName(name);
   if ("error" in clean) return clean;
-  const all = await storeFolders(row.orgId);
+  const all = await storeFolders(row.orgId, readTenant(u));
   if (nameTaken(all, row.parentId, clean.name, id)) return { error: `There is already a "${clean.name}" here` };
   if (clean.name === row.name) return {};
   await db.update(folders).set({ name: clean.name }).where(eq(folders.id, id));
@@ -3402,12 +3429,12 @@ export async function renameFolder(id: number, name: string): Promise<{ error?: 
 
 export async function moveFolder(id: number, intoId: number | null): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  const row = await folderById(u, id);
   if (!row) return { error: "Not found" };
   const gate = await folderStoreGate(u, row.orgId);
   if ("error" in gate) return gate;
   if (row.parentId === intoId) return {};
-  const all = await storeFolders(row.orgId);
+  const all = await storeFolders(row.orgId, readTenant(u));
   const ok = canMoveFolder(all, id, intoId);
   if (!ok.ok) return { error: ok.error };
   if (nameTaken(all, intoId, row.name, id)) return { error: `There is already a "${row.name}" there` };
@@ -3429,11 +3456,11 @@ export async function moveFolder(id: number, intoId: number | null): Promise<{ e
  */
 export async function deleteFolder(id: number): Promise<{ error?: string }> {
   const u = await requireEditor();
-  const [row] = await db.select().from(folders).where(eq(folders.id, id));
+  const row = await folderById(u, id);
   if (!row) return { error: "Not found" };
   const gate = await folderStoreGate(u, row.orgId);
   if ("error" in gate) return gate;
-  const all = await storeFolders(row.orgId);
+  const all = await storeFolders(row.orgId, readTenant(u));
   const inside = [id, ...descendantIds(all, id)];
   const held = await db.select({ id: attachments.id }).from(attachments)
     .where(inArray(attachments.folderId, inside)).catch(() => []);
@@ -3479,7 +3506,7 @@ export async function moveFilesToFolder(
   if ("error" in gate) return gate;
   let dest: typeof folders.$inferSelect | undefined;
   if (folderId !== null) {
-    [dest] = await db.select().from(folders).where(eq(folders.id, folderId));
+    dest = await folderById(u, folderId);
     if (!dest || (dest.orgId ?? null) !== store) return { error: "That folder is not in this store" };
   }
   await db.update(attachments).set({ folderId })
@@ -3508,7 +3535,7 @@ export async function createDropLink(
   const expiry = cleanExpiry(data.expiresOn, shopToday());
   if ("error" in expiry) return expiry;
   if (folderId !== null) {
-    const all = await storeFolders(orgId);
+    const all = await storeFolders(orgId, readTenant(u));
     if (!all.some((f) => f.id === folderId)) return { error: "That folder is gone" };
   }
   const token = crypto.randomBytes(18).toString("base64url");
@@ -3614,7 +3641,7 @@ export async function recordLibraryFiles(
   // would file this person's upload somewhere they cannot see it.
   let dest: number | null = null;
   if (folderId !== null) {
-    const [f] = await db.select().from(folders).where(eq(folders.id, folderId));
+    const f = await folderById(u, folderId);
     if (f && (f.orgId ?? null) === (u.orgId ?? null)) dest = f.id;
   }
   const rows = await db.insert(attachments)
@@ -5759,12 +5786,26 @@ export async function listMessageable(): Promise<{ people: { name: string; email
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+/**
+ * A stage definition belongs to one workspace's board. `requireOwner` answers
+ * "an owner of some service company", so without this the id in the call was
+ * enough to recolor, rename or delete another company's stage - and the rename
+ * and delete paths then rewrote that company's instruments to match.
+ */
+const ownStage = (u: SessionUser, s: { tenantOrgId: number | null }): boolean => {
+  const mine = readTenant(u);
+  return mine === null || s.tenantOrgId === mine;
+};
+
 export async function addStage(name: string, bg: string): Promise<{ error?: string }> {
   const u = await requireOwner();
   const n = name.trim();
   if (!n || n.length > 40) return { error: "Stage name must be 1-40 characters" };
   if (!HEX.test(bg)) return { error: "Pick a color" };
-  const existing = await db.select().from(stageDefs);
+  // Per workspace. Unscoped, "already exists" was a report on somebody else's
+  // stage list - and the sort order below jumped to clear their rows.
+  const existing = await db.select().from(stageDefs)
+    .where(forTenant(stageDefs.tenantOrgId, myTenantOrgId(u)));
   if (existing.some((s) => s.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
   const sortOrder = Math.max(0, ...existing.map((s) => s.sortOrder)) + 1;
   await db.insert(stageDefs).values({ tenantOrgId: myTenantOrgId(u), name: n, bg: bg.toUpperCase(), fg: autoFg(bg), sortOrder }).onConflictDoNothing();
@@ -5778,7 +5819,8 @@ export async function setStageColor(id: number, bg: string) {
   const u = await requireOwner();
   if (!HEX.test(bg)) return;
   const [s] = await db.select().from(stageDefs).where(eq(stageDefs.id, id));
-  if (!s || s.bg === bg.toUpperCase()) return;
+  if (!s || !ownStage(u, s)) return;
+  if (s.bg === bg.toUpperCase()) return;
   await db.update(stageDefs).set({ bg: bg.toUpperCase(), fg: autoFg(bg) }).where(eq(stageDefs.id, id));
   await audit({
     actor: u.email, entityType: "settings", entityId: s.name,
@@ -5793,13 +5835,19 @@ export async function renameStage(id: number, name: string): Promise<{ error?: s
   const n = name.trim();
   if (!n || n.length > 40) return { error: "Stage name must be 1-40 characters" };
   const [s] = await db.select().from(stageDefs).where(eq(stageDefs.id, id));
-  if (!s || s.name === n) return {};
+  if (!s || !ownStage(u, s)) return {};
+  if (s.name === n) return {};
   if (s.builtin) return { error: "Built-in stages can't be renamed - sync and reports key on their names" };
-  const existing = await db.select().from(stageDefs);
+  const existing = await db.select().from(stageDefs)
+    .where(forTenant(stageDefs.tenantOrgId, s.tenantOrgId));
   if (existing.some((x) => x.id !== id && x.name.toLowerCase() === n.toLowerCase())) return { error: `"${n}" already exists` };
   await db.update(stageDefs).set({ name: n }).where(eq(stageDefs.id, id));
-  // Carry the rename onto every instrument tagged with the old name.
-  const insts = await db.select().from(instruments);
+  // Carry the rename onto every instrument tagged with the old name - in the
+  // STAGE'S workspace. This loop writes, and unscoped it rewrote the stage tags
+  // on every other operator's fleet because one owner renamed a column on their
+  // own board.
+  const insts = await db.select().from(instruments)
+    .where(forTenant(instruments.tenantOrgId, s.tenantOrgId));
   for (const i of insts) {
     if (!i.stages.includes(s.name)) continue;
     await db.update(instruments)
@@ -5818,11 +5866,14 @@ export async function renameStage(id: number, name: string): Promise<{ error?: s
 export async function deleteStage(id: number): Promise<{ error?: string }> {
   const u = await requireOwner();
   const [s] = await db.select().from(stageDefs).where(eq(stageDefs.id, id));
-  if (!s) return {};
+  if (!s || !ownStage(u, s)) return {};
   if (s.builtin) return { error: "Built-in stages can't be deleted - sync and reports key on their names" };
   await db.delete(stageDefs).where(eq(stageDefs.id, id));
-  // Strip it from any instruments; keep the at-least-one-stage invariant.
-  const insts = await db.select().from(instruments);
+  // Strip it from any instruments; keep the at-least-one-stage invariant. Same
+  // workspace as the stage - see renameStage. Unscoped this reset other
+  // operators' systems to "Intake" and filed stage events against them.
+  const insts = await db.select().from(instruments)
+    .where(forTenant(instruments.tenantOrgId, s.tenantOrgId));
   for (const i of insts) {
     if (!i.stages.includes(s.name)) continue;
     const next = i.stages.filter((x) => x !== s.name);
@@ -8751,7 +8802,13 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
   if (!rows.length) return { error: "Nothing to import" };
   if (rows.length > IMPORT_MAX_ROWS) return { error: `Import ${IMPORT_MAX_ROWS} rows at a time (got ${rows.length})` };
 
-  const existing = await db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments);
+  // This workspace's fleet, and only this workspace's. Unscoped, an external id
+  // that happened to match another operator's system did two bad things at
+  // once: it hung the imported assets off THEIR record, and it reported the
+  // collision back to the importer - a serial from a book they cannot open.
+  const tenant = readTenant(u);
+  const existing = await db.select({ id: instruments.id, externalId: instruments.externalId })
+    .from(instruments).where(forTenant(instruments.tenantOrgId, tenant));
   const byExt = new Map(existing.map((i) => [i.externalId.toLowerCase(), i.id]));
   const extOf = new Map(existing.map((i) => [i.id, i.externalId]));
   const createdThisRun = new Map<string, number>(); // externalId -> new instrument id
@@ -8762,10 +8819,12 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
   // row that already exists is skipped and says what it matched. Keyed on the
   // system's EXTERNAL id rather than its row id, because rows landing in a
   // system this run is about to create have no row id yet.
+  // Same scope, for the same reason: describeKey below turns these into the
+  // "already imported as ..." lines the caller reads back.
   const priorAssets = await db.select({
     id: assets.id, instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model,
     serial: assets.serial, owner: assets.owner, location: assets.location,
-  }).from(assets);
+  }).from(assets).where(forTenant(assets.tenantOrgId, tenant));
   const dupeFields = (a: typeof priorAssets[number]) => ({
     systemKey: a.instrumentId !== null ? (extOf.get(a.instrumentId) ?? "").toLowerCase() : "",
     kind: a.kind, model: a.model, serial: a.serial, owner: a.owner, location: a.location,
@@ -8862,7 +8921,11 @@ export async function importFleet(rows: ImportRow[], dryRun: boolean): Promise<{
     // The catalog is the only source of truth for types, models and
     // categories, so a migration registers what it brings in - otherwise the
     // imported fleet would be full of equipment no picker can name again.
-    const vocab = await db.select().from(vocabTerms);
+    // Against this workspace's catalog. Matching another's meant the term was
+    // recorded as already known and never registered here, so the import
+    // finished with equipment no picker on this instance could name.
+    const vocab = await db.select().from(vocabTerms)
+      .where(forTenant(vocabTerms.tenantOrgId, tenant));
     const has = (kind: string, at: string, name: string) => vocab.some((v) =>
       v.kind === kind && v.assetType.toLowerCase() === at.toLowerCase() && v.name.toLowerCase() === name.toLowerCase());
     const newTerms: { kind: string; assetType: string; name: string }[] = [];
@@ -9623,9 +9686,15 @@ export async function setModule(
  *
  * The URL is the credential, so this is owner work: minting hands out a key
  * to every dated fact in the shop, and rotating revokes every copy at once.
+ *
+ * PLATFORM owner, specifically. The token is a single column on app_settings,
+ * so there is one feed for the instance and it is the instance operator's.
+ * Under requireOwner() a second operator's owner could mint it - handing
+ * themselves a standing export of somebody else's calendar - and rotating it
+ * would silently kill the first operator's subscription on every phone.
  */
 export async function setCalendarFeed(on: boolean): Promise<{ error?: string; token?: string }> {
-  const u = await requireOwner();
+  const u = await requirePlatformOwner();
   const token = on ? crypto.randomBytes(18).toString("base64url") : "";
   await db.update(appSettings).set({ calendarToken: token }).where(eq(appSettings.id, 1));
   await audit({
@@ -10644,7 +10713,11 @@ export async function createPurchaseOrder(data: {
   if (!usable.length && !data.allowEmpty) return { error: "An order needs at least one line" };
   if (usable.length > 200) return { error: "200 lines at a time" };
 
-  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
+  // Numbered within the workspace that owns the order. Across all of them the
+  // series jumped over other operators' orders, which both leaks their volume
+  // and makes one company's PO numbers depend on another's.
+  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders)
+    .where(forTenant(purchaseOrders.tenantOrgId, acc.room.tenantOrgId ?? myTenantOrgId(u)));
   const [po] = await db.insert(purchaseOrders).values({
     tenantOrgId: acc.room.tenantOrgId ?? myTenantOrgId(u),
     number: nextPoNumber(existing.map((r) => r.number)),

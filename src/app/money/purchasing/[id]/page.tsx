@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, sql, type AnyColumn, type SQL } from "driz
 import { db } from "@/db";
 import { appSettings, instruments, orgSites, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse, readTenant, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, visibleSystemIds } from "@/lib/tenancy";
 import { makerNames } from "@/lib/makersData";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { stockAccess } from "@/lib/stock";
@@ -29,6 +29,11 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
     db.select().from(poLines).where(eq(poLines.poId, poId)).orderBy(asc(poLines.id)),
   ]);
   if (!po) notFound();
+  // A purchase order with no destination room falls through to `isHouse(role)`
+  // below, which is true for every operator's staff - so the tenant stamp has
+  // to answer first, or the id in the URL is the whole authorization.
+  const tenant = readTenant(user);
+  if (tenant !== null && po.tenantOrgId !== tenant) notFound();
 
   // Access follows the destination room, exactly like the actions do.
   const [room] = po.stockroomId === null ? [] : await db.select().from(stockrooms).where(eq(stockrooms.id, po.stockroomId));
@@ -54,6 +59,9 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
         id: orgSites.id, name: orgSites.name, orgId: orgSites.orgId, archived: orgSites.archived,
         orgName: orgs.name, orgKind: orgs.kind,
       }).from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
+        // "in this tenant" is what the comment above always claimed; this is
+        // the predicate that makes it true.
+        .where(forTenant(orgSites.tenantOrgId, tenant))
         .orderBy(asc(orgs.name), asc(orgSites.name))
     : [];
   const shipSites = siteRows

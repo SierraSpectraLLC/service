@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { sheetDiffs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { getModules } from "@/lib/flags";
 import ParityList from "@/components/ParityList";
 import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
@@ -10,7 +11,13 @@ import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function ParityPage({ searchParams }: { searchParams: Promise<{ show?: string }> }) {
-  try { await requireStaff(); } catch { redirect("/"); }
+  // Platform staff, not staff. The sheet is an instance-level integration -
+  // one sheet, one sheetOrgId, set by the platform owner - so its diffs are the
+  // instance operator's, and they name systems by external id. Under plain
+  // requireStaff a second operator's technician read them off this page.
+  let user;
+  try { user = await requireStaff(); } catch { redirect("/"); }
+  if (!isPlatformStaff(tenantViewer(user))) redirect("/");
   const { show = "" } = await searchParams;
   if (!(await getModules()).sheetSync) redirect("/");
   // Open diffs first, newest first within each group.

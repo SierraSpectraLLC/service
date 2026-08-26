@@ -15,7 +15,7 @@ import BillingPolicyPanel from "@/components/BillingPolicyPanel";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
-import { isHouse, maySeeAgreements, readTenant } from "@/lib/tenancy";
+import { isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
 import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
@@ -40,9 +40,17 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   if (isNaN(orgId)) notFound();
 
   const isOwner = user.role === "owner";
+  const tenant = readTenant(user);
+  // An owner owns a workspace, not the instance. Platform staff read null here
+  // and keep reaching every organization - that is the support path - but an
+  // operator's owner may only configure organizations inside their own tenant.
+  // Without this the id in the URL was the whole authorization: any owner could
+  // type any number and read another service company's client dossier, sites,
+  // contracts, allowlist and staff names.
+  const inTenant = tenant === null || (await tenantOfOrg(orgId)) === tenant;
   // Staff are the house, but an organization's settings are the owner's call or
   // the organization's own - not any staff member's.
-  const mayConfigure = isOwner || (user.role === "client_editor" && user.orgId === orgId);
+  const mayConfigure = (isOwner && inTenant) || (user.role === "client_editor" && user.orgId === orgId);
   if (!mayConfigure) notFound();
   // Reading the contracts is its own privilege - see lib/tenancy.maySeeAgreements.
   const seesAgreements = await maySeeAgreements(user, orgId);
@@ -55,7 +63,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     getBrand(),
   ]);
   if (!org) notFound();
-  const quota = await storeQuota(orgId, readTenant(user));
+  const quota = await storeQuota(orgId, tenant);
 
   // What each person's account already has on it: the profile they will be
   // called by, and whether a password is standing in for the codes. Read here

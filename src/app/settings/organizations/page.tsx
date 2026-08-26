@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { appSettings, clientAllowlist, houseMembers, orgSites, orgs, systemShares, users } from "@/db/schema";
@@ -16,6 +16,7 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
   let user;
   try { user = await requireOwner(); } catch { redirect("/"); }
   const isPlatform = isPlatformStaff(tenantViewer(user));
+  const tenant = readTenant(user);
   const [[s], allowRows, directory, orgRows, shareCounts, userRows, houseRows, siteRows] = await Promise.all([
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
     db.select().from(clientAllowlist).orderBy(asc(clientAllowlist.entry)),
@@ -30,13 +31,23 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
       title: users.title, siteId: users.siteId,
     }).from(users),
     db.select({ email: houseMembers.email, orgId: houseMembers.orgId }).from(houseMembers),
+    // Site names go to the form whole, so this one is shipped rather than
+    // merely joined against - another company's addresses, unfiltered.
     db.select({ id: orgSites.id, orgId: orgSites.orgId, name: orgSites.name })
-      .from(orgSites).where(eq(orgSites.archived, false)).orderBy(asc(orgSites.name)),
+      .from(orgSites)
+      .where(and(eq(orgSites.archived, false), forTenant(orgSites.tenantOrgId, tenant)))
+      .orderBy(asc(orgSites.name)),
   ]);
 
   // The directory rows, thickened into editable people: the profile off the
   // users row, and the handle that decides which org they belong to - an
   // allowlist row for a client login, a house membership for staff.
+  // An allowlist row with no organization carries no tenant stamp either -
+  // clientAllowlist has none - so there is nothing on it that says whose
+  // invitation it was. Unassigned addresses therefore belong to whoever runs
+  // the instance, and an operator's owner is shown none of them rather than
+  // all of them. Failing closed is the only honest reading of a missing scope.
+  const orphanRows = isPlatform ? allowRows.filter((r) => r.orgId === null) : [];
   const profile = new Map(userRows.map((r) => [r.email.trim().toLowerCase(), r]));
   const houseOrg = new Map(houseRows.map((r) => [r.email.trim().toLowerCase(), r.orgId]));
   const allowByEmail = new Map(allowRows.map((r) => [r.entry.trim().toLowerCase(), r]));
@@ -64,7 +75,7 @@ export default async function OrganizationsPage({ searchParams }: { searchParams
           logins: allowRows.filter((r) => r.orgId === o.id).length,
           editors: allowRows.filter((r) => r.orgId === o.id && r.canEdit).length,
         }))}
-        orphans={allowRows.filter((r) => r.orgId === null).map((r) => ({ id: r.id, entry: r.entry }))}
+        orphans={orphanRows.map((r) => ({ id: r.id, entry: r.entry }))}
         directory={people}
         sites={siteRows}
         filter={{ q: filter.q ?? "", kind: filter.kind ?? "" }}

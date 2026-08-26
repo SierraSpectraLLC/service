@@ -38,11 +38,16 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
   const [orgRows, allOrgs, systemRows] = await Promise.all([
     orgIds.length ? db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, orgIds)) : [],
     visibleOrgs(user),
-    // Every client-owned system, so an assigned contract can name its systems.
+    // Every client-owned system, so an assigned contract can name its systems -
+    // this workspace's, and only this workspace's. Unscoped, the contract's
+    // system picker listed every serial on the instance, which is a competitor's
+    // installed base handed over in a dropdown.
     db.select({
       id: instruments.id, ownerOrgId: instruments.ownerOrgId,
       externalId: instruments.externalId, model: instruments.model,
-    }).from(instruments).orderBy(asc(instruments.externalId)),
+    }).from(instruments)
+      .where(forTenant(instruments.tenantOrgId, tenant))
+      .orderBy(asc(instruments.externalId)),
   ]);
   const name = new Map(orgRows.map((o) => [o.id, o.name]));
   // The signed papers filed against these agreements. Without this the attach

@@ -5,7 +5,7 @@ import {
   instruments, tasks, parts, attachments, discussionPosts, assets, auditLog, vocabTerms,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { readTenant, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, readTenant, viewTenant, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 import { canSeePost, type Audience } from "@/lib/discussionScope";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { findOutsideMatches } from "@/lib/serialLookup";
@@ -184,7 +184,9 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const mayCreate = serialUnknown && user.role !== "client_viewer";
   // Everything strict from the catalog - starting an unknown unit's record is
   // still equipment entry, not a place to invent vocabulary.
-  const catalogTerms = mayCreate ? await db.select().from(vocabTerms) : [];
+  const catalogTerms = mayCreate
+    ? await db.select().from(vocabTerms).where(forTenant(vocabTerms.tenantOrgId, await viewTenant(user)))
+    : [];
   const kinds = catalogTerms.filter((v) => v.kind === "asset_type").map((v) => v.name);
   const createModels: Record<string, string[]> = {};
   for (const v of catalogTerms) {

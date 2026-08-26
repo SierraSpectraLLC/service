@@ -34,6 +34,9 @@ export async function GET(req: Request) {
   }
   try {
     const today = shopToday();
+    // Deliberately every workspace's: this is the platform's weekly sweep, and
+    // each agreement below is chased by its OWN operator via houseEmails(
+    // a.tenantOrgId). Nothing here is rendered to a person.
     const all = await db.select().from(agreements);
     const due = needsAttention(all, today);
     if (!due.length) return NextResponse.json({ sent: 0, checked: all.length });
@@ -108,7 +111,11 @@ async function draftRenewalQuote(
     .where(and(eq(quotes.agreementId, a.id), ne(quotes.status, "declined")));
   if (existing.length) return false;
 
-  const cards = await db.select().from(rateCards);
+  // The agreement's own workspace prices its own renewal. Unscoped, resolveRate
+  // could settle on another operator's card and put their hourly rate on this
+  // one's quote - the numbering two lines down already scopes this way.
+  const cards = await db.select().from(rateCards)
+    .where(forTenant(rateCards.tenantOrgId, a.tenantOrgId));
   const rate = resolveRate(cards, { orgId: a.orgId, agreementId: a.id });
   const burn = renewalFromBurn({
     visitsUsed: used.visits,

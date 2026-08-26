@@ -3,7 +3,7 @@ import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm
 import { db } from "@/db";
 import { assets, attachments, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isHouse, scopeFor, visibleAssetIds } from "@/lib/tenancy";
+import { forTenant, isHouse, readTenant, scopeFor, visibleAssetIds } from "@/lib/tenancy";
 import { assetAccess } from "@/lib/tenancy";
 import PdfStudio from "@/components/PdfStudio";
 import { myCloudConnection } from "@/app/actions";
@@ -40,6 +40,10 @@ export default async function PdfStudioPage() {
   }).from(attachments)
     .where(and(
       ilike(attachments.fileName, "%.pdf"),
+      // The house sees its house - not every house. `house` is true for ANY
+      // operator's staff, so without the stamp this listed every PDF filed on
+      // the instance, by name, to whoever signed in last.
+      forTenant(attachments.tenantOrgId, readTenant(user)),
       house ? undefined : or(
         scope.all ? undefined : scope.ids.length ? inArray(attachments.instrumentId, scope.ids) : sql`false`,
         seeAssets === null ? undefined : seeAssets.length ? inArray(attachments.assetId, seeAssets) : sql`false`,

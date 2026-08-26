@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
+import { forTenant } from "@/lib/tenancy";
 import { instruments, sheetDiffs, appSettings, systemShares } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { STAGES, SHEET_STAGES } from "@/lib/stages";
@@ -256,7 +257,11 @@ export async function runSheetSync(): Promise<{ checked: number; diffs: number; 
     (await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
       .where(eq(systemShares.orgId, sheetOrgId))).map((r) => r.instrumentId)
   );
-  const allRows = await db.select().from(instruments);
+  // The instance operator's fleet. One sheet, one operator: comparing another
+  // workspace's systems against it reports them all as "missing from the sheet"
+  // and prints their external ids into a diff list that is not theirs.
+  const allRows = await db.select().from(instruments)
+    .where(forTenant(instruments.tenantOrgId, settings?.operatorOrgId ?? null));
   const dbRows = sharedIds === null ? allRows : allRows.filter((r) => sharedIds.has(r.id));
   const byId = new Map(dbRows.map((r) => [r.externalId, r]));
 

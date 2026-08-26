@@ -4,6 +4,7 @@ import { db } from "@/db";
 import {
   agreements, appSettings, assets, instruments, invoices, orgs, pmSchedules, quotes, tasks,
 } from "@/db/schema";
+import { forTenant } from "@/lib/tenancy";
 import { assembleEvents, eventsToIcs } from "@/lib/calendar";
 import { addDays } from "@/lib/pm";
 import { appUrl } from "@/lib/appUrl";
@@ -34,16 +35,29 @@ export async function GET(req: Request) {
   const from = addDays(today, -14);
   const to = addDays(today, 90);
 
+  // Whose calendar this is. The token is one column on app_settings, so there
+  // is exactly one feed and it belongs to the operator that runs the instance.
+  // Nothing below was scoped before, which made a single URL a standing export
+  // of every workspace's schedules, jobs, quotes, invoices, contracts, client
+  // names and serials - to anybody the link was ever forwarded to.
+  //
+  // Null (an instance that has never named an operator) keeps the old
+  // unrestricted behavior, which is correct there: one operator, one calendar.
+  const feedTenant = settings?.operatorOrgId ?? null;
+
   const [schedRows, taskRows, quoteRows, invoiceRows, agreementRows, orgRows, instRows, assetRows, brand] =
     await Promise.all([
-      db.select().from(pmSchedules),
-      db.select().from(tasks).where(and(ne(tasks.state, "Done"), ne(tasks.dueDate, ""))),
-      db.select().from(quotes),
-      db.select().from(invoices),
-      db.select().from(agreements),
+      db.select().from(pmSchedules).where(forTenant(pmSchedules.tenantOrgId, feedTenant)),
+      db.select().from(tasks).where(and(
+        forTenant(tasks.tenantOrgId, feedTenant), ne(tasks.state, "Done"), ne(tasks.dueDate, ""))),
+      db.select().from(quotes).where(forTenant(quotes.tenantOrgId, feedTenant)),
+      db.select().from(invoices).where(forTenant(invoices.tenantOrgId, feedTenant)),
+      db.select().from(agreements).where(forTenant(agreements.tenantOrgId, feedTenant)),
       db.select({ id: orgs.id, name: orgs.name }).from(orgs),
-      db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments),
-      db.select({ id: assets.id, kind: assets.kind, model: assets.model, instrumentId: assets.instrumentId }).from(assets),
+      db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments)
+        .where(forTenant(instruments.tenantOrgId, feedTenant)),
+      db.select({ id: assets.id, kind: assets.kind, model: assets.model, instrumentId: assets.instrumentId })
+        .from(assets).where(forTenant(assets.tenantOrgId, feedTenant)),
       getBrand(),
     ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));

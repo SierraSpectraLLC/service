@@ -6,7 +6,7 @@ import {
   agreements, appSettings, assets, instruments, invoices, orgs, pmSchedules, quotes, tasks,
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { isStaffRole } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, tenantViewer } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { assembleEvents, monthGrid, monthOf, monthTitle, shiftMonth } from "@/lib/calendar";
 import { shopToday } from "@/lib/shopday";
@@ -47,9 +47,10 @@ export default async function CalendarPage({ searchParams }: {
       db.select().from(invoices).where(forTenant(invoices.tenantOrgId, t)),
       db.select().from(agreements).where(forTenant(agreements.tenantOrgId, t)),
       db.select({ id: orgs.id, name: orgs.name }).from(orgs),
-      db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments),
+      db.select({ id: instruments.id, externalId: instruments.externalId }).from(instruments)
+        .where(forTenant(instruments.tenantOrgId, t)),
       db.select({ id: assets.id, kind: assets.kind, model: assets.model, instrumentId: assets.instrumentId })
-        .from(assets),
+        .from(assets).where(forTenant(assets.tenantOrgId, t)),
       db.select().from(appSettings).where(eq(appSettings.id, 1)).then((r) => r[0] ?? null),
     ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
@@ -100,7 +101,11 @@ export default async function CalendarPage({ searchParams }: {
         }
       />
       <CalendarBoard ym={ym} weeks={weeks} events={events} today={today} />
-      {user.role === "owner" && (
+      {/* The feed's secret lives on app_settings, one row for the whole
+          instance, and the feed it opens is the instance operator's calendar.
+          `role === "owner"` is true for EVERY workspace's owner, so this card
+          used to print one company's live token onto another's page. */}
+      {isPlatformStaff(tenantViewer(user)) && (
         <CalendarFeedCard token={settings?.calendarToken ?? ""} />
       )}
     </div>

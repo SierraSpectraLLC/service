@@ -1,9 +1,9 @@
-import { asc, inArray } from "drizzle-orm";
+import { asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import {
-  partCatalog, partKitLines, partNumbers, partPhotos, partPrices, parts, pmSchedules, poLines,
-  procedures, stockItems, vocabTerms,
+  instruments, partCatalog, partKitLines, partNumbers, partPhotos, partPrices, parts, pmSchedules,
+  poLines, procedures, purchaseOrders, stockItems, stockrooms, vocabTerms,
 } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
@@ -39,12 +39,21 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
     db.select({ name: vocabTerms.name, kind: vocabTerms.kind, assetType: vocabTerms.assetType, categories: vocabTerms.categories })
       .from(vocabTerms)
       .where(forTenant(vocabTerms.tenantOrgId, tenant)).orderBy(asc(vocabTerms.name)),
-    // Every number the shop has actually used. Not tenant-filtered on parts,
-    // which carries no stamp of its own - it belongs to whatever system it sits
-    // on - so this is deliberately generous and the dedupe does the rest.
-    db.selectDistinct({ pn: parts.partNumber }).from(parts),
-    db.selectDistinct({ pn: stockItems.partNumber }).from(stockItems),
-    db.selectDistinct({ pn: poLines.partNumber }).from(poLines),
+    // Every number THIS shop has actually used. None of these three tables
+    // carries a stamp of its own - a part belongs to the system it sits on, a
+    // shelf line to its room, a PO line to its order - so each one borrows the
+    // stamp of the record above it. Left unfiltered this was a reading of what
+    // every other service company on the instance fits and stocks.
+    db.selectDistinct({ pn: parts.partNumber }).from(parts)
+      .leftJoin(instruments, eq(instruments.id, parts.instrumentId))
+      .where(tenant === null ? undefined
+        : or(isNull(parts.instrumentId), eq(instruments.tenantOrgId, tenant))),
+    db.selectDistinct({ pn: stockItems.partNumber }).from(stockItems)
+      .innerJoin(stockrooms, eq(stockrooms.id, stockItems.stockroomId))
+      .where(forTenant(stockrooms.tenantOrgId, tenant)),
+    db.selectDistinct({ pn: poLines.partNumber }).from(poLines)
+      .innerJoin(purchaseOrders, eq(purchaseOrders.id, poLines.poId))
+      .where(forTenant(purchaseOrders.tenantOrgId, tenant)),
   ]);
   // The maker/vendor book, suggested on every manufacturer and vendor field.
   const bookNames = await makerNames(tenant);
