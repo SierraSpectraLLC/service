@@ -9823,9 +9823,48 @@ const revHouse = () => {
   revalidatePath("/", "layout");
 };
 
-async function guardFor(actorEmail: string, subjectEmail: string, next: "owner" | "staff" | "revoke") {
+/**
+ * The four lockout rules from memberGuard, plus the one it cannot know: WHOSE
+ * staff this is.
+ *
+ * house_members is one instance-wide table keyed on email, and requireOwner
+ * means "an owner of some service company" - so without this an owner of any
+ * workspace could rewrite, revoke, or mint a temporary password for another
+ * workspace's engineer, and then sign in as them. memberGuard refuses exactly
+ * three subjects (the STAFF_EMAILS root owner, yourself, the last owner) and
+ * none of them is a tenant, so the root owner was the only person on the
+ * instance this did not reach.
+ *
+ * `mine` is myTenantOrgId - "my own workspace's people" - which is what the
+ * siblings setHouseTempPassword and clearHouseTempPassword already test, and
+ * what listHouseMembers filters by. Null is platform staff, who administer
+ * everybody. A subject with no org is nobody's staff yet; only platform staff
+ * may claim one, because there is nothing on the row that says whose it is.
+ */
+async function guardFor(
+  actor: { email: string; operatorOrgId: number | null; rootOperatorOrgId: number | null },
+  subjectEmail: string,
+  next: "owner" | "staff" | "revoke",
+) {
   const members = await houseMemberRows();
-  return { members, guard: memberGuard({ actorEmail, subjectEmail, next, envStaff: parseList(process.env.STAFF_EMAILS), members }) };
+  const base = memberGuard({
+    actorEmail: actor.email, subjectEmail, next,
+    envStaff: parseList(process.env.STAFF_EMAILS), members,
+  });
+  if (!base.ok) return { members, guard: base };
+  const mine = actor.operatorOrgId ?? actor.rootOperatorOrgId; // = lib/authz.myTenantOrgId
+  if (mine !== null) {
+    // Only an EXISTING row can belong to somebody else. No row means this is a
+    // new hire, and the insert below stamps them with myTenantOrgId(u) - the
+    // actor's own workspace - so refusing here would break adding staff at all.
+    const subject = members.find((m) => m.email.trim().toLowerCase() === subjectEmail.trim().toLowerCase());
+    if (subject && (subject.orgId ?? null) !== mine) {
+      // Same words a missing row gets: whether another workspace employs this
+      // address is not something to confirm by the shape of the refusal.
+      return { members, guard: { ok: false as const, error: "Not found" } };
+    }
+  }
+  return { members, guard: base };
 }
 
 
@@ -10121,7 +10160,7 @@ export async function setHouseMember(
   const u = await requireOwner();
   const want = role === "owner" ? "owner" : "staff";
   const e = email.trim().toLowerCase();
-  const { guard } = await guardFor(u.email, e, want);
+  const { guard } = await guardFor(u, e, want);
   if (!guard.ok) return { error: guard.error };
   const [existing] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
   const label = (name ?? "").trim().slice(0, 80);
@@ -10257,7 +10296,7 @@ export async function revokeHouseMember(email: string, reason: string): Promise<
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
   const e = email.trim().toLowerCase();
-  const { guard } = await guardFor(u.email, e, "revoke");
+  const { guard } = await guardFor(u, e, "revoke");
   if (!guard.ok) return { error: guard.error };
   const inEnv = parseList(process.env.STAFF_EMAILS).includes(e);
   const [existing] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
