@@ -34,6 +34,7 @@ import { db } from "@/db";
 import {
   appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
 } from "@/db/schema";
+import { blockSide } from "@/lib/blocks";
 import { BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { TONE_HEX } from "@/lib/tones";
 import { daysSince } from "@/lib/queue";
@@ -118,6 +119,8 @@ export type FollowUp = { systemId: number; externalId: string; text: string };
 export type PendingCtx = {
   /** The org this section belongs to (null = the operator's own work). */
   sectionOrgId: number | null;
+  /** The operator whose digest this is - what a null blockedOrgId means. */
+  operatorOrgId: number | null;
   orgName: (id: number | null) => string;
   operatorName: string;
   blockedTasks: { title: string }[];
@@ -174,7 +177,7 @@ export const handoffFor = (
 export function pendingForSystem(
   i: {
     id: number; externalId: string; stages: string[];
-    blockedReason: string; blockedSince: Date | null;
+    blockedReason: string; blockedSince: Date | null; blockedOrgId?: number | null;
   },
   ctx: PendingCtx,
 ): PendingItem[] {
@@ -189,7 +192,14 @@ export function pendingForSystem(
     });
 
   if (i.stages.includes(BLOCKED_STAGE) && i.blockedReason.trim()) {
-    add("us", ctx.operatorName, `Blocked: ${i.blockedReason.trim()}`, "blocked", i.blockedReason.trim(),
+    /* Whose block it is, as recorded, rather than "us" as it used to be
+       regardless. The reason still names who we are WAITING ON - that is what
+       a reason is for - and it no longer decides whose list this lands on. A
+       system on our bench waiting for a customer's answer stays in our court,
+       because we are the ones who have to chase it. See lib/blocks. */
+    const side = blockSide(i.blockedOrgId ?? null, ctx.sectionOrgId, ctx.operatorOrgId);
+    add(side, side === "partner" ? ctx.orgName(ctx.sectionOrgId) : ctx.operatorName,
+      `Blocked: ${i.blockedReason.trim()}`, "blocked", i.blockedReason.trim(),
       i.blockedSince ? daysSince(i.blockedSince, ctx.now) : null);
   }
   if (i.stages.includes("Waiting to ship")) {
@@ -461,7 +471,8 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
           });
           const blockedTasks = taskRows.filter((t) => t.instrumentId === i.id && t.state === "Blocked");
           section.pending.push(...pendingForSystem(i, {
-            sectionOrgId: ownerId, orgName, operatorName: brand.operatorName, now,
+            sectionOrgId: ownerId, operatorOrgId: tenantOrgId,
+            orgName, operatorName: brand.operatorName, now,
             blockedTasks: blockedTasks.map((t) => ({ title: t.title })),
             waitingWorkOrders: woRows.filter((w) => w.instrumentId === i.id && w.state === "waiting")
               .map((w) => ({ number: w.number, title: w.title, orgId: w.orgId })),

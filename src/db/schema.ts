@@ -498,6 +498,23 @@ export const instruments = pgTable("instruments", {
   /** When it was blocked, so the digest can say how long. Null = unknown. */
   blockedSince: timestamp("blocked_since"),
   blockedBy: text("blocked_by").notNull().default(""),
+  /**
+   * Whose block this is - the organization it falls under, not the party being
+   * waited on.
+   *
+   * The two are different facts and the app used to have only one, hardcoded:
+   * lib/digest courted every block to "us" whatever it was about. That is right
+   * most of the time and wrong in a way nobody could correct, because a system
+   * on our bench is stuck with US even when the sentence is "waiting on LabZen
+   * to approve the quote" - we are the ones holding it, and it is our chase.
+   * The reason names who we are waiting on; this names whose problem it is.
+   *
+   * So it is CHOSEN at the moment of blocking rather than sniffed out of the
+   * reason, defaulting to whoever is doing the blocking. Null is the operator,
+   * which is what every row blocked before this column reads as and what the
+   * old hardcoded answer said. Cleared with the block, like the reason.
+   */
+  blockedOrgId: integer("blocked_org_id").references(() => orgs.id, { onDelete: "set null" }),
   notes: text("notes").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

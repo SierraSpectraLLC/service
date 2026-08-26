@@ -19,6 +19,8 @@ import { audienceLine, canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
 import { scheduleLine } from "@/lib/pmRequest";
 import { getBrand } from "@/lib/brand";
+import { blockHolderName } from "@/lib/blocks";
+import { blockParties } from "@/lib/blockData";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
@@ -356,6 +358,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const partyName = (orgId: number | null) => (orgId === null ? brand.operatorName : orgName.get(orgId) ?? "a former organization");
+  /* Who a block on this system may be put under, and who the current one is
+     under. The list is read here rather than in the panel so the picker offers
+     exactly what the action will accept - see lib/blockData. */
+  const blockOrgs = await blockParties(inst, user.orgId);
+  const blockHolder = blockHolderName(inst.blockedOrgId, inst.tenantOrgId, partyName);
   // Which house. On a system shared in from another service company, their staff
   // are a provider on it, not its house - so its house's internal notes are not
   // theirs to read. See lib/discussionScope.
@@ -618,11 +625,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         panels={panelsFor(isStaff, [
           { key: "system", label: "System", node: (
             <SystemPanel
-              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name, blockedReason: inst.blockedReason,
+              instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name, blockedReason: inst.blockedReason, blockedOrgId: inst.blockedOrgId,
                 location: inst.location, forSale: inst.forSale, saleNote: inst.saleNote, listingToken: inst.listingToken,
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}
               gxpStanding={gxpStanding}
+              blockOrgs={blockOrgs} blockHolder={blockHolder}
               label={systemLabel(inst, assetRows)}
               // Companies, not just the strings already typed onto systems -
               // see lib/clientNames for what that was hiding. Staff only: the

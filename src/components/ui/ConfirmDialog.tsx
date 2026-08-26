@@ -41,6 +41,15 @@ export type InputOptions = ConfirmOptions & {
   allowEmpty?: boolean;
 };
 
+export type ChoiceOptions = InputOptions & {
+  /** The picker's label, e.g. "Blocked with". */
+  choiceLabel: string;
+  choices: { value: string; label: string; note?: string }[];
+  /** Which one starts selected. Falls back to the first. */
+  choiceInitial?: string;
+  choiceHint?: string;
+};
+
 /** What the dialog's text field looks like and when its answer counts. */
 type InputSpec = {
   label: string;
@@ -50,11 +59,24 @@ type InputSpec = {
   minLen: number;
 };
 
+/** The optional picker beside the field. See choiceDialog. */
+type ChoiceSpec = {
+  label: string;
+  hint?: string;
+  initial: string;
+  options: { value: string; label: string; note?: string }[];
+};
+
+/** What choiceDialog resolves: the field, and which option was picked. */
+export type ChoiceAnswer = { value: string; choice: string };
+
 type Pending = {
   opts: ConfirmOptions;
   /** Set when the dialog also collects a string: confirmReason or inputDialog. */
   input?: InputSpec;
-  resolve: (answer: boolean | string | null) => void;
+  /** Set when it collects a choice alongside the string. */
+  choice?: ChoiceSpec;
+  resolve: (answer: boolean | string | ChoiceAnswer | null) => void;
 };
 
 let current: Pending | null = null;
@@ -114,30 +136,67 @@ export function inputDialog(opts: InputOptions): Promise<string | null> {
   });
 }
 
+/**
+ * One field and one picker, answered together.
+ *
+ * For the case where a fact and its attribution are the same act - blocking a
+ * system says both why and whose it is, and asking those in two dialogs would
+ * let somebody answer the first and abandon the second, leaving a block with a
+ * reason and no owner. Resolves { value, choice }, or null on Cancel, Escape
+ * or the scrim.
+ */
+export function choiceDialog(opts: ChoiceOptions): Promise<ChoiceAnswer | null> {
+  current?.resolve(null);
+  return new Promise<ChoiceAnswer | null>((resolve) => {
+    current = {
+      opts,
+      input: {
+        label: opts.label ?? "Name", placeholder: opts.placeholder,
+        hint: opts.hint, initial: opts.initial ?? "",
+        minLen: opts.allowEmpty ? 0 : 1,
+      },
+      choice: {
+        label: opts.choiceLabel, hint: opts.choiceHint,
+        initial: opts.choiceInitial ?? opts.choices[0]?.value ?? "",
+        options: opts.choices,
+      },
+      resolve: resolve as Pending["resolve"],
+    };
+    notify?.();
+  });
+}
+
 export function ConfirmHost() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [value, setValue] = useState("");
+  const [pick, setPick] = useState("");
 
   useEffect(() => {
-    notify = () => { setPending(current); setValue(current?.input?.initial ?? ""); };
+    const load = () => {
+      setPending(current);
+      setValue(current?.input?.initial ?? "");
+      setPick(current?.choice?.initial ?? "");
+    };
+    notify = load;
     // A call made before hydration finished still shows.
-    if (current) { setPending(current); setValue(current.input?.initial ?? ""); }
+    if (current) load();
     return () => { notify = null; };
   }, []);
 
   if (!pending) return null;
-  const { opts, input } = pending;
-  const settle = (answer: boolean | string | null) => {
+  const { opts, input, choice } = pending;
+  const settle = (answer: boolean | string | ChoiceAnswer | null) => {
     pending.resolve(answer);
     if (current === pending) current = null;
     setPending(null);
     setValue("");
+    setPick("");
   };
   const cancelValue = input ? null : false;
   const ready = !input || value.trim().length >= input.minLen;
   const confirm = () => {
     if (!ready) return;
-    settle(input ? value.trim() : true);
+    settle(choice ? { value: value.trim(), choice: pick } : input ? value.trim() : true);
   };
 
   return (
@@ -164,6 +223,23 @@ export function ConfirmHost() {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") confirm(); }} />
           {input.hint && <div className="field-hint">{input.hint}</div>}
+        </div>
+      )}
+      {/* Under the field, not above it: the fact comes first and the
+          attribution follows from it. It is a select rather than a row of
+          radios because the default is nearly always right and the list can
+          run to several parties on a shared bench. */}
+      {choice && (
+        <div className="field" style={{ marginTop: 10 }}>
+          <label htmlFor="confirm-choice">{choice.label}</label>
+          <select id="confirm-choice" value={pick} onChange={(e) => setPick(e.target.value)}>
+            {choice.options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}{o.note ? ` - ${o.note}` : ""}
+              </option>
+            ))}
+          </select>
+          {choice.hint && <div className="field-hint">{choice.hint}</div>}
         </div>
       )}
     </Dialog>

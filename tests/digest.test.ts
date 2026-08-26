@@ -21,14 +21,19 @@ const now = new Date("2026-08-21T14:00:00Z");
 const days = (n: number) => new Date(now.getTime() - n * 86400000);
 
 const sys = (over: Partial<{
-  id: number; externalId: string; stages: string[]; blockedReason: string; blockedSince: Date | null;
+  id: number; externalId: string; stages: string[]; blockedReason: string;
+  blockedSince: Date | null; blockedOrgId: number | null;
 }> = {}) => ({
   id: 1, externalId: "T-003", stages: ["Refurbishment"],
-  blockedReason: "", blockedSince: null as Date | null, ...over,
+  blockedReason: "", blockedSince: null as Date | null,
+  blockedOrgId: null as number | null, ...over,
 });
 
 const ctx = (over: Partial<PendingCtx> = {}): PendingCtx => ({
   sectionOrgId: 5,
+  // Sierra Spectra is org 3 on this instance; a block with no org recorded
+  // means "the operator", which is what every pre-column row reads as.
+  operatorOrgId: 3,
   orgName: (id) => (id === 5 ? "LabZen" : id === 9 ? "GMI" : "Sierra Spectra"),
   operatorName: "Sierra Spectra",
   blockedTasks: [], waitingWorkOrders: [], openParts: [],
@@ -82,6 +87,39 @@ describe("whose court a wait sits in", () => {
       court: "us", who: "Sierra Spectra",
       what: "Blocked: waiting on LabZen to approve the quote", days: 6,
     });
+  });
+
+  it("STAYS IN OUR COURT WHEN THE BLOCK IS OURS, WHOEVER THE REASON NAMES", () => {
+    // The rule blocks were given an organization for. "Waiting on LabZen" is
+    // who we are waiting ON; the machine is on our bench and the chase is
+    // ours, so this is our line to read every morning - not an action item
+    // posted to the customer.
+    const [item] = pendingForSystem(
+      sys({
+        stages: ["Waiting / blocked"], blockedOrgId: 3,
+        blockedReason: "waiting on LabZen to approve the quote", blockedSince: days(6),
+      }), ctx());
+    expect(item).toMatchObject({ court: "us", who: "Sierra Spectra" });
+  });
+
+  it("moves to the partner only when the block was put under them", () => {
+    const [item] = pendingForSystem(
+      sys({
+        stages: ["Waiting / blocked"], blockedOrgId: 5,
+        blockedReason: "back on their bench for a facilities fix", blockedSince: days(6),
+      }), ctx());
+    expect(item).toMatchObject({ court: "partner", who: "LabZen" });
+  });
+
+  it("does not hand a third party's block to this engagement", () => {
+    // Org 9 is GMI - neither us nor the organization this section is about.
+    // Their block is not LabZen's to answer for, so it stays ours to chase.
+    const [item] = pendingForSystem(
+      sys({
+        stages: ["Waiting / blocked"], blockedOrgId: 9,
+        blockedReason: "with the reseller", blockedSince: days(2),
+      }), ctx());
+    expect(item.court).toBe("us");
   });
 
   it("blocked with no reason says nothing here - the chase list asks instead", () => {

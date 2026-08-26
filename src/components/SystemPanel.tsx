@@ -13,6 +13,7 @@ import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 import { STANDING_TONE } from "@/lib/gxp";
 import Dialog from "@/components/ui/Dialog";
+import type { BlockOrgChoice } from "@/lib/blocks";
 import { toast } from "@/components/ui/Toast";
 
 type Inst = {
@@ -21,6 +22,8 @@ type Inst = {
   lead: string; notes: string; archived: boolean; archivedBy: string;
   /** Why it is blocked, while it is. See lib/stages and StagePanel. */
   blockedReason: string;
+  /** Whose block it is - null is the operator's own. See lib/blocks. */
+  blockedOrgId: number | null;
   location: string; name: string;
   forSale: boolean; saleNote: string; listingToken: string;
   /**
@@ -48,7 +51,7 @@ function LeadSelect({ instrumentId, lead, people }: { instrumentId: number; lead
   );
 }
 
-export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell, gxpStanding }: {
+export default function SystemPanel({ instrument, label, clients, categories, stages, stageDefs, gases, knownGases, people, shares, orgOptions, accessRequests, ownerOrgId, canEdit, isStaff, isOwner, canSell, gxpStanding, blockOrgs = [], blockHolder = "" }: {
   // `label` is composed from the system's assets - see lib/systemLabel.ts.
   instrument: Inst; label: string; clients: string[]; categories: string[];
   stages: string[]; stageDefs: StageDefLite[];
@@ -60,6 +63,10 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   canSell: boolean;
   /** Derived qualification standing - null on unregulated systems. See lib/gxp. */
   gxpStanding: { label: string; tone: "ok" | "warn" | "bad"; reasons: string[] } | null;
+  /** Who a block on this system may be put under, the default first. */
+  blockOrgs?: BlockOrgChoice[];
+  /** Who the current block is under, blank when it is the obvious party. */
+  blockHolder?: string;
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */
 }) {
   const [editing, setEditing] = useState(false);
@@ -276,7 +283,8 @@ export default function SystemPanel({ instrument, label, clients, categories, st
       )}
 
       <StagePanel instrumentId={instrument.id} stages={stages} stageDefs={stageDefs} canEdit={canEdit}
-        blockedReason={instrument.blockedReason} systemLabel={instrument.externalId} />
+        blockedReason={instrument.blockedReason} systemLabel={instrument.externalId}
+        blockOrgs={blockOrgs} blockedOrgId={instrument.blockedOrgId} blockHolder={blockHolder} />
       <GasPanel target={{ instrumentId: instrument.id, assetId: null }} gases={gases} knownGases={knownGases} canEdit={canEdit} isStaff={isStaff} />
       <SharePanel targetId={instrument.id} shares={shares} orgOptions={orgOptions} ownerOrgId={ownerOrgId}
         canManageAll={isStaff} canAddProvider={!isStaff && canEdit} />

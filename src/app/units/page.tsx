@@ -10,6 +10,7 @@ import { systemLabel } from "@/lib/systemLabel";
 import { getBrand } from "@/lib/brand";
 import { ageDays, getStageSince } from "@/lib/stageAges";
 import { BLOCKED_STAGE } from "@/lib/stages";
+import { blockHolderName, blockLabel } from "@/lib/blocks";
 import { PIPELINE_STAGES } from "@/lib/clientLandingData";
 import { COVERAGE, coverageBadge, coverageOf, type CoverageAgreement } from "@/lib/coverage";
 import { providerNameOf, providerNames } from "@/lib/providers";
@@ -124,6 +125,11 @@ export default async function UnitsPage({ searchParams }: {
       stages: r.stages,
       blocked: r.stages.includes(BLOCKED_STAGE),
       blockedReason: r.blockedReason ?? "",
+      /* Whose block it is, named only when it is not the workspace servicing
+         the unit - on a roster of units somebody else is working, "who do I
+         chase" is the question this answers. See lib/blocks. */
+      blockHolder: blockHolderName(r.blockedOrgId, r.tenantOrgId, (id) =>
+        id === user.orgId ? (org?.name ?? "you") : brand.operatorName),
       age,
       forSale: r.forSale,
       coverage: coverageOf(r.id, covAgreements, today, brand.operatorName),
@@ -193,7 +199,9 @@ export default async function UnitsPage({ searchParams }: {
               </Link>
               <span className="sub">
                 {u.label}{u.where ? ` · ${u.where}` : ""}
-                {u.blocked && u.blockedReason ? ` · ${u.blockedReason}` : ""}
+                {u.blocked && u.blockedReason
+                  ? ` · ${u.blockHolder ? `${blockLabel(u.blockHolder)}: ` : ""}${u.blockedReason}`
+                  : ""}
               </span>
             </span>
             {u.forSale && <Pill tone="accent">Listed</Pill>}

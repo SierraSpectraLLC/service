@@ -2616,6 +2616,7 @@ ALTER TABLE "app_settings" ADD COLUMN IF NOT EXISTS "digest_last_sent_on" text N
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_reason" text NOT NULL DEFAULT '';
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_since" timestamp;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_by" text NOT NULL DEFAULT '';
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "blocked_org_id" integer;
 
 -- Platform appearance: the header colour and the spectrum bar above it, so a
 -- rebrand is a settings change rather than a deploy. Blank/default = the look

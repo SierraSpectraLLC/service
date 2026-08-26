@@ -107,6 +107,7 @@ import {
   GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, BLOCKED_STAGE,
   autoFg, cleanBlockReason, isBlocking, partOpen, stageChange, validBlockReason,
 } from "@/lib/stages";
+import { blockParties } from "@/lib/blockData";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
@@ -409,7 +410,7 @@ const targetLabel = (externalId: string, asset: { kind: string; model: string; s
  * something the person was never given a box to fill in.
  */
 export async function toggleStage(
-  instrumentId: number, stage: string, reason = "",
+  instrumentId: number, stage: string, reason = "", blockedOrgId: number | null = null,
 ): Promise<{ error?: string; needsReason?: boolean }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
@@ -432,10 +433,29 @@ export async function toggleStage(
   if (blocking && !validBlockReason(why)) {
     return { error: "Say why it's blocked and what would clear it", needsReason: true };
   }
+  /* Whose block it is, chosen rather than inferred. Defaulting to the
+     blocker's own organization is the rule stated plainly: if we are working
+     on a system and block it, it is blocked with us - and it stays with us
+     when the reason says "waiting on LabZen", because the machine is on our
+     bench and the chase is ours. See lib/blocks. */
+  let heldBy: number | null = null;
+  if (blocking) {
+    const parties = await blockParties(inst, u.orgId);
+    // "Us" means something different depending on who is asking: for the shop
+    // it is the workspace the system lives in, for a client editor working
+    // their own machine it is their own company. Both are always in `parties`
+    // - the tenant by construction, a client because only a share got them
+    // the right to block it at all.
+    const mine = isStaffRole(u.role) ? inst.tenantOrgId : u.orgId;
+    heldBy = blockedOrgId ?? mine;
+    if (heldBy !== null && !parties.some((p) => p.id === heldBy)) {
+      return { error: "That organization has nothing to do with this system" };
+    }
+  }
   const blockFields = blocking
-    ? { blockedReason: why, blockedSince: new Date(), blockedBy: u.email }
+    ? { blockedReason: why, blockedSince: new Date(), blockedBy: u.email, blockedOrgId: heldBy }
     : stage === BLOCKED_STAGE && has
-      ? { blockedReason: "", blockedSince: null, blockedBy: "" }
+      ? { blockedReason: "", blockedSince: null, blockedBy: "", blockedOrgId: null }
       : {};
   await db.update(instruments).set({ stages: next, updatedAt: new Date(), ...blockFields })
     .where(eq(instruments.id, instrumentId));
@@ -455,7 +475,9 @@ export async function toggleStage(
  * the part"), and making somebody unblock and re-block to say so would lose
  * the date it has been stuck since.
  */
-export async function setBlockedReason(instrumentId: number, reason: string): Promise<{ error?: string }> {
+export async function setBlockedReason(
+  instrumentId: number, reason: string, blockedOrgId: number | null = null,
+): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
@@ -463,8 +485,22 @@ export async function setBlockedReason(instrumentId: number, reason: string): Pr
   if (!inst.stages.includes(BLOCKED_STAGE)) return { error: "That system isn't blocked" };
   const why = cleanBlockReason(reason);
   if (!validBlockReason(why)) return { error: "Say why it's blocked and what would clear it" };
+  /* The holder is re-pointable for the same reason the reason is re-wordable:
+     a wait that started on our bench can genuinely become theirs when the unit
+     goes back to them, and making somebody unblock and re-block to say so
+     would lose the date it has been stuck since. Null leaves it where it is -
+     the caller is only rewording. */
+  let heldBy: number | null | undefined = undefined;
+  if (blockedOrgId !== null) {
+    const parties = await blockParties(inst, u.orgId);
+    if (!parties.some((p) => p.id === blockedOrgId)) {
+      return { error: "That organization has nothing to do with this system" };
+    }
+    heldBy = blockedOrgId;
+  }
   await db.update(instruments).set({
     blockedReason: why, blockedBy: u.email,
+    ...(heldBy === undefined ? {} : { blockedOrgId: heldBy }),
     // Keep blockedSince: it is how long the system has been stuck, which
     // rewording the reason does not reset. Backfill it only if it is missing,
     // which is every row blocked before a reason was demanded.
