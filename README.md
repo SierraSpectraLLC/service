@@ -206,15 +206,34 @@ service company with a year of work behind it - so somebody evaluating the
 product can be handed a login instead of a slide deck.
 
 ```bash
-DATABASE_URL=... npm run db:seed:demo             # open it
-DATABASE_URL=... npm run db:seed:demo -- --reset  # rebuild from scratch
-DATABASE_URL=... npm run db:seed:demo -- --wipe   # take it back out
+DATABASE_URL=... npm run db:seed:demo -- --dry-run  # writes nothing, reports what it would change
+DATABASE_URL=... npm run db:seed:demo               # open it
+DATABASE_URL=... npm run db:seed:demo -- --reset    # rebuild from scratch
+DATABASE_URL=... npm run db:seed:demo -- --wipe     # take it back out
 ```
 
-It prints the sign-in at the end: `demo@ridgelinefield.com` and a generated
-password (`--password=...` or `DEMO_PASSWORD` to choose one; a six-digit code
-by mail reaches the same account). The owner email and the company name are
-`--owner=` and `--name=`, or `DEMO_OWNER_EMAIL` / `DEMO_ORG_NAME`.
+**Start with `--dry-run`.** Everything before the first write is a `SELECT`, so
+a dry run can prove the names are free and then report the instance-wide
+changes - which are the only ones anybody outside the demo can see - without
+touching anything. It is the honest answer to "what will this do to *my*
+instance", as opposed to instances in general.
+
+**No terminal?** `.github/workflows/demo-workspace.yml` is the same four
+actions behind a button: Actions > Demo workspace > Run workflow, pick
+`check` / `seed` / `reset` / `wipe`. It reads `DATABASE_URL`, `DEMO_PASSWORD`
+and `BLOB_READ_WRITE_TOKEN` from a `demo` **environment** rather than from
+repository secrets, so ordinary CI cannot see the production connection string,
+and the environment can carry an approval rule. The output lands in the job
+summary, which is what GitHub's mobile app shows without making anybody scroll
+a log. `DEMO_PASSWORD` is required for `seed` and `reset` on purpose: a
+generated password would have to be printed to be useful, and a printed
+password is a credential in a log.
+
+It prints the sign-in at the end: `demo@ridgelinefield.com` and a password -
+supplied via `--password=` or `DEMO_PASSWORD`, generated and printed only when
+neither is given. A six-digit code by mail reaches the same account. The owner
+email and the company name are `--owner=` and `--name=`, or `DEMO_OWNER_EMAIL` /
+`DEMO_ORG_NAME`.
 
 **Every client shape, on purpose.** Five organizations, because "does it handle
 a reseller" is the second thing anybody asks: a regulated lab under
@@ -252,10 +271,20 @@ default expense policy, and the loaded labor rate.
 **What it does change, and says so.** Client sign-in and four optional modules
 live in `app_settings`, which is one row for the whole instance; the demo
 cannot show a client portal, an EOD report or a remote session without them, so
-any that are off get turned on and the change is printed. Two instance-wide
-numbers - the travel/expense policy and the loaded labor rate - are filled in
-only when nothing is there at all, because an instance that has set its own
-keeps them. Pass `--no-modules` to leave `app_settings` exactly as found.
+any that are off get turned on and the change is printed. `--no-modules` leaves
+that row exactly as found - and costs less than it sounds, because "view as"
+never consults the client-access flag (`src/auth.ts` reads it on the sign-in
+path and nowhere else), so the owner can still walk the client and reseller
+portals; what is lost is handing a separate client login to somebody else.
+
+Two other instance-wide numbers - the travel/expense policy and the loaded
+labor rate - are **opt-in**, behind `--defaults`, even though the demo's travel
+strip and job-cost margin read empty without them. A nav entry appearing is a
+change somebody notices and ignores; a loaded labor rate is the number the
+existing operator's own job costing computes margins *from*, so filling it in
+unasked would make their real jobs show invented profit. That is not a demo
+touching a demo.
+
 `--wipe` does not turn the modules back off: by then they may be load-bearing
 for another workspace, and the script cannot know which were on before.
 
@@ -265,12 +294,28 @@ the supported path and tells the client how to send a check. Pass
 `--stripe-account=acct_...` (Connect Express, test mode) to demo the card and
 ACH flows for real.
 
-**Mail is not wired up.** Digest and EOD recipient lists are left blank and
-automatic dunning is off on every demo client, so a buyer clicking through
-cannot mail a stranger - Preview renders the real edition and sends nothing.
-Every invented address sits on a reserved `.example` domain, which cannot
-resolve anywhere. `--mail-to=you@example.com` wires the lists up if you want
-live sends.
+**Mail is not wired up, and that is enforced rather than hoped.** Digest and
+EOD recipient lists are left blank, automatic dunning is off on every demo
+client, and every invented address sits on a reserved `.example` domain that
+cannot resolve. But two crons notify without anybody pressing anything - the
+weekly usage report and the weekly renewal warning, and the seed deliberately
+plants a contract inside its notice window so the second one fires. Both reach
+the workspace's own staff, so every message would hard-bounce against the
+operator's real sending reputation for as long as the demo exists.
+
+So the seed writes an `emailOn: false` row for every notification kind against
+every address it invents. That is the product's own opt-out table, and
+`lib/notify` writes the in-app row *first* and filters recipients afterwards -
+so the bell still lights up, the inbox still fills, the feature still
+demonstrates, and only the envelope is dropped. Any of them can be switched
+back on from Settings. `--mail-to=you@example.com` says "I want this demo to
+send", and then nothing is suppressed.
+
+**Share, drop and listing tokens are random.** They are the whole credential -
+there is no session behind them - and `/api/drop/[token]` in particular mints a
+Blob upload token for an anonymous caller against nothing but the token in the
+path. A readable one would be a stranger writing 100MB at a time into the
+operator's real Blob store.
 
 **Files are real** when `BLOB_READ_WRITE_TOKEN` is set: the reports,
 certificates, photos and packing lists are generated at seed time and uploaded,

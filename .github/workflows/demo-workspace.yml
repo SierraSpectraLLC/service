@@ -1,0 +1,116 @@
+# Open, rebuild or remove the demo workspace - from a phone, with no terminal.
+#
+# Actions > Demo workspace > Run workflow. Start with "check", which writes
+# nothing and reports exactly what a real run would change on THIS instance.
+#
+# Setup, once, all of it from the GitHub web UI:
+#   Settings > Environments > New environment: demo
+#   Add these secrets TO THAT ENVIRONMENT (not to the repository - an
+#   environment secret is readable only by a job that names the environment,
+#   so ordinary CI cannot see your production connection string):
+#     DATABASE_URL          the pooled Neon string
+#     DEMO_PASSWORD         the password you will hand over (10+ chars, and it
+#                           may not contain the local part of the owner address)
+#     BLOB_READ_WRITE_TOKEN optional; without it the demo's files do not open
+#   Optionally add an approval rule to the environment so a run needs a second
+#   pair of eyes.
+#
+# Nothing secret is ever printed. DEMO_PASSWORD is required for seed and reset
+# precisely so the script never has to generate one and echo it into a log that
+# everybody with read access can see.
+name: Demo workspace
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        type: choice
+        required: true
+        default: check
+        options:
+          - check          # dry run: writes nothing, reports the blast radius
+          - seed           # open the demo workspace
+          - reset          # remove it and rebuild it from scratch
+          - wipe           # remove it and stop
+      keep_instance_settings:
+        description: "Leave app_settings completely alone (no module flags, no defaults)"
+        type: boolean
+        default: false
+      stripe_account:
+        description: "Stripe Connect account for the demo, test mode (optional)"
+        type: string
+        default: ""
+
+# One at a time: two runs against one database is a race nobody needs.
+concurrency: demo-workspace
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: demo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Check the inputs before touching anything
+        env:
+          ACTION: ${{ inputs.action }}
+          HAS_DB: ${{ secrets.DATABASE_URL != '' }}
+          HAS_PW: ${{ secrets.DEMO_PASSWORD != '' }}
+        run: |
+          if [ "$HAS_DB" != "true" ]; then
+            echo "::error::No DATABASE_URL secret on the 'demo' environment. See the comment at the top of this file."
+            exit 1
+          fi
+          # A generated password would have to be printed to be useful, and a
+          # printed password is a credential in a log. So: supply one.
+          if { [ "$ACTION" = "seed" ] || [ "$ACTION" = "reset" ]; } && [ "$HAS_PW" != "true" ]; then
+            echo "::error::Add a DEMO_PASSWORD secret to the 'demo' environment first - at least 10 characters."
+            exit 1
+          fi
+
+      - name: ${{ inputs.action }}
+        id: run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          DEMO_OWNER_EMAIL: ${{ vars.DEMO_OWNER_EMAIL }}
+          DEMO_ORG_NAME: ${{ vars.DEMO_ORG_NAME }}
+        run: |
+          set -o pipefail
+          FLAGS=""
+          case "${{ inputs.action }}" in
+            check) FLAGS="--dry-run" ;;
+            seed)  FLAGS="" ;;
+            reset) FLAGS="--reset" ;;
+            wipe)  FLAGS="--wipe" ;;
+          esac
+          if [ "${{ inputs.keep_instance_settings }}" = "true" ]; then
+            FLAGS="$FLAGS --no-modules --no-defaults"
+          fi
+          if [ -n "${{ inputs.stripe_account }}" ]; then
+            FLAGS="$FLAGS --stripe-account=${{ inputs.stripe_account }}"
+          fi
+          echo "Running: npx tsx scripts/seed-demo.ts $FLAGS"
+          npx tsx scripts/seed-demo.ts $FLAGS 2>&1 | tee /tmp/demo.log
+
+      # The job summary is what GitHub's mobile app shows without making anybody
+      # scroll a log, which is the whole point of running this from a phone.
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "## Demo workspace - \`${{ inputs.action }}\`"
+            echo
+            echo '```'
+            cat /tmp/demo.log 2>/dev/null || echo "(the run produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

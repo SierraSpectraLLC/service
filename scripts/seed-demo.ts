@@ -70,6 +70,7 @@ import {
 import { hashPassword, passwordProblem } from "../src/lib/password";
 import { STARTER_CATEGORIES } from "../src/lib/expenseCategories";
 import { makeTempPassword } from "../src/lib/tempPassword";
+import { NOTIFY_KINDS } from "../src/lib/inbox";
 
 type Db = NeonHttpDatabase<typeof schema>;
 
@@ -84,8 +85,10 @@ const opt = (n: string, fallback = ""): string => {
 const OWNER = (opt("owner") || process.env.DEMO_OWNER_EMAIL || "demo@ridgelinefield.com").trim().toLowerCase();
 const ORG_NAME = opt("name") || process.env.DEMO_ORG_NAME || "Cascade Instrument Service";
 const RESET = has("reset");
+const DRY = has("dry-run");
 const WIPE = has("wipe");
 const MODULES = !has("no-modules");
+const DEFAULTS = has("defaults");
 const MAIL_TO = opt("mail-to").trim().toLowerCase();
 const STRIPE_ACCOUNT = opt("stripe-account").trim();
 
@@ -120,6 +123,27 @@ const monthStart = (offset = 0): string => {
   d.setUTCDate(1);
   d.setUTCMonth(d.getUTCMonth() + offset);
   return d.toISOString().slice(0, 10);
+};
+
+// ── Secrets ────────────────────────────────────────────────────────────────
+/**
+ * The tokens in share, drop and listing URLs are the WHOLE credential - there
+ * is no session behind them, which is the point of handing one to somebody who
+ * has no account. So they are random here rather than readable.
+ *
+ * The one that actually matters is a drop link: /api/drop/[token] mints a Blob
+ * upload token for an anonymous caller against nothing but the token in the
+ * path, so a guessable one is a stranger writing 100MB at a time into the
+ * operator's real Blob store until the quota fills. Named rather than inlined
+ * so the same token can be referenced twice - once written, once looked up.
+ */
+const TOKENS = new Map<string, string>();
+const token = (name: string): string => {
+  const hit = TOKENS.get(name);
+  if (hit) return hit;
+  const made = `demo-${randomBytes(16).toString("hex")}`;
+  TOKENS.set(name, made);
+  return made;
 };
 
 // ── Output ─────────────────────────────────────────────────────────────────
@@ -399,7 +423,7 @@ async function main(): Promise<void> {
   // ── Preflight ────────────────────────────────────────────────────────────
   section("Checking the instance");
   let [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
-  if (!settings) {
+  if (!settings && !DRY) {
     await db.insert(appSettings).values({ id: 1 }).onConflictDoNothing();
     say("app_settings had no row; created one.");
     [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
@@ -448,6 +472,53 @@ async function main(): Promise<void> {
     throw new Error(`System ids CIS-1xxx are already taken (${idClash.length} of them). Wipe the old demo first.`);
   }
 
+  // ── Dry run ──────────────────────────────────────────────────────────────
+  // Read-only, and the only honest answer to "what will this do to MY instance".
+  // Everything above this line is a SELECT; everything below it writes. So a
+  // dry run stops here, having already proved the names are free, and reports
+  // the instance-wide changes - which are the only ones anybody else can see.
+  if (DRY) {
+    const [otherOps] = await db.select({ n: raw<number>`count(*)::int` }).from(orgs)
+      .where(eq(orgs.isOperator, true));
+    console.log("\n  Nothing was written. This is what a real run would change.\n");
+    console.log(`  Workspace name "${ORG_NAME}" is free, and so are the five client names.`);
+    console.log(`  ${OWNER} is not staff anywhere on this instance.`);
+    console.log(`  This instance currently has ${otherOps?.n ?? 0} operator workspace(s); the demo would be one more.\n`);
+
+    const flags = {
+      clientAccessEnabled: "client sign-in - lets client accounts on the allowlist sign in at all",
+      eodEnabled: "the EOD report page and its nav entry",
+      digestEnabled: "the daily digest. READ THIS ONE TWICE: the cron is gated on this single "
+        + "instance-wide flag, so turning it on restarts YOUR OWN workspace's morning digest - the "
+        + "internal edition to your staff, and a partner edition to every client of yours that has "
+        + "recipients configured. If it has been off for a while, real customers get mail tomorrow",
+      remoteEnabled: "remote support pages",
+      publicCatalogEnabled: "the public, unauthenticated equipment catalog",
+    } as const;
+    const off = (Object.keys(flags) as (keyof typeof flags)[]).filter((k) => settings && !settings[k]);
+    if (!settings) {
+      console.log("  app_settings has NO ROW on this instance - a real run would create it.\n");
+    } else if (off.length) {
+      console.log("  INSTANCE-WIDE, would be turned ON (every workspace here sees these):");
+      for (const k of off) console.log(`    - ${k}: ${flags[k]}`);
+      console.log("    Pass --no-modules to leave every one of them alone.\n");
+    } else {
+      console.log("  Instance modules are all on already - a real run would change none of them.\n");
+    }
+    const unset = settings
+      ? [settings.expensePolicy === null ? "expense_policy" : "", settings.loadedLaborCents === 0 ? "loaded_labor_cents" : ""].filter(Boolean)
+      : [];
+    if (unset.length) {
+      console.log(`  NOT touched unless you ask: ${unset.join(", ")} (currently unset here).`);
+      console.log("    Without them the demo's travel strip is blank and its job costing shows no");
+      console.log("    margin. Pass --defaults to fill them in - but note they are instance-wide,");
+      console.log("    so YOUR real jobs would start showing margins computed from an invented rate.\n");
+    }
+    console.log("  Everything else it writes is stamped with the demo tenant and invisible to yours.");
+    console.log("  Google-sheet sync is never touched. No mail is wired up. Run without --dry-run to do it.\n");
+    return;
+  }
+
   // ── Instance settings ────────────────────────────────────────────────────
   // Client sign-in and the optional modules are one row for the whole instance.
   // The demo cannot show a client portal, an EOD report or a remote session
@@ -466,30 +537,73 @@ async function main(): Promise<void> {
       await db.update(appSettings)
         .set(Object.fromEntries(turnedOn.map((k) => [k, true])))
         .where(eq(appSettings.id, 1));
-      warn(`Turned ON instance-wide: ${turnedOn.map((k) => want[k]).join(", ")}. This affects every workspace here.`);
+      warn(`Turned ON instance-wide: ${turnedOn.join(", ")}. This affects every workspace here.`);
+      // The app writes an audit line whenever somebody flips these in Settings
+      // (actions.updateSettings), and a change made by a script is no less worth
+      // finding later - more so, since nobody was watching. tenantOrgId stays
+      // null because the change belongs to the INSTANCE rather than to the demo,
+      // which is also why --wipe leaves these lines behind: removing the
+      // workspace does not un-turn-on what was turned on for everybody.
+      await db.insert(auditLog).values(turnedOn.map((k) => ({
+        tenantOrgId: null, actor: OWNER, entityType: "settings", entityId: k,
+        action: `seed-demo turned on ${k} for the whole instance`,
+        field: k, oldValue: "false", newValue: "true",
+      })));
+      if (turnedOn.includes("digestEnabled")) {
+        warn("Because the digest was among them: the hourly cron is gated on that one flag for the "
+          + "WHOLE instance, so your own workspace's morning digest starts again tomorrow - internal "
+          + "edition to your staff, partner edition to any client of yours with recipients set. Turn "
+          + "it back off in Settings > Configuration if that is not what you wanted.");
+      }
     } else {
       say("Instance modules were already on; nothing changed.");
     }
     // Never: it polls a real spreadsheet on an hourly cron, and its diff queue
     // has no tenant column, so a demo diff would appear in somebody's real one.
-    if (settings && !settings.sheetSyncEnabled) say("Left Google-sheet sync off (it polls a real spreadsheet).");
+    if (settings && !settings.sheetSyncEnabled) {
+      say("Left Google-sheet sync off (it polls a real spreadsheet).");
+    } else if (settings?.sheetSyncEnabled) {
+      // "Left off" is no protection when it was already on. lib/sheetSync reads
+      // `db.select().from(instruments)` with no tenant predicate, so the demo's
+      // systems will be compared against whatever sheet this instance polls and
+      // will surface as diffs in ITS parity view. Nothing here can fix that; the
+      // honest thing is to say so before the rows exist.
+      warn("Google-sheet sync is ALREADY ON here. Its diff engine reads every instrument on the "
+        + "instance with no tenant filter, so the demo's 15 systems will appear as unresolved diffs "
+        + "in your own Sheet parity view. Turn the module off first, or expect to dismiss them.");
+    }
 
-    // Two instance-wide numbers with no tenant column of their own, and two
+    // Two instance-wide numbers with no tenant column of their own, behind two
     // whole surfaces that read empty without them: the travel-stipend strip on
-    // a work order, and the margin on the job-cost panel. Filled in ONLY when
-    // nothing is there - an instance that has set its own travel policy or its
-    // own loaded rate keeps them, because those are somebody's real figures.
-    if (settings && settings.expensePolicy === null) {
+    // a work order, and the margin on the job-cost panel.
+    //
+    // OPT-IN, unlike the module flags above, and the difference is worth
+    // stating. A nav entry appearing is a change somebody notices and ignores.
+    // A loaded labor rate is a number the existing operator's own job-costing
+    // screens compute margins FROM: fill it in unasked and their real jobs
+    // start showing invented profit. That is not a demo touching a demo; it is
+    // a script editing somebody's books. So --defaults, or not at all.
+    if (DEFAULTS && settings && settings.expensePolicy === null) {
       await db.update(appSettings).set({
         expensePolicy: {
           radiusMiles: 80, dayPerDiemCents: 3000, overnightPerDiemCents: 6500,
           extendedAfterNights: 3, overnightExtendedCents: 8500, hotelNightCapCents: 18000,
         },
       }).where(eq(appSettings.id, 1));
+      await db.insert(auditLog).values({
+        tenantOrgId: null, actor: OWNER, entityType: "settings", entityId: "expensePolicy",
+        action: "seed-demo set a starter travel/expense policy for the whole instance",
+        field: "expensePolicy", oldValue: "", newValue: "starter",
+      });
       warn("Instance had no travel/expense policy; set a starter one (80 mi radius, $30/day, $180/night cap).");
     }
-    if (settings && settings.loadedLaborCents === 0) {
+    if (DEFAULTS && settings && settings.loadedLaborCents === 0) {
       await db.update(appSettings).set({ loadedLaborCents: 9500 }).where(eq(appSettings.id, 1));
+      await db.insert(auditLog).values({
+        tenantOrgId: null, actor: OWNER, entityType: "settings", entityId: "loadedLaborCents",
+        action: "seed-demo set the loaded labor rate to $95.00/h for the whole instance",
+        field: "loadedLaborCents", oldValue: "0", newValue: "9500",
+      });
       warn("Instance had no loaded labor rate; set $95.00/h so job costing shows a margin.");
     }
   } else {
@@ -502,7 +616,15 @@ async function main(): Promise<void> {
     name: ORG_NAME, kind: "provider", isOperator: true, parentOrgId: null,
     themeColor: "#1D4E63",
     termsDays: 30,
-    digestHour: 7, digestDays: "1,2,3,4,5",
+    // The internal edition does NOT read digestRecipients - runDailyDigest sends
+    // it to houseEmails(tenantOrgId) (lib/digest sendEdition, orgId === null),
+    // which here is five invented people on a reserved domain. Leaving the
+    // recipient list blank therefore stops nothing, and the schema offers no
+    // per-workspace off switch. digestDue's last test is `hourNow >= digestHour`
+    // and shopHour only ever returns 0-23, so an hour that never arrives is the
+    // switch: the cron composes nothing for this workspace, Preview and Send now
+    // still work by hand, and --mail-to puts it back on a real schedule.
+    digestHour: MAIL_TO ? 7 : 24, digestDays: "1,2,3,4,5",
     digestRecipients: MAIL_TO, eodRecipients: MAIL_TO,
     storageLimitMb: 25600,
     remoteAccessEnabled: true,
@@ -611,9 +733,16 @@ async function main(): Promise<void> {
       cardSurchargeBps: 290, cardSurchargeFlatCents: 30,
     },
   });
+  // Every demo client carries dunningAuto:false EXPLICITLY, including the three
+  // that need no other billing policy. An absent policy is not a neutral
+  // absence - lib/billingPolicy resolves it to DEFAULT_POLICY, where dunningAuto
+  // is true - so a demo invoice that later goes late would arm the hourly
+  // collections cron against an invented address.
+  const quiet = { dunningAuto: false } as const;
   const meridian = await mkOrg({
     name: "Meridian Instrument Exchange", kind: "client", parentOrgId: T, createdAt: at(-260),
     themeColor: "#B26B1F", termsDays: 45, apEmail: "jules@meridianexchange.example",
+    billingPolicy: quiet,
     // The third shape of the client product: their units are stock heading for
     // a sale, so their landing is a pipeline and their nav grows Listings.
     resaleEnabled: true, storageLimitMb: 102400,
@@ -623,13 +752,14 @@ async function main(): Promise<void> {
     // Not a customer: another service company, invited onto one system because
     // the NMR magnet work is theirs. This is what `kind: provider` is for.
     name: "Vantage Scientific", kind: "provider", parentOrgId: T, createdAt: at(-150),
-    themeColor: "#334155", termsDays: 30, storageLimitMb: 1024,
+    themeColor: "#334155", termsDays: 30, storageLimitMb: 1024, billingPolicy: quiet,
   });
   const keystone = await mkOrg({
     // Nothing of theirs is ever on our bench. They exist to prove the product
     // can report a day whose only work was a phone call.
     name: "Keystone Bio", kind: "client", parentOrgId: T, createdAt: at(-95),
     themeColor: "#0F766E", termsDays: 30, apEmail: "nadia@keystonebio.example", storageLimitMb: 1024,
+    billingPolicy: quiet,
   });
   say(`Clients: Ellison ${ellison.id}, North Harbor ${harbor.id}, Meridian ${meridian.id}, `
     + `Vantage ${vantage.id} (provider), Keystone ${keystone.id}`);
@@ -782,13 +912,13 @@ async function main(): Promise<void> {
       location: "Tacoma - Bay 6", ownerOrgId: meridian.id, siteId: site("Tacoma"), priority: 5,
       lead: HOUSE.owen.name, stages: ["Refurbishment"], pmPosture: "advisory",
       forSale: true, saleNote: "Fully refurbished, source rebuilt, sign-off packet included.",
-      listingToken: "demo-lst-xevo-4410", notes: "", createdAt: at(-70), updatedAt: at(-4) },
+      listingToken: token("lst-xevo-4410"), notes: "", createdAt: at(-70), updatedAt: at(-4) },
     { tenantOrgId: T, externalId: "CIS-1010", client: "Meridian Instrument Exchange", category: "GC-MS",
       name: "Stock unit - 5977B", model: "5977B GC-MSD", manufacturer: "Agilent", serial: "US16290331",
       location: "Tacoma - staged", ownerOrgId: meridian.id, siteId: site("Tacoma"), priority: 3,
       lead: HOUSE.owen.name, stages: ["Waiting to ship"], pmPosture: "advisory",
       forSale: true, saleNote: "Sold pending crate. Photos and checkout data attached.",
-      listingToken: "demo-lst-5977-0331", notes: "Crate booked for Thursday pickup.",
+      listingToken: token("lst-5977-0331"), notes: "Crate booked for Thursday pickup.",
       createdAt: at(-140), updatedAt: at(-2) },
     { tenantOrgId: T, externalId: "CIS-1011", client: "Meridian Instrument Exchange", category: "LC-MS",
       name: "Stock unit - QTRAP", model: "QTRAP 6500+", manufacturer: "Sciex", serial: "AB6500-1182",
@@ -1734,9 +1864,17 @@ async function main(): Promise<void> {
 
   // Three rungs of rate card, so the precedence rule is visible rather than
   // asserted: the agreement beats the org, the org beats the default.
+  // Deliberately NO workspace-default card (orgId null AND agreementId null).
+  // lib/rates.resolveRate ends at `cards.find(c => c.orgId === null && c.agreementId === null)`
+  // and its callers load every card on the instance with no tenant predicate,
+  // so a default card belonging to the demo would quietly become the fallback
+  // hourly rate for the operator that actually runs this instance. Two rungs of
+  // precedence - the agreement beating the organization - demonstrate the rule
+  // without reaching into somebody else's pricing.
   await db.insert(rateCards).values([
-    { tenantOrgId: T, orgId: null, agreementId: null, hourlyCents: 18500, afterHoursPct: 150,
-      travelPct: 50, minIncrementMin: 15, label: "Standard field service", createdBy: OWNER, createdAt: at(-400) },
+    { tenantOrgId: T, orgId: harbor.id, agreementId: null, hourlyCents: 18500, afterHoursPct: 150,
+      travelPct: 50, minIncrementMin: 15, label: "North Harbor - time and materials",
+      createdBy: OWNER, createdAt: at(-330) },
     { tenantOrgId: T, orgId: ellison.id, agreementId: null, hourlyCents: 17000, afterHoursPct: 150,
       travelPct: 50, minIncrementMin: 15, label: "Ellison negotiated", createdBy: OWNER, createdAt: at(-395) },
     { tenantOrgId: T, orgId: ellison.id, agreementId: ag("AGR-2026-11").id, hourlyCents: 14500,
@@ -2204,40 +2342,40 @@ async function main(): Promise<void> {
   // quote link, and a drop link pointing the other way - somewhere for a client
   // to put files without an account.
   const shares = await db.insert(shareLinks).values([
-    { tenantOrgId: T, token: "demo-share-files-ellison-01", kind: "files", orgId: ellison.id,
+    { tenantOrgId: T, token: token("share-files-ellison-01"), kind: "files", orgId: ellison.id,
       label: "CIS-1001 release packet", expiresOn: day(60), createdBy: HOUSE.tess.email,
       openedAt: at(-1, 18), lastOpenedAt: at(0, 15), openCount: 3, createdAt: at(-2) },
-    { tenantOrgId: T, token: "demo-share-invoice-2042", kind: "invoice", orgId: ellison.id,
+    { tenantOrgId: T, token: token("share-invoice-2042"), kind: "invoice", orgId: ellison.id,
       invoiceId: iv("INV-2042"), label: "Invoice INV-2042", expiresOn: day(300),
       createdBy: HOUSE.dana.email, openedAt: at(-8, 16), lastOpenedAt: at(-6, 20), openCount: 2, createdAt: at(-9) },
-    { tenantOrgId: T, token: "demo-share-invoice-2038", kind: "invoice", orgId: harbor.id,
+    { tenantOrgId: T, token: token("share-invoice-2038"), kind: "invoice", orgId: harbor.id,
       invoiceId: iv("INV-2038"), label: "Invoice INV-2038", expiresOn: day(250),
       createdBy: HOUSE.dana.email, openedAt: at(-61, 15), lastOpenedAt: at(-31, 14), openCount: 5, createdAt: at(-62) },
-    { tenantOrgId: T, token: "demo-share-quote-3001", kind: "quote", orgId: harbor.id, quoteId: q("Q-3001"),
+    { tenantOrgId: T, token: token("share-quote-3001"), kind: "quote", orgId: harbor.id, quoteId: q("Q-3001"),
       label: "Quote Q-3001", expiresOn: day(40), createdBy: OWNER,
       openedAt: at(-5, 17), lastOpenedAt: at(-3, 19), openCount: 2, createdAt: at(-6) },
-    { tenantOrgId: T, token: "demo-share-quote-3004", kind: "quote", orgId: keystone.id, quoteId: q("Q-3004"),
+    { tenantOrgId: T, token: token("share-quote-3004"), kind: "quote", orgId: keystone.id, quoteId: q("Q-3004"),
       label: "Quote Q-3004", expiresOn: day(30), createdBy: OWNER,
       openedAt: at(-3, 16), lastOpenedAt: at(-1, 21), openCount: 4, createdAt: at(-4) },
     // Withdrawn, so the revoked state is on screen rather than only in a test.
-    { tenantOrgId: T, token: "demo-share-files-revoked", kind: "files", orgId: meridian.id,
+    { tenantOrgId: T, token: token("share-files-revoked"), kind: "files", orgId: meridian.id,
       label: "QTRAP condition report (superseded)", expiresOn: day(20), createdBy: HOUSE.owen.email,
       revokedAt: at(-10), createdAt: at(-30) },
   ]).returning();
   const share = (t: string) => shares.find((s) => s.token === t)!.id;
 
   await db.insert(shareLinkFiles).values([
-    { shareId: share("demo-share-files-ellison-01"), attachmentId: file("reserpine-tune-report.pdf") },
-    { shareId: share("demo-share-files-ellison-01"), attachmentId: file("cis-1001.svg") },
-    { shareId: share("demo-share-files-ellison-01"), attachmentId: file("calibration-cert-PT-88213.pdf") },
-    { shareId: share("demo-share-files-revoked"), attachmentId: file("cis-1009-listing.svg") },
+    { shareId: share(token("share-files-ellison-01")), attachmentId: file("reserpine-tune-report.pdf") },
+    { shareId: share(token("share-files-ellison-01")), attachmentId: file("cis-1001.svg") },
+    { shareId: share(token("share-files-ellison-01")), attachmentId: file("calibration-cert-PT-88213.pdf") },
+    { shareId: share(token("share-files-revoked")), attachmentId: file("cis-1009-listing.svg") },
   ]);
 
   await db.insert(dropLinks).values([
-    { tenantOrgId: T, orgId: ellison.id, folderId: folder("Ellison"), token: "demo-drop-ellison-methods",
+    { tenantOrgId: T, orgId: ellison.id, folderId: folder("Ellison"), token: token("drop-ellison-methods"),
       label: "Method files from Rita", expiresOn: day(21), usedCount: 2, lastUploadAt: at(-3, 18),
       createdBy: HOUSE.priya.email, createdAt: at(-14) },
-    { tenantOrgId: T, orgId: harbor.id, folderId: null, token: "demo-drop-harbor-photos",
+    { tenantOrgId: T, orgId: harbor.id, folderId: null, token: token("drop-harbor-photos"),
       label: "Photos of the ICP install", expiresOn: day(-2), usedCount: 0,
       createdBy: HOUSE.tess.email, createdAt: at(-32) },
   ]);
@@ -2458,24 +2596,49 @@ async function main(): Promise<void> {
       href: `/instruments/${sid("CIS-1014")}`, createdAt: at(-16, 22), readAt: at(-15, 15) },
   ]);
 
-  // Mail that has not gone yet: the hold window the outbox exists for.
+  // The held-email queue, both rows ALREADY SENT.
+  //
+  // A pending row here would not be a picture of the feature, it would be an
+  // email: flushOutbox selects every unsent due row on the instance with no
+  // tenant predicate (lib/outboxData), and it is driven by the notifications
+  // poller every open tab runs - so the first real user to open a tab would
+  // mail tess@cascadeinstrument.example within about a minute. Sent rows show
+  // the same history and post nothing.
   await db.insert(emailOutbox).values([
     { email: HOUSE.tess.email, kind: "task_assigned", title: "You were assigned: Carryover study",
       href: `/work/${wo("WO-2043")}`, subject: "A task is waiting for you", actor: HOUSE.owner.name,
-      context: "CIS-1001", item: "Carryover study", sendAfter: at(0, 18), sendBy: at(0, 20), createdAt: at(0, 17) },
+      context: "CIS-1001", item: "Carryover study", sendAfter: at(0, 17), sendBy: at(0, 17),
+      sentAt: at(0, 17), createdAt: at(0, 17) },
     { email: OWNER, kind: "gas_empty", title: "Helium marked empty on CIS-1002",
       href: `/instruments/${sid("CIS-1002")}`, subject: "Helium is empty on CIS-1002",
       actor: HOUSE.owen.name, context: "CIS-1002", item: "Helium",
       sendAfter: at(-1, 15), sendBy: at(-1, 17), sentAt: at(-1, 15, 2), createdAt: at(-1, 15) },
   ]);
 
-  await db.insert(notificationPrefs).values([
-    { email: OWNER, kind: "usage_report", emailOn: true },
-    { email: OWNER, kind: "discussion", emailOn: true },
-    { email: HOUSE.owen.email, kind: "discussion", emailOn: false },
-    { email: HOUSE.owen.email, kind: "sign_in", emailOn: false },
-    { email: HOUSE.priya.email, kind: "gas_empty", emailOn: false },
-  ]).onConflictDoNothing();
+  // ── The mail stop ────────────────────────────────────────────────────────
+  // Every notification kind, switched off for every address the demo invents.
+  //
+  // This is the one thing standing between a demo tenant and real outbound
+  // mail. Two crons notify without anybody pressing anything - the weekly
+  // usage report and the weekly renewal warning, and the seed deliberately
+  // plants a contract inside its notice window so the second one fires. Both
+  // reach the WORKSPACE's staff, who here are four invented people on a
+  // reserved domain, so every message would hard-bounce against the operator's
+  // real sending reputation for as long as the demo exists.
+  //
+  // Switching them off in the product's own opt-out table rather than by some
+  // flag of my own matters: lib/notify writes the in-app row FIRST and filters
+  // recipients afterwards (lib/inbox.emailAllowed), so the bell still lights
+  // up, the inbox still fills, and the demo still shows the feature working.
+  // Only the envelope is dropped. Whoever holds the keys can turn any of these
+  // back on from Settings, which is the same switch a real operator uses.
+  //
+  // --mail-to says "I want this demo to send"; then nothing is suppressed.
+  if (!MAIL_TO) {
+    await db.insert(notificationPrefs).values(
+      demoEmails().flatMap((email) => NOTIFY_KINDS.map((k) => ({ email, kind: k.kind, emailOn: false }))),
+    ).onConflictDoNothing();
+  }
 
   // A saved panel layout, so "view as this person" reproduces THEIR screen and
   // not a generic one.
@@ -2547,7 +2710,12 @@ async function main(): Promise<void> {
     { tenantOrgId: T, kind: "asset_type", assetType: "", name: "Vacuum pump", createdAt: at(-400) },
     { tenantOrgId: T, kind: "model", assetType: "Mass spec", name: "6495C", manufacturer: "Agilent",
       categories: ["LC-MS"], gases: ["Nitrogen", "Argon"], docTypes: ["Tune report", "Test data"],
-      photoUrl: heroPhoto.url, published: true, publicSlug: "agilent-6495c",
+      // published:false, deliberately. The public catalog is served to anyone,
+      // unauthenticated, from the instance's own domain - so a published demo
+      // model would put an invented company's marketing page on the real
+      // operator's website, where a search engine would find it. The feature is
+      // one toggle away in Settings > Equipment if the buyer wants to see it.
+      photoUrl: heroPhoto.url, published: false, publicSlug: "agilent-6495c",
       publicSummary: "Triple quadrupole LC-MS/MS for regulated bioanalysis. We refurbish, install, qualify and support these.",
       specs: JSON.stringify([
         { name: "Mass range", value: "5-1400 m/z" }, { name: "Scan speed", value: "5000 Da/s" },
@@ -2555,7 +2723,7 @@ async function main(): Promise<void> {
       ]), createdAt: at(-400) },
     { tenantOrgId: T, kind: "model", assetType: "Mass spec", name: "LCMS-8060NX", manufacturer: "Shimadzu",
       categories: ["LC-MS"], gases: ["Nitrogen", "Argon"], docTypes: ["Tune report", "Report"],
-      published: true, publicSlug: "shimadzu-lcms-8060nx",
+      published: false, publicSlug: "shimadzu-lcms-8060nx",
       publicSummary: "High-sensitivity triple quadrupole. IQ/OQ execution and annual re-qualification available.",
       specs: JSON.stringify([
         { name: "Mass range", value: "2-2000 m/z" }, { name: "Scan speed", value: "30000 u/s" },
@@ -2569,7 +2737,7 @@ async function main(): Promise<void> {
       categories: ["ICP-MS"], gases: ["Argon"], createdAt: at(-398) },
     { tenantOrgId: T, kind: "model", assetType: "Mass spec", name: "Xevo TQ-S micro", manufacturer: "Waters",
       categories: ["LC-MS"], gases: ["Nitrogen", "Argon"], photoUrl: listingPhoto.url,
-      published: true, publicSlug: "waters-xevo-tq-s-micro",
+      published: false, publicSlug: "waters-xevo-tq-s-micro",
       publicSummary: "Compact tandem quadrupole. Refurbished units in stock; source rebuilds a speciality.",
       createdAt: at(-398) },
     { tenantOrgId: T, kind: "model", assetType: "Pump", name: "1290 Infinity II Flex", manufacturer: "Agilent",
@@ -2712,7 +2880,9 @@ async function main(): Promise<void> {
   console.log(`  ${ORG_NAME} is ready.\n`);
   console.log("  Sign in");
   console.log(`    ${OWNER}`);
-  console.log(`    password: ${password}${chosen ? "  (as supplied)" : "  (generated - change it in Settings)"}`);
+  console.log(chosen
+    ? "    password: the one you supplied (not printed - this output may be a CI log)"
+    : `    password: ${password}   (generated - change it in Settings, or supply DEMO_PASSWORD next time)`);
   console.log("    or ask for a six-digit code at /login, which reaches the same account.\n");
   const live = sysRows.filter((r) => !r.archived).length;
   console.log("  What is in there");
