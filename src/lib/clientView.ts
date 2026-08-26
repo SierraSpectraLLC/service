@@ -94,6 +94,47 @@ export function moveLabel(yourMove: boolean, operatorName: string): string {
 
 export const moveTone = (yourMove: boolean): Tone => (yourMove ? "warn" : "info");
 
+/**
+ * A QUEUE IS A POSITION, NOT AN OBLIGATION.
+ *
+ * This is the distinction the client surfaces got wrong. The queue answers who
+ * HAS a system; it does not answer who owes a move. A shop that finishes a job
+ * hands the system back - the queue arriving at the client with nothing
+ * attached to it - and reading that as "they are waiting on you" turns every
+ * completed job into a chore on somebody's list. Which is exactly what it did:
+ * a system handed back in service, with no open work, was announced as
+ * "Sierra Spectra is waiting on you".
+ *
+ * So possession only counts as a chore when something is actually pending: an
+ * open job, work that has stopped, or maintenance that has fallen due. All
+ * three are already in the state, which is why the state decides this.
+ *
+ * The known gap: a shop that parks a system with a written reason and opens
+ * nothing gets no chore raised here. The reason still shows on the record, and
+ * that is the better failure - a missed nudge costs a phone call, while
+ * crying wolf on every finished job costs the list its credibility.
+ */
+export const queueNeedsThem = (state: ClientState): boolean => needsAttention(state);
+
+/**
+ * What the card's footer says about who holds this and whether it matters.
+ *
+ * Three outcomes, not two. "With them and fine" is a real answer and the one
+ * the old code could not say: it tested `state === "ok" && !yourMove`, so a
+ * healthy system the SHOP held read "Nothing pending" while a healthy system
+ * the CLIENT held read "Your move" - the truth, inverted.
+ */
+export function standingPill(
+  state: ClientState, yourMove: boolean, operatorName: string,
+): { label: string; tone: Tone } {
+  if (!yourMove) return { label: `With ${operatorName}`, tone: "info" };
+  return queueNeedsThem(state)
+    ? { label: "Your move", tone: "warn" }
+    // Theirs, and nothing is pending on it. Back from service is the ordinary
+    // way a system ends up here.
+    : { label: "Nothing pending", tone: "good" };
+}
+
 // ── How much to show ────────────────────────────────────────────────────────
 
 /**

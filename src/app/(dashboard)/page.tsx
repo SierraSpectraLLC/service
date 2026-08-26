@@ -323,8 +323,12 @@ export default async function Home({ searchParams }: {
 
     const todos = await clientTodos({
       orgId: user.orgId, today,
-      systems: data.map((d) => ({
+      /* The state travels with the queue, because holding a system is only a
+         chore when something is pending on it - see queueNeedsThem. `systems`
+         is built from `data` one-for-one just above, so the index lines up. */
+      systems: data.map((d, i) => ({
         id: d.id, externalId: d.externalId, queueMine: d.queueMine, queueReason: d.queueReason,
+        state: systems[i].state,
       })),
       systemIds: rows.map((r) => r.id),
     });

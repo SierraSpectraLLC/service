@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  CLIENT_STATE, bySeverity, density, moveLabel, moveTone, needsAttention,
+  CLIENT_STATE, bySeverity, density, needsAttention, standingPill,
   type ClientState, type ClientTodo, type Density,
 } from "@/lib/clientView";
 import { EmptyState, FacetStrip, Pill, Toolbar } from "@/components/ui";
@@ -228,6 +228,7 @@ export default function ClientLanding({
 
 function SystemCard({ s, operatorName }: { s: ClientSystem; operatorName: string }) {
   const tone = CLIENT_STATE[s.state].tone;
+  const pill = standingPill(s.state, s.yourMove, operatorName);
   return (
     <Link href={`/instruments/${s.id}`} className={`inst ${tone}`}>
       <div className="top">
@@ -237,9 +238,10 @@ function SystemCard({ s, operatorName }: { s: ClientSystem; operatorName: string
       </div>
       <div className="why">{s.why}</div>
       <div className="foot">
-        {s.state === "ok" && !s.yourMove
-          ? <Pill tone="good">Nothing pending</Pill>
-          : <Pill tone={moveTone(s.yourMove)}>{moveLabel(s.yourMove, operatorName)}</Pill>}
+        {/* Three answers, not two. "With them and fine" is the ordinary state
+            of a system that just came back from service, and the condition
+            this replaced could not say it - see standingPill. */}
+        <Pill tone={pill.tone}>{pill.label}</Pill>
         <span className="rt">{s.lastVisit ? `last visit ${s.lastVisit}` : ""}</span>
       </div>
     </Link>

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import {
   CARD_EVERYTHING_MAX, CLIENT_STATE, CLIENT_STATES, PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
   STALLED_DAYS, bySeverity, clientState, density, isStalled, medianDays, moveLabel, moveTone,
-  needsAttention, rankTodos, sitesOf, type ClientTodo,
+  needsAttention, queueNeedsThem, rankTodos, sitesOf, standingPill, type ClientTodo,
 } from "@/lib/clientView";
 import { BLOCKED_STAGE } from "@/lib/stages";
 
@@ -97,6 +97,43 @@ describe("whose move it is", () => {
     expect(moveTone(true)).toBe("warn");
     expect(moveTone(false)).toBe("info");
   });
+
+  it("does not turn a finished job into a chore", () => {
+    /* The reported bug, exactly. The shop completed the maintenance on QQQ-6
+       and handed it back; the landing announced "Sierra Spectra is waiting on
+       you · QQQ-6 is waiting on you" under the words "In service". A queue is
+       a position, not an obligation - possession only counts when something
+       is pending. */
+    expect(queueNeedsThem("ok")).toBe(false);
+    for (const s of CLIENT_STATES.filter((x) => x !== "ok")) {
+      expect(queueNeedsThem(s), s).toBe(true);
+    }
+  });
+
+  it("has a third answer for held-and-fine", () => {
+    // The condition this replaced tested `state === "ok" && !yourMove`, which
+    // is the truth inverted: it said "Nothing pending" about a system the SHOP
+    // held and "Your move" about a healthy one the client held.
+    expect(standingPill("ok", true, "Sierra Spectra")).toEqual(
+      { label: "Nothing pending", tone: "good" });
+    expect(standingPill("ok", false, "Sierra Spectra")).toEqual(
+      { label: "With Sierra Spectra", tone: "info" });
+  });
+
+  it("still says your move when something is actually pending", () => {
+    for (const s of CLIENT_STATES.filter((x) => x !== "ok")) {
+      expect(standingPill(s, true, "Sierra Spectra").label, s).toBe("Your move");
+      expect(standingPill(s, true, "Sierra Spectra").tone, s).toBe("warn");
+    }
+  });
+
+  it("says who holds it before it says whether it matters", () => {
+    // Not theirs is not theirs, whatever state it is in: a system on the
+    // bench being repaired is with the shop, not a chore on the client's list.
+    for (const s of CLIENT_STATES) {
+      expect(standingPill(s, false, "Sierra Spectra").label, s).toBe("With Sierra Spectra");
+    }
+  });
 });
 
 describe("how much to show", () => {
@@ -154,6 +191,48 @@ describe("what is waiting on them", () => {
   it("has thresholds that mean something", () => {
     expect(STALE_ANSWER_DAYS).toBeGreaterThan(0);
     expect(PM_BADLY_OVERDUE_DAYS).toBeGreaterThan(STALE_ANSWER_DAYS);
+  });
+});
+
+describe("a queue is a position, not an obligation", () => {
+  const read = (f: string) => readFileSync(f, "utf8");
+
+  /* Three surfaces said the same wrong thing about the same fact, which is
+     what a rule with three copies does. The rule now lives in one function and
+     these check that each surface asks it rather than re-deriving it. */
+
+  it("raises a held system as a chore only when something is pending", () => {
+    const src = read("src/lib/clientLandingData.ts");
+    expect(src).toMatch(/!s\.queueMine \|\| !queueNeedsThem\(s\.state\)/);
+  });
+
+  it("lets a more specific chore own the line", () => {
+    /* Gating the queue row on "something is pending" means it now co-occurs
+       with whatever made it pending - so a PM fallen due was announced twice,
+       once by name and once as "LZ-001 is waiting on you", and a two-item
+       list read as four. */
+    const src = read("src/lib/clientLandingData.ts");
+    expect(src).toMatch(/named\.has\(s\.id\)/);
+    expect(src).toMatch(/for \(const p of live\) if \(p\.instrumentId !== null\) named\.add/);
+  });
+
+  it("gives the card one pill from one rule", () => {
+    const src = read("src/components/ClientLanding.tsx");
+    expect(src).toMatch(/standingPill\(s\.state, s\.yourMove, operatorName\)/);
+    // The inverted condition this replaced.
+    expect(src).not.toMatch(/state === "ok" && !s\.yourMove/);
+  });
+
+  it("stops the record using the shop's words about the client's own machine", () => {
+    const src = read("src/components/StandingLine.tsx");
+    expect(src).toMatch(/clientVoice/);
+    expect(src).toMatch(/Nothing is pending on it/);
+    // "Ours to move" and "Hand it on" are the shop talking to itself. They
+    // survive for staff and must not be the only sentences on offer.
+    expect(src).toMatch(/Hand it back/);
+    const page = read("src/app/instruments/[id]/page.tsx");
+    expect(page).toMatch(/clientVoice=\{!isStaff\}/);
+    expect(page).toMatch(/pending=\{somethingPending\}/);
   });
 });
 

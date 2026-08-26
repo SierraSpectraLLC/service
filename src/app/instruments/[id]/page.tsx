@@ -61,7 +61,8 @@ import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
 import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
-import { CLIENT_GROUP_LABEL, clientMaySee } from "@/lib/clientView";
+import { CLIENT_GROUP_LABEL, clientMaySee, queueNeedsThem } from "@/lib/clientView";
+import { stateOf } from "@/lib/clientLandingData";
 import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
@@ -394,6 +395,19 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const pmDue = pmRows.filter((sc) => !sc.paused && sc.nextDue <= today).length;
   const queueMine = queueView(user, inst) === "mine";
   const queueDays = daysSince(inst.queueSince ?? inst.createdAt, new Date());
+  /* Whether holding this is actually a chore, for the standing line's client
+     voice. queueView() is already viewer-relative - "mine" means the client on
+     a client's screen - but possession is a POSITION, not an obligation: a
+     shop that finishes a job hands the system back, and that is the queue
+     arriving with nothing attached to it. See queueNeedsThem in lib/clientView,
+     which the landing's cards and its waiting-on-you list read too. */
+  const somethingPending = queueNeedsThem(stateOf({
+    down: openWos.some((w) => w.severity === "Down")
+      || assetRows.some((a) => a.status === "Down"),
+    openSeverities: openWos.map((w) => w.severity),
+    stages: inst.stages,
+    pmDue: pmDue > 0,
+  }));
   // Which shape this reader gets. Resolved here as well as inside the layout,
   // from the one rule in lib/panelMode, so the kebab can name the OTHER shape
   // and the page never renders one layout and swaps to the other on hydrate.
@@ -478,6 +492,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         since={shopTime(inst.queueSince ?? inst.createdAt)}
         reason={inst.queueReason}
         canMove={canKick(user, inst)}
+        clientVoice={!isStaff}
+        pending={somethingPending}
         // A wait is amber on its own and red once it is costing something:
         // an overdue task behind it means the wait has already run past a date
         // somebody committed to.

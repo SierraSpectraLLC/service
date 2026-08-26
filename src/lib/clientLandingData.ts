@@ -6,7 +6,8 @@ import { invoiceView, isOpen } from "@/lib/statement";
 import { quoteStanding } from "@/lib/quotes";
 import { formatCents } from "@/lib/money";
 import {
-  clientState, isStalled, medianDays, rankTodos, PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
+  clientState, isStalled, medianDays, queueNeedsThem, rankTodos,
+  PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
   type ClientState, type ClientTodo,
 } from "@/lib/clientView";
 import { ageDays, getStageSince } from "@/lib/stageAges";
@@ -26,8 +27,11 @@ import { daysBetween } from "@/lib/finance";
 export async function clientTodos(opts: {
   orgId: number;
   today: string;
-  /** Systems this viewer can see, already scoped. */
-  systems: { id: number; externalId: string; queueMine: boolean; queueReason: string }[];
+  /** Systems this viewer can see, already scoped, with the state each is in. */
+  systems: {
+    id: number; externalId: string; queueMine: boolean; queueReason: string;
+    state: ClientState;
+  }[];
   /** Ids of the systems above, for the maintenance read. */
   systemIds: number[];
 }): Promise<ClientTodo[]> {
@@ -47,6 +51,12 @@ export async function clientTodos(opts: {
   ]);
 
   const todos: ClientTodo[] = [];
+  /* Systems a todo above already names. The queue row is the general case and
+     runs last, so anything more specific wins the line: a PM that has fallen
+     due is why the system is parked with them, and saying it twice - once as
+     "Book a maintenance window for LZ-001" and once as "LZ-001 is waiting on
+     you" - makes a two-item list read as four things to do. */
+  const named = new Set<number>();
 
   // A quote nobody has answered. The lines are re-read rather than trusting a
   // stored total, the same way approval prices it.
@@ -102,12 +112,15 @@ export async function clientTodos(opts: {
       days: worst,
       action: "Pick a date",
     });
+    for (const p of live) if (p.instrumentId !== null) named.add(p.instrumentId);
   }
 
-  // A system parked in their queue: the shop has stopped because it is waiting
-  // on them, and the reason is whatever whoever parked it wrote down.
+  /* A system parked in their queue - but only when something is actually
+     pending on it. Holding a system is not the same as owing a move: a shop
+     that finishes a job hands it back, and that is the queue arriving with
+     nothing attached. See queueNeedsThem in lib/clientView. */
   for (const s of systems) {
-    if (!s.queueMine) continue;
+    if (!s.queueMine || !queueNeedsThem(s.state) || named.has(s.id)) continue;
     todos.push({
       key: `queue-${s.id}`,
       tone: "warn",
