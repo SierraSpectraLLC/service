@@ -449,6 +449,14 @@ export const instruments = pgTable("instruments", {
   // When it landed in the current queue. Null = never moved, so read it as the
   // system's own createdAt rather than backfilling every row.
   queueSince: timestamp("queue_since"),
+  // Whoever holds it has seen the handback. A queue position is not a notice
+  // board: "back with you, nothing pending" is worth saying once and is noise
+  // on the fortieth visit, so the holder can dismiss the line and the record
+  // keeps who did it and when - which is also how the shop learns the handback
+  // landed. Cleared by every move, so the NEXT one announces itself to a client
+  // who dismissed the last.
+  queueAckAt: timestamp("queue_ack_at"),
+  queueAckBy: text("queue_ack_by").notNull().default(""),
   // Which of the owner's sites it is installed at. Null = nobody has said, which
   // is every system until somebody does. Set null on delete rather than cascade:
   // losing the site record must not take the instrument with it.

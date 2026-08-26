@@ -18,7 +18,8 @@ export type QueueLegRow = {
  * how a blockage on their side stops counting against our turnaround.
  */
 export default function QueuePanel({
-  instrumentId, externalId, holderName, isMine, since, days, reason, legs, options, ourName, canKick,
+  instrumentId, externalId, holderName, isMine, since, days, reason, legs, options, ourName,
+  canKick, seenBy = "", seenAt = "",
 }: {
   instrumentId: number;
   externalId: string;
@@ -35,6 +36,17 @@ export default function QueuePanel({
   /** What to call our own queue. */
   ourName: string;
   canKick: boolean;
+  /**
+   * Who dismissed the handback line on their side, and when.
+   *
+   * The receipt on the notification, and the answer to a question the board
+   * could never answer: a system parked with a client and a note attached
+   * looked exactly the same whether they read it that afternoon or never
+   * opened the record. Blank means nobody has - which is worth seeing before
+   * chasing somebody who was never told.
+   */
+  seenBy?: string;
+  seenAt?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [toOrgId, setToOrgId] = useState<string>("");
@@ -91,6 +103,19 @@ export default function QueuePanel({
       {reason && (
         <div className="t-body" style={{ borderLeft: "3px solid var(--line)", padding: "4px 10px", margin: "6px 0" }}>
           {reason}
+          {/* Only about somebody else's queue: "their side" means nothing when
+              the queue is our own. Read or not read, said plainly - an unread
+              handback is not a failure on anybody's part, it is a phone call
+              that has not been made yet, and knowing which beats guessing. */}
+          {!isMine && (
+            <div className="mut t-small" style={{ marginTop: 4 }}>
+              {/* Local part only, the same way the handover legs below name
+                  their actor - a whole mailbox in a receipt line is noise. */}
+              {seenAt
+                ? `Seen by ${seenBy.split("@")[0] || "them"} · ${seenAt}`
+                : "Not opened on their side yet"}
+            </div>
+          )}
         </div>
       )}
       {!reason && (

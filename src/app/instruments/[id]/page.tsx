@@ -408,6 +408,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     stages: inst.stages,
     pmDue: pmDue > 0,
   }));
+  /* Theirs, and nothing is pending on it - which makes the standing line a
+     notification rather than a standing fact. It says one useful thing ("this
+     is back with you, here is why") and then has nothing left to say, so it
+     can be dismissed, and once it has been the top of the record goes back to
+     being reserved for something that needs an answer. Nothing is lost: every
+     fact it carried is on the Queue panel one card down, permanently. */
+  const handback = !isStaff && queueMine && !somethingPending;
+  /* Dismissing speaks for the whole organization - their colleagues stop
+     seeing the line and the shop reads the name as a receipt - so it takes the
+     same role every other write does. A read-only account still sees the
+     sentence; it just is not theirs to close. */
+  const mayDismiss = handback && canEdit;
   // Which shape this reader gets. Resolved here as well as inside the layout,
   // from the one rule in lib/panelMode, so the kebab can name the OTHER shape
   // and the page never renders one layout and swaps to the other on hydrate.
@@ -485,7 +497,9 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
           worked on this morning - you had to scroll to the Queue card to find
           out, and mostly nobody did. Its tone drives the rack spine down the
           working pane, so the standing stays in view however far you scroll. */}
+      {!(handback && inst.queueAckAt) && (
       <StandingLine
+        instrumentId={inst.id}
         holderName={inst.queueOrgId === null ? brand.operatorName : orgName.get(inst.queueOrgId) ?? "another organization"}
         isMine={queueMine}
         days={queueDays}
@@ -494,11 +508,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         canMove={canKick(user, inst)}
         clientVoice={!isStaff}
         pending={somethingPending}
+        dismissible={mayDismiss}
         // A wait is amber on its own and red once it is costing something:
         // an overdue task behind it means the wait has already run past a date
         // somebody committed to.
         overdue={overdueTasks > 0}
       />
+      )}
 
       {/* One 760px column wasted a wide monitor and buried half the record
           below three screens of scroll. Two columns from 1200px up, arranged
@@ -591,6 +607,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               since={shopTime(inst.queueSince ?? inst.createdAt)}
               days={daysSince(inst.queueSince ?? inst.createdAt, new Date())}
               reason={inst.queueReason}
+              // Whether the handback landed with a human. The one thing the
+              // shop could never tell before: a system parked with a client
+              // and a note attached looked identical whether they had read it
+              // that afternoon or never opened the record at all.
+              seenBy={inst.queueAckBy}
+              seenAt={inst.queueAckAt ? shopTime(inst.queueAckAt) : ""}
               legs={queueRows.map((q) => ({
                 id: q.id, fromName: q.fromName, toName: q.toName, reason: q.reason,
                 actor: q.actor, when: shopTime(q.at),

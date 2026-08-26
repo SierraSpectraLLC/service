@@ -3315,3 +3315,9 @@ DO $$ BEGIN
       FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- Whoever holds a system can dismiss the handback line once they have read it.
+-- Nullable rather than a boolean: the timestamp and the name are the record
+-- that the handback landed, which is worth more to the shop than a flag.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_ack_at" timestamp;
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_ack_by" text NOT NULL DEFAULT '';

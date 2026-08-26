@@ -8294,7 +8294,13 @@ export async function kickToQueue(
   const toName = to?.name ?? brand.operatorName;
 
   await db.update(instruments)
-    .set({ queueOrgId: toOrgId, queueReason: why, queueSince: new Date() })
+    // The acknowledgement belongs to the leg that is ending, so it clears with
+    // it: a client who dismissed the last handback must still be told about
+    // this one. See ackQueueHandback.
+    .set({
+      queueOrgId: toOrgId, queueReason: why, queueSince: new Date(),
+      queueAckAt: null, queueAckBy: "",
+    })
     .where(eq(instruments.id, instrumentId));
   await db.insert(queueEvents).values({
     instrumentId, fromOrgId: inst.queueOrgId, toOrgId,
@@ -8321,6 +8327,48 @@ export async function kickToQueue(
       fromName, toName, reason: why, stages: inst.stages,
     });
   }
+  rev(instrumentId);
+  return {};
+}
+
+/**
+ * "Yes, I have seen that" - the holder dismisses the handback line.
+ *
+ * A queue position is a standing fact; a handback is a notification, and the
+ * two were being shown as the same thing. "Back with you since Tuesday,
+ * nothing is pending on it" earns the top of the record once. On the fortieth
+ * visit it is furniture, and furniture at the top of a record is how people
+ * learn to skip the top of the record - which is exactly where the line that
+ * DOES matter will appear next time.
+ *
+ * So it is dismissible, and the dismissal is recorded rather than hidden in a
+ * browser: it is the only signal the shop gets that a handback actually landed
+ * with a human. That is also what pays for the gap left open when the queue
+ * stopped raising a chore on every held system - a nudge that goes unread now
+ * shows as unread.
+ *
+ * Only the holder may dismiss it, because it is only being said to them.
+ * Whoever holds it, not whoever may move it: canKick deliberately also admits
+ * the operator and the owner, and neither of them is the audience for this.
+ */
+export async function ackQueueHandback(instrumentId: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!(await canSeeSystemSafe(u, instrumentId))) return { error: "Not found" };
+  // A null queue org is the house's own queue, which staff hold.
+  const holding = inst.queueOrgId === null ? isStaffRole(u.role) : u.orgId === inst.queueOrgId;
+  if (!holding) return { error: "Only whoever is holding it can dismiss that" };
+  // Already dismissed by a colleague. Not an error - the line is gone either
+  // way, and the first name on it is the one worth keeping.
+  if (inst.queueAckAt) return {};
+  await db.update(instruments)
+    .set({ queueAckAt: new Date(), queueAckBy: u.email })
+    .where(eq(instruments.id, instrumentId));
+  /* No audit line on purpose. The activity log is every field anybody ever
+     edited, and a read receipt is not an edit to the record - it is a fact
+     ABOUT the record's delivery, which the two columns already carry in the
+     one place anybody would look for it. */
   rev(instrumentId);
   return {};
 }

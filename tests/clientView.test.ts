@@ -230,6 +230,16 @@ describe("a queue is a position, not an obligation", () => {
     // "Ours to move" and "Hand it on" are the shop talking to itself. They
     // survive for staff and must not be the only sentences on offer.
     expect(src).toMatch(/Hand it back/);
+    /* Where nothing is pending there is nothing to hand back, so the control
+       is Dismiss: the line is a notification that has finished saying its one
+       useful thing, and leaving it there forever teaches people to skip the
+       top of the record. */
+    expect(src).toMatch(/dismissible \?/);
+    expect(src).toMatch(/>\s*\{busy \? "Dismissing/);
+    expect(src).toMatch(/ackQueueHandback\(instrumentId\)/);
+    const page2 = read("src/app/instruments/[id]/page.tsx");
+    // Dismissed means gone, not merely quieter.
+    expect(page2).toMatch(/!\(handback && inst\.queueAckAt\)/);
     const page = read("src/app/instruments/[id]/page.tsx");
     expect(page).toMatch(/clientVoice=\{!isStaff\}/);
     expect(page).toMatch(/pending=\{somethingPending\}/);

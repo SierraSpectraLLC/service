@@ -1,7 +1,10 @@
 "use client";
 
+import { useTransition } from "react";
+import { ackQueueHandback } from "@/app/actions";
 import { QUEUE_EVENT } from "@/components/QueuePanel";
 import StatusLine from "@/components/ui/StatusLine";
+import { toast } from "@/components/ui/Toast";
 import { standingTone } from "@/lib/panelMode";
 
 /**
@@ -20,9 +23,10 @@ import { standingTone } from "@/lib/panelMode";
  * standing stays in peripheral vision however far down the record you scroll.
  */
 export default function StandingLine({
-  holderName, isMine, days, since, reason, canMove, overdue,
-  clientVoice = false, pending = true,
+  instrumentId, holderName, isMine, days, since, reason, canMove, overdue,
+  clientVoice = false, pending = true, dismissible = false,
 }: {
+  instrumentId: number;
   /** Who holds the queue right now, already resolved to a name. */
   holderName: string;
   /** True when the viewer HOLDS it - not necessarily that they owe a move. */
@@ -55,14 +59,39 @@ export default function StandingLine({
    * queueNeedsThem in lib/clientView.
    */
   pending?: boolean;
+  /**
+   * This one is a notification rather than a standing fact, so it comes with a
+   * way to close it.
+   *
+   * "Back with you since Tuesday, nothing is pending on it" earns the top of
+   * the record once. Left there it becomes furniture, and furniture at the top
+   * of a record teaches people to skip the top of the record - which is where
+   * the line that DOES matter appears next time. See ackQueueHandback, which
+   * also records the dismissal, so a handback nobody read shows as unread.
+   */
+  dismissible?: boolean;
 }) {
+  const [busy, start] = useTransition();
   // The same rule the page sets data-tone by on its root - one function, so
   // this line and the pane's rack spine can never disagree.
   const tone = standingTone({ isMine, overdue });
   const dur = days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"}`;
 
+  const dismiss = () => start(async () => {
+    const res = await ackQueueHandback(instrumentId);
+    if (res?.error) toast({ message: res.error, tone: "bad" });
+  });
+
   return (
-    <StatusLine tone={tone} actions={canMove && (
+    <StatusLine tone={tone} actions={dismissible ? (
+      /* Not "Hand it back": nothing is pending, so there is nothing to hand
+         back. The only thing left to do with this sentence is finish reading
+         it. Moving it is still one card down, on the Queue panel, along with
+         every fact this line is repeating. */
+      <button className="btn sm" onClick={dismiss} disabled={busy}>
+        {busy ? "Dismissing…" : "Dismiss"}
+      </button>
+    ) : canMove && (
       <button className={`btn sm${isMine ? "" : " accent"}`}
         onClick={() => window.dispatchEvent(new Event(QUEUE_EVENT))}>
         {isMine ? (clientVoice ? "Hand it back" : "Hand it on") : "Move it"}
