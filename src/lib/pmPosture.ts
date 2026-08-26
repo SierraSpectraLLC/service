@@ -31,9 +31,19 @@ export const isPmPosture = (v: string): v is (typeof PM_POSTURES)[number] =>
  * stock on a service shop's bench wants its calendar, and the reseller whose
  * whole instance runs advisory can say so explicitly per system.
  */
-export function pmPosture(stored: string, ownerResale: boolean): PmPosture {
+export function pmPosture(
+  stored: string, ownerResale: boolean, coveredElsewhere = false,
+): PmPosture {
   if (stored === "scheduled" || stored === "advisory") return stored;
-  return ownerResale ? "advisory" : "scheduled";
+  /* A third reason to be advisory, and the same reason as the first: nobody
+     here is going to do this work. A machine under contract with the
+     manufacturer gets its PMs from the manufacturer, so generating tasks and
+     moving the queue for visits we are not making produces overdue red on a
+     calendar that is not ours to keep. See advisoryByCoverage in lib/coverage,
+     which decides this for exactly one state - a LAPSED or unrecorded contract
+     still falls due, because going quiet about that is how a lapse becomes a
+     failure. */
+  return ownerResale || coveredElsewhere ? "advisory" : "scheduled";
 }
 
 /** Is the stored value an explicit choice, or is the owner's default deciding? */
@@ -45,11 +55,18 @@ export const postureIsDefault = (stored: string): boolean =>
  * came from, because "why is this system advisory" has two possible answers
  * and the fix for each is a different button.
  */
-export function postureLine(stored: string, ownerResale: boolean, ownerName: string): string {
-  const p = pmPosture(stored, ownerResale);
+export function postureLine(
+  stored: string, ownerResale: boolean, ownerName: string,
+  /** Who else holds a live contract on it, when somebody does. */
+  providerName = "",
+): string {
+  const p = pmPosture(stored, ownerResale, !!providerName);
   if (!postureIsDefault(stored)) return p === "advisory"
     ? "Set on this system: upkeep is reference, nothing comes due."
     : "Set on this system: due work turns into tasks.";
+  // Two defaults can land on advisory, and they are different facts about
+  // different companies. Coverage first: it is the more specific of the two.
+  if (providerName) return `${providerName} services this one, so upkeep here is reference - nothing comes due.`;
   if (p === "advisory") return `${ownerName || "The owner"} is a reseller, so upkeep is reference by default - nothing comes due.`;
   return "Due work turns into tasks and moves the queue.";
 }

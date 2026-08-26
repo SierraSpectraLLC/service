@@ -22,7 +22,7 @@ import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 import Landing from "@/components/Landing";
 import ClientLanding, { type ClientSystem } from "@/components/ClientLanding";
-import { clientTodos, pipelineFor, resellerTodos, stateOf, whySentence } from "@/lib/clientLandingData";
+import { clientTodos, pipelineFor, readyToMove, stateOf, whySentence } from "@/lib/clientLandingData";
 import { rankTodos } from "@/lib/clientView";
 import ResellerLanding from "@/components/ResellerLanding";
 import { PageHead } from "@/components/ui";
@@ -351,8 +351,16 @@ export default async function Home({ searchParams }: {
       };
     });
 
+    const orgSelf = orgNames.find((o) => o.id === user.orgId);
+
     const todos = await clientTodos({
       orgId: user.orgId, today,
+      /* A reseller gets money only. A PM is advisory on a machine being
+         rebuilt and a queue chore is derived from a state that means nothing
+         when a unit is supposed to be in pieces - both fired anyway, and made
+         the pipeline's ordinary business look like a list of things they were
+         late for. See the note on clientTodos. */
+      mode: orgSelf?.resaleEnabled ? "reseller" : "lab",
       /* The state travels with the queue, because holding a system is only a
          chore when something is pending on it - see queueNeedsThem. `systems`
          is built from `data` one-for-one just above, so the index lines up. */
@@ -370,15 +378,13 @@ export default async function Home({ searchParams }: {
       w.closedAt !== null && w.closedAt.toISOString().slice(0, 10) >= yearStart);
     const planned = closedThisYear.filter((w) => w.severity === "Planned").length;
 
-    const orgSelf = orgNames.find((o) => o.id === user.orgId);
-
     /* A reseller reads a process, not a floor. Their units are inventory
        heading for a sale rather than benches that have to stay up, so the
        whole landing changes shape - see lib/clientView. resaleEnabled already
        drove one tile on the staff board; here it picks the mode. */
     if (orgSelf?.resaleEnabled) {
       const label = (id: number) => data.find((d) => d.id === id)?.label ?? "";
-      const { stages: pipeStages, stalled } = await pipelineFor(
+      const { stages: pipeStages, stalled, units: inPipeline } = await pipelineFor(
         rows.map((r) => ({
           id: r.id, externalId: r.externalId, stages: r.stages,
           blockedReason: r.blockedReason ?? "", blockedSince: r.blockedSince,
@@ -406,8 +412,14 @@ export default async function Home({ searchParams }: {
           />
           <ResellerLanding
             stages={pipeStages}
+            inPipeline={inPipeline}
+            unitCount={rows.length}
             stalled={stalled}
-            todos={rankTodos([...todos, ...resellerTodos({ stalled, atGate, toShip })])}
+            /* Money only. The gates and the shipping queue moved out of the
+               alert band and into a work list - they are the process working,
+               not a warning, and an alarm that is always on is furniture. */
+            todos={rankTodos(todos)}
+            ready={readyToMove({ atGate, toShip })}
             listings={listings}
             operatorName={brand.operatorName}
             orgName={orgSelf?.name ?? "your organization"}

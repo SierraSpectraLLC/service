@@ -218,9 +218,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        rather than sent to build it. Files is not here either - it was promoted
        to Documents, a door of its own, because it is the second most used
        thing a client comes for. */
-    ...(hasStock || orgRemoteOn || seesPayroll || (resells && isClientOrg) ? [{
+    ...(!isStaff && user?.orgId != null ? [{
       label: "Your account",
       items: [
+        /* THE ROSTER. The landing answers "what needs me": a lab's groups by
+           exception and folds the healthy ones behind one line, a reseller's
+           counts positions in a process. Neither answers "what do I have", and
+           for a reseller nothing did - the pipeline columns named six units in
+           Refurbishment with no way to reach the six. The primary five stay as
+           they are; this is the flat list behind them. */
+        { href: "/units", label: resells ? "All units" : "All instruments" },
         // A reseller's primary row spends its fifth slot on Listings, so the
         // parts store moves here rather than disappearing - they buy parts to
         // refurbish with, and a door they use should not vanish.

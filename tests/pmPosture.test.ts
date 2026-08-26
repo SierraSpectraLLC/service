@@ -54,3 +54,35 @@ describe("postureLine", () => {
     expect(postureLine("scheduled", true, "FlipLab")).toContain("Set on this system");
   });
 });
+
+describe("a system somebody else maintains", () => {
+  /* A machine under contract with the manufacturer gets its PMs from the
+     manufacturer. Generating tasks and moving the queue for visits we are not
+     making puts overdue red on a calendar that was never ours to keep - and
+     chases a client who is not late for anything. */
+
+  it("goes advisory by default", () => {
+    expect(pmPosture("", false, true)).toBe("advisory");
+    expect(pmPosture("", false, false)).toBe("scheduled");
+  });
+
+  it("still loses to an explicit choice on the system", () => {
+    // The escape hatch stays open in both directions: a shop that agrees to
+    // cover one machine anyway says so on that machine.
+    expect(pmPosture("scheduled", false, true)).toBe("scheduled");
+    expect(pmPosture("advisory", false, false)).toBe("advisory");
+  });
+
+  it("says WHICH default is deciding, because the fix differs", () => {
+    // Two defaults can land on advisory and they are facts about different
+    // companies. Coverage is the more specific, so it wins the sentence.
+    expect(postureLine("", false, "InterVenn", "Agilent")).toContain("Agilent");
+    expect(postureLine("", false, "InterVenn", "Agilent")).not.toContain("reseller");
+    expect(postureLine("", true, "FlipLab", "")).toContain("reseller");
+  });
+
+  it("keeps an explicit choice's sentence explicit", () => {
+    expect(postureLine("scheduled", false, "InterVenn", "Agilent"))
+      .toContain("Set on this system");
+  });
+});

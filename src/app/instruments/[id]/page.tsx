@@ -63,7 +63,7 @@ import PanelLayout from "@/components/PanelLayout";
 import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
 import { CLIENT_GROUP_LABEL, clientMaySee, queueNeedsThem } from "@/lib/clientView";
-import { coverageOf, type CoverageAgreement } from "@/lib/coverage";
+import { advisoryByCoverage, coverageOf, type CoverageAgreement } from "@/lib/coverage";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { stateOf } from "@/lib/clientLandingData";
@@ -780,11 +780,18 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               // carry their calendar as reference. The toggle is the house's -
               // it changes what the cron does, which is operator machinery.
               posture={{
-                effective: pmPosture(inst.pmPosture, resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null)),
+                effective: pmPosture(
+                  inst.pmPosture,
+                  resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null),
+                  // A machine the manufacturer maintains gets its PMs from the
+                  // manufacturer. An explicit choice on the system still wins.
+                  advisoryByCoverage(coverage.state),
+                ),
                 stored: inst.pmPosture,
                 note: postureLine(inst.pmPosture,
                   resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null),
-                  inst.ownerOrgId !== null ? orgName.get(inst.ownerOrgId) ?? "" : ""),
+                  inst.ownerOrgId !== null ? orgName.get(inst.ownerOrgId) ?? "" : "",
+                  advisoryByCoverage(coverage.state) ? coverage.provider : ""),
                 instrumentId: inst.id,
                 canToggle: isStaff,
               }}

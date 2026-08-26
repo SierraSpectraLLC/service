@@ -27,6 +27,7 @@ import { parseChecklist } from "@/lib/checklist";
 import { getBrand } from "@/lib/brand";
 import { pmHandoff } from "@/lib/pmQueue";
 import { pmPosture } from "@/lib/pmPosture";
+import { coveredElsewhere } from "@/lib/providers";
 import { notifyTaskAssigned } from "@/lib/notify";
 import { addDays } from "@/lib/pm";
 import { scopeMatches, summarizeItem } from "@/lib/checkout";
@@ -123,8 +124,20 @@ export async function generateDuePmTasks(today: string, actor: string): Promise<
     ? await db.select({ id: orgs.id, resaleEnabled: orgs.resaleEnabled }).from(orgs)
         .where(inArray(orgs.id, [...new Set(instRows.flatMap((i) => (i.ownerOrgId !== null ? [i.ownerOrgId] : [])))]))
     : [];
+  /* And systems somebody else is under contract to maintain. Generating a
+     task and moving the queue for a PM the manufacturer is going to perform
+     puts overdue red on a calendar that was never ours to keep - and the
+     client, who is not late for anything, gets chased for it. One extra read
+     for the whole run. */
+  const elsewhere = await coveredElsewhere(
+    instRows.map((i) => ({ id: i.id, ownerOrgId: i.ownerOrgId })),
+    today, (await getBrand()).operatorName);
   const advisory = new Set(instRows
-    .filter((i) => pmPosture(i.pmPosture, resaleOrgs.find((o) => o.id === i.ownerOrgId)?.resaleEnabled ?? false) === "advisory")
+    .filter((i) => pmPosture(
+      i.pmPosture,
+      resaleOrgs.find((o) => o.id === i.ownerOrgId)?.resaleEnabled ?? false,
+      elsewhere.has(i.id),
+    ) === "advisory")
     .map((i) => i.id));
   // Who could take the next move on each of these systems. Read once for the
   // whole run rather than per schedule - a fleet of due filters is one query.

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { EmptyState, Panel, Pill } from "@/components/ui";
 import type { ClientTodo } from "@/lib/clientView";
-import type { PipelineStage, StalledUnit } from "@/lib/clientLandingData";
+import type { PipelineStage, ReadyItem, StalledUnit } from "@/lib/clientLandingData";
 
 /**
  * A reseller's landing: where their units are in the process, and which ones
@@ -15,20 +15,38 @@ import type { PipelineStage, StalledUnit } from "@/lib/clientLandingData";
  *
  * There is no uptime figure here either, and for a second reason on top of the
  * first: uptime would be meaningless for a machine that is deliberately apart.
+ *
+ * WHAT IS AN ALERT HERE, AND WHAT IS NOT. This page used to open with "Sierra
+ * Spectra is waiting on you - 3 things" in amber, over: a unit at Checkout, two
+ * units waiting to ship, and a queue note. Every one of those is the pipeline
+ * WORKING. Units reach Checkout; somebody signs them off. They pass sign-off;
+ * somebody names a destination. A landing that raises the alarm on the ordinary
+ * next step has an alarm that is always on, and an alarm that is always on is
+ * furniture - the same lesson the handback line taught.
+ *
+ * So the loud band carries money and nothing else: a quote nobody has answered,
+ * an invoice past terms. The routine gates are a work list. The genuine
+ * exception - a unit that has STOPPED - keeps its own section further down,
+ * where the reason and the age fit on a card.
  */
 export default function ResellerLanding({
-  stages, stalled, todos, listings, operatorName, orgName, shippedThisYear,
+  stages, inPipeline, unitCount, stalled, todos, ready, listings,
+  operatorName, orgName, shippedThisYear,
 }: {
   stages: PipelineStage[];
+  /** DISTINCT units standing in the pipeline - never the sum of the columns. */
+  inPipeline: number;
+  /** Every unit of theirs, in the pipeline or not. */
+  unitCount: number;
   stalled: StalledUnit[];
+  /** Money, and only money. */
   todos: ClientTodo[];
+  ready: ReadyItem[];
   listings: { id: number; externalId: string; label: string; note: string; token: string }[];
   operatorName: string;
   orgName: string;
   shippedThisYear: number;
 }) {
-  const inPipeline = stages.reduce((n, s) => n + s.count, 0);
-
   return (
     <>
       {todos.length > 0 && (
@@ -53,10 +71,33 @@ export default function ResellerLanding({
         </section>
       )}
 
+      {ready.length > 0 && (
+        <Panel title="Ready to move" count={ready.reduce((n, r) => n + r.count, 0)}
+          hint="Units standing at a gate. Ordinary business, not a warning - this list is empty only when the pipeline is.">
+          {ready.map((r) => (
+            <div key={r.key} className="ledger">
+              <span className="grow">
+                <Link href={r.href} className="plain" style={{ fontWeight: 600 }}>{r.title}</Link>
+                <span className="sub">{r.detail}</span>
+              </span>
+              <Pill tone="neutral">{r.count} unit{r.count === 1 ? "" : "s"}</Pill>
+              <Link className="btn sm" href={r.href}>{r.action}</Link>
+            </div>
+          ))}
+        </Panel>
+      )}
+
       <h3 className="band-label">
         Where your units are
         <span className="sp" />
+        {/* Distinct units, not the sum of the columns. A unit sits in more
+            than one stage at once - Checkout and Sign-off together is
+            ordinary - so summing them counted positions and called them
+            units: sixteen units read as "19 in the pipeline". */}
         <span className="mut t-meta">{inPipeline} in the pipeline</span>
+        <Link href="/units" className="btn sm" style={{ marginLeft: 10 }}>
+          All {unitCount} units
+        </Link>
       </h3>
 
       {inPipeline === 0 ? (
@@ -64,8 +105,11 @@ export default function ResellerLanding({
           body={`Units show up here as ${operatorName} takes them in.`} />
       ) : (
         <div className="pipe">
+          {/* Each column is a door. It read as a poster before: "REFURBISHMENT
+              6" with no way to reach the six. */}
           {stages.filter((s) => s.count > 0).map((s) => (
-            <div key={s.stage} className={`stage-col${s.hot ? " hot" : ""}`}>
+            <Link key={s.stage} href={`/units?stage=${encodeURIComponent(s.stage)}`}
+              className={`stage-col${s.hot ? " hot" : ""}`}>
               <span className="lab">{s.stage}</span>
               <span className="c">{s.count}</span>
               {/* No median rather than a zero: a stage nothing has finished
@@ -74,7 +118,7 @@ export default function ResellerLanding({
               <span className="age">
                 {s.medianDays === null ? "no history yet" : `${s.medianDays} d median`}
               </span>
-            </div>
+            </Link>
           ))}
         </div>
       )}

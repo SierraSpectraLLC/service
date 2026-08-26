@@ -317,6 +317,90 @@ describe("the reseller's own shape", () => {
   });
 });
 
+describe("what is an alert on a reseller's landing, and what is not", () => {
+  const read = (f: string) => readFileSync(f, "utf8");
+
+  /* The page opened with "Sierra Spectra is waiting on you - 3 things" in
+     amber over: a unit at Checkout, two units waiting to ship, and a queue
+     note. Every one of those is the pipeline WORKING. An alarm that is always
+     on is furniture - the same lesson the handback line taught. */
+
+  it("keeps the routine gates out of the alert band", () => {
+    const src = read("src/lib/clientLandingData.ts");
+    // The gates became a work list with a neutral count, not a toned todo.
+    expect(src).toMatch(/export function readyToMove/);
+    expect(src).not.toMatch(/export function resellerTodos/);
+    const page = read("src/app/(dashboard)/page.tsx");
+    expect(page).toMatch(/ready=\{readyToMove\(\{ atGate, toShip \}\)\}/);
+    // Money, and only money, reaches the band.
+    expect(page).toMatch(/todos=\{rankTodos\(todos\)\}/);
+  });
+
+  it("does not repeat a stalled unit in the band and in its own section", () => {
+    // "Sitting too long" already carries the reason and the age on a card.
+    const src = read("src/lib/clientLandingData.ts");
+    const ready = src.slice(src.indexOf("export function readyToMove"));
+    expect(ready).not.toMatch(/stalled/);
+  });
+
+  it("spares a reseller the lab's chores", () => {
+    /* A PM is advisory on a machine being rebuilt, and a queue chore comes
+       from a client state that means nothing when a unit is supposed to be in
+       pieces. Both fired anyway. */
+    const src = read("src/lib/clientLandingData.ts");
+    expect(src).toMatch(/mode\?: "lab" \| "reseller"/);
+    expect(src).toMatch(/mode === "reseller" \? \[\] : pmRows/);
+    expect(src).toMatch(/for \(const s of mode === "reseller" \? \[\] : systems\)/);
+    const page = read("src/app/(dashboard)/page.tsx");
+    expect(page).toMatch(/mode: orgSelf\?\.resaleEnabled \? "reseller" : "lab"/);
+  });
+
+  it("counts units in the pipeline, not positions", () => {
+    /* instruments.stages is an array and a unit genuinely sits in more than
+       one at once, so summing the columns counted positions and called them
+       units: sixteen units read as "19 in the pipeline". */
+    const land = read("src/components/ResellerLanding.tsx");
+    expect(land).not.toMatch(/stages\.reduce\(\(n, s\) => n \+ s\.count, 0\)/);
+    expect(land).toMatch(/inPipeline: number/);
+    const data = read("src/lib/clientLandingData.ts");
+    expect(data).toMatch(/return \{ stages, stalled, units \}/);
+  });
+
+  it("makes every stage column a door", () => {
+    // It read as a poster: "REFURBISHMENT 6" with no way to reach the six.
+    const land = read("src/components/ResellerLanding.tsx");
+    expect(land).toMatch(/href=\{`\/units\?stage=\$\{encodeURIComponent\(s\.stage\)\}`\}/);
+    expect(land).toMatch(/All \{unitCount\} units/);
+  });
+});
+
+describe("the roster a reseller could not reach", () => {
+  const read = (f: string) => readFileSync(f, "utf8");
+
+  it("lists every visible unit, flat, behind a search and a stage filter", () => {
+    const src = read("src/app/units/page.tsx");
+    // Scoped like every other client read.
+    expect(src).toMatch(/visibleSystemIds\(user\)/);
+    expect(src).toMatch(/isStaffRole\(user\.role\) \|\| user\.orgId === null\) redirect/);
+    expect(src).toMatch(/searchParams/);
+    expect(src).toMatch(/u\.stages\.includes\(stage\)/);
+  });
+
+  it("gives it a door without disturbing the primary five", () => {
+    const layout = read("src/app/layout.tsx");
+    expect(layout).toMatch(/href: "\/units", label: resells \? "All units" : "All instruments"/);
+    // The five stayed five: the roster lives in the account group.
+    expect(layout).toMatch(/\{ href: "\/", label: resells \? "Your pipeline" : "Your lab" \}/);
+  });
+
+  it("says nothing rather than zero where no stage event was logged", () => {
+    // "0 d" would read as "arrived today", which is the opposite of unknown -
+    // the same rule the pipeline's missing median follows.
+    const src = read("src/app/units/page.tsx");
+    expect(src).toMatch(/u\.age === null \? "" :/);
+  });
+});
+
 describe("no fabricated metric reaches a client", () => {
   const walk = (dir: string): string[] => {
     const out: string[] = [];

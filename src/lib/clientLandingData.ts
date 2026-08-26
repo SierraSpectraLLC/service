@@ -34,8 +34,22 @@ export async function clientTodos(opts: {
   }[];
   /** Ids of the systems above, for the maintenance read. */
   systemIds: number[];
+  /**
+   * Which product this list is for.
+   *
+   * A reseller's units are inventory heading for a sale, not benches that have
+   * to stay up - stages.ts says as much where it calls "In service" a resting
+   * state rather than a step. So two of the four sources here mean nothing to
+   * them: a PM is advisory on a machine being rebuilt (see lib/pmPosture), and
+   * a queue chore is derived from a client STATE that is meaningless when a
+   * unit is supposed to be in pieces. Both fired anyway, and turned the
+   * pipeline's ordinary business into a list of things they were late for.
+   *
+   * Money is money either way, so quotes and invoices stay.
+   */
+  mode?: "lab" | "reseller";
 }): Promise<ClientTodo[]> {
-  const { orgId, today, systems, systemIds } = opts;
+  const { orgId, today, systems, systemIds, mode = "lab" } = opts;
 
   const [quoteRows, invoiceRows, pmRows] = await Promise.all([
     db.select().from(quotes).where(eq(quotes.orgId, orgId)),
@@ -92,7 +106,7 @@ export async function clientTodos(opts: {
   // Maintenance that has fallen due and needs a window from their side. One
   // row for all of it: eleven separate "book a visit" lines is a list nobody
   // works through.
-  const live = pmRows.filter((p) => !p.paused);
+  const live = mode === "reseller" ? [] : pmRows.filter((p) => !p.paused);
   if (live.length > 0) {
     const oldest = live[0];
     const worst = daysBetween(oldest.nextDue, today);
@@ -119,7 +133,7 @@ export async function clientTodos(opts: {
      pending on it. Holding a system is not the same as owing a move: a shop
      that finishes a job hands it back, and that is the queue arriving with
      nothing attached. See queueNeedsThem in lib/clientView. */
-  for (const s of systems) {
+  for (const s of mode === "reseller" ? [] : systems) {
     if (!s.queueMine || !queueNeedsThem(s.state) || named.has(s.id)) continue;
     todos.push({
       key: `queue-${s.id}`,
@@ -235,6 +249,16 @@ export async function pipelineFor(rows: {
 }[], label: (id: number) => string): Promise<{
   stages: PipelineStage[];
   stalled: StalledUnit[];
+  /**
+   * DISTINCT units standing somewhere in the pipeline.
+   *
+   * Not the sum of the columns. instruments.stages is an array and a unit
+   * genuinely sits in more than one at once - Checkout and Sign-off together
+   * is ordinary - so summing the columns counted positions and reported them
+   * as units: sixteen units read as "19 in the pipeline", directly under a
+   * header saying sixteen.
+   */
+  units: number;
 }> {
   const ids = rows.map((r) => r.id);
   const since = ids.length ? await getStageSince(ids) : new Map();
@@ -271,6 +295,9 @@ export async function pipelineFor(rows: {
     };
   });
 
+  const units = rows.filter(
+    (r) => r.stages.some((x) => (PIPELINE_STAGES as readonly string[]).includes(x))).length;
+
   const stalled: StalledUnit[] = rows
     .flatMap((r) => {
       const stage = r.stages.find((x) => x === BLOCKED_STAGE);
@@ -284,7 +311,7 @@ export async function pipelineFor(rows: {
     })
     .sort((a, b) => b.days - a.days);
 
-  return { stages, stalled };
+  return { stages, stalled, units };
 }
 
 /**
@@ -305,24 +332,36 @@ export const PIPELINE_STAGES = [
  * stages where the OWNER says a unit may move on, so a unit sitting in one is
  * sitting on them, not on the shop.
  */
-export function resellerTodos(input: {
-  stalled: StalledUnit[];
+/**
+ * What is ready to move, for a reseller.
+ *
+ * NOT an alert, and that is the whole change. Every one of these is the
+ * pipeline working: a unit reaches Checkout, somebody signs it off; it passes
+ * sign-off, somebody names a destination. A landing that announces "Sierra
+ * Spectra is waiting on you - 3 things" in amber over the ordinary next step
+ * of the ordinary process has an alarm that is always on, and an alarm that is
+ * always on is furniture. The same lesson the handback line taught: reserve
+ * the loud treatment for the exception, or it stops meaning exception.
+ *
+ * The genuine exception here is a unit that has STOPPED - and that already has
+ * its own section, "Sitting too long", with the reason and the age on a card.
+ * So it is not repeated up here either.
+ */
+export type ReadyItem = {
+  key: string;
+  title: string;
+  detail: string;
+  href: string;
+  action: string;
+  /** How many units this row stands for, for the count beside it. */
+  count: number;
+};
+
+export function readyToMove(input: {
   atGate: { id: number; externalId: string; stage: string }[];
   toShip: { id: number; externalId: string }[];
-}): ClientTodo[] {
-  const out: ClientTodo[] = [];
-
-  for (const u of input.stalled) {
-    out.push({
-      key: `stalled-${u.id}`,
-      tone: "bad",
-      title: `Decide on ${u.externalId}`,
-      detail: `Blocked ${u.days} days · ${u.reason}`,
-      href: `/instruments/${u.id}`,
-      days: u.days,
-      action: "Decide",
-    });
-  }
+}): ReadyItem[] {
+  const out: ReadyItem[] = [];
 
   // One row per gate rather than per unit: three units at Checkout is one
   // sitting to do, and three lines nobody works through.
@@ -331,26 +370,24 @@ export function resellerTodos(input: {
     if (list.length === 0) continue;
     out.push({
       key: `gate-${gate}`,
-      tone: "warn",
-      title: list.length === 1
-        ? `Sign off ${list[0].externalId} at ${gate}`
-        : `Sign off ${list.length} units at ${gate}`,
+      title: `${gate}`,
       detail: list.map((u) => u.externalId).join(", "),
-      href: list.length === 1 ? `/instruments/${list[0].id}` : "/",
-      action: "Review",
+      href: list.length === 1 ? `/instruments/${list[0].id}` : `/units?stage=${encodeURIComponent(gate)}`,
+      action: list.length === 1 ? "Open" : "See them",
+      count: list.length,
     });
   }
 
   if (input.toShip.length > 0) {
     out.push({
       key: "ship",
-      tone: "warn",
-      title: input.toShip.length === 1
-        ? `Confirm shipping for ${input.toShip[0].externalId}`
-        : `Confirm shipping for ${input.toShip.length} units`,
-      detail: "Passed sign-off and waiting on a destination",
-      href: input.toShip.length === 1 ? `/instruments/${input.toShip[0].id}` : "/",
-      action: "Confirm",
+      title: "Waiting to ship",
+      detail: "Passed sign-off, waiting on a destination",
+      href: input.toShip.length === 1
+        ? `/instruments/${input.toShip[0].id}`
+        : "/units?stage=Waiting+to+ship",
+      action: input.toShip.length === 1 ? "Open" : "See them",
+      count: input.toShip.length,
     });
   }
 
