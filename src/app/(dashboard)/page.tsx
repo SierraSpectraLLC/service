@@ -32,6 +32,7 @@ import { PageHead } from "@/components/ui";
 import ClientCoverage from "@/components/ClientCoverage";
 import MoneyCard from "@/components/MoneyCard";
 import { seesBooksFor } from "@/lib/financeData";
+import { resellerView } from "@/lib/viewMode";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
@@ -374,6 +375,14 @@ export default async function Home({ searchParams }: {
     });
 
     const orgSelf = orgNames.find((o) => o.id === user.orgId);
+    /* WHICH HALF OF THE APP THIS PERSON WORKS IN. The org's resale flag is the
+       default, not the answer: a COO put in charge of the equipment at a
+       reselling company opens a pipeline of stock when what they came for is
+       whether the instruments are running. Same rule the nav reads, so a page
+       and the nav above it cannot disagree. See lib/viewMode. */
+    const [meRow] = await db.select({ viewMode: users.viewMode }).from(users)
+      .where(eq(users.email, user.email.toLowerCase())).catch(() => []);
+    const asReseller = resellerView(meRow?.viewMode ?? "", orgSelf?.resaleEnabled ?? false);
 
     const todos = await clientTodos({
       orgId: user.orgId, today,
@@ -382,7 +391,7 @@ export default async function Home({ searchParams }: {
          when a unit is supposed to be in pieces - both fired anyway, and made
          the pipeline's ordinary business look like a list of things they were
          late for. See the note on clientTodos. */
-      mode: orgSelf?.resaleEnabled ? "reseller" : "lab",
+      mode: asReseller ? "reseller" : "lab",
       /* And money only for somebody at this organization who may read its
          money - the chore names the figure, so withholding the page and
          keeping the chore would withhold nothing. */
@@ -404,9 +413,10 @@ export default async function Home({ searchParams }: {
 
     /* A reseller reads a process, not a floor. Their units are inventory
        heading for a sale rather than benches that have to stay up, so the
-       whole landing changes shape - see lib/clientView. resaleEnabled already
-       drove one tile on the staff board; here it picks the mode. */
-    if (orgSelf?.resaleEnabled) {
+       whole landing changes shape - see lib/clientView. Which shape THIS
+       reader gets is resolved above: the org's flag with their own choice on
+       top of it. */
+    if (asReseller) {
       const label = (id: number) => data.find((d) => d.id === id)?.label ?? "";
       const { stages: pipeStages, stalled, units: inPipeline } = await pipelineFor(
         rows.map((r) => ({
@@ -583,6 +593,11 @@ export default async function Home({ searchParams }: {
         // The ship pipeline is the shop's own axis, and a reseller client's.
         // For everyone else "Ship queue + shipped" is a tile about a business
         // they aren't in - same burial as the resale controls.
+        /* The ORG's flag, deliberately, not the reader's view. Whether this
+           company ships things is a fact about the company; somebody who chose
+           the equipment view still works somewhere that ships. See
+           lib/viewMode - a preference decides which question a page leads
+           with, never what the company is. */
         showShipping={isStaff || (user.orgId !== null && (orgNames.find((o) => o.id === user.orgId)?.resaleEnabled ?? false))}
       />
       {(pastEngagements.length > 0 || previouslyOwned.length > 0) && (

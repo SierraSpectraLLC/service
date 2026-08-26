@@ -352,7 +352,30 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
     expect(src).toMatch(/mode === "reseller" \? \[\] : pmRows/);
     expect(src).toMatch(/for \(const s of mode === "reseller" \? \[\] : systems\)/);
     const page = read("src/app/(dashboard)/page.tsx");
-    expect(page).toMatch(/mode: orgSelf\?\.resaleEnabled \? "reseller" : "lab"/);
+    /* From the RESOLVED view rather than straight off the org's flag. The flag
+       is only the default now - a COO put in charge of the equipment at a
+       reselling company sits on the other side of it, and a landing that read
+       the org directly would hand them a pipeline under an equipment nav. See
+       lib/viewMode. */
+    expect(page).toMatch(/mode: asReseller \? "reseller" : "lab"/);
+    expect(page).toMatch(/resellerView\(meRow\?\.viewMode \?\? "", orgSelf\?\.resaleEnabled \?\? false\)/);
+    expect(page).toMatch(/if \(asReseller\) \{/);
+  });
+
+  it("resolves that view the same way everywhere it is asked", () => {
+    /* Four surfaces used to derive it from the org flag on their own, and a
+       person who switched would have got a pipeline nav over a lab page. One
+       rule, read by all of them. */
+    for (const f of [
+      "src/app/layout.tsx", "src/app/(dashboard)/page.tsx", "src/app/units/page.tsx",
+    ]) {
+      expect(read(f), f).toMatch(/resellerView\(/);
+    }
+    // And nothing decides the SHAPE off the raw flag any more. The one place
+    // that still reads it decides a company CAPABILITY - whether they ship -
+    // which no screen preference may move.
+    const page = read("src/app/(dashboard)/page.tsx");
+    expect(page.match(/resaleEnabled/g) ?? []).toHaveLength(2);
   });
 
   it("counts units in the pipeline, not positions", () => {

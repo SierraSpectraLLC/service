@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { agreements, assets, instruments, orgSites, orgs } from "@/db/schema";
+import { agreements, assets, instruments, orgSites, orgs, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, viewTenant, visibleSystemIds } from "@/lib/tenancy";
@@ -11,6 +11,7 @@ import { getBrand } from "@/lib/brand";
 import { ageDays, getStageSince } from "@/lib/stageAges";
 import { BLOCKED_STAGE } from "@/lib/stages";
 import { blockHolderName, blockLabel } from "@/lib/blocks";
+import { resellerView } from "@/lib/viewMode";
 import { PIPELINE_STAGES } from "@/lib/clientLandingData";
 import { COVERAGE, coverageBadge, coverageOf, type CoverageAgreement } from "@/lib/coverage";
 import { providerNameOf, providerNames } from "@/lib/providers";
@@ -69,7 +70,13 @@ export default async function UnitsPage({ searchParams }: {
       : Promise.resolve([]),
     ids.length ? getStageSince(ids) : Promise.resolve(new Map()),
   ]);
-  const resells = org?.resale ?? false;
+  /* The org's resale flag is the default, not the answer - the same rule the
+     nav and the landing read, so somebody who chose the equipment view does
+     not get a roster of "units" under a nav that says instruments. See
+     lib/viewMode. */
+  const [me] = await db.select({ viewMode: users.viewMode }).from(users)
+    .where(eq(users.email, user.email.toLowerCase())).catch(() => []);
+  const resells = resellerView(me?.viewMode ?? "", org?.resale ?? false);
   const noun = resells ? "unit" : "instrument";
 
   // Where each one lives, when the account has named its sites.

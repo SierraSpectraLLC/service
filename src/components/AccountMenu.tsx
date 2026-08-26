@@ -14,7 +14,7 @@ import Dropdown from "@/components/Dropdown";
  * The initials disc is the affordance. It also answers a question the old header
  * couldn't: WHICH account, which matters on a shared bench machine.
  */
-export default function AccountMenu({ name, email, orgName, roleLabel, settingsHref, viewAs }: {
+export default function AccountMenu({ name, email, orgName, roleLabel, settingsHref, viewAs, viewSwitch }: {
   name: string;
   email: string;
   /** The organization whose workspace this is, if any. */
@@ -24,6 +24,8 @@ export default function AccountMenu({ name, email, orgName, roleLabel, settingsH
   settingsHref: string | null;
   /** The owner's persona switcher, rendered inside the menu. */
   viewAs?: React.ReactNode;
+  /** Which half of the app I work in, where my company does both. */
+  viewSwitch?: React.ReactNode;
 }) {
   const initials = (name || email)
     .split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -45,6 +47,9 @@ export default function AccountMenu({ name, email, orgName, roleLabel, settingsH
       {/* The persona switcher opens a second step inside the menu, so its clicks
           must not reach the panel's close-on-choose handler. */}
       {viewAs && <div className="menu-sub" onClick={(e) => e.stopPropagation()}>{viewAs}</div>}
+      {/* Brings its own menu-sub and its own click guard - it opens a second
+          step inside the menu exactly as the persona switcher does. */}
+      {viewSwitch}
       {/* A real form, so signing out survives a dead client bundle. */}
       <form action={signOutAction}>
         <button type="submit" style={{ width: "100%" }}>Sign out</button>

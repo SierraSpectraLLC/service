@@ -109,6 +109,7 @@ import {
   autoFg, cleanBlockReason, isBlocking, partOpen, stageChange, validBlockReason,
 } from "@/lib/stages";
 import { systemParties, systemPartiesFor } from "@/lib/partyData";
+import { isViewPref } from "@/lib/viewMode";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
@@ -9742,6 +9743,28 @@ export async function setMyPhone(raw: string): Promise<{ error?: string }> {
  * assignments, your @mentions, your signatures and your hours, so it should be
  * the one you answer to.
  */
+/**
+ * Which half of the app I work in.
+ *
+ * MINE TO SET, and nobody else's. It changes which question a page leads with
+ * - is the equipment running, or is the stock moving - and changes nothing at
+ * all about what I may see or do, so it is not something an operator grants or
+ * an owner administers. Blank puts me back on my company's own setting, which
+ * is where everybody starts and where almost everybody stays.
+ *
+ * Not audited, for the same reason: a preference about my own screen is not an
+ * act on the record, and a trail full of "changed their view" is a trail
+ * somebody has to read past to find the changes that mattered.
+ */
+export async function setMyViewMode(mode: string): Promise<{ error?: string }> {
+  const u = await requireUser();
+  if (!isViewPref(mode)) return { error: "Unknown view" };
+  await db.update(users).set({ viewMode: mode }).where(eq(users.email, u.email.toLowerCase()));
+  // The nav, the landing and the roster all read it, so the whole shell.
+  revalidatePath("/", "layout");
+  return {};
+}
+
 export async function setMyName(raw: string): Promise<{ error?: string }> {
   const u = await requireUser();
   const name = raw.trim().replace(/\s+/g, " ").slice(0, 60);

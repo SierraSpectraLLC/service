@@ -731,6 +731,7 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_group_id" text NOT NULL DEFA
 
 -- Many operators on one instance: the org tree, per-operator staff, and the
 -- tenant stamp every top-level record carries. See src/lib/tenants.ts.
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "view_mode" text NOT NULL DEFAULT '';
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_hash" text NOT NULL DEFAULT '';
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_set_at" timestamp;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "phone" text NOT NULL DEFAULT '';

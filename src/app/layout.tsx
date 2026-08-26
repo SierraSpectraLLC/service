@@ -15,6 +15,8 @@ import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import HeaderNav from "@/components/HeaderNav";
 import MobileNav, { type TabItem } from "@/components/MobileNav";
 import AccountMenu from "@/components/AccountMenu";
+import ViewSwitch from "@/components/ViewSwitch";
+import { mayChooseView, resellerView } from "@/lib/viewMode";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import { viewAsPeople } from "@/app/actions";
@@ -49,9 +51,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // A first sign-in goes to /welcome once, wherever they were headed - a name,
   // what to email them about, and a password if they want one. Decided here
   // rather than in middleware because it takes a database read; see lib/welcome.
+  /* This person's own row, read once. The welcome redirect wants one column
+     off it and the view switch wants another, and two round trips for two
+     columns of the same row is a round trip nobody needed. */
+  const [me] = user
+    ? await db.select({ onboardedAt: users.onboardedAt, viewMode: users.viewMode })
+        .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => [])
+    : [];
   if (user) {
-    const [me] = await db.select({ onboardedAt: users.onboardedAt })
-      .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => []);
     const to = welcomeRedirect(true, me?.onboardedAt ?? null, (await headers()).get(PATH_HEADER) ?? "/");
     if (to) redirect(to);
   }
@@ -105,9 +112,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     : [];
   const orgRemoteOn = !isStaff && modules.remote && ownOrg?.remote === true;
   const isClientOrg = !isStaff && ownOrg?.kind === "client";
-  // A reseller's units are stock heading for a sale rather than benches, so
-  // their first door is a pipeline and they get a room their listings live in.
-  const resells = !isStaff && ownOrg?.resale === true;
+  /* A reseller's units are stock heading for a sale rather than benches, so
+     their first door is a pipeline and they get a room their listings live in.
+     WHICH HALF THIS PERSON WORKS IN, though, is theirs to say: the org's flag
+     is the default and a COO in charge of the equipment can sit on the other
+     side of it. One resolved value, read by the nav here and passed to the
+     landing and the roster, so a person who switched cannot get a pipeline nav
+     over a lab page. See lib/viewMode. */
+  const orgResells = ownOrg?.resale === true;
+  /* Off this person's own row rather than off the session: it is a screen
+     preference, and widening the session for one would put it in every token
+     and every cached identity in the app. */
+  const resells = !isStaff && resellerView(me?.viewMode ?? "", orgResells);
   // Payroll is in the nav only for somebody who may actually read one: the
   // company's own owner, or a person at a client whose flag was turned on. An
   // entry that leads to a page which redirects is worse than no entry, and
@@ -354,6 +370,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     settingsHref={settingsHref}
                     viewAs={mayViewAs && !view.persona
                       ? <ViewAsBar orgs={orgOptions} people={peopleOptions} active={null} />
+                      : undefined}
+                    viewSwitch={!isStaff && mayChooseView(orgResells)
+                      ? <ViewSwitch mode={resells ? "reseller" : "lab"} orgName={user.orgName || "Your company"} />
                       : undefined}
                   />
                 </span>

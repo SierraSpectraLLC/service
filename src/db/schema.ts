@@ -26,6 +26,17 @@ export const users = pgTable("users", {
    * for it; blank means this person has none and signs in by code as usual.
    * Format and rules live in lib/password.
    */
+  /**
+   * Which half of the app this person works in, on a company that does both -
+   * "lab" or "reseller", blank to follow their organization's own setting.
+   *
+   * Theirs to set, not the operator's: it changes which question a page leads
+   * with and nothing about what they may see or do, so it is a preference
+   * rather than a privilege. Blank is the common answer and stays the default
+   * forever - a company that starts or stops reselling carries along everybody
+   * who never touched this. See lib/viewMode.
+   */
+  viewMode: text("view_mode").notNull().default(""),
   passwordHash: text("password_hash").notNull().default(""),
   passwordSetAt: timestamp("password_set_at"),
   /**
