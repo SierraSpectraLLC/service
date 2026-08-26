@@ -199,6 +199,88 @@ Share > Publish to web > CSV) works when the service account vars are unset.
 All authorization is enforced server-side in the actions
 (`src/app/actions.ts`), not just hidden in the UI.
 
+## The demo workspace
+
+`scripts/seed-demo.ts` opens a second operator on the instance - an invented
+service company with a year of work behind it - so somebody evaluating the
+product can be handed a login instead of a slide deck.
+
+```bash
+DATABASE_URL=... npm run db:seed:demo             # open it
+DATABASE_URL=... npm run db:seed:demo -- --reset  # rebuild from scratch
+DATABASE_URL=... npm run db:seed:demo -- --wipe   # take it back out
+```
+
+It prints the sign-in at the end: `demo@ridgelinefield.com` and a generated
+password (`--password=...` or `DEMO_PASSWORD` to choose one; a six-digit code
+by mail reaches the same account). The owner email and the company name are
+`--owner=` and `--name=`, or `DEMO_OWNER_EMAIL` / `DEMO_ORG_NAME`.
+
+**Every client shape, on purpose.** Five organizations, because "does it handle
+a reseller" is the second thing anybody asks: a regulated lab under
+full-service contract (multi-site, GxP paperwork, its own stockroom, remote
+access), a time-and-materials lab paying late and three rungs up the dunning
+ladder, a **reseller** whose units are stock and whose landing is a pipeline,
+another **service company** sharing one system with us, and a client with
+nothing of theirs on the bench at all - the one that proves a day whose only
+work was a phone call still reaches a report. Their nine logins differ on all
+four allowlist flags, so "what can this person see" is answerable by clicking
+rather than by argument.
+
+Behind them: fourteen live systems covering every stage in the vocabulary plus
+one archived, jobs in all six states and all four severities, parts in all ten
+statuses across both lanes, quotes and invoices in every status, contracts
+drawing down against allowances, a retainer with a cycle ready to raise, three
+stockrooms, six purchase orders, a validation document set with signatures
+(one of them revoked), release sign-offs, share links with view receipts, and
+generated PDFs behind every download.
+
+**What it will not touch.** Everything it writes is stamped with the demo
+tenant, hangs off a row that is, or is keyed to a demo email address; it never
+edits another tenant's rows. `--wipe` empties every stamped table by tenant
+*explicitly* rather than trusting the cascade - five stamped tables carry
+`tenant_org_id` with no foreign key behind it in the deployed DDL, and
+`audit_log`'s is `SET NULL`, so a cascade alone would leave rows pointing at an
+organization that no longer exists.
+
+Three things are deliberately left alone, and all three for the same reason -
+they are instance-wide with no tenant column, so a demo row would show up in
+somebody's real workspace: the Google-sheet parity queue (`sheet_diffs`, and
+the module stays off - it polls a real spreadsheet on a cron), the shop's
+default expense policy, and the loaded labor rate.
+
+**What it does change, and says so.** Client sign-in and four optional modules
+live in `app_settings`, which is one row for the whole instance; the demo
+cannot show a client portal, an EOD report or a remote session without them, so
+any that are off get turned on and the change is printed. Two instance-wide
+numbers - the travel/expense policy and the loaded labor rate - are filled in
+only when nothing is there at all, because an instance that has set its own
+keeps them. Pass `--no-modules` to leave `app_settings` exactly as found.
+`--wipe` does not turn the modules back off: by then they may be load-bearing
+for another workspace, and the script cannot know which were on before.
+
+**No Stripe account is invented.** A made-up connected account renders pay
+buttons that fail the moment anybody presses them; without one the portal takes
+the supported path and tells the client how to send a check. Pass
+`--stripe-account=acct_...` (Connect Express, test mode) to demo the card and
+ACH flows for real.
+
+**Mail is not wired up.** Digest and EOD recipient lists are left blank and
+automatic dunning is off on every demo client, so a buyer clicking through
+cannot mail a stranger - Preview renders the real edition and sends nothing.
+Every invented address sits on a reserved `.example` domain, which cannot
+resolve anywhere. `--mail-to=you@example.com` wires the lists up if you want
+live sends.
+
+**Files are real** when `BLOB_READ_WRITE_TOKEN` is set: the reports,
+certificates, photos and packing lists are generated at seed time and uploaded,
+so every download in the demo opens something. Without a Blob store the rows
+are still made, inline, and the script says which ones will not resolve.
+
+Dates are relative to the run, so a demo opened six months from now still reads
+as a shop that was busy yesterday. `LOCAL_DB=1 PGLITE_DIR=...` points the same
+script at the throwaway database `npm run dev:local` uses.
+
 ## Gas tracking
 
 Each system lists the gases it requires (Helium, Nitrogen, Argon, Hydrogen,
@@ -260,4 +342,5 @@ src/
   app/api/upload          Vercel Blob client-upload token endpoint
   components/             client components (Dashboard, panels, forms)
 scripts/seed.ts           loads the Jul 2026 sheet snapshot
+scripts/seed-demo.ts      the demo workspace handed to a buyer (see above)
 ```
