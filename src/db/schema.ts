@@ -1740,6 +1740,24 @@ export const agreements = pgTable("agreements", {
   // client can run a full-service contract on one system and a PM-only one on
   // another, each drawing down separately.
   instrumentIds: integer("instrument_ids").array().notNull().default([]),
+  /**
+   * WHO PROVIDES THE SERVICE. Null = us, the tenant on this row.
+   *
+   * Without this the app could only hold one kind of relationship - ours - and
+   * so it assumed one: every system a client could see was announced as "under
+   * service with Sierra Spectra", including a system we had touched exactly
+   * once and one whose real contract is with the manufacturer. Visibility is
+   * not a relationship, the same way a queue is not an obligation.
+   *
+   * A third party here is an orgs row with no users and no login, the way a
+   * manufacturer name is - a directory entry, not a participant. Two rows can
+   * name the same system with different providers, which is the real case
+   * where Agilent holds the LC stack and we hold the MS.
+   *
+   * Null rather than a self-reference so that every row written before this
+   * column existed keeps its exact meaning with nothing to backfill.
+   */
+  providerOrgId: integer("provider_org_id").references(() => orgs.id, { onDelete: "set null" }),
   note: text("note").notNull().default(""),
   // ── Recurring billing ────────────────────────────────────────────────────
   // A retainer is the agreement, not a work order: nobody drives out, nobody

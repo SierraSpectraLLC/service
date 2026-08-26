@@ -2,6 +2,7 @@ import { and, asc, eq, desc, inArray, isNull, lte, ne, sql, type AnyColumn, type
 import { db } from "@/db";
 import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, orgSites, attachments, workOrders, users, pmSchedules, agreements } from "@/db/schema";
+import { coverageOf, coverageSummary, type CoverageAgreement } from "@/lib/coverage";
 import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
@@ -284,6 +285,34 @@ export default async function Home({ searchParams }: {
       woBySys.set(w.instrumentId, [...(woBySys.get(w.instrumentId) ?? []), w]);
     }
 
+    /* Who services each of these - which is NOT the same question as what a
+       contract includes. The provider and the term answer "who do I call and
+       will this be billed"; the entitlements further down are money, and stay
+       behind the organization's own gate. So this read takes only the columns
+       that decide coverage, and every viewer of the account gets it. */
+    const covRows = rows.length
+      ? await db.select({
+          id: agreements.id, title: agreements.title, number: agreements.number,
+          status: agreements.status, startsOn: agreements.startsOn, endsOn: agreements.endsOn,
+          renewNoticeDays: agreements.renewNoticeDays, instrumentIds: agreements.instrumentIds,
+          providerOrgId: agreements.providerOrgId,
+        }).from(agreements)
+          .where(and(
+            eq(agreements.orgId, user.orgId),
+            eq(agreements.kind, "contract"),
+            forTenant(agreements.tenantOrgId, await viewTenant(user)),
+          ))
+          .catch(() => [])
+      : [];
+    const covAgreements: CoverageAgreement[] = covRows.map((a) => ({
+      ...a,
+      // Null stays null: it is what makes an agreement OURS, and resolving it
+      // to our own name here would lose the distinction the state depends on.
+      providerName: a.providerOrgId === null
+        ? null
+        : orgNames.find((o) => o.id === a.providerOrgId)?.name ?? "another company",
+    }));
+
     const systems: ClientSystem[] = data.map((d) => {
       const jobs = (woBySys.get(d.id) ?? [])
         .sort((a, b) => severityOf(a.severity).rank - severityOf(b.severity).rank);
@@ -318,6 +347,7 @@ export default async function Home({ searchParams }: {
            window" is the page arguing with itself. Either is their move. */
         yourMove: d.queueMine || pmBySys.has(d.id),
         lastVisit: lastVisitBySys.get(d.id) ?? "",
+        coverage: coverageOf(d.id, covAgreements, today, brand.operatorName),
       };
     });
 
@@ -405,13 +435,20 @@ export default async function Home({ searchParams }: {
       <div className="container wide">
         <PageHead
           title="Your lab"
-          sub={`${rows.length} instrument${rows.length === 1 ? "" : "s"} under service with ${brand.operatorName}`}
+          /* It used to read "N instruments under service with us" from the
+             COUNT OF SYSTEMS THEY COULD SEE, which announced a service
+             relationship over every system a client had ever shared with us -
+             including one we had touched exactly once. Visibility is not a
+             relationship. Now it counts the ones an agreement actually says
+             are ours. */
+          sub={coverageSummary(systems.map((x) => x.coverage.state), brand.operatorName)}
         />
         <ClientLanding
           systems={systems}
           todos={todos}
           operatorName={brand.operatorName}
           orgName={orgSelf?.name ?? "your organization"}
+          today={today}
           q={initial.q ?? ""}
           where={initial.where ?? ""}
           coverage={
@@ -425,7 +462,12 @@ export default async function Home({ searchParams }: {
               }))} />
           }
           thisYear={[
-            { value: String(rows.length), label: `instrument${rows.length === 1 ? "" : "s"} under service` },
+            // Same claim, same fix: the ones we actually hold a contract on.
+            // Zero is an honest answer here and sits beside a real zero.
+            {
+              value: String(systems.filter((x) => x.coverage.state === "ours").length),
+              label: `under service with ${brand.operatorName}`,
+            },
             {
               value: String(closedThisYear.length),
               label: closedThisYear.length === 1

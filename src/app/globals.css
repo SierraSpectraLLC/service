@@ -1503,6 +1503,14 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .inst h4 { margin: 5px 0 1px; font-size: var(--fs-title); font-weight: 750; line-height: 1.25; }
 .inst .make { font-size: var(--fs-small); color: var(--mut); }
 .inst .why { padding: 8px 16px 12px; font-size: var(--fs-body); flex: 1 1 auto; }
+/* Who holds the contract, under what the machine is doing. Quieter than the
+   state sentence and never absent: a missing coverage line reads as "covered"
+   to anybody used to seeing one. Amber only once a contract has actually
+   lapsed - not knowing of one is not the same as knowing there is none. */
+.inst .why.cov {
+  padding: 0 16px 12px; font-size: var(--fs-small); color: var(--mut); flex: 0 0 auto;
+}
+.inst .why.cov.warn { color: var(--t-warn-fg); }
 .inst .foot {
   border-top: 1px solid var(--line); padding: 8px 16px; display: flex;
   align-items: center; gap: 8px; font-size: var(--fs-meta); color: var(--mut);

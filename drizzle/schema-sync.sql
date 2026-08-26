@@ -3321,3 +3321,8 @@ END $$;
 -- that the handback landed, which is worth more to the shop than a flag.
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_ack_at" timestamp;
 ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "queue_ack_by" text NOT NULL DEFAULT '';
+
+-- Who provides the service an agreement covers. Null = the tenant on the row,
+-- which is what every agreement written before this column meant, so there is
+-- nothing to backfill.
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "provider_org_id" integer;

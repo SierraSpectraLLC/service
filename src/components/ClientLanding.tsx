@@ -3,6 +3,7 @@ import {
   CLIENT_STATE, bySeverity, density, needsAttention, standingPill,
   type ClientState, type ClientTodo, type Density,
 } from "@/lib/clientView";
+import { COVERAGE, coverageBadge, coverageLine, type Coverage } from "@/lib/coverage";
 import { EmptyState, FacetStrip, Pill, Toolbar } from "@/components/ui";
 
 /**
@@ -26,6 +27,15 @@ export type ClientSystem = {
   /** True when the queue sits with THEM. */
   yourMove: boolean;
   lastVisit: string;
+  /**
+   * Who services this one, and until when.
+   *
+   * A separate axis from `state` and deliberately so: "In service" says the
+   * machine is fine, and says nothing at all about whether anybody is under
+   * contract to keep it that way. The page used to conflate them by counting
+   * shared systems as serviced ones.
+   */
+  coverage: Coverage;
 };
 
 /**
@@ -38,12 +48,14 @@ export type ClientSystem = {
  * survives a link somebody pastes to a colleague.
  */
 export default function ClientLanding({
-  systems, todos, operatorName, orgName, q, where, coverage, thisYear, override,
+  systems, todos, operatorName, orgName, today, q, where, coverage, thisYear, override,
 }: {
   systems: ClientSystem[];
   todos: ClientTodo[];
   operatorName: string;
   orgName: string;
+  /** The shop's today, for reading a coverage end date as past or future. */
+  today: string;
   /** Search text, from the URL. */
   q: string;
   /** The chosen location, from the URL; blank means all of them. */
@@ -142,7 +154,7 @@ export default function ClientLanding({
            are still worth seeing. */
         <div className="wall">
           {[...attention, ...healthy].map((s) => (
-            <SystemCard key={s.id} s={s} operatorName={operatorName} />
+            <SystemCard key={s.id} s={s} operatorName={operatorName} today={today} />
           ))}
         </div>
       ) : (
@@ -163,13 +175,13 @@ export default function ClientLanding({
                     </span>
                   </h4>
                   <div className="wall">
-                    {g.list.map((s) => <SystemCard key={s.id} s={s} operatorName={operatorName} />)}
+                    {g.list.map((s) => <SystemCard key={s.id} s={s} operatorName={operatorName} today={today} />)}
                   </div>
                 </div>
               ))
           ) : (
             <div className="wall">
-              {attention.map((s) => <SystemCard key={s.id} s={s} operatorName={operatorName} />)}
+              {attention.map((s) => <SystemCard key={s.id} s={s} operatorName={operatorName} today={today} />)}
             </div>
           )}
 
@@ -192,6 +204,12 @@ export default function ClientLanding({
                       </Link>
                       <span className="sub">{s.label}{s.location ? ` · ${s.location}` : ""}</span>
                     </span>
+                    {/* Only where it is not ours: the band label above already
+                        says how many are, and a badge on every row would be
+                        noise on the list nobody opens. */}
+                    {s.coverage.state !== "ours" && (
+                      <Pill tone={COVERAGE[s.coverage.state].tone}>{coverageBadge(s.coverage)}</Pill>
+                    )}
                     <span className="mut t-meta">{s.lastVisit ? `last visit ${s.lastVisit}` : ""}</span>
                   </div>
                 ))}
@@ -226,7 +244,9 @@ export default function ClientLanding({
   );
 }
 
-function SystemCard({ s, operatorName }: { s: ClientSystem; operatorName: string }) {
+function SystemCard({ s, operatorName, today }: {
+  s: ClientSystem; operatorName: string; today: string;
+}) {
   const tone = CLIENT_STATE[s.state].tone;
   const pill = standingPill(s.state, s.yourMove, operatorName);
   return (
@@ -237,6 +257,12 @@ function SystemCard({ s, operatorName }: { s: ClientSystem; operatorName: string
         <div className="make">{s.label}{s.location ? ` · ${s.location}` : ""}</div>
       </div>
       <div className="why">{s.why}</div>
+      {/* Always rendered, always specific. An absent line would be read as
+          "covered" by anybody used to seeing one, which is the assumption this
+          whole thing exists to stop. */}
+      <div className={`why cov${s.coverage.state === "lapsed" ? " warn" : ""}`}>
+        {coverageLine(s.coverage, today)}
+      </div>
       <div className="foot">
         {/* Three answers, not two. "With them and fine" is the ordinary state
             of a system that just came back from service, and the condition
