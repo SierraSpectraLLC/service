@@ -81,6 +81,10 @@ const FIXTURE = `
     ('LZ-003', 'Lab Zen', 'Shimadzu LCMS-8060', 'Shimadzu', 'SH806014', 3, '{"Sign-off"}', 'Awaiting client sign-off.'),
     ('CA-001', 'Coastal Analytical', 'PerkinElmer Optima 8300 ICP-OES', 'PerkinElmer', 'PE83007', 4, '{"Intake"}', ''),
     ('CA-002', 'Coastal Analytical', 'Agilent 7890B GC', 'Agilent', 'CN14320', 5, '{"Waiting / blocked"}', 'HED fault - part on order.'),
+    -- A unit that has genuinely stopped: past the reseller's stall threshold,
+    -- so the pipeline's "sitting too long" surface has something real to show.
+    -- CA-002 stays at twelve days, which is the staff board's blocked story.
+    ('CA-004', 'Coastal Analytical', 'Waters Xevo TQ-S', 'Waters', 'WX88120', 4, '{"Waiting / blocked"}', 'Discontinued control board.'),
     ('CA-003', 'Coastal Analytical', 'Waters Xevo TQ-S', 'Waters', 'WAT5521', 6, '{"In service"}', '');
 
   -- Work with no system behind it: a LabZen engineer rang and got talked
@@ -132,6 +136,11 @@ const FIXTURE = `
      SET blocked_reason = 'Waiting on HED board from Agilent - no ETA.',
          blocked_since  = now() - interval '12 days'
    WHERE external_id = 'CA-002';
+
+  UPDATE instruments
+     SET blocked_reason = 'Discontinued control board. Two options sourced - one refurbished, one substitute.',
+         blocked_since  = now() - interval '41 days'
+   WHERE external_id = 'CA-004';
 
   INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, status, location) VALUES
     (1, 'Mass spec', '6495C', 'US2405111', 'Agilent', 'In service', 'Bench 4'),
@@ -460,6 +469,21 @@ const FIXTURE = `
   INSERT INTO system_shares (instrument_id, org_id, access, added_by)
     SELECT id, owner_org_id, 'edit', 'fixture' FROM instruments WHERE owner_org_id IS NOT NULL
     ON CONFLICT DO NOTHING;
+
+  -- A reseller account, so the third shape of the client product has something
+  -- to render: their units are stock heading for a sale rather than benches, so
+  -- their landing is a pipeline and their exceptions are units that stopped
+  -- moving. Coastal doubles as one - it already owns systems in the fixture.
+  UPDATE orgs SET resale_enabled = true WHERE id = 2;
+  UPDATE instruments SET for_sale = true, sale_note = 'Refurbished, sign-off packet attached',
+    listing_token = 'lst-coastal-000001'
+    WHERE client = 'Coastal Analytical' AND external_id = (
+      SELECT external_id FROM instruments WHERE client = 'Coastal Analytical' ORDER BY id LIMIT 1);
+  INSERT INTO users (id, name, email, role, onboarded_at) VALUES
+    ('dev-dana', 'Dana Whitfield', 'accounts@coastal.test', 'client_editor', now())
+    ON CONFLICT (id) DO NOTHING;
+  INSERT INTO sessions (session_token, user_id, expires) VALUES
+    ('resellertoken', 'dev-dana', now() + interval '30 days');
 
   -- Somewhere to be. Two sites for Lab Zen so the multi-site grouping on the
   -- client landing has something to group by; one system left unassigned, the

@@ -94,6 +94,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     : [];
   const orgRemoteOn = !isStaff && modules.remote && ownOrg?.remote === true;
   const isClientOrg = !isStaff && ownOrg?.kind === "client";
+  // A reseller's units are stock heading for a sale rather than benches, so
+  // their first door is a pipeline and they get a room their listings live in.
+  const resells = !isStaff && ownOrg?.resale === true;
   // Payroll is in the nav only for somebody who may actually read one: the
   // company's own owner, or a person at a client whose flag was turned on. An
   // entry that leads to a page which redirects is worse than no entry, and
@@ -153,12 +156,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        see lib/finance. */
     { href: "/money", label: "Financial" },
   ] : [
-    { href: "/", label: "Your lab" },
+    { href: "/", label: resells ? "Your pipeline" : "Your lab" },
     { href: "/work", label: "Requests" },
     /* Quotes and invoices, named for what the client does with them rather
        than for what the shop filed. */
     ...(isClientOrg ? [{ href: "/orders", label: "Approvals" }] : []),
-    ...(isClientOrg ? [{ href: "/store", label: "Parts" }] : []),
+    ...(resells
+      ? [{ href: "/listings", label: "Listings" }]
+      : isClientOrg ? [{ href: "/store", label: "Parts" }] : []),
     { href: "/documents", label: "Documents" },
   ];
   const navGroups = isStaff ? [
@@ -213,9 +218,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        rather than sent to build it. Files is not here either - it was promoted
        to Documents, a door of its own, because it is the second most used
        thing a client comes for. */
-    ...(hasStock || orgRemoteOn || seesPayroll ? [{
+    ...(hasStock || orgRemoteOn || seesPayroll || (resells && isClientOrg) ? [{
       label: "Your account",
       items: [
+        // A reseller's primary row spends its fifth slot on Listings, so the
+        // parts store moves here rather than disappearing - they buy parts to
+        // refurbish with, and a door they use should not vanish.
+        ...(resells && isClientOrg ? [{ href: "/store", label: "Parts" }] : []),
         // Their own shelf, when they keep one - not the shop's inventory.
         ...(hasStock ? [{ href: "/stock", label: "Your inventory" }] : []),
         ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
@@ -234,10 +243,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     { href: "/inbox", label: "Inbox", icon: "inbox" },
     { href: "/documents", label: "Library", icon: "library" },
   ] : [
-    { href: "/", label: "Your lab", icon: "home" },
+    { href: "/", label: resells ? "Pipeline" : "Your lab", icon: "home" },
     { href: "/work", label: "Requests", icon: "work" },
     ...(isClientOrg ? [{ href: "/orders", label: "Approvals", icon: "approvals" as const }] : []),
-    ...(isClientOrg ? [{ href: "/store", label: "Parts", icon: "parts" as const }] : []),
+    ...(resells
+      ? [{ href: "/listings", label: "Listings", icon: "parts" as const }]
+      : isClientOrg ? [{ href: "/store", label: "Parts", icon: "parts" as const }] : []),
     { href: "/documents", label: "Documents", icon: "library" },
   ];
 

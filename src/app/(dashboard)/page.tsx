@@ -21,7 +21,9 @@ import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 import Landing from "@/components/Landing";
 import ClientLanding, { type ClientSystem } from "@/components/ClientLanding";
-import { clientTodos, stateOf, whySentence } from "@/lib/clientLandingData";
+import { clientTodos, pipelineFor, resellerTodos, stateOf, whySentence } from "@/lib/clientLandingData";
+import { rankTodos } from "@/lib/clientView";
+import ResellerLanding from "@/components/ResellerLanding";
 import { PageHead } from "@/components/ui";
 import ClientCoverage from "@/components/ClientCoverage";
 import MoneyCard from "@/components/MoneyCard";
@@ -335,6 +337,51 @@ export default async function Home({ searchParams }: {
     const planned = closedThisYear.filter((w) => w.severity === "Planned").length;
 
     const orgSelf = orgNames.find((o) => o.id === user.orgId);
+
+    /* A reseller reads a process, not a floor. Their units are inventory
+       heading for a sale rather than benches that have to stay up, so the
+       whole landing changes shape - see lib/clientView. resaleEnabled already
+       drove one tile on the staff board; here it picks the mode. */
+    if (orgSelf?.resaleEnabled) {
+      const label = (id: number) => data.find((d) => d.id === id)?.label ?? "";
+      const { stages: pipeStages, stalled } = await pipelineFor(
+        rows.map((r) => ({
+          id: r.id, externalId: r.externalId, stages: r.stages,
+          blockedReason: r.blockedReason ?? "", blockedSince: r.blockedSince,
+        })),
+        label,
+      );
+      const atGate = rows
+        .flatMap((r) => ["Checkout", "Sign-off"]
+          .filter((g) => r.stages.includes(g))
+          .map((stage) => ({ id: r.id, externalId: r.externalId, stage })));
+      const toShip = rows.filter((r) => r.stages.includes("Waiting to ship"))
+        .map((r) => ({ id: r.id, externalId: r.externalId }));
+
+      const shipped = rows.filter((r) => r.stages.includes("Shipped")).length;
+      const listings = rows.filter((r) => r.forSale).map((r) => ({
+        id: r.id, externalId: r.externalId, label: label(r.id),
+        note: r.saleNote, token: r.listingToken,
+      }));
+
+      return (
+        <div className="container wide">
+          <PageHead
+            title="Your pipeline"
+            sub={`${rows.length} unit${rows.length === 1 ? "" : "s"} with ${brand.operatorName}`}
+          />
+          <ResellerLanding
+            stages={pipeStages}
+            stalled={stalled}
+            todos={rankTodos([...todos, ...resellerTodos({ stalled, atGate, toShip })])}
+            listings={listings}
+            operatorName={brand.operatorName}
+            orgName={orgSelf?.name ?? "your organization"}
+            shippedThisYear={shipped}
+          />
+        </div>
+      );
+    }
 
     /* Their own paper, and only if their own organization lets this person
        read it - the same gate the agreements page uses. Scoped to the org AND

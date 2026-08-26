@@ -180,6 +180,54 @@ describe("reseller pipeline", () => {
   });
 });
 
+describe("the reseller's own shape", () => {
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  it("counts positions in a process, and never uptime", () => {
+    // Uptime is meaningless for a machine that is SUPPOSED to be in pieces -
+    // a second reason on top of the one that applies to every account. The
+    // word survives in the comment saying so; what must not survive is a
+    // figure, so only rendered code is scanned.
+    const src = read("src/components/ResellerLanding.tsx");
+    expect(src).toMatch(/stage-col/);
+    const code = src.split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l) && !/\{\/\*/.test(l))
+      .join("\n");
+    expect(code).not.toMatch(/uptime/i);
+    expect(code).not.toMatch(/response time/i);
+  });
+
+  it("says so rather than showing a zero when a stage has no history", () => {
+    const src = read("src/components/ResellerLanding.tsx");
+    expect(src).toMatch(/medianDays === null/);
+    expect(src).toMatch(/no history yet/);
+  });
+
+  it("reads blocked age from the column that is always written", () => {
+    // The stage-event log is the general answer, but blocking writes its own
+    // column - and blocked age is the one thing this page acts on.
+    const src = read("src/lib/clientLandingData.ts");
+    expect(src).toMatch(/blockedSince/);
+    expect(src).toMatch(/stage === BLOCKED_STAGE/);
+  });
+
+  it("keeps listings behind the resale flag", () => {
+    const src = read("src/app/listings/page.tsx");
+    expect(src).toMatch(/if \(!org\?\.resale\) redirect\("\/"\)/);
+    expect(src).toMatch(/isStaffRole\(user\.role\) \|\| user\.orgId === null\) redirect/);
+    // Scoped like every other client read.
+    expect(src).toMatch(/visibleSystemIds\(user\)/);
+  });
+
+  it("gives a reseller a pipeline door and a lab a parts door", () => {
+    const layout = read("src/app/layout.tsx");
+    expect(layout).toMatch(/resells \? "Your pipeline" : "Your lab"/);
+    expect(layout).toMatch(/href: "\/listings", label: "Listings"/);
+    // The parts store does not vanish for a reseller; it moves one level down.
+    expect(layout).toMatch(/resells && isClientOrg \? \[\{ href: "\/store", label: "Parts" \}\]/);
+  });
+});
+
 describe("no fabricated metric reaches a client", () => {
   const walk = (dir: string): string[] => {
     const out: string[] = [];

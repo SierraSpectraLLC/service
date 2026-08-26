@@ -6,9 +6,11 @@ import { invoiceView, isOpen } from "@/lib/statement";
 import { quoteStanding } from "@/lib/quotes";
 import { formatCents } from "@/lib/money";
 import {
-  clientState, rankTodos, PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
+  clientState, isStalled, medianDays, rankTodos, PM_BADLY_OVERDUE_DAYS, STALE_ANSWER_DAYS,
   type ClientState, type ClientTodo,
 } from "@/lib/clientView";
+import { ageDays, getStageSince } from "@/lib/stageAges";
+import { BLOCKED_STAGE } from "@/lib/stages";
 import { daysBetween } from "@/lib/finance";
 
 /**
@@ -183,3 +185,161 @@ export function stateOf(row: {
   });
 }
 
+// ── Reseller mode ───────────────────────────────────────────────────────────
+
+/**
+ * Where a reseller's units are, and how long they have been there.
+ *
+ * A lab's question is "can I use it". A reseller's is "is it moving" - their
+ * units are inventory heading for a sale, not benches that have to stay up,
+ * and stages.ts says as much where it calls "In service" a resting state
+ * rather than a step. So the landing counts positions in a process and reports
+ * how long each one typically takes, and the exception is a unit that has
+ * stopped rather than a unit that is down.
+ */
+export type PipelineStage = {
+  stage: string;
+  count: number;
+  /** Null when nothing is in this stage - never 0, which would read as instant. */
+  medianDays: number | null;
+  /** Something in here has sat long enough to be a problem. */
+  hot: boolean;
+};
+
+export type StalledUnit = {
+  id: number;
+  externalId: string;
+  label: string;
+  stage: string;
+  days: number;
+  reason: string;
+};
+
+export async function pipelineFor(rows: {
+  id: number; externalId: string; stages: string[]; blockedReason: string;
+  /** Written directly when a system is blocked, whatever the event log holds. */
+  blockedSince: Date | null;
+}[], label: (id: number) => string): Promise<{
+  stages: PipelineStage[];
+  stalled: StalledUnit[];
+}> {
+  const ids = rows.map((r) => r.id);
+  const since = ids.length ? await getStageSince(ids) : new Map();
+  const now = new Date();
+
+  /**
+   * How long this unit has been in this stage.
+   *
+   * The stage-event log is the general answer, but blocking writes its own
+   * column - and blocked age is the one this page acts on, so it reads the
+   * column first rather than depending on a log that may not have been
+   * running when the unit stopped.
+   */
+  const blockedAt = new Map(rows.map((r) => [r.id, r.blockedSince]));
+  const ageIn = (id: number, stage: string): number | null => {
+    if (stage === BLOCKED_STAGE) {
+      const at = blockedAt.get(id);
+      if (at) return ageDays(at, now);
+    }
+    const at = since.get(id)?.get(stage);
+    return at ? ageDays(at, now) : null;
+  };
+
+  const stages: PipelineStage[] = PIPELINE_STAGES.map((stage) => {
+    const inIt = rows.filter((r) => r.stages.includes(stage));
+    const ages = inIt.map((r) => ageIn(r.id, stage)).filter((d): d is number => d !== null);
+    return {
+      stage,
+      count: inIt.length,
+      medianDays: medianDays(ages),
+      // Only the blocked column goes red on age: thirty days IN refurbishment
+      // is ordinary work, thirty days BLOCKED is a unit nobody is moving.
+      hot: stage === BLOCKED_STAGE && ages.some((d) => isStalled(stage, d)),
+    };
+  });
+
+  const stalled: StalledUnit[] = rows
+    .flatMap((r) => {
+      const stage = r.stages.find((x) => x === BLOCKED_STAGE);
+      if (!stage) return [];
+      const days = ageIn(r.id, stage);
+      if (days === null || !isStalled(stage, days)) return [];
+      return [{
+        id: r.id, externalId: r.externalId, label: label(r.id), stage, days,
+        reason: r.blockedReason || "Work has stopped and no reason was recorded.",
+      }];
+    })
+    .sort((a, b) => b.days - a.days);
+
+  return { stages, stalled };
+}
+
+/**
+ * The stages that are a PIPELINE. "In service" and "Maintenance due" are what a
+ * unit does after it is sold and belong to a lab's story, not a reseller's;
+ * "Shipped" is the exit, counted but never a column to work.
+ */
+export const PIPELINE_STAGES = [
+  "Intake", "Refurbishment", "System setup", "Checkout",
+  "Applications", "Sign-off", BLOCKED_STAGE, "Waiting to ship",
+] as const;
+
+/**
+ * What a reseller has to decide, on top of the quotes and invoices every
+ * account has.
+ *
+ * Their waiting-on-you is mostly release gates: Checkout and Sign-off are the
+ * stages where the OWNER says a unit may move on, so a unit sitting in one is
+ * sitting on them, not on the shop.
+ */
+export function resellerTodos(input: {
+  stalled: StalledUnit[];
+  atGate: { id: number; externalId: string; stage: string }[];
+  toShip: { id: number; externalId: string }[];
+}): ClientTodo[] {
+  const out: ClientTodo[] = [];
+
+  for (const u of input.stalled) {
+    out.push({
+      key: `stalled-${u.id}`,
+      tone: "bad",
+      title: `Decide on ${u.externalId}`,
+      detail: `Blocked ${u.days} days · ${u.reason}`,
+      href: `/instruments/${u.id}`,
+      days: u.days,
+      action: "Decide",
+    });
+  }
+
+  // One row per gate rather than per unit: three units at Checkout is one
+  // sitting to do, and three lines nobody works through.
+  for (const gate of ["Checkout", "Sign-off"]) {
+    const list = input.atGate.filter((u) => u.stage === gate);
+    if (list.length === 0) continue;
+    out.push({
+      key: `gate-${gate}`,
+      tone: "warn",
+      title: list.length === 1
+        ? `Sign off ${list[0].externalId} at ${gate}`
+        : `Sign off ${list.length} units at ${gate}`,
+      detail: list.map((u) => u.externalId).join(", "),
+      href: list.length === 1 ? `/instruments/${list[0].id}` : "/",
+      action: "Review",
+    });
+  }
+
+  if (input.toShip.length > 0) {
+    out.push({
+      key: "ship",
+      tone: "warn",
+      title: input.toShip.length === 1
+        ? `Confirm shipping for ${input.toShip[0].externalId}`
+        : `Confirm shipping for ${input.toShip.length} units`,
+      detail: "Passed sign-off and waiting on a destination",
+      href: input.toShip.length === 1 ? `/instruments/${input.toShip[0].id}` : "/",
+      action: "Confirm",
+    });
+  }
+
+  return out;
+}
