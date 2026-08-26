@@ -61,11 +61,17 @@ export type Coverage = {
   endsOn: string;
   /** True while it is inside its own renewal-notice window. */
   expiring: boolean;
+  /**
+   * Somebody other than us holds it. Not derivable from `state` alone, because
+   * a LAPSED contract may equally be one of ours that ran out - and the two
+   * are removed by different people through different doors.
+   */
+  thirdParty: boolean;
 };
 
 const UNKNOWN: Coverage = {
   state: "unknown", provider: "", agreementId: null, agreementTitle: "",
-  endsOn: "", expiring: false,
+  endsOn: "", expiring: false, thirdParty: false,
 };
 
 /** [] on an agreement means the whole account, not "no systems". */
@@ -110,6 +116,7 @@ export function coverageOf(
       agreementTitle: best.a.title || best.a.number || "Service agreement",
       endsOn: best.a.endsOn,
       expiring: best.s === "expiring",
+      thirdParty: best.a.providerName !== null,
     };
   }
 
@@ -130,6 +137,7 @@ export function coverageOf(
     agreementTitle: last.a.title || last.a.number || "Service agreement",
     endsOn: last.a.endsOn,
     expiring: false,
+    thirdParty: last.a.providerName !== null,
   };
 }
 

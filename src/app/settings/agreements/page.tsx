@@ -1,6 +1,8 @@
 import { asc, desc, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
+import { providerNameOf, providerNames } from "@/lib/providers";
+import { getBrand } from "@/lib/brand";
 import { attachments, agreements, instruments, orgs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
@@ -67,6 +69,8 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
   // agreement; a shop with hundreds would want this batched, and would also
   // want a different page.
   const usage = await usageForAll(rows);
+  const provNames = await providerNames(rows);
+  const brand = await getBrand();
   const nothing = { partsCents: 0, visits: 0, laborMinutes: 0, pmPartsCents: 0 };
 
   const shaped = rows.map((r) => ({
@@ -78,6 +82,7 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
     visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
     pmPartsIncluded: r.pmPartsIncluded, includedKits: r.includedKits,
     hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
+    providerName: providerNameOf(r.providerOrgId, provNames),
     valueCents: r.valueCents, note: r.note,
     used: usage.get(r.id) ?? nothing,
   }));
@@ -133,12 +138,14 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
 
       {chase.length > 0 && (
         <AgreementsPanel rows={chase} today={today} systems={systems} papers={papers}
+          operatorName={brand.operatorName}
           orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
           title={`Needs attention · ${chase.length}`} />
       )}
 
       {(rest.length > 0 || shown.length === 0) && (
         <AgreementsPanel rows={rest} today={today} systems={systems} papers={papers}
+          operatorName={brand.operatorName}
           orgs={allOrgs.map((o) => ({ id: o.id, name: o.name }))} canEdit
           title={chase.length ? "Everything else" : "In force"} />
       )}

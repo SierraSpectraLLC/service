@@ -2,6 +2,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
+import { providerNameOf, providerNames } from "@/lib/providers";
 import { agreements, appSettings, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
@@ -83,6 +84,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   const agreementRows = await db.select().from(agreements)
     .where(eq(agreements.orgId, orgId)).orderBy(asc(agreements.endsOn), asc(agreements.id));
   const usage = await usageForAll(agreementRows);
+  const provNames = await providerNames(agreementRows);
   // The signed document itself. attachments.agreementId has always existed;
   // until now nothing wrote it, so the terms lived in the app and the contract
   // lived in somebody's mail.
@@ -189,6 +191,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
 
       {tab === "agreements" && seesAgreements && (
       <AgreementsPanel
+        operatorName={brand.operatorName}
         rows={agreementRows.map((r) => ({
           id: r.id, orgId: r.orgId, orgName: org.name,
           kind: r.kind, number: r.number, title: r.title, status: r.status,
@@ -198,6 +201,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
           pmPartsIncluded: r.pmPartsIncluded, includedKits: r.includedKits,
           hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
+          providerName: providerNameOf(r.providerOrgId, provNames),
           valueCents: r.valueCents, note: r.note,
           used: usage.get(r.id) ?? { partsCents: 0, visits: 0, laborMinutes: 0 },
         }))}

@@ -16,7 +16,7 @@ import { COVERAGE, coverageBadge, coverageLine, type Coverage } from "@/lib/cove
  * what happens next. Neither had a home on this page before.
  */
 export default function SystemCoverage({
-  coverage, today, operatorName, lastService, agreementHref,
+  coverage, today, operatorName, lastService, agreementHref, recorder,
 }: {
   coverage: Coverage;
   today: string;
@@ -25,6 +25,12 @@ export default function SystemCoverage({
   lastService: { on: string; number: string; title: string } | null;
   /** Where to read the agreement, for a viewer allowed to open it. */
   agreementHref?: string;
+  /**
+   * The control for recording somebody else's contract, supplied by the page
+   * that knows whether this reader may. Absent for anybody who may not, which
+   * is the only gate on the client side - the real one is on the action.
+   */
+  recorder?: React.ReactNode;
 }) {
   const c = coverage;
   return (
@@ -76,6 +82,7 @@ export default function SystemCoverage({
           covered by a company we do not know about, or by nobody at all.
         </div>
       )}
+      {recorder}
     </Panel>
   );
 }

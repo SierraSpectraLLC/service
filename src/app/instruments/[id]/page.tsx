@@ -65,6 +65,7 @@ import { modeFor, standingTone } from "@/lib/panelMode";
 import { CLIENT_GROUP_LABEL, clientMaySee, queueNeedsThem } from "@/lib/clientView";
 import { coverageOf, type CoverageAgreement } from "@/lib/coverage";
 import SystemCoverage from "@/components/SystemCoverage";
+import CoverageRecorder from "@/components/CoverageRecorder";
 import { stateOf } from "@/lib/clientLandingData";
 import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
@@ -657,6 +658,22 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               // Only for somebody their own organization lets read the paper.
               agreementHref={coverage.agreementId !== null && canSeePaper
                 ? (isStaff ? "/money/contracts" : "/settings/agreements")
+                : undefined}
+              /* Staff, or an editor at the organization that owns it. The
+                 owning org is the one whose contract this is, which is why a
+                 sister client with a view share gets no control here. */
+              recorder={canEdit && inst.ownerOrgId !== null
+                && (isStaff || user.orgId === inst.ownerOrgId)
+                ? (
+                  <CoverageRecorder
+                    instrumentId={inst.id}
+                    operatorName={brand.operatorName}
+                    // Removal is offered only for a row somebody recorded here.
+                    // Ours are commercial paper and leave by the other door.
+                    existingId={coverage.thirdParty ? coverage.agreementId : null}
+                    existingProvider={coverage.provider}
+                  />
+                )
                 : undefined}
             />
           ) },

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { and, inArray, asc, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
+import { providerNameOf, providerNames } from "@/lib/providers";
+import { getBrand } from "@/lib/brand";
 import { attachments, agreements, instruments, orgs, rateCards } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
@@ -62,6 +64,8 @@ export default async function ContractsPage({ searchParams }: {
     .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
 
   const usage = await usageForAll(rows);
+  const provNames = await providerNames(rows);
+  const brand = await getBrand();
   const nothing = { partsCents: 0, visits: 0, laborMinutes: 0, pmPartsCents: 0 };
 
   const shaped = rows.map((r) => ({
@@ -73,6 +77,7 @@ export default async function ContractsPage({ searchParams }: {
     visitsUnlimited: r.visitsUnlimited, partsUnlimited: r.partsUnlimited,
     pmPartsIncluded: r.pmPartsIncluded, includedKits: r.includedKits,
     hourlyRateCents: r.hourlyRateCents, instrumentIds: r.instrumentIds,
+    providerName: providerNameOf(r.providerOrgId, provNames),
     valueCents: r.valueCents, note: r.note,
     used: usage.get(r.id) ?? nothing,
   }));
@@ -167,6 +172,7 @@ export default async function ContractsPage({ searchParams }: {
       <RetainerCard rows={retainers} today={today} canEdit />
 
       <AgreementsPanel
+        operatorName={brand.operatorName}
         rows={shown} today={today} systems={systems} orgs={clientOrgs} papers={papers}
         canEdit extra={extra}
         title={f === "ended" ? "Ended" : f === "all" ? "All contracts" : "In force"}

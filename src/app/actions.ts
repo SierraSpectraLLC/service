@@ -11911,8 +11911,56 @@ export async function setKitLines(
 // the answer is always what the ledger actually says rather than a second copy
 // of it that is free to disagree. See lib/agreements.
 
+/**
+ * A third party named on an agreement, resolved to a directory entry.
+ *
+ * A service provider we do not run is an orgs row with no users, no login and
+ * no workspace - the same kind of thing a manufacturer name is. It gets a row
+ * rather than a text column because "who do I call" eventually wants a phone
+ * number, and because two agreements naming the same company should point at
+ * the same company.
+ *
+ * Matched case-insensitively inside the tenant before anything is created, so
+ * "Agilent" typed twice is one entry. It will still collect "Agilent" and
+ * "Agilent Technologies" as separate companies - that is a merge problem for
+ * whoever tidies the directory, and a far smaller one than refusing to record
+ * the fact at all.
+ */
+async function resolveProvider(
+  name: string, tenantOrgId: number | null, operatorName: string,
+): Promise<{ error: string } | { id: number | null }> {
+  const clean = name.trim().slice(0, 120);
+  if (!clean) return { id: null };
+  /* Naming ourselves means it is ours, which is what a null provider says.
+     Checked against the TENANT'S OWN NAME as well as the brand's: on an
+     instance whose settings row names no operator the brand falls back to the
+     platform name, and "Sierra Spectra" typed into a Sierra Spectra workspace
+     has to resolve to us whichever of the two it matches. This is the check
+     that stops a client granting themselves one of our contracts, so it is
+     not a place to be relying on one lookup being populated. */
+  const [tenant] = tenantOrgId === null ? [] : await db.select({ name: orgs.name })
+    .from(orgs).where(eq(orgs.id, tenantOrgId));
+  const us = [operatorName, tenant?.name ?? ""]
+    .map((x) => x.trim().toLowerCase()).filter(Boolean);
+  if (us.includes(clean.toLowerCase())) return { id: null };
+  const existing = await db.select({ id: orgs.id, name: orgs.name, parentOrgId: orgs.parentOrgId })
+    .from(orgs)
+    .where(tenantOrgId === null ? undefined : eq(orgs.parentOrgId, tenantOrgId));
+  const hit = existing.find((o) => o.name.trim().toLowerCase() === clean.toLowerCase());
+  if (hit) return { id: hit.id };
+  const [made] = await db.insert(orgs)
+    .values({ name: clean, kind: "provider", parentOrgId: tenantOrgId })
+    .returning({ id: orgs.id });
+  return { id: made.id };
+}
+
 export type AgreementInput = {
   kind: string; number: string; title: string; status: string;
+  /**
+   * Who provides the service, by name. Blank or our own name means us, which
+   * is what a null provider_org_id has always meant.
+   */
+  providerName?: string;
   startsOn: string; endsOn: string; renewNoticeDays: number | string;
   visitsIncluded: number | string; partsAllowance: string; laborIncludedHours: string;
   visitsUnlimited?: boolean; partsUnlimited?: boolean; pmPartsIncluded?: boolean;
@@ -11983,8 +12031,12 @@ export async function addAgreement(orgId: number, data: AgreementInput): Promise
   if (!mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
   const clean = cleanAgreement(data);
   if ("error" in clean) return clean;
+  const tenantOrgId = orgTenant(org) ?? myTenantOrgId(u);
+  const provider = await resolveProvider(
+    data.providerName ?? "", tenantOrgId, (await getBrand()).operatorName);
+  if ("error" in provider) return provider;
   const [row] = await db.insert(agreements).values({
-    ...clean, orgId, tenantOrgId: orgTenant(org) ?? myTenantOrgId(u), createdBy: u.email,
+    ...clean, orgId, tenantOrgId, providerOrgId: provider.id, createdBy: u.email,
   }).returning();
   await audit({
     actor: u.email, entityType: "agreement", entityId: row.id, tenantOrgId: row.tenantOrgId,
@@ -12004,7 +12056,11 @@ export async function updateAgreement(id: number, data: AgreementInput): Promise
   if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
   const clean = cleanAgreement(data);
   if ("error" in clean) return clean;
-  await db.update(agreements).set(clean).where(eq(agreements.id, id));
+  const provider = await resolveProvider(
+    data.providerName ?? "", before.tenantOrgId, (await getBrand()).operatorName);
+  if ("error" in provider) return provider;
+  await db.update(agreements).set({ ...clean, providerOrgId: provider.id })
+    .where(eq(agreements.id, id));
   await audit({
     actor: u.email, entityType: "agreement", entityId: id, tenantOrgId: before.tenantOrgId,
     action: `edited ${agreementName(clean)} for ${org.name}`,
@@ -12014,6 +12070,120 @@ export async function updateAgreement(id: number, data: AgreementInput): Promise
   });
   revalidatePath(`/settings/organizations/${before.orgId}`);
   revalidatePath("/agreements");
+  return {};
+}
+
+/**
+ * "Somebody else covers this one." Recorded by whoever it is true of.
+ *
+ * The client knows their own paperwork better than we do. Before this, the
+ * only way a manufacturer's contract reached this app was a phone call
+ * somebody remembered to make and somebody else remembered to type in, which
+ * is why every system a client shared with us read as one we service.
+ *
+ * THE GATE IS THE POINT. agreements is also where OUR contracts live - the
+ * rows that decide what we bill and what we absorb - so this door is narrow in
+ * three directions at once:
+ *
+ *   - their own organization's paper only, never another client's;
+ *   - a provider that is somebody else, never us and never blank. A client who
+ *     could write a row with a null provider could grant themselves unlimited
+ *     visits on our dime;
+ *   - editors only, because it speaks for the whole organization.
+ *
+ * Staff can call it too and it behaves identically - the record should not
+ * depend on which side of the relationship typed it.
+ */
+export async function recordCoverage(input: {
+  instrumentId: number;
+  providerName: string;
+  title: string;
+  number: string;
+  startsOn: string;
+  endsOn: string;
+  visitsIncluded: string;
+  partsAllowance: string;
+  laborIncludedHours: string;
+  note: string;
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireEditor();
+  const [inst] = await db.select().from(instruments).where(eq(instruments.id, input.instrumentId));
+  if (!inst) return { error: "Not found" };
+  if (!(await canSeeSystemSafe(u, input.instrumentId))) return { error: "Not found" };
+  // A contract is written with whoever OWNS the machine. A system nobody owns
+  // on this instance is ours outright and has nothing to record.
+  if (inst.ownerOrgId === null) return { error: "That system has no owner to hold a contract" };
+  const staff = isStaffRole(u.role);
+  if (!staff && u.orgId !== inst.ownerOrgId) {
+    return { error: "Only the organization that owns it can record its coverage" };
+  }
+  const name = input.providerName.trim();
+  if (name.length < 2) return { error: "Say who provides the service" };
+
+  const brand = await getBrand();
+  const provider = await resolveProvider(name, inst.tenantOrgId, brand.operatorName);
+  if ("error" in provider) return provider;
+  /* The lock. resolveProvider returns null for our own name, and a null
+     provider is what marks an agreement as OURS - the row that decides what
+     we bill and what we absorb. Recording one of ours is a commercial act and
+     belongs on the agreements screen behind requireStaff, not here. */
+  if (provider.id === null) {
+    return {
+      error: `This is for a contract somebody else holds. To record one of ${brand.operatorName}'s own, use the agreements screen.`,
+    };
+  }
+
+  const clean = cleanAgreement({
+    kind: "contract", number: input.number, title: input.title, status: "active",
+    startsOn: input.startsOn, endsOn: input.endsOn, renewNoticeDays: 60,
+    visitsIncluded: input.visitsIncluded, partsAllowance: input.partsAllowance,
+    laborIncludedHours: input.laborIncludedHours,
+    // Scoped to this one system. An account-wide claim about somebody else's
+    // paper is a much bigger assertion than anybody typing into one record's
+    // panel means to make.
+    instrumentIds: [input.instrumentId],
+    value: "", note: input.note,
+  });
+  if ("error" in clean) return clean;
+
+  const [row] = await db.insert(agreements).values({
+    ...clean, orgId: inst.ownerOrgId, tenantOrgId: inst.tenantOrgId,
+    providerOrgId: provider.id, createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: row.id, tenantOrgId: row.tenantOrgId,
+    instrumentId: input.instrumentId,
+    action: `recorded ${name} coverage on ${inst.externalId}`
+      + `${clean.endsOn ? ` (to ${clean.endsOn})` : ""}`,
+  });
+  rev(input.instrumentId);
+  revalidatePath("/settings/agreements");
+  return { id: row.id };
+}
+
+/**
+ * Take a recorded third-party coverage row back off the record.
+ *
+ * Same three-way gate as recording it, plus one more: only rows with a
+ * provider. Ours are removed from the agreements screen, by staff, with a
+ * reason - deleting a commercial contract is not something a client's editor
+ * does from an instrument page.
+ */
+export async function removeCoverage(id: number): Promise<{ error?: string }> {
+  const u = await requireEditor();
+  const [row] = await db.select().from(agreements).where(eq(agreements.id, id));
+  if (!row) return {};
+  if (row.providerOrgId === null) return { error: "Not found" };
+  if (!isStaffRole(u.role) && u.orgId !== row.orgId) return { error: "Not found" };
+  const [prov] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, row.providerOrgId));
+  await db.delete(agreements).where(eq(agreements.id, id));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: id, tenantOrgId: row.tenantOrgId,
+    instrumentId: row.instrumentIds[0] ?? null,
+    action: `removed ${prov?.name ?? "third-party"} coverage`,
+  });
+  rev(row.instrumentIds[0] ?? null);
+  revalidatePath("/settings/agreements");
   return {};
 }
 

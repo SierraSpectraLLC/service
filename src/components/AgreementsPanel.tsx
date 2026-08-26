@@ -25,6 +25,8 @@ export type AgreementRow = {
   /** JSON [{partNumber, name, qty}] - what the paper includes in kind. */
   includedKits: string;
   hourlyRateCents: number | null;
+  /** Who provides it. Null is us - see agreements.provider_org_id. */
+  providerName: string | null;
   /** Which of the client's systems this paper covers. [] = all of them. */
   instrumentIds: number[];
   valueCents: number | null; note: string;
@@ -34,6 +36,9 @@ export type AgreementRow = {
 
 const emptyDraft = {
   kind: "contract", number: "", title: "", status: "active",
+  // Blank means us. See agreements.provider_org_id: naming a third party is
+  // what turns a row from "what we owe them" into "what somebody else does".
+  providerName: "",
   startsOn: "", endsOn: "", renewNoticeDays: "60",
   visitsIncluded: "0", partsAllowance: "", laborIncludedHours: "",
   visitsUnlimited: false, partsUnlimited: false, pmPartsIncluded: false, hourlyRate: "",
@@ -206,7 +211,10 @@ function PaperPicker({ lib, onPick, onFiles, disabled, note }: {
   );
 }
 
-export default function AgreementsPanel({ rows, today, orgs, systems = [], canEdit, papers = [], title = "Agreements", extra }: {
+export default function AgreementsPanel({
+  rows, today, orgs, systems = [], canEdit, papers = [], title = "Agreements", extra,
+  operatorName,
+}: {
   rows: AgreementRow[];
   today: string;
   /** The signed documents filed against these agreements. */
@@ -216,6 +224,8 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   /** The clients' systems, for assigning a contract to specific ones. */
   systems?: { id: number; ownerOrgId: number | null; externalId: string; label: string }[];
   canEdit: boolean;
+  /** What to call ourselves - the default provider on every row. */
+  operatorName: string;
   title?: string;
   /** One quiet line per agreement id - a renewal figure, a billing note. */
   extra?: Record<number, string>;
@@ -303,6 +313,7 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
   const openEdit = (r: AgreementRow) => {
     setDraft({
       kind: r.kind, number: r.number, title: r.title, status: r.status,
+      providerName: r.providerName ?? "",
       startsOn: r.startsOn, endsOn: r.endsOn, renewNoticeDays: String(r.renewNoticeDays),
       visitsIncluded: String(r.visitsIncluded),
       partsAllowance: r.partsAllowanceCents ? (r.partsAllowanceCents / 100).toFixed(2) : "",
@@ -367,6 +378,10 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               </span>
               <span className={`pill ${STANDING_TONE[s]}`}>{STANDING_LABEL[s]}</span>
               <span className="pill neutral">{KIND_LABEL[r.kind]}</span>
+              {/* Whose paper. Only when it is not ours: every row on this
+                  screen used to be ours and most still are, so a pill on all
+                  of them would say nothing. */}
+              {r.providerName !== null && <span className="pill info">{r.providerName}</span>}
               {orgs.length !== 1 && <span className="mut t-small">{r.orgName}</span>}
               {r.valueCents != null && (
                 <span className="mono t-meta" style={{ color: "var(--slate)" }}
@@ -460,6 +475,19 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
               </div>
             )}
 
+            {/* No drawdown on somebody else's paper. Every figure in these
+                bars is summed from work THIS workspace recorded, so on a
+                manufacturer's contract they are all zero - and "0 of 8 visits
+                used" would read as eight visits still in hand rather than as
+                a number we are in no position to know. What it entitles them
+                to still shows above; only the burn is withheld. */}
+            {r.providerName !== null ? (
+              <div className="mut t-small" style={{ marginTop: 8 }}>
+                Held by {r.providerName}. What has been used against it is theirs to
+                report — nothing here draws it down.
+              </div>
+            ) : (
+            <>
             <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 8 }}>
               <Bar label="Parts" included={r.partsAllowanceCents} used={r.used.partsCents} fmt={formatCents}
                 unlimited={r.partsUnlimited} />
@@ -483,13 +511,14 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                 </div>
               );
             })()}
-
             {/* Reported, never hidden: the money was really spent, the client
                 just isn't being charged for it out of this allowance. */}
             {r.pmPartsIncluded && (r.used.pmPartsCents ?? 0) > 0 && (
               <div className="mut t-meta" style={{ marginTop: 6 }}>
                 Plus {formatCents(r.used.pmPartsCents ?? 0)} in PM parts, covered by the contract.
               </div>
+            )}
+            </>
             )}
             {r.note && <div className="mut" style={{ fontSize: 12, marginTop: 6, whiteSpace: "pre-wrap" }}>{r.note}</div>}
           </div>
@@ -577,6 +606,22 @@ export default function AgreementsPanel({ rows, today, orgs, systems = [], canEd
                   <button key={k} type="button" aria-pressed={draft.kind === k}
                     onClick={() => up("terms", { kind: k })}>{KIND_LABEL[k]}</button>
                 ))}
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <label>Who provides the service</label>
+                <input value={draft.providerName}
+                  onChange={(e) => up("terms", { providerName: e.target.value })}
+                  placeholder={`${operatorName} — or name the company that does`} />
+                <div className="mut t-meta" style={{ marginTop: 3 }}>
+                  {/* The consequence, said where the decision is made. A row
+                      naming somebody else is a record of THEIR paper: it never
+                      absorbs our labour, never draws down against our work,
+                      and never raises a "one visit left" flag on a job. */}
+                  {draft.providerName.trim()
+                    && draft.providerName.trim().toLowerCase() !== operatorName.trim().toLowerCase()
+                    ? `A contract ${draft.providerName.trim()} holds. It is on the record and on the client's page, and nothing about it changes what ${operatorName} bills.`
+                    : `${operatorName}'s own contract. What it includes is what we absorb.`}
+                </div>
               </div>
 
               <div className="pf2" style={{ marginBottom: 8 }}>
