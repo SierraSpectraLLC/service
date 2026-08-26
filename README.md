@@ -268,10 +268,29 @@ somebody's real workspace: the Google-sheet parity queue (`sheet_diffs`, and
 the module stays off - it polls a real spreadsheet on a cron), the shop's
 default expense policy, and the loaded labor rate.
 
-**What it does change, and says so.** Client sign-in and four optional modules
+**What it does change, and says so.** Client sign-in and three optional modules
 live in `app_settings`, which is one row for the whole instance; the demo
 cannot show a client portal, an EOD report or a remote session without them, so
-any that are off get turned on and the change is printed. `--no-modules` leaves
+any that are off get turned on and the change is printed. Two of those are
+worth reading twice before you run it:
+
+- **`digestEnabled`** is the single gate on the hourly digest cron for the
+  whole instance, so turning it on restarts *your* morning digest - internal
+  edition to your staff, partner edition to every client of yours with
+  recipients set. Not tomorrow morning: `digestDue` is `hourNow >= digestHour`
+  against a stale last-sent stamp, so it goes out on the next hourly run.
+- **`clientAccessEnabled`** is one kill switch over every non-staff sign-in
+  (`src/auth.ts`, `signInAllowed`). Turning it on re-opens the portal to every
+  address on your client allowlist at once, anybody offboarded by switching it
+  off included - and `/login` is public, so a stranger typing one of those
+  addresses sends a real sign-in code to that customer's inbox.
+
+`publicCatalogEnabled` is deliberately **not** in that set. It would put an
+unauthenticated `/equipment` page, a card on the anonymous landing page and new
+sitemap entries on your production domain under your brand, re-expose any of
+your own `vocab_terms` still marked published, and buy the demo nothing - every
+model this seed writes is `published: false`. Turn it on in Settings if you
+want to show the feature; that is a decision, not a side effect of seeding. `--no-modules` leaves
 that row exactly as found - and costs less than it sounds, because "view as"
 never consults the client-access flag (`src/auth.ts` reads it on the sign-in
 path and nowhere else), so the owner can still walk the client and reseller

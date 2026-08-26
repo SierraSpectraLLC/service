@@ -515,14 +515,26 @@ async function main(): Promise<void> {
     console.log(`  This instance currently has ${otherOps?.n ?? 0} operator workspace(s); the demo would be one more.\n`);
 
     const flags = {
-      clientAccessEnabled: "client sign-in - lets client accounts on the allowlist sign in at all",
+      clientAccessEnabled: "client sign-in. It is ONE instance-wide kill switch (src/auth.ts, "
+        + "signInAllowed) and turning it on re-opens the portal to EVERY address on your "
+        + "client allowlist at once - anybody you offboarded by switching it off included. "
+        + "/login is public, so a stranger who types one of those addresses sends a real "
+        + "sign-in code to that customer's inbox",
       eodEnabled: "the EOD report page and its nav entry",
       digestEnabled: "the daily digest. READ THIS ONE TWICE: the cron is gated on this single "
         + "instance-wide flag, so turning it on restarts YOUR OWN workspace's morning digest - the "
         + "internal edition to your staff, and a partner edition to every client of yours that has "
-        + "recipients configured. If it has been off for a while, real customers get mail tomorrow",
+        + "recipients configured. NOT tomorrow morning: digestDue is `hourNow >= digestHour` and "
+        + "your last-sent stamp is stale, so it goes out on the next hourly cron",
       remoteEnabled: "remote support pages",
-      publicCatalogEnabled: "the public, unauthenticated equipment catalog",
+      // publicCatalogEnabled is deliberately NOT here. It would put an
+      // unauthenticated /equipment page, a card on the anonymous landing page
+      // and new sitemap entries on the operator's own production domain, under
+      // their brand - and buy the demo nothing at all, because every model this
+      // seed writes is published:false. It also re-exposes any of THEIR OWN
+      // vocab_terms still carrying published=true, which switching the module
+      // off never unpublished. Turn it on in Settings if you want to show the
+      // feature; that is a decision, not a side effect of seeding.
     } as const;
     const off = (Object.keys(flags) as (keyof typeof flags)[]).filter((k) => settings && !settings[k]);
     if (!settings) {
@@ -559,7 +571,6 @@ async function main(): Promise<void> {
       eodEnabled: "EOD report",
       digestEnabled: "daily digest",
       remoteEnabled: "remote support",
-      publicCatalogEnabled: "public equipment catalog",
     } as const;
     const turnedOn = (Object.keys(want) as (keyof typeof want)[]).filter((k) => settings && !settings[k]);
     if (turnedOn.length) {
@@ -580,9 +591,11 @@ async function main(): Promise<void> {
       })));
       if (turnedOn.includes("digestEnabled")) {
         warn("Because the digest was among them: the hourly cron is gated on that one flag for the "
-          + "WHOLE instance, so your own workspace's morning digest starts again tomorrow - internal "
-          + "edition to your staff, partner edition to any client of yours with recipients set. Turn "
-          + "it back off in Settings > Configuration if that is not what you wanted.");
+          + "WHOLE instance, so your own workspace's morning digest starts again - internal edition "
+          + "to your staff, partner edition to any client of yours with recipients set. Not tomorrow: "
+          + "digestDue only asks whether the hour has passed and whether it already went TODAY, and "
+          + "a stale stamp means the next hourly run qualifies. Turn it back off in Settings > "
+          + "Configuration NOW if that is not what you wanted.");
       }
     } else {
       say("Instance modules were already on; nothing changed.");
