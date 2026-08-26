@@ -31,7 +31,7 @@ import type { PipelineStage, ReadyItem, StalledUnit } from "@/lib/clientLandingD
  */
 export default function ResellerLanding({
   stages, inPipeline, unitCount, stalled, todos, ready, listings,
-  operatorName, orgName, shippedThisYear,
+  operatorName, shippedThisYear,
 }: {
   stages: PipelineStage[];
   /** DISTINCT units standing in the pipeline - never the sum of the columns. */
@@ -44,7 +44,6 @@ export default function ResellerLanding({
   ready: ReadyItem[];
   listings: { id: number; externalId: string; label: string; note: string; token: string }[];
   operatorName: string;
-  orgName: string;
   shippedThisYear: number;
 }) {
   return (
@@ -174,11 +173,14 @@ export default function ResellerLanding({
 
       {/* Counted, not modelled: units that reached Shipped this calendar year.
           Nothing here is a rate, a percentage or a projection. */}
-      <h3 className="band-label">This year with {operatorName}</h3>
+      {/* Named for the work, not for the shop. A reseller's own page reading
+          "This year with Sierra Spectra" made their business a subsidiary
+          clause of ours. */}
+      <h3 className="band-label">This year</h3>
       <div className="pair">
         <div className="card">
           <div className="bignum">{inPipeline}</div>
-          <div className="biglab">units in the pipeline for {orgName}</div>
+          <div className="biglab">units in the pipeline</div>
         </div>
         <div className="card">
           <div className="bignum">{shippedThisYear}</div>

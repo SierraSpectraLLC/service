@@ -153,7 +153,10 @@ export default async function UnitsPage({ searchParams }: {
     <div className="container wide">
       <PageHead
         title={resells ? "Your units" : "Your instruments"}
-        sub={`Every ${noun} ${org?.name ?? "your organization"} has with ${brand.operatorName}, wherever it stands.`}
+        // Their estate, described as theirs. Who services each one is a
+        // per-unit fact and rides the row, where it is an answer rather than
+        // a lens on the whole page.
+        sub={`Every ${noun} on your account, wherever it stands.`}
       />
 
       <Toolbar

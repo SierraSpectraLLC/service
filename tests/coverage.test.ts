@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { coverageFor } from "@/lib/billing";
 import {
-  COVERAGE, COVERAGE_STATES, advisoryByCoverage, coverageBadge, coverageLine, coverageOf,
+  COVERAGE, COVERAGE_STATES, type CoverageState, advisoryByCoverage, coverageBadge, coverageLine, coverageOf,
   coverageSummary, type CoverageAgreement,
 } from "@/lib/coverage";
 
@@ -139,24 +139,98 @@ describe("what covers a system", () => {
 });
 
 describe("the line under Your lab", () => {
-  it("names the operator only for the systems the operator covers", () => {
-    expect(coverageSummary(["ours", "ours"], OPERATOR))
-      .toBe("2 instruments under service with Sierra Spectra");
-    expect(coverageSummary(["ours", "theirs", "unknown"], OPERATOR))
-      .toBe("3 instruments · 1 under service with Sierra Spectra");
+  /* IT NEVER NAMES THE OPERATOR. This is a client's own page and the sentence
+     is about THEIR estate. Naming the shop made the shop the frame - "none
+     under contract with Sierra Spectra" answers a question nobody asked, on
+     the page of a lab that may well be covered by the manufacturer and does
+     not think of itself as a Sierra Spectra account. */
+
+  it("names nobody", () => {
+    for (const states of [
+      ["ours"], ["theirs"], ["lapsed"], ["unknown"],
+      ["ours", "theirs"], ["ours", "unknown"], [],
+    ] as CoverageState[][]) {
+      expect(coverageSummary(states)).not.toMatch(/sierra|spectra|agilent/i);
+    }
   });
 
-  it("says the gap plainly when none of them are ours", () => {
-    // The reported screenshot: one instrument, no contract, and a header that
-    // announced it as under service with us.
-    expect(coverageSummary(["unknown"], OPERATOR))
-      .toBe("1 instrument · none under contract with Sierra Spectra");
-    expect(coverageSummary(["lapsed", "theirs"], OPERATOR))
-      .toBe("2 instruments · none under contract with Sierra Spectra");
+  it("counts ANY live contract as covered, whoever holds it", () => {
+    /* Counting only ours would report "no service contract on file" over a
+       machine the manufacturer covers - the same false claim as the one this
+       replaced, pointed the other way. */
+    expect(coverageSummary(["ours", "theirs"])).toBe("2 instruments · all under a service contract");
+    expect(coverageSummary(["theirs"])).toBe("1 instrument · under a service contract");
+    expect(coverageSummary(["ours", "theirs", "lapsed", "unknown"]))
+      .toBe("4 instruments · 2 under a service contract");
+  });
+
+  it("says the gap as a gap in the FILE, not in the world", () => {
+    // The reported screenshot: one instrument, nothing recorded. We know what
+    // we have been shown; we do not know what exists.
+    expect(coverageSummary(["unknown"])).toBe("1 instrument · no service contract on file");
+    expect(coverageSummary(["lapsed", "unknown"]))
+      .toBe("2 instruments · no service contracts on file");
+    expect(coverageSummary(["unknown"])).not.toMatch(/uncovered|unprotected|not covered/i);
+  });
+
+  it("reads properly for one instrument either way", () => {
+    // "1 instrument · all under a service contract" is what a plural rule
+    // produces if nobody checks.
+    expect(coverageSummary(["ours"])).toBe("1 instrument · under a service contract");
+    expect(coverageSummary(["ours"])).not.toMatch(/\ball\b/);
+  });
+
+  it("takes the noun from the product it is describing", () => {
+    // A reseller has units, not instruments.
+    expect(coverageSummary(["ours", "ours"], "unit"))
+      .toBe("2 units · all under a service contract");
   });
 
   it("says nothing about service for an empty account", () => {
-    expect(coverageSummary([], OPERATOR)).toBe("No instruments on file yet");
+    expect(coverageSummary([])).toBe("No instruments on file yet");
+  });
+});
+
+describe("the operator's name is a party, never a frame", () => {
+  const read = (f: string) => readFileSync(f, "utf8");
+
+  /* The rule: name the shop where it is a PARTY to the fact - it is waiting on
+     an answer, it holds this contract, it did this work. Never where the fact
+     is about the client's own estate, because then the shop becomes the lens
+     the client reads their own lab through. */
+
+  it("keeps it out of the landing's header and year band", () => {
+    const land = read("src/components/ClientLanding.tsx");
+    expect(land).toMatch(/This year&apos;s service/);
+    expect(land).not.toMatch(/This year with \{operatorName\}/);
+    const page = read("src/app/(dashboard)/page.tsx");
+    expect(page).toMatch(/sub=\{coverageSummary\(systems\.map\(\(x\) => x\.coverage\.state\)\)\}/);
+    // The tile that repeated the header, framed as ours, is gone.
+    expect(page).not.toMatch(/under service with \$\{brand\.operatorName\}/);
+  });
+
+  it("keeps it out of a reseller's own inventory line", () => {
+    const page = read("src/app/(dashboard)/page.tsx");
+    expect(page).not.toMatch(/unit\$\{rows\.length === 1 \? "" : "s"\} with \$\{brand\.operatorName\}/);
+    const land = read("src/components/ResellerLanding.tsx");
+    expect(land).not.toMatch(/This year with \{operatorName\}/);
+    expect(land).not.toMatch(/in the pipeline for \{orgName\}/);
+  });
+
+  it("keeps it out of the roster's description", () => {
+    const src = read("src/app/units/page.tsx");
+    expect(src).toMatch(/Every \$\{noun\} on your account/);
+  });
+
+  it("KEEPS it where the shop is genuinely the counterparty", () => {
+    // These are not brand noise. Somebody is waiting on an answer; somebody
+    // holds this contract; somebody did this work. Stripping the name here
+    // would leave the client with a fact and no party attached to it.
+    expect(read("src/components/ClientLanding.tsx"))
+      .toMatch(/\{operatorName\} is waiting on you/);
+    expect(read("src/components/SystemCoverage.tsx"))
+      .toMatch(/Last service by \{operatorName\}/);
+    expect(read("src/lib/coverage.ts")).toMatch(/Under service with \$\{c\.provider\}/);
   });
 });
 

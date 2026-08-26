@@ -177,23 +177,37 @@ export function coverageBadge(c: Coverage): string {
 }
 
 /**
- * The line under "Your lab", which used to claim every visible system.
+ * The line under "Your lab".
  *
- * It counts rather than characterizes, and it names the operator only for the
- * systems the operator actually covers. An account where none of them are ours
- * gets a count and a plain statement of the gap, which is the honest version
- * of what that page has been saying.
+ * IT NEVER NAMES THE OPERATOR, and that is deliberate. This is a client's own
+ * page and the sentence is about THEIR estate: how many instruments they have
+ * and how many of them somebody is under contract to look after. Naming the
+ * shop here made the shop the frame - "none under contract with Sierra
+ * Spectra" answers a question nobody asked, on the page of a lab that may well
+ * be covered by the manufacturer and does not think of itself as a Sierra
+ * Spectra account. Who holds each contract is a per-system fact and lives on
+ * the card and the record, where it is an answer rather than a lens.
+ *
+ * Covered means ANY live contract, ours or somebody else's. Counting only ours
+ * would report "0 under contract" over a machine the manufacturer covers - the
+ * same false claim as the one this replaced, pointed the other way.
+ *
+ * And nothing recorded reads as "no contract ON FILE" rather than "no
+ * contract": we know what we have been shown, not what exists.
  */
-export function coverageSummary(
-  states: CoverageState[], operatorName: string,
-): string {
+export function coverageSummary(states: CoverageState[], noun = "instrument"): string {
   const n = states.length;
-  const unit = `${n} instrument${n === 1 ? "" : "s"}`;
-  if (n === 0) return "No instruments on file yet";
-  const ours = states.filter((s) => s === "ours").length;
-  if (ours === n) return `${unit} under service with ${operatorName}`;
-  if (ours === 0) return `${unit} · none under contract with ${operatorName}`;
-  return `${unit} · ${ours} under service with ${operatorName}`;
+  if (n === 0) return `No ${noun}s on file yet`;
+  const unit = `${n} ${noun}${n === 1 ? "" : "s"}`;
+  const covered = states.filter((s) => s === "ours" || s === "theirs").length;
+  if (n === 1) {
+    return covered === 1
+      ? `1 ${noun} · under a service contract`
+      : `1 ${noun} · no service contract on file`;
+  }
+  if (covered === n) return `${unit} · all under a service contract`;
+  if (covered === 0) return `${unit} · no service contracts on file`;
+  return `${unit} · ${covered} under a service contract`;
 }
 
 /**

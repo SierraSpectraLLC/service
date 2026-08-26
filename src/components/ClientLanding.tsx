@@ -226,10 +226,14 @@ export default function ClientLanding({
           and neither is computable: there is no service-state history and no
           first-response capture in this app. A number a client cannot check
           and we cannot derive is worse than no number, so the band carries
-          visit counts and nothing that would have to be invented. */}
+          visit counts and nothing that would have to be invented.
+
+          Named for the work rather than for the shop. "This year with Sierra
+          Spectra" made a lab's own page a page about its vendor - and read
+          strangely on an account whose instruments the manufacturer covers. */}
       {thisYear && thisYear.length > 0 && (
         <>
-          <h3 className="band-label">This year with {operatorName}</h3>
+          <h3 className="band-label">This year&apos;s service</h3>
           <div className="pair">
             {thisYear.map((m) => (
               <div key={m.label} className="card">

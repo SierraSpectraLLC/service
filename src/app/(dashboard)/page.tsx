@@ -408,7 +408,11 @@ export default async function Home({ searchParams }: {
         <div className="container wide">
           <PageHead
             title="Your pipeline"
-            sub={`${rows.length} unit${rows.length === 1 ? "" : "s"} with ${brand.operatorName}`}
+            /* Their stock, not our account list. "16 units with Sierra
+               Spectra" framed a reseller's own inventory as something they
+               keep at our place - see coverageSummary for the same fix on the
+               lab side. */
+            sub={`${rows.length} unit${rows.length === 1 ? "" : "s"} · ${inPipeline} in the pipeline`}
           />
           <ResellerLanding
             stages={pipeStages}
@@ -422,7 +426,6 @@ export default async function Home({ searchParams }: {
             ready={readyToMove({ atGate, toShip })}
             listings={listings}
             operatorName={brand.operatorName}
-            orgName={orgSelf?.name ?? "your organization"}
             shippedThisYear={shipped}
           />
         </div>
@@ -453,7 +456,7 @@ export default async function Home({ searchParams }: {
              including one we had touched exactly once. Visibility is not a
              relationship. Now it counts the ones an agreement actually says
              are ours. */
-          sub={coverageSummary(systems.map((x) => x.coverage.state), brand.operatorName)}
+          sub={coverageSummary(systems.map((x) => x.coverage.state))}
         />
         <ClientLanding
           systems={systems}
@@ -485,19 +488,26 @@ export default async function Home({ searchParams }: {
                   : orgNames.find((o) => o.id === a.providerOrgId)?.name ?? "another company",
               }))} />
           }
+          /* Service, not a relationship summary. The first tile used to count
+             the systems WE held a contract on, which repeated the header and
+             made the year's work about us; the header now answers coverage and
+             this band answers what was actually done. Both counted, neither
+             derived. */
           thisYear={[
-            // Same claim, same fix: the ones we actually hold a contract on.
-            // Zero is an honest answer here and sits beside a real zero.
-            {
-              value: String(systems.filter((x) => x.coverage.state === "ours").length),
-              label: `under service with ${brand.operatorName}`,
-            },
             {
               value: String(closedThisYear.length),
               label: closedThisYear.length === 1
                 ? `visit this year · ${planned} planned, ${closedThisYear.length - planned} unplanned`
                 : `visits this year · ${planned} planned, ${closedThisYear.length - planned} unplanned`,
             },
+            (() => {
+              const touched = new Set(closedThisYear
+                .map((w) => w.instrumentId).filter((x): x is number => x !== null)).size;
+              return {
+                value: String(touched),
+                label: `instrument${touched === 1 ? "" : "s"} worked on`,
+              };
+            })(),
           ]}
         />
       </div>
