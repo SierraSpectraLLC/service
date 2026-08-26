@@ -17,6 +17,7 @@ import MobileNav, { type TabItem } from "@/components/MobileNav";
 import AccountMenu from "@/components/AccountMenu";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
+import { viewAsPeople } from "@/app/actions";
 import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmHost } from "@/components/ui/ConfirmDialog";
 import { ToastHost } from "@/components/ui/Toast";
@@ -59,6 +60,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const mayViewAs = view.real?.role === "owner";
   const orgOptions = mayViewAs
     ? await db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)).catch(() => [])
+    : [];
+  /* And the people, for standing in one named person's shoes rather than a
+     role's - the only way to reach somebody's saved layout, their assigned
+     work and their read state. Read only when the picker is about to be shown:
+     it resolves every account's identity, which is not work a client's page
+     load should be paying for. */
+  const peopleOptions = mayViewAs && !view.persona
+    ? await viewAsPeople().catch(() => [])
     : [];
   // Parity is an operator concern, so don't even ask the database for it on a
   // client's request.
@@ -281,7 +290,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       } as React.CSSProperties}>
         {/* Topmost so a persona is never mistaken for a broken page. */}
         {view.persona && (
-          <ViewAsBar orgs={[]} active={{ orgName: view.persona.orgName, role: view.persona.role }} />
+          <ViewAsBar orgs={[]} active={{
+            kind: view.persona.kind, orgName: view.persona.orgName,
+            role: view.persona.role, name: view.persona.name,
+          }} />
         )}
         <div className="app-header" style={{ background: headerBg, color: headerFg }}>
           <div className="spectrum" />
@@ -327,7 +339,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                     name={user.name} email={user.email}
                     orgName={user.orgName} roleLabel={ROLE_LABEL[user.role] ?? user.role}
                     settingsHref={settingsHref}
-                    viewAs={mayViewAs && !view.persona ? <ViewAsBar orgs={orgOptions} active={null} /> : undefined}
+                    viewAs={mayViewAs && !view.persona
+                      ? <ViewAsBar orgs={orgOptions} people={peopleOptions} active={null} />
+                      : undefined}
                   />
                 </span>
               </nav>

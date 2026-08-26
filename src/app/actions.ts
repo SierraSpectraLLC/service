@@ -135,7 +135,9 @@ import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
 import { normalizePhone } from "@/lib/sms";
-import { isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { personaCookie } from "@/lib/viewAs";
+import { signInIdentity } from "@/auth";
 import { maySeeTrail } from "@/lib/trail";
 import { pruneTrail, recordTrail } from "@/lib/trailData";
 import { connectionView, removeConnection, withGraph } from "@/lib/cloudStore";
@@ -8717,7 +8719,7 @@ export async function setViewAs(orgId: number | null, mode: "editor" | "viewer" 
   } else {
     const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
     if (!org) return { error: "Not found" };
-    jar.set(VIEW_AS_COOKIE, `${orgId}:${mode}`, {
+    jar.set(VIEW_AS_COOKIE, personaCookie({ kind: "role", orgId, role: mode === "viewer" ? "client_viewer" : "client_editor" }), {
       httpOnly: true, sameSite: "lax", path: "/",
       secure: process.env.NODE_ENV === "production",
       maxAge: 60 * 60 * 8, // a working day, then back to yourself
@@ -8730,6 +8732,124 @@ export async function setViewAs(orgId: number | null, mode: "editor" | "viewer" 
   }
   revalidatePath("/", "layout");
   return {};
+}
+
+/**
+ * Stand in one named person's shoes - read-only.
+ *
+ * The difference from setViewAs is not a degree, it is a kind. A role persona
+ * answers "what does an editor at Lab Zen see"; this answers "what does BILL
+ * see", which is the only question that reaches his saved panel layout, the
+ * jobs assigned to him, his read state and the per-person flags on his
+ * account. An engineer's glitch that the operator cannot reproduce is almost
+ * always in one of those, and none of them were reachable before.
+ *
+ * Read-only, enforced in lib/authz rather than here: reproducing somebody's
+ * screen must not be able to act in their name, and the owner's own account is
+ * one click away for anything that genuinely needs doing.
+ */
+export async function setViewAsPerson(email: string | null): Promise<{ error?: string }> {
+  const real = await requireRealOwner();
+  const jar = await cookies();
+  if (email === null) {
+    jar.delete(VIEW_AS_COOKIE);
+    revalidatePath("/", "layout");
+    return {};
+  }
+  const wanted = email.trim().toLowerCase();
+  if (wanted === real.email.trim().toLowerCase()) {
+    return { error: "That is you - there is nothing to stand in" };
+  }
+  /* Resolved the way a sign-in resolves, NOT by looking for a users row. An
+     account row is only written at first sign-in, so requiring one refused
+     exactly the person this was built for: a staff member who exists in
+     house_members and has never logged in. */
+  const theirs = await signInIdentity(wanted);
+  const [row] = await db.select({ name: users.name }).from(users).where(eq(users.email, wanted));
+  if (!theirs.role && theirs.orgId === null) return { error: "No account with that address" };
+  const shownName = row?.name || wanted.split("@")[0];
+  /* Only people this owner is entitled to see at all. The platform's owner
+     runs the instance and may shadow anybody on it; a second operator's owner
+     runs their own workspace, and another company's engineer is not theirs to
+     look through. */
+  if (!isPlatformStaff(tenantViewer(real))) {
+    const mine = await visibleOrgs(real);
+    const ok = theirs.operatorOrgId === real.operatorOrgId
+      || (theirs.orgId !== null && mine.some((o) => o.id === theirs.orgId));
+    if (!ok) return { error: "Not found" };
+  }
+  jar.set(VIEW_AS_COOKIE, personaCookie({ kind: "person", email: wanted }), {
+    httpOnly: true, sameSite: "lax", path: "/",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 8,
+  });
+  await audit({
+    actor: real.email, entityType: "settings", entityId: "view_as",
+    action: `started viewing the portal as ${shownName} (read-only)`,
+  });
+  revalidatePath("/", "layout");
+  return {};
+}
+
+/**
+ * Everybody this owner may stand in for, for the picker.
+ *
+ * Grouped by organization on the way out, because "Sierra Spectra, then Bill"
+ * is how somebody thinks about it - and because a flat list of every account
+ * on the instance is a list nobody scrolls.
+ */
+export async function viewAsPeople(): Promise<{
+  email: string; name: string; role: string; orgName: string;
+}[]> {
+  const real = await requireRealOwner();
+  const platform = isPlatformStaff(tenantViewer(real));
+  const mine = platform ? [] : await visibleOrgs(real);
+  const brand = await getBrand();
+
+  /* Everybody with a way in, not everybody who has used it. An account row is
+     only written at first sign-in, so a staff member who has never logged in -
+     which is exactly the person whose setup you would want to check - exists
+     only in house_members or the client allowlist. Reading users alone left
+     the engineers out of the list, which is who this was built for. */
+  const [userRows, houseRows, allowRows] = await Promise.all([
+    db.select({ email: users.email, name: users.name }).from(users)
+      .orderBy(asc(users.email)).catch(() => []),
+    listHouseMembers().catch(() => []),
+    db.select({ entry: clientAllowlist.entry, orgId: clientAllowlist.orgId, orgName: orgs.name })
+      .from(clientAllowlist).leftJoin(orgs, eq(orgs.id, clientAllowlist.orgId)).catch(() => []),
+  ]);
+
+  const named = new Map<string, string>();
+  for (const r of userRows) named.set(r.email.trim().toLowerCase(), r.name ?? "");
+  for (const h of houseRows) if (!named.get(h.email)) named.set(h.email.trim().toLowerCase(), h.name ?? "");
+
+  const emails = new Set<string>([
+    ...userRows.map((r) => r.email.trim().toLowerCase()),
+    ...houseRows.map((h) => h.email.trim().toLowerCase()),
+    // Exact addresses only: an "@acme.com" rule is a door, not a person.
+    ...allowRows.map((a) => a.entry.trim().toLowerCase()).filter((e) => e && !e.startsWith("@")),
+  ]);
+
+  const me = real.email.trim().toLowerCase();
+  const out: { email: string; name: string; role: string; orgName: string }[] = [];
+  for (const email of [...emails].sort()) {
+    if (!email || email === me) continue;
+    const who = await signInIdentity(email);
+    if (!platform) {
+      const ok = who.operatorOrgId === real.operatorOrgId
+        || (who.orgId !== null && mine.some((o) => o.id === who.orgId));
+      if (!ok) continue;
+    }
+    out.push({
+      email,
+      name: named.get(email) || email.split("@")[0],
+      role: who.role || "client_viewer",
+      // Staff have no client org, so they list under the company they work
+      // for rather than under a blank heading.
+      orgName: who.orgName || brand.operatorName,
+    });
+  }
+  return out;
 }
 
 // ---------------- Asset sharing ----------------

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { reportTrail } from "@/app/actions";
+import { SHADOW_REFUSAL } from "@/lib/viewAs";
 
 /**
  * The page that appears when a page throws, and the one place a render error
@@ -19,7 +20,15 @@ export default function ErrorPage({ error, reset }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  /* The one "error" that is not one: a write refused because the operator is
+     standing in somebody's shoes. Their screen still shows their buttons -
+     that IS their screen - so pressing one is an easy mistake, and it should
+     read as a polite decline rather than as a crash on top of the bug being
+     chased. Recognised by message so every action gets it at once. */
+  const refused = error.message === SHADOW_REFUSAL;
+
   useEffect(() => {
+    if (refused) return;
     void reportTrail({
       kind: "error",
       route: window.location.pathname,
@@ -29,7 +38,25 @@ export default function ErrorPage({ error, reset }: {
       // with a generic string, is matched back to the server log.
       detail: `${error.digest ? `digest ${error.digest}\n` : ""}${error.stack ?? ""}`.trim(),
     }).catch(() => {});
-  }, [error]);
+  }, [error, refused]);
+
+  if (refused) {
+    return (
+      <div className="container">
+        <div className="card" style={{ marginTop: 40, padding: "22px 24px" }}>
+          <div className="card-title" style={{ marginBottom: 6 }}>
+            Nothing can be changed from here.
+          </div>
+          <div className="t-body mut" style={{ marginBottom: 14 }}>
+            You are looking at somebody else&apos;s screen. Their controls are
+            shown because that is what they see - but this mode only reads.
+            Leave it from the banner at the top to act as yourself.
+          </div>
+          <button className="btn accent" onClick={() => reset()}>Back to their screen</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container">
