@@ -64,6 +64,7 @@ import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
 import { CLIENT_GROUP_LABEL, clientMaySee, queueNeedsThem } from "@/lib/clientView";
 import { advisoryByCoverage, coverageOf, type CoverageAgreement } from "@/lib/coverage";
+import { dayOf } from "@/lib/serviceHistory";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { stateOf } from "@/lib/clientLandingData";
@@ -449,13 +450,26 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
      behind it are, and stay behind the organization's own gate. */
   const canSeePaper = inst.ownerOrgId !== null && await maySeeAgreements(user, inst.ownerOrgId);
 
-  /* The last job THIS workspace closed on it. Not "last serviced": a machine
+  /* The last work THIS workspace finished on it. Not "last serviced": a machine
      under contract with the manufacturer may well have been serviced last
      month by somebody whose work never reaches this record, and the panel says
-     whose work it is reporting for exactly that reason. */
-  const lastClosed = woRows
-    .filter((w) => w.closedAt !== null)
-    .sort((a, b) => (b.closedAt as Date).getTime() - (a.closedAt as Date).getTime())[0];
+     whose work it is reporting for exactly that reason.
+
+     Work orders AND completed maintenance, because a PM recorded as done files
+     a Done task and never a work order - so a panel reading only closed work
+     orders said "nothing closed on this record yet" about an annual PM we had
+     just performed. Same rule as the landing: see lib/serviceHistory. */
+  const lastClosed: { day: string; number: string; title: string } | undefined = [
+    ...woRows.flatMap((w) => (w.closedAt === null ? [] : [{
+      day: dayOf(w.closedAt), number: w.number, title: w.title,
+    }])),
+    ...taskRows.flatMap((t) => (
+      t.state !== "Done" || t.completedAt === null
+        || (t.origin !== "pm" && t.origin !== "pm_request")
+        ? []
+        : [{ day: dayOf(t.completedAt), number: "", title: t.title }]
+    )),
+  ].sort((a, b) => b.day.localeCompare(a.day))[0];
 
   /* Dismissing speaks for the whole organization - their colleagues stop
      seeing the line and the shop reads the name as a receipt - so it takes the
@@ -650,7 +664,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               operatorName={brand.operatorName}
               lastService={lastClosed
                 ? {
-                    on: shopMonthDay(lastClosed.closedAt as Date),
+                    on: shopMonthDay(new Date(`${lastClosed.day}T12:00:00Z`)),
                     number: lastClosed.number,
                     title: lastClosed.title,
                   }

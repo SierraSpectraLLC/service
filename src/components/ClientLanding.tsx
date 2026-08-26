@@ -140,7 +140,13 @@ export default function ClientLanding({
         {attention.length > 0 ? "Needs attention" : "Your instruments"}
         <span className="sp" />
         <span className="mut t-meta">
-          {attention.length} of {shown.length}
+          {/* "0 of 1" is a riddle: two numbers beside a heading that says
+              "Your instruments", with nothing saying of what. The count only
+              means anything when something is IN it, so with no exceptions it
+              says the plain thing instead. */}
+          {attention.length > 0
+            ? `${attention.length} of ${shown.length} need${attention.length === 1 ? "s" : ""} attention`
+            : `${shown.length} instrument${shown.length === 1 ? "" : "s"}`}
           {shape === "grouped" && locations.length > 1 && !where ? " · by room" : ""}
         </span>
       </h3>

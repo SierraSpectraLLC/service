@@ -3,6 +3,7 @@ import { db } from "@/db";
 import Link from "next/link";
 import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, orgSites, attachments, workOrders, users, pmSchedules, agreements } from "@/db/schema";
 import { coverageOf, coverageSummary, type CoverageAgreement } from "@/lib/coverage";
+import { dayOf, lastVisitBy, visitsOf, visitsThisYear, type Completion } from "@/lib/serviceHistory";
 import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
@@ -72,7 +73,10 @@ export default async function Home({ searchParams }: {
     // Who work can be assigned to: the logins of the organizations this viewer
     // works with. See lib/directory.
     visibleDirectory(user),
-    db.select({ instrumentId: tasks.instrumentId, assetId: tasks.assetId, dueDate: tasks.dueDate, state: tasks.state, assignee: tasks.assignee, title: tasks.title }).from(tasks).where(mine(tasks.instrumentId)),
+    // completedAt and origin ride along for the client's service history: a PM
+    // recorded as done files a Done TASK and never a work order, so counting
+    // only closed work orders reported real visits as none. See lib/serviceHistory.
+    db.select({ instrumentId: tasks.instrumentId, assetId: tasks.assetId, dueDate: tasks.dueDate, state: tasks.state, assignee: tasks.assignee, title: tasks.title, completedAt: tasks.completedAt, origin: tasks.origin }).from(tasks).where(mine(tasks.instrumentId)),
     db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, serial: assets.serial, manufacturer: assets.manufacturer, status: assets.status, sortOrder: assets.sortOrder }).from(assets).where(mine(assets.instrumentId)),
     // Archived systems included, so retiring the last system for a client (or
     // in a category) doesn't drop it out of the pickers.
@@ -260,18 +264,32 @@ export default async function Home({ searchParams }: {
       : [];
     const siteName = new Map(siteRows.map((x) => [x.id, x.name]));
 
-    /* Last visit: the most recent CLOSED job on this instrument. A visit is a
-       job somebody finished, which is the only record of one this app keeps -
-       it is not inferred from an audit line, which would count a field edit as
-       an engineer standing in the room. */
-    const lastVisitAt = new Map<number, Date>();
-    for (const w of woRows) {
-      if (w.instrumentId === null || w.closedAt === null) continue;
-      const seen = lastVisitAt.get(w.instrumentId);
-      if (!seen || w.closedAt > seen) lastVisitAt.set(w.instrumentId, w.closedAt);
-    }
-    const lastVisitBySys = new Map(
-      [...lastVisitAt].map(([id, at]) => [id, shopMonthDay(at)] as const));
+    /* A VISIT IS A DAY SOMEBODY COMPLETED WORK ON THE SYSTEM - from whichever
+       table recorded it. This used to read closed work orders alone, which is
+       a fact about filing rather than about service: a PM recorded as done
+       files a Done TASK and never a work order (see actions.alignMaintenance),
+       so a shop that ran a client's annual PM the way the maintenance panel
+       invites you to had it counted as no visit at all.
+
+       Still nothing inferred: a completion is a row somebody wrote saying work
+       finished, never an audit line, which would count a field edit as an
+       engineer standing in the room. See lib/serviceHistory. */
+    const completions: Completion[] = [
+      ...woRows.flatMap((w) => (w.instrumentId === null || w.closedAt === null ? [] : [{
+        instrumentId: w.instrumentId,
+        day: dayOf(w.closedAt),
+        planned: w.severity === "Planned",
+      }])),
+      ...taskRows.flatMap((t) => (
+        t.instrumentId === null || t.state !== "Done" || t.completedAt === null
+          || (t.origin !== "pm" && t.origin !== "pm_request")
+          ? []
+          : [{ instrumentId: t.instrumentId, day: dayOf(t.completedAt), planned: true }]
+      )),
+    ];
+    const visits = visitsOf(completions);
+    const lastVisitBySys = new Map([...lastVisitBy(visits)]
+      .map(([id, day]) => [id, shopMonthDay(new Date(`${day}T12:00:00Z`))] as const));
 
     const pmBySys = new Map<number, string>();
     for (const p of pmDueRows) {
@@ -371,12 +389,10 @@ export default async function Home({ searchParams }: {
       systemIds: rows.map((r) => r.id),
     });
 
-    // Visits: closed jobs this calendar year, split the way the work orders
-    // themselves are already labelled. Both halves are counted, never derived.
-    const yearStart = `${today.slice(0, 4)}-01-01`;
-    const closedThisYear = woRows.filter((w) =>
-      w.closedAt !== null && w.closedAt.toISOString().slice(0, 10) >= yearStart);
-    const planned = closedThisYear.filter((w) => w.severity === "Planned").length;
+    // Visits this calendar year, from the same rule the cards use. Both halves
+    // are counted, never derived.
+    const closedThisYear = visitsThisYear(visits, today);
+    const planned = closedThisYear.filter((v) => v.planned).length;
 
     /* A reseller reads a process, not a floor. Their units are inventory
        heading for a sale rather than benches that have to stay up, so the
@@ -501,8 +517,7 @@ export default async function Home({ searchParams }: {
                 : `visits this year · ${planned} planned, ${closedThisYear.length - planned} unplanned`,
             },
             (() => {
-              const touched = new Set(closedThisYear
-                .map((w) => w.instrumentId).filter((x): x is number => x !== null)).size;
+              const touched = new Set(closedThisYear.map((v) => v.instrumentId)).size;
               return {
                 value: String(touched),
                 label: `instrument${touched === 1 ? "" : "s"} worked on`,
