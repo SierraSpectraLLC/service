@@ -91,7 +91,7 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
     visibleDirectory(user),
   ]);
   if (!asset) notFound();
-  const fileQuota = await storeQuota(asset.ownerOrgId ?? null);
+  const fileQuota = await storeQuota(asset.ownerOrgId ?? null, asset.tenantOrgId);
 
   // The rest of this unit's stack, for the "serves / served by" relationship.
   // Only the columns needed to name one and to apply the rules in

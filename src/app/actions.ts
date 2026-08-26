@@ -3092,7 +3092,7 @@ export async function recordAttachments(
   // Charged to whoever OWNS the record, not to whoever pressed upload: a tune
   // report on a client's system is the client's paperwork, and the shop filing
   // it on their behalf shouldn't pay for their storage.
-  const guard = await guardStorage(await storeOwnerForTarget(t0), files.reduce((n, f) => n + (f.size || 0), 0));
+  const guard = await guardStorage(await storeOwnerForTarget(t0), myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
@@ -3136,7 +3136,7 @@ export async function addPhotos(
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
   const onSystem = t0.instrumentId !== null && t0.assetId === null;
-  const guard = await guardStorage(await storeOwnerForTarget(t0), files.reduce((n, f) => n + (f.size || 0), 0));
+  const guard = await guardStorage(await storeOwnerForTarget(t0), myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
 
   const rows = await db.insert(attachments).values(files.map((f) => ({
@@ -3607,7 +3607,7 @@ export async function recordLibraryFiles(
   // An org's files land on its shelf; the house's land on the operator's.
   const u = await requireEditor();
   if (!files.length) return {};
-  const guard = await guardStorage(u.orgId, files.reduce((n, f) => n + (f.size || 0), 0));
+  const guard = await guardStorage(u.orgId, myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
   // Dropped into an open folder, they belong in it. Checked rather than
   // trusted: the id comes from a URL, and a folder in somebody else's store
@@ -3806,7 +3806,17 @@ export async function attachLibraryFile(target: WorkTarget, attachmentId: number
   // record's attachment would move evidence between systems by a different
   // name; reaching into another org's shelf would be a leak.
   if (!src || src.instrumentId !== null || src.assetId !== null) return { error: "Not a library file" };
+  /*
+   * "One of yours" has to test the WORKSPACE as well as the organization,
+   * because for staff u.orgId is null and so is the org on every house shelf
+   * file - in every workspace. The org test alone therefore passed any other
+   * operator's private shelf, and this function then copies that file's bytes
+   * onto the caller's record. Platform staff (readTenant null) keep the reach
+   * they have everywhere else.
+   */
   if ((src.orgId ?? null) !== u.orgId) return { error: "Not found" };
+  const myTenant = readTenant(u);
+  if (myTenant !== null && src.tenantOrgId !== myTenant) return { error: "Not found" };
   const already = await db.select({ id: attachments.id }).from(attachments)
     .where(and(
       eq(attachments.url, src.url),
@@ -3889,7 +3899,7 @@ export async function uploadAgreementPapers(
   if (!a) return { error: "Not found" };
   const gate = await adminOrgGate(u, a.orgId);
   if ("error" in gate) return gate;
-  const guard = await guardStorage(u.orgId, files.reduce((n, f) => n + (f.size || 0), 0));
+  const guard = await guardStorage(u.orgId, myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
   const rows = await db.insert(attachments).values(files.map((f) => ({
     fileName: f.fileName, url: f.url, size: f.size, description: "",
@@ -3940,6 +3950,9 @@ export async function listLibraryFiles(): Promise<{
     .where(and(
       isNull(attachments.instrumentId), isNull(attachments.assetId),
       u.orgId === null ? isNull(attachments.orgId) : eq(attachments.orgId, u.orgId),
+      // Staff carry orgId null, and so does every house shelf on the instance,
+      // so the line above alone listed every operator's private library.
+      forTenant(attachments.tenantOrgId, readTenant(u)),
     ))
     .orderBy(desc(attachments.createdAt))
     .limit(300);
@@ -3963,9 +3976,11 @@ async function storeOwnerForTarget(
   return t.asset?.ownerOrgId ?? null;
 }
 
-async function guardStorage(orgId: number | null, addBytes: number): Promise<{ error: string } | undefined> {
+async function guardStorage(
+  orgId: number | null, tenant: number | null, addBytes: number,
+): Promise<{ error: string } | undefined> {
   if (addBytes <= 0) return undefined;
-  const q = await storeQuota(orgId);
+  const q = await storeQuota(orgId, tenant);
   if (fits(q.usedBytes, addBytes, q.limitBytes === null ? 0 : Math.round(q.limitBytes / MB))) return undefined;
   return { error: overQuotaMessage(q.storeName, q, addBytes) };
 }
@@ -6971,7 +6986,7 @@ export async function setOrgStorageLimit(orgId: number, limitMb: number): Promis
   if ("error" in gate) return gate;
   const { org } = gate;
   if (mb > 0) {
-    const used = await storeUsedBytes(orgId);
+    const used = await storeUsedBytes(orgId, myTenantOrgId(u));
     if (used > mb * MB) {
       return { error: `${org.name} is already storing ${fmtBytes(used)}. Set at least that, or have them remove files first.` };
     }
@@ -10197,7 +10212,26 @@ export async function listHouseMembers(): Promise<{
   const root = rootOwner(env);
   const owners = ownerEmails(env, members);
   const rows = await db.select().from(houseMembers);
-  const emails = [...new Set([...env, ...rows.map((r) => r.email.toLowerCase())])];
+  /**
+   * WHOSE people. house_members is one instance-wide table, and this used to
+   * return all of it - so a second service company's owner opened Settings and
+   * read the first company's engineers by name and address, beside a "revoke"
+   * link and a "temp password" one. The listing is also what Settings > Usage
+   * decides from, so the same row leaked that person's last sign-in.
+   *
+   * An operator sees the members stamped with their own workspace. Nobody else's,
+   * and none of the STAFF_EMAILS entries either: those are the ROOT operator's
+   * break-glass access (lib/houseRole), so they belong to that workspace and not
+   * to whoever happens to be reading. Platform staff still see the instance -
+   * that is the support path, and the whole reason readTenant returns null.
+   */
+  const platform = isPlatformStaff(tenantViewer(u));
+  const mine = myTenantOrgId(u);
+  const visible = platform ? rows : rows.filter((r) => (r.orgId ?? null) === mine);
+  const emails = [...new Set([
+    ...(platform ? env : []),
+    ...visible.map((r) => r.email.toLowerCase()),
+  ])];
   return emails
     .map((email) => {
       const row = rows.find((r) => r.email.toLowerCase() === email);
@@ -11769,7 +11803,7 @@ export async function listStoreFilesForRef(): Promise<{
   files: { id: number; fileName: string; kind: string; description: string; size: number; isPhoto: boolean; where: string }[];
 }> {
   const u = await requireStaff();
-  const rows = await storeFiles(u.orgId ?? null, 500).catch(() => []);
+  const rows = await storeFiles(u.orgId ?? null, readTenant(u), 500).catch(() => []);
   return {
     files: rows.map((r) => ({
       id: r.id, fileName: r.fileName, kind: r.kind, description: r.description, size: r.size,

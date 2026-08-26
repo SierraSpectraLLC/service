@@ -334,7 +334,7 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
   // enforces the same rule (resolveTarget's lateFiles), so this widening is
   // display, not authority.
   const canAttach = canAdd || (canEdit && staff);
-  const fileQuota = await storeQuota(inst?.ownerOrgId ?? asset?.ownerOrgId ?? null);
+  const fileQuota = await storeQuota(inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, inst?.tenantOrgId ?? asset?.tenantOrgId ?? null);
 
   // Who the composer may offer for an @mention: this record's readers, and
   // nobody else - see lib/mentionAudience.

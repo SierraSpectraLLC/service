@@ -14,11 +14,17 @@ import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
  * stewarded work carries) and as its own org row, since an operator can own
  * equipment like anyone else. Those are one tenant and must be one store, or it
  * would quietly get twice the ceiling it was sold.
+ *
+ * WHICH operator, though. This used to resolve the house store against
+ * app_settings.operator_org_id - the company that runs the INSTANCE - so every
+ * workspace asking for "our own shelf" was handed that company's org id. A
+ * second service company opened Files, saw a tab labelled with its own name,
+ * and read the first company's contracts and manuals. The house store belongs
+ * to whoever is asking, which is what `tenant` is.
  */
-async function storeKeys(orgId: number | null): Promise<[number | null, number | null]> {
-  const op = (await getBrand()).operatorOrgId;
-  if (orgId === null) return [null, op];
-  if (op !== null && orgId === op) return [op, null];
+function storeKeys(orgId: number | null, tenant: number | null): [number | null, number | null] {
+  if (orgId === null) return [null, tenant];
+  if (tenant !== null && orgId === tenant) return [tenant, null];
   return [orgId, orgId];
 }
 
@@ -39,8 +45,18 @@ async function storeKeys(orgId: number | null): Promise<[number | null, number |
  * `= NULL` would quietly match nothing. Two keys per test, because the operator
  * answers to both of its names (see storeKeys).
  */
-function storeWhere(k1: number | null, k2: number | null) {
-  return sql`
+function storeWhere(k1: number | null, k2: number | null, tenant: number | null) {
+  /*
+   * The tenant test is not belt-and-braces, it is load-bearing, because both
+   * halves of the org test below match on NULL: a shelf file carries org_id
+   * NULL when it belongs to a house, and a system carries owner_org_id NULL
+   * when nobody has claimed it. Every workspace has rows like that, so without
+   * this line one operator's shelf and another's unowned systems land in the
+   * same bucket - which is exactly what happened. Null tenant is platform
+   * staff, and drops the predicate.
+   */
+  const own = tenant === null ? sql`TRUE` : sql`a.tenant_org_id IS NOT DISTINCT FROM ${tenant}::integer`;
+  return sql`${own} AND (
        (a.instrument_id IS NULL AND a.asset_id IS NULL
         AND (a.org_id IS NOT DISTINCT FROM ${k1}::integer
           OR a.org_id IS NOT DISTINCT FROM ${k2}::integer))
@@ -49,7 +65,7 @@ function storeWhere(k1: number | null, k2: number | null) {
           OR i.owner_org_id IS NOT DISTINCT FROM ${k2}::integer))
     OR (a.asset_id IS NOT NULL
         AND (s.owner_org_id IS NOT DISTINCT FROM ${k1}::integer
-          OR s.owner_org_id IS NOT DISTINCT FROM ${k2}::integer))`;
+          OR s.owner_org_id IS NOT DISTINCT FROM ${k2}::integer)))`;
 }
 
 // neon-http returns { rows } from execute; other drivers a bare array.
@@ -58,9 +74,9 @@ const firstRow = <T,>(res: unknown): T | undefined =>
 const allRows = <T,>(res: unknown): T[] =>
   Array.isArray(res) ? (res as T[]) : ((res as { rows?: T[] }).rows ?? []);
 
-export async function storeUsedBytes(orgId: number | null): Promise<number> {
+export async function storeUsedBytes(orgId: number | null, tenant: number | null): Promise<number> {
   // k1/k2 rather than a/b: `a` is the attachments alias inside the SQL.
-  const [k1, k2] = await storeKeys(orgId);
+  const [k1, k2] = storeKeys(orgId, tenant);
   // DISTINCT on the blob URL, so a document filed onto four units is one stored
   // file. Summing over the subquery rather than SUM(DISTINCT size) - two
   // unrelated files that happen to be the same length are still two files.
@@ -70,7 +86,7 @@ export async function storeUsedBytes(orgId: number | null): Promise<number> {
       FROM ${attachments} a
       LEFT JOIN ${instruments} i ON i.id = a.instrument_id
       LEFT JOIN ${assets} s ON s.id = a.asset_id
-      WHERE ${storeWhere(k1, k2)}
+      WHERE ${storeWhere(k1, k2, tenant)}
     ) t
   `);
   return Number(firstRow<{ total: string | number }>(res)?.total ?? 0);
@@ -104,8 +120,8 @@ export type StoreFileRow = {
  * needs paging and a search box, not a page that quietly takes ten seconds. The
  * caller is told when it truncated.
  */
-export async function storeFiles(orgId: number | null, limit = 500): Promise<StoreFileRow[]> {
-  const [k1, k2] = await storeKeys(orgId);
+export async function storeFiles(orgId: number | null, tenant: number | null, limit = 500): Promise<StoreFileRow[]> {
+  const [k1, k2] = storeKeys(orgId, tenant);
   const res = await db.execute(sql`
     SELECT a.id, a.file_name, a.url, a.size, a.kind, a.description,
            a.uploaded_by, a.created_at, a.org_id, a.framing, a.folder_id,
@@ -118,7 +134,7 @@ export async function storeFiles(orgId: number | null, limit = 500): Promise<Sto
     FROM ${attachments} a
     LEFT JOIN ${instruments} i ON i.id = a.instrument_id
     LEFT JOIN ${assets} s ON s.id = a.asset_id
-    WHERE ${storeWhere(k1, k2)}
+    WHERE ${storeWhere(k1, k2, tenant)}
     ORDER BY a.created_at DESC, a.id DESC
     LIMIT ${limit}
   `);
@@ -140,9 +156,9 @@ export async function storeFiles(orgId: number | null, limit = 500): Promise<Sto
 }
 
 /** Usage and ceiling together, ready for the meter. */
-export async function storeQuota(orgId: number | null): Promise<Quota & { storeName: string }> {
+export async function storeQuota(orgId: number | null, tenant: number | null): Promise<Quota & { storeName: string }> {
   const [used, limitMb, storeName] = await Promise.all([
-    storeUsedBytes(orgId),
+    storeUsedBytes(orgId, tenant),
     storeLimitMb(orgId),
     storeLabel(orgId),
   ]);

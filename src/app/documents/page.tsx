@@ -9,7 +9,7 @@ import { shopTime, shopToday } from "@/lib/shopday";
 import { storeFiles, storeQuota, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
-import { visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
 import FileLinksCard, { type StoreLink } from "@/components/FileLinksCard";
 import LibraryUpload from "@/components/LibraryUpload";
@@ -52,15 +52,24 @@ export default async function DocumentsPage(
   // nothing at all happening.
   const { store: storeParam, cloud: cloudNote, folder: folderParam } = await searchParams;
   const wanted = storeParam && /^\d+$/.test(storeParam) ? parseInt(storeParam) : null;
-  // Only the house may look at another store; everyone else gets their own,
-  // whatever the query string says.
-  const viewing = isHouseUser ? wanted : user.orgId;
+  /*
+   * Only the house may look at another store; everyone else gets their own,
+   * whatever the query string says. And "another store" means one of THIS
+   * workspace's organizations: the id arrives in the URL, so without checking
+   * it against the reachable set a staff member could type another service
+   * company's client id and read their files. visibleOrgs already answers
+   * exactly that question, and platform staff still see everything through it.
+   */
+  const reachable = isHouseUser ? await visibleOrgs(user).catch(() => []) : [];
+  const viewing = isHouseUser
+    ? (wanted !== null && reachable.some((o) => o.id === wanted) ? wanted : null)
+    : user.orgId;
   const isOwnStore = viewing === user.orgId;
 
   const [rows, quota, orgRows, brand, guestRows, cloud] = await Promise.all([
-    storeFiles(viewing, CAP).catch(() => []),
-    storeQuota(viewing),
-    isHouseUser ? visibleOrgs(user).catch(() => []) : [],
+    storeFiles(viewing, readTenant(user), CAP).catch(() => []),
+    storeQuota(viewing, readTenant(user)),
+    reachable,
     getBrand(),
     // Readable, but somebody else's - a system shared with them, or one they
     // sold and stayed on as a viewer. These are why the PDF studio can offer
@@ -72,9 +81,15 @@ export default async function DocumentsPage(
   ]);
   // The store's folders. Loose files only - a file on a system is already
   // filed where it belongs; see lib/folders.
+  // Scoped by tenant as well as by org, because the house shelf is org_id NULL
+  // in every workspace - so "the folders with no org" is otherwise everybody's.
+  const storeTenant = readTenant(user);
   const folderRows = await db.select({ id: foldersTable.id, name: foldersTable.name, parentId: foldersTable.parentId })
     .from(foldersTable)
-    .where(viewing === null ? isNull(foldersTable.orgId) : eq(foldersTable.orgId, viewing))
+    .where(and(
+      viewing === null ? isNull(foldersTable.orgId) : eq(foldersTable.orgId, viewing),
+      forTenant(foldersTable.tenantOrgId, storeTenant),
+    ))
     .orderBy(asc(foldersTable.name))
     .catch(() => []);
   // A folder id from the URL only counts if it is one of this store's - a
@@ -103,8 +118,15 @@ export default async function DocumentsPage(
   const canOrganise = canEdit && (isOwnStore || isHouseUser);
   const [dropRows, shareRows] = await Promise.all([
     canOrganise
+      // A drop link row carries its TOKEN, and that token is the whole
+      // credential: /api/drop/[token] mints a Blob upload against nothing else.
+      // Unscoped, the house-shelf branch handed one operator every other
+      // operator's live upload tokens.
       ? db.select().from(dropLinks)
-          .where(viewing === null ? isNull(dropLinks.orgId) : eq(dropLinks.orgId, viewing))
+          .where(and(
+            viewing === null ? isNull(dropLinks.orgId) : eq(dropLinks.orgId, viewing),
+            forTenant(dropLinks.tenantOrgId, storeTenant),
+          ))
           .orderBy(desc(dropLinks.createdAt)).limit(30).catch(() => [])
       : [],
     isOwnStore && canEdit

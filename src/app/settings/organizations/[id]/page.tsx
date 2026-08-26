@@ -15,7 +15,7 @@ import BillingPolicyPanel from "@/components/BillingPolicyPanel";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
-import { isHouse, maySeeAgreements } from "@/lib/tenancy";
+import { isHouse, maySeeAgreements, readTenant } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
 import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
@@ -55,7 +55,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     getBrand(),
   ]);
   if (!org) notFound();
-  const quota = await storeQuota(orgId);
+  const quota = await storeQuota(orgId, readTenant(user));
 
   // What each person's account already has on it: the profile they will be
   // called by, and whether a password is standing in for the codes. Read here

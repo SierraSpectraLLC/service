@@ -41,7 +41,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
     .slice(0, 30);
   if (!files.length) return NextResponse.json({ error: "Nothing to record" }, { status: 400 });
 
-  const q = await storeQuota(link.orgId);
+  const q = await storeQuota(link.orgId, link.tenantOrgId);
   const addBytes = files.reduce((n, f) => n + f.size, 0);
   if (!fits(q.usedBytes, addBytes, q.limitBytes === null ? 0 : Math.round(q.limitBytes / MB))) {
     return NextResponse.json({ error: "The store this link points to is full" }, { status: 400 });

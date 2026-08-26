@@ -9,7 +9,7 @@ import { shopTime } from "@/lib/shopday";
 import { storeFiles } from "@/lib/storeUsage";
 import { groupStoredFiles } from "@/lib/storeGroup";
 import { isPhotoFile } from "@/lib/photos";
-import { visibleOrgs } from "@/lib/tenancy";
+import { readTenant, visibleOrgs } from "@/lib/tenancy";
 import GalleryGrid from "@/components/GalleryGrid";
 import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
@@ -37,13 +37,20 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
 
   const { store: storeParam } = await searchParams;
   const wanted = storeParam && /^\d+$/.test(storeParam) ? parseInt(storeParam) : null;
-  // Only the house may look at another store; everyone else gets their own,
-  // whatever the query string says.
-  const viewing = isHouseUser ? wanted : user.orgId;
+  /*
+   * Only the house may look at another store; everyone else gets their own -
+   * and the id in the query string has to be one of this workspace's
+   * organizations, or a staff member could name another service company's
+   * client and read their photographs.
+   */
+  const reachable = isHouseUser ? await visibleOrgs(user).catch(() => []) : [];
+  const viewing = isHouseUser
+    ? (wanted !== null && reachable.some((o) => o.id === wanted) ? wanted : null)
+    : user.orgId;
 
   const [rows, orgRows, brand] = await Promise.all([
-    storeFiles(viewing, CAP).catch(() => []),
-    isHouseUser ? visibleOrgs(user).catch(() => []) : [],
+    storeFiles(viewing, readTenant(user), CAP).catch(() => []),
+    reachable,
     getBrand(),
   ]);
 

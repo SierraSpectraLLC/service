@@ -1,7 +1,7 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { list } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/authz";
+import { currentUser, myTenantOrgId } from "@/lib/authz";
 import { overQuotaMessage } from "@/lib/storage";
 import { storeQuota } from "@/lib/storeUsage";
 
@@ -45,7 +45,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         // checked against the house here and against the client in
         // recordAttachments - the strictest of the two wins, which is the safe
         // direction to be wrong in.
-        const q = await storeQuota(u.orgId);
+        const q = await storeQuota(u.orgId, myTenantOrgId(u));
         if (q.state === "full") throw new Error(overQuotaMessage(q.storeName, q, 0));
         const headroom = q.remainingBytes === null ? Infinity : q.remainingBytes;
         return {

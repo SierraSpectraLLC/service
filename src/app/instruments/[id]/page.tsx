@@ -202,7 +202,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   if (!inst) notFound();
   // Whose storage a file uploaded here would land in - the system's owner, not
   // whoever happens to be looking at it.
-  const fileQuota = await storeQuota(inst.ownerOrgId ?? null);
+  const fileQuota = await storeQuota(inst.ownerOrgId ?? null, inst.tenantOrgId);
 
   // An asset can carry work of its own (recorded on its page, with no system).
   // Count it in the per-asset "open" badge so nothing hides on a subpage.

@@ -29,7 +29,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ token: string 
       onBeforeGenerateToken: async () => {
         const [link] = await db.select().from(dropLinks).where(eq(dropLinks.token, token));
         if (!link || !linkUsable(link, shopToday())) throw new Error("This link is no longer active");
-        const q = await storeQuota(link.orgId);
+        const q = await storeQuota(link.orgId, link.tenantOrgId);
         if (q.state === "full") throw new Error(overQuotaMessage(q.storeName, q, 0));
         const headroom = q.remainingBytes === null ? Infinity : q.remainingBytes;
         return {

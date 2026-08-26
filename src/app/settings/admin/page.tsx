@@ -7,7 +7,7 @@ import { currentUser } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { shopTime } from "@/lib/shopday";
 import { systemLabel } from "@/lib/systemLabel";
-import { visibleOrgs } from "@/lib/tenancy";
+import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { tempState } from "@/lib/tempPassword";
 import SharePanel from "@/components/SharePanel";
 import AccessRequestsPanel from "@/components/AccessRequestsPanel";
@@ -31,24 +31,49 @@ export default async function AdminSettingsPage() {
   if (user.role !== "owner") redirect("/");
   const isPlatform = isPlatformStaff(tenantViewer(user));
 
+  /**
+   * This page moves ownership, so it lists everything - and "everything" has to
+   * mean this workspace's everything. Unscoped, a second service company's owner
+   * read the first one's systems by external id and saw who they were shared
+   * with. readTenant is null for platform staff, and forTenant then drops the
+   * predicate, which is how the instance's own operator keeps seeing all of it.
+   */
+  const tenant = readTenant(user);
   const siteRows = await db.select({
     name: orgSites.name, address: orgSites.address, orgName: orgs.name,
   }).from(orgSites).innerJoin(orgs, eq(orgs.id, orgSites.orgId))
-    .where(eq(orgSites.archived, false)).orderBy(asc(orgs.name), asc(orgSites.name));
+    .where(and(eq(orgSites.archived, false), forTenant(orgSites.tenantOrgId, tenant)))
+    .orderBy(asc(orgs.name), asc(orgSites.name));
   const [rows, orgRows, assetRows, shareRows, requestRows, recordRows] = await Promise.all([
-    db.select().from(instruments).orderBy(asc(instruments.archived), asc(instruments.externalId)),
+    db.select().from(instruments).where(forTenant(instruments.tenantOrgId, tenant))
+      .orderBy(asc(instruments.archived), asc(instruments.externalId)),
     visibleOrgs(user),
-    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, sortOrder: assets.sortOrder }).from(assets),
+    db.select({ instrumentId: assets.instrumentId, kind: assets.kind, model: assets.model, sortOrder: assets.sortOrder })
+      .from(assets).where(forTenant(assets.tenantOrgId, tenant)),
+    // The share and request rows hang off a system rather than carrying a stamp,
+    // so they are scoped through the system they belong to.
     db.select({ instrumentId: systemShares.instrumentId, orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
-      .from(systemShares).innerJoin(orgs, eq(orgs.id, systemShares.orgId)).orderBy(asc(orgs.name)),
+      .from(systemShares)
+      .innerJoin(orgs, eq(orgs.id, systemShares.orgId))
+      .innerJoin(instruments, eq(instruments.id, systemShares.instrumentId))
+      .where(forTenant(instruments.tenantOrgId, tenant))
+      .orderBy(asc(orgs.name)),
     db.select({ id: accessRequests.id, instrumentId: accessRequests.instrumentId, kind: accessRequests.kind, requestedBy: accessRequests.requestedBy, message: accessRequests.message, createdAt: accessRequests.createdAt, orgName: orgs.name, orgKind: orgs.kind })
-      .from(accessRequests).innerJoin(orgs, eq(orgs.id, accessRequests.orgId))
-      .where(eq(accessRequests.status, "pending")).orderBy(asc(accessRequests.createdAt)),
+      .from(accessRequests)
+      .innerJoin(orgs, eq(orgs.id, accessRequests.orgId))
+      .innerJoin(instruments, eq(instruments.id, accessRequests.instrumentId))
+      .where(and(eq(accessRequests.status, "pending"), forTenant(instruments.tenantOrgId, tenant)))
+      .orderBy(asc(accessRequests.createdAt)),
     // Current records only: a superseded one is still on disk and still reads
     // at its URL, but "who holds a frozen copy" is answered by the live set.
+    // Scoped by the ORG that holds it, since the system it froze may be gone.
     db.select({ id: engagementRecords.id, instrumentId: engagementRecords.instrumentId, kind: engagementRecords.kind, externalId: engagementRecords.externalId, revokedAt: engagementRecords.revokedAt, orgName: orgs.name })
-      .from(engagementRecords).innerJoin(orgs, eq(orgs.id, engagementRecords.orgId))
-      .where(isNull(engagementRecords.supersededAt))
+      .from(engagementRecords)
+      .innerJoin(orgs, eq(orgs.id, engagementRecords.orgId))
+      .where(and(
+        isNull(engagementRecords.supersededAt),
+        tenant === null ? undefined : eq(orgs.parentOrgId, tenant),
+      ))
       .orderBy(asc(engagementRecords.revokedAt)),
   ]);
 
