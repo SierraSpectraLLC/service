@@ -221,9 +221,13 @@ instance", as opposed to instances in general.
 **No terminal?** `.github/workflows/demo-workspace.yml` is the same four
 actions behind a button: Actions > Demo workspace > Run workflow, pick
 `check` / `seed` / `reset` / `wipe`. It reads `DATABASE_URL`, `DEMO_PASSWORD`
-and `BLOB_READ_WRITE_TOKEN` from a `demo` **environment** rather than from
-repository secrets, so ordinary CI cannot see the production connection string,
-and the environment can carry an approval rule. The output lands in the job
+and `BLOB_READ_WRITE_TOKEN` from a `demo` **environment** where that is
+available, so ordinary CI cannot see the production connection string and the
+environment can carry an approval rule - but environment *secrets* are not
+offered on every plan for a private repository, and plain **repository secrets
+work unchanged** (`secrets.X` reads those too; an environment secret of the same
+name simply wins). The cost of the simpler route is that every workflow in the
+repo can read them, `ci.yml` included. The output lands in the job
 summary, which is what GitHub's mobile app shows without making anybody scroll
 a log. `DEMO_PASSWORD` is required for `seed` and `reset` on purpose: a
 generated password would have to be printed to be useful, and a printed

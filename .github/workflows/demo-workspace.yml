@@ -9,13 +9,22 @@
 #    workflow's `environment` input when you run it. A name that does not match
 #    is the one failure mode here that is silent: GitHub creates an empty
 #    environment rather than complaining, and every secret reads as unset.)
-#   Add these secrets TO THAT ENVIRONMENT (not to the repository - an
-#   environment secret is readable only by a job that names the environment,
-#   so ordinary CI cannot see your production connection string):
+#   Add these secrets:
 #     DATABASE_URL          the pooled Neon string
 #     DEMO_PASSWORD         the password you will hand over (10+ chars, and it
 #                           may not contain the local part of the owner address)
 #     BLOB_READ_WRITE_TOKEN optional; without it the demo's files do not open
+#
+#   ON THE ENVIRONMENT if you can - an environment secret is readable only by a
+#   job that names the environment, so ordinary CI never sees your production
+#   connection string. But environment SECRETS are not offered on every plan for
+#   a private repository (variables sometimes are, on the same page, which is
+#   its own trap), so this is a preference and not a requirement.
+#
+#   REPOSITORY SECRETS WORK TOO, unchanged: Settings > Secrets and variables >
+#   Actions > Secrets tab > New repository secret. `secrets.X` reads those as
+#   well; an environment secret of the same name simply wins. The cost is that
+#   every workflow in the repo can then read them, ci.yml included.
 #   Optionally add an approval rule to the environment so a run needs a second
 #   pair of eyes.
 #
