@@ -74,8 +74,13 @@ export default async function ClientOrderPage({ params }: { params: Promise<{ id
               {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
             </span>
             {qtyOf(l) !== 1 && <span className="mut t-small">× {qtyOf(l)}</span>}
+            {/* Says what is true rather than showing a zero: the line was
+                done and the agreement paid for it, which is the whole value
+                of having one. */}
             <b className="mono t-body" style={{ width: 90, textAlign: "right" }}>
-              {l.covered ? formatCents(0) : formatCents(Math.round(qtyOf(l) * l.unitCents))}
+              {l.covered
+                ? <span className="t-small" style={{ color: "var(--t-good-fg)" }}>covered</span>
+                : formatCents(Math.round(qtyOf(l) * l.unitCents))}
             </b>
           </div>
         ))}

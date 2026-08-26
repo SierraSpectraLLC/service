@@ -61,6 +61,7 @@ import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
 import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
+import { CLIENT_GROUP_LABEL, clientMaySee } from "@/lib/clientView";
 import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
@@ -501,7 +502,12 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
         // Six working contexts instead of four catch-alls: Now is whose move
         // it is and who holds it; Work is the jobs; Configuration is what the
         // system IS; Files and History split paper from log.
-        groups={[
+        /* A client sees their own machine, not the shop's working memory -
+           see lib/clientView, where the allow-list and the words live. The
+           layout machinery is identical either way; only what goes into it
+           changes, so both sides of a conversation are looking at the same
+           shape of page. */
+        groups={groupsFor(isStaff, [
           { key: "now", label: "Now", keys: ["queue", "custody"],
             badge: !queueMine ? `${queueDays}d` : undefined, badgeTone: "warn" },
           { key: "work", label: "Work",
@@ -520,8 +526,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               const seen = readRows[0]?.lastSeenAt;
               return visiblePosts.filter((x) => x.authorEmail !== user.email && (!seen || x.createdAt > seen)).length || undefined;
             })() },
-        ]}
-        panels={[
+        ])}
+        panels={panelsFor(isStaff, [
           { key: "system", label: "System", node: (
             <SystemPanel
               instrument={{ id: inst.id, externalId: inst.externalId, client: inst.client, category: inst.category, priority: inst.priority, gxp: inst.gxp, lead: inst.lead, notes: inst.notes, archived: inst.archived, archivedBy: inst.archivedBy, name: inst.name, blockedReason: inst.blockedReason,
@@ -795,8 +801,34 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               }))} />
             </div>
           ) },
-        ]}
+        ])}
       />
     </div>
   );
+}
+
+/**
+ * The panels this viewer gets. Staff get everything; a client gets the
+ * allow-list in lib/clientView and nothing that is merely absent from it.
+ */
+function panelsFor<T extends { key: string }>(isStaff: boolean, all: T[]): T[] {
+  return isStaff ? all : all.filter((p) => clientMaySee(p.key));
+}
+
+/**
+ * The contexts this viewer gets, in their words, with any that emptied out
+ * dropped - a rail button leading to nothing is the dead button the band
+ * layout shipped for years.
+ */
+function groupsFor<T extends { key: string; label: string; keys: string[] }>(
+  isStaff: boolean, all: T[],
+): T[] {
+  if (isStaff) return all;
+  return all
+    .map((g) => ({
+      ...g,
+      label: CLIENT_GROUP_LABEL[g.key] ?? g.label,
+      keys: g.keys.filter(clientMaySee),
+    }))
+    .filter((g) => g.keys.length > 0);
 }

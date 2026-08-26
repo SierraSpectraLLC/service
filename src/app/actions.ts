@@ -51,7 +51,7 @@ import {
 } from "@/lib/backfill";
 import {
   asStatementRow, billingContext, creditFor, depositOffsetsFor, draftSourceFor, dueFor, invoiceById, invoiceForOrg,
-  invoicesForOrg,
+  invoicesForOrg, quoteForOrg,
 } from "@/lib/invoiceData";
 import {
   addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
@@ -12775,6 +12775,14 @@ function revQuote(q: { id: number; workOrderId: number | null }) {
   revalidatePath("/money/quotes");
   revalidatePath("/money");
   if (q.workOrderId) revalidatePath(`/work/${q.workOrderId}`);
+  // The client's side of the same quote. It worked before only because both
+  // portal pages are force-dynamic, which is a property of those files rather
+  // than a decision made here - and the client landing now counts unanswered
+  // quotes, so a stale one would keep telling them to answer something they
+  // already answered.
+  revalidatePath(`/orders/q/${q.id}`);
+  revalidatePath("/orders");
+  revalidatePath("/");
 }
 
 /**
@@ -12929,21 +12937,34 @@ async function quoteByToken(token: string, quoteId: number): Promise<
   return { link, q };
 }
 
+export type QuoteAnswer = { error?: string; depositInvoiceId?: number; onHold?: boolean };
+
 /**
- * The client says yes.
+ * The client says yes - everything that follows from it, once.
  *
- * Three things follow, in this order and all of them audited: the job is taken
+ * Three things happen, in this order and all of them audited: the job is taken
  * off its wait, a deposit invoice is raised if the quote asked for one, and the
  * answer is written where the engineer will read it. If the client is on credit
  * hold the job is still recorded - it opens held, and the portal said so before
  * they pressed the button.
+ *
+ * This is the core, with no authorization in it at all. Two doors reach it and
+ * they authorize differently - a public share token, or a signed-in client -
+ * but what approval MEANS must not fork with the door, or one route eventually
+ * grows a deposit rule the other does not have.
+ *
+ * Two things must stay inside here rather than move to a caller. The
+ * `answerable` check is the only thing making approval idempotent: a double
+ * submit after success is refused rather than raising a second deposit
+ * invoice. And the total is re-read from the quote's own lines, so no caller
+ * can hand in a figure.
  */
-export async function approveQuote(
-  token: string, quoteId: number, signedBy: string,
-): Promise<{ error?: string; depositInvoiceId?: number; onHold?: boolean }> {
-  const found = await quoteByToken(token, quoteId);
-  if ("error" in found) return found;
-  const { q } = found;
+async function applyQuoteApproval(
+  q: typeof quotes.$inferSelect,
+  signedBy: string,
+  /** The account behind the signature, when there is one. */
+  actorEmail: string,
+): Promise<QuoteAnswer> {
   const today = shopToday();
   if (!answerable(q, today)) return { error: `${q.number} is ${quoteStanding(q, today)} and cannot be answered.` };
   const who = signedBy.trim().slice(0, 120);
@@ -12999,7 +13020,7 @@ export async function approveQuote(
     }
     if (wo) {
       await db.insert(workOrderNotes).values({
-        workOrderId: wo.id, author: who, authorEmail: "",
+        workOrderId: wo.id, author: who, authorEmail: actorEmail,
         text: `Approved ${q.number} (${formatCents(total)}).`
           + (deposit > 0 ? ` A ${q.depositPct}% deposit of ${formatCents(deposit)} was invoiced.` : "")
           + (credit?.onHold ? " The account is past due, so this opens on credit hold." : ""),
@@ -13018,19 +13039,68 @@ export async function approveQuote(
 }
 
 /**
+ * Approval through a public share link.
+ *
+ * The door for somebody who was emailed a quote and has no account. The link
+ * is the whole authorization, which is why it is a long unguessable token
+ * bound to one quote and one organization, and why the signature is typed
+ * text: there is no session to attribute it to.
+ */
+export async function approveQuote(
+  token: string, quoteId: number, signedBy: string,
+): Promise<QuoteAnswer> {
+  const found = await quoteByToken(token, quoteId);
+  if ("error" in found) return found;
+  const who = signedBy.trim().slice(0, 120);
+  if (!who) return { error: "Type your name to sign." };
+  return applyQuoteApproval(found.q, who, "");
+}
+
+/**
+ * Approval by a signed-in client, without leaving their session.
+ *
+ * A logged-in client used to be handed a link to the PUBLIC share page to
+ * approve their own quote - and if nobody had minted a share link, or somebody
+ * had revoked one, they had no way to approve at all. Worse, the token route
+ * authorizes by URL possession, so a `client_viewer` - read-only in every
+ * other corner of this app - could accept four thousand dollars of work by
+ * following a link somebody forwarded them.
+ *
+ * This door closes both. `requireEditor` refuses a viewer, `quoteForOrg` binds
+ * the quote to the caller's own organization inside the query rather than
+ * after it, and the signature is tied to a real account instead of being
+ * whatever was typed into a box.
+ */
+export async function approveQuoteAsClient(
+  quoteId: number, signedBy: string,
+): Promise<QuoteAnswer> {
+  let u;
+  try {
+    u = await requireEditor();
+  } catch {
+    // Deliberately the same words a viewer gets anywhere else, rather than
+    // "you may not approve" - which would tell them a quote is there.
+    return { error: "Your account is read-only. Ask a colleague who can approve." };
+  }
+  if (u.orgId === null) return { error: "This quote is not yours to answer." };
+  const full = await quoteForOrg(quoteId, u.orgId);
+  if (!full) return { error: "This quote is not yours to answer." };
+  const who = (signedBy.trim() || u.name || u.email).slice(0, 120);
+  return applyQuoteApproval(full.row, who, u.email);
+}
+
+/**
  * The client says no. The reason goes to the job's discussion, where the
  * engineer will read it - not into a field on a quote nobody opens again.
  */
-export async function declineQuote(
-  token: string, quoteId: number, data: { by: string; reason: string },
+async function applyQuoteDecline(
+  q: typeof quotes.$inferSelect,
+  who: string,
+  why: string,
+  actorEmail: string,
 ): Promise<{ error?: string }> {
-  const found = await quoteByToken(token, quoteId);
-  if ("error" in found) return found;
-  const { q } = found;
   const today = shopToday();
   if (!answerable(q, today)) return { error: `${q.number} is ${quoteStanding(q, today)} and cannot be answered.` };
-  const who = data.by.trim().slice(0, 120) || "The client";
-  const why = data.reason.trim().slice(0, 2000);
 
   await db.update(quotes).set({
     status: "declined", answeredOn: today, answeredBy: who,
@@ -13039,7 +13109,7 @@ export async function declineQuote(
 
   if (q.workOrderId !== null) {
     await db.insert(workOrderNotes).values({
-      workOrderId: q.workOrderId, author: who, authorEmail: "",
+      workOrderId: q.workOrderId, author: who, authorEmail: actorEmail,
       text: `Declined ${q.number}.${why ? ` ${why}` : ""}`,
     });
   }
@@ -13050,6 +13120,45 @@ export async function declineQuote(
   });
   revQuote(q);
   return {};
+}
+
+/** Declining through a public share link. */
+export async function declineQuote(
+  token: string, quoteId: number, data: { by: string; reason: string },
+): Promise<{ error?: string }> {
+  const found = await quoteByToken(token, quoteId);
+  if ("error" in found) return found;
+  return applyQuoteDecline(
+    found.q,
+    data.by.trim().slice(0, 120) || "The client",
+    data.reason.trim().slice(0, 2000),
+    "",
+  );
+}
+
+/**
+ * Declining from inside a session. Same authority as approving: saying no to
+ * quoted work is a decision about money, and it is recorded against a real
+ * account rather than against whatever was typed into a box.
+ */
+export async function declineQuoteAsClient(
+  quoteId: number, signedBy: string, reason: string,
+): Promise<{ error?: string }> {
+  let u;
+  try {
+    u = await requireEditor();
+  } catch {
+    return { error: "Your account is read-only. Ask a colleague who can answer this." };
+  }
+  if (u.orgId === null) return { error: "This quote is not yours to answer." };
+  const full = await quoteForOrg(quoteId, u.orgId);
+  if (!full) return { error: "This quote is not yours to answer." };
+  return applyQuoteDecline(
+    full.row,
+    (signedBy.trim() || u.name || u.email).slice(0, 120),
+    reason.trim().slice(0, 2000),
+    u.email,
+  );
 }
 
 /**

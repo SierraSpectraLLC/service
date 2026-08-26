@@ -134,16 +134,29 @@ export default async function OrdersPage({ searchParams }: {
               {r.sub && <div className="mut t-meta">{r.sub}</div>}
             </Link>
             <Pill tone={r.status.tone}>{r.status.label}</Pill>
+            {/* A fully covered quote totals zero, and a blank money cell on a
+                money page reads as a bug rather than as good news. */}
             <b className="mono t-body" style={{ width: 90, textAlign: "right" }}>
-              {r.totalCents > 0 ? formatCents(r.totalCents) : ""}
+              {r.totalCents > 0
+                ? formatCents(r.totalCents)
+                : <span className="t-small" style={{ color: "var(--t-good-fg)" }}>covered</span>}
             </b>
             <span style={{ width: 150, textAlign: "right" }}>
-              {r.action && r.token ? (
-                <Link className="btn sm primary" href={`/share/${r.token}`} style={{ textDecoration: "none" }}>
-                  {r.action === "approve" ? "Review & approve" : `Pay ${formatCents(r.totalCents)}`}
+              {r.action === "approve" ? (
+                /* Answered on the order's own page, in session. This used to
+                   link out to the PUBLIC share page even for somebody already
+                   signed in - and only when an un-revoked share link happened
+                   to exist. */
+                <Link className="btn sm primary plain" href={r.href}>Review &amp; approve</Link>
+              ) : r.action === "pay" && r.token ? (
+                /* Payment still goes through the hosted page: taking a card is
+                   the payment processor's job and the token is what it is
+                   handed. Approval is ours, and did not need to leave. */
+                <Link className="btn sm primary plain" href={`/share/${r.token}`}>
+                  Pay {formatCents(r.totalCents)}
                 </Link>
               ) : (
-                <Link className="btn sm" href={r.href} style={{ textDecoration: "none" }}>Details</Link>
+                <Link className="btn sm plain" href={r.href}>Details</Link>
               )}
             </span>
           </div>

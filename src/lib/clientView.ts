@@ -177,6 +177,44 @@ export function rankTodos(list: ClientTodo[]): ClientTodo[] {
   return [...list].sort((a, b) => weight(a) - weight(b) || (b.days ?? 0) - (a.days ?? 0));
 }
 
+// ── The record, as its owner reads it ───────────────────────────────────────
+
+/**
+ * The panels a client sees on their own instrument.
+ *
+ * An allow-list rather than a deny-list on purpose: a panel added later is
+ * invisible to a client until somebody decides it should not be, which is the
+ * safe direction for a surface that shows another company their machine.
+ *
+ * What is left out is left out because it is the shop's working memory, not
+ * because it is secret. Internal tasks are how an engineer breaks a job into
+ * steps; hours are what the shop pays itself; the daily update is a note to
+ * tomorrow's engineer; the activity log is every field anybody ever edited. A
+ * client reading those learns nothing they can act on and quite a lot about
+ * how the sausage is made.
+ */
+export const CLIENT_PANELS = [
+  "queue", "system", "assets", "site", "workorders", "maintenance",
+  "parts", "photos", "validation", "files", "reference", "discussion",
+] as const;
+
+export const clientMaySee = (key: string): boolean =>
+  (CLIENT_PANELS as readonly string[]).includes(key);
+
+/**
+ * The contexts, named for what a client came to find rather than for how the
+ * shop files it. "Configuration" is a word about a database; "What it is" is
+ * the question somebody actually has.
+ */
+export const CLIENT_GROUP_LABEL: Record<string, string> = {
+  now: "Now",
+  work: "Work",
+  maintenance: "Maintenance",
+  config: "What it is",
+  files: "Documents",
+  history: "History",
+};
+
 // ── Reseller mode ───────────────────────────────────────────────────────────
 
 /**

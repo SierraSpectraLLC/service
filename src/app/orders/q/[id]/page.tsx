@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { orgs, shareLinks } from "@/db/schema";
+import { orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
@@ -11,6 +11,7 @@ import { qtyOf, quoteForOrg, quoteTotal } from "@/lib/invoiceData";
 import { quoteStanding } from "@/lib/quotes";
 import { quoteOrderStatus, quoteSteps } from "@/lib/clientOrders";
 import OrderSteps from "@/components/OrderSteps";
+import ClientApprove from "@/components/ClientApprove";
 import { Id, PageHead, Panel, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -34,8 +35,6 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
   const status = quoteOrderStatus(row, standing);
   const placedOn = shopMonthDay(row.createdAt);
   const total = quoteTotal(full);
-  const [link] = await db.select({ token: shareLinks.token }).from(shareLinks)
-    .where(and(eq(shareLinks.quoteId, id), isNull(shareLinks.revokedAt)));
 
   return (
     <div className="container">
@@ -46,10 +45,18 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
         actions={
           <>
             <Pill tone={status.tone}>{status.label}</Pill>
-            {status.needsYou && link && (
-              <Link className="btn sm primary" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
-                Review & approve
-              </Link>
+            {/* Answered here, in session. This used to be a link out to the
+                PUBLIC share page - and it only appeared at all if somebody had
+                minted a share link that nobody had since revoked, so a client
+                could be looking at a quote with no way to answer it. */}
+            {status.needsYou && (
+              <ClientApprove
+                quoteId={row.id}
+                number={row.number}
+                total={formatCents(total)}
+                canApprove={user.role === "client_editor"}
+                suggestedName={user.name || ""}
+              />
             )}
           </>
         }
@@ -72,8 +79,14 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
               {l.detail && <span className="mut t-meta" style={{ display: "block" }}>{l.detail}</span>}
             </span>
             {qtyOf(l) !== 1 && <span className="mut t-small">× {qtyOf(l)}</span>}
+            {/* A covered line says so. It used to price at LIST here while
+                quoteTotal zeroed it below, so the items did not add up to the
+                total on the client's own page - and the client had no way to
+                tell which lines their agreement was paying for. */}
             <b className="mono t-body" style={{ width: 90, textAlign: "right" }}>
-              {l.unitCents > 0 ? formatCents(Math.round(qtyOf(l) * l.unitCents)) : "quote"}
+              {l.covered
+                ? <span className="t-small" style={{ color: "var(--t-good-fg)" }}>covered</span>
+                : l.unitCents > 0 ? formatCents(Math.round(qtyOf(l) * l.unitCents)) : "quote"}
             </b>
           </div>
         ))}
