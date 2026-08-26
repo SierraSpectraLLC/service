@@ -199,6 +199,133 @@ Share > Publish to web > CSV) works when the service account vars are unset.
 All authorization is enforced server-side in the actions
 (`src/app/actions.ts`), not just hidden in the UI.
 
+## The demo workspace
+
+`scripts/seed-demo.ts` opens a second operator on the instance - an invented
+service company with a year of work behind it - so somebody evaluating the
+product can be handed a login instead of a slide deck.
+
+```bash
+DATABASE_URL=... npm run db:seed:demo -- --dry-run  # writes nothing, reports what it would change
+DATABASE_URL=... npm run db:seed:demo               # open it
+DATABASE_URL=... npm run db:seed:demo -- --reset    # rebuild from scratch
+DATABASE_URL=... npm run db:seed:demo -- --wipe     # take it back out
+```
+
+**Start with `--dry-run`.** Everything before the first write is a `SELECT`, so
+a dry run can prove the names are free and then report the instance-wide
+changes - which are the only ones anybody outside the demo can see - without
+touching anything. It is the honest answer to "what will this do to *my*
+instance", as opposed to instances in general.
+
+**No terminal?** `.github/workflows/demo-workspace.yml` is the same four
+actions behind a button: Actions > Demo workspace > Run workflow, pick
+`check` / `seed` / `reset` / `wipe`. It reads `DATABASE_URL`, `DEMO_PASSWORD`
+and `BLOB_READ_WRITE_TOKEN` from a `demo` **environment** rather than from
+repository secrets, so ordinary CI cannot see the production connection string,
+and the environment can carry an approval rule. The output lands in the job
+summary, which is what GitHub's mobile app shows without making anybody scroll
+a log. `DEMO_PASSWORD` is required for `seed` and `reset` on purpose: a
+generated password would have to be printed to be useful, and a printed
+password is a credential in a log.
+
+It prints the sign-in at the end: `demo@ridgelinefield.com` and a password -
+supplied via `--password=` or `DEMO_PASSWORD`, generated and printed only when
+neither is given. A six-digit code by mail reaches the same account. The owner
+email and the company name are `--owner=` and `--name=`, or `DEMO_OWNER_EMAIL` /
+`DEMO_ORG_NAME`.
+
+**Every client shape, on purpose.** Five organizations, because "does it handle
+a reseller" is the second thing anybody asks: a regulated lab under
+full-service contract (multi-site, GxP paperwork, its own stockroom, remote
+access), a time-and-materials lab paying late and three rungs up the dunning
+ladder, a **reseller** whose units are stock and whose landing is a pipeline,
+another **service company** sharing one system with us, and a client with
+nothing of theirs on the bench at all - the one that proves a day whose only
+work was a phone call still reaches a report. Their nine logins differ on all
+four allowlist flags, so "what can this person see" is answerable by clicking
+rather than by argument.
+
+Behind them: fourteen live systems covering every stage in the vocabulary plus
+one archived, jobs in all six states and all four severities, parts in all ten
+statuses across both lanes, quotes and invoices in every status, contracts
+drawing down against allowances, a retainer with a cycle ready to raise, three
+stockrooms, six purchase orders, a validation document set with signatures
+(one of them revoked), release sign-offs, share links with view receipts, and
+generated PDFs behind every download.
+
+**What it will not touch.** Everything it writes is stamped with the demo
+tenant, hangs off a row that is, or is keyed to a demo email address; it never
+edits another tenant's rows. `--wipe` empties every stamped table by tenant
+*explicitly* rather than trusting the cascade - five stamped tables carry
+`tenant_org_id` with no foreign key behind it in the deployed DDL, and
+`audit_log`'s is `SET NULL`, so a cascade alone would leave rows pointing at an
+organization that no longer exists.
+
+Three things are deliberately left alone, and all three for the same reason -
+they are instance-wide with no tenant column, so a demo row would show up in
+somebody's real workspace: the Google-sheet parity queue (`sheet_diffs`, and
+the module stays off - it polls a real spreadsheet on a cron), the shop's
+default expense policy, and the loaded labor rate.
+
+**What it does change, and says so.** Client sign-in and four optional modules
+live in `app_settings`, which is one row for the whole instance; the demo
+cannot show a client portal, an EOD report or a remote session without them, so
+any that are off get turned on and the change is printed. `--no-modules` leaves
+that row exactly as found - and costs less than it sounds, because "view as"
+never consults the client-access flag (`src/auth.ts` reads it on the sign-in
+path and nowhere else), so the owner can still walk the client and reseller
+portals; what is lost is handing a separate client login to somebody else.
+
+Two other instance-wide numbers - the travel/expense policy and the loaded
+labor rate - are **opt-in**, behind `--defaults`, even though the demo's travel
+strip and job-cost margin read empty without them. A nav entry appearing is a
+change somebody notices and ignores; a loaded labor rate is the number the
+existing operator's own job costing computes margins *from*, so filling it in
+unasked would make their real jobs show invented profit. That is not a demo
+touching a demo.
+
+`--wipe` does not turn the modules back off: by then they may be load-bearing
+for another workspace, and the script cannot know which were on before.
+
+**No Stripe account is invented.** A made-up connected account renders pay
+buttons that fail the moment anybody presses them; without one the portal takes
+the supported path and tells the client how to send a check. Pass
+`--stripe-account=acct_...` (Connect Express, test mode) to demo the card and
+ACH flows for real.
+
+**Mail is not wired up, and that is enforced rather than hoped.** Digest and
+EOD recipient lists are left blank, automatic dunning is off on every demo
+client, and every invented address sits on a reserved `.example` domain that
+cannot resolve. But two crons notify without anybody pressing anything - the
+weekly usage report and the weekly renewal warning, and the seed deliberately
+plants a contract inside its notice window so the second one fires. Both reach
+the workspace's own staff, so every message would hard-bounce against the
+operator's real sending reputation for as long as the demo exists.
+
+So the seed writes an `emailOn: false` row for every notification kind against
+every address it invents. That is the product's own opt-out table, and
+`lib/notify` writes the in-app row *first* and filters recipients afterwards -
+so the bell still lights up, the inbox still fills, the feature still
+demonstrates, and only the envelope is dropped. Any of them can be switched
+back on from Settings. `--mail-to=you@example.com` says "I want this demo to
+send", and then nothing is suppressed.
+
+**Share, drop and listing tokens are random.** They are the whole credential -
+there is no session behind them - and `/api/drop/[token]` in particular mints a
+Blob upload token for an anonymous caller against nothing but the token in the
+path. A readable one would be a stranger writing 100MB at a time into the
+operator's real Blob store.
+
+**Files are real** when `BLOB_READ_WRITE_TOKEN` is set: the reports,
+certificates, photos and packing lists are generated at seed time and uploaded,
+so every download in the demo opens something. Without a Blob store the rows
+are still made, inline, and the script says which ones will not resolve.
+
+Dates are relative to the run, so a demo opened six months from now still reads
+as a shop that was busy yesterday. `LOCAL_DB=1 PGLITE_DIR=...` points the same
+script at the throwaway database `npm run dev:local` uses.
+
 ## Gas tracking
 
 Each system lists the gases it requires (Helium, Nitrogen, Argon, Hydrogen,
@@ -260,4 +387,5 @@ src/
   app/api/upload          Vercel Blob client-upload token endpoint
   components/             client components (Dashboard, panels, forms)
 scripts/seed.ts           loads the Jul 2026 sheet snapshot
+scripts/seed-demo.ts      the demo workspace handed to a buyer (see above)
 ```
