@@ -491,29 +491,64 @@ export async function notifyHandoff(opts: {
 export async function notifyInvite(opts: {
   to: string; inviterName: string; orgName: string;
   /**
-   * Whether a temporary password was set for them at the same time. The
-   * password itself is NEVER in here: it goes to the person who set it, to be
-   * said out loud, because this email is exactly the channel that is not
-   * working when somebody needs one.
+   * Whether a temporary password was set for them at the same time, WITHOUT
+   * saying what it is. Used where the password is being read down a phone
+   * instead - see mintTempPassword.
    */
   tempPassword?: boolean;
-}) {
+  /**
+   * The temporary password in the clear, to be printed in this email.
+   *
+   * This is a live credential in an inbox, and the trade is deliberate: a
+   * resent invitation exists because somebody could not get in, and an
+   * operator resending one wants the person working rather than waiting for a
+   * phone call. It is chosen per send by the caller (actions.resendInvite),
+   * never defaulted on, and it EXPIRES - which is what keeps a mailbox from
+   * being a permanent key. Where the mail channel itself is the thing that is
+   * broken, `tempPassword` above is still the right field.
+   */
+  tempPasswordPlain?: string;
+  /** The day it stops working, printed beside it so the loan has a visible end. */
+  tempExpiresOn?: string;
+}): Promise<boolean> {
   try {
     const brand = (await getBrand()).name;
     const url = appUrl();
-    const how = opts.tempPassword
-      ? "Use this email address. A temporary password has been set for you - whoever added you will pass it on. You can set your own once you are in."
-      : "Use this email address - no password, a sign-in code is emailed to you.";
+    const how = opts.tempPasswordPlain
+      ? "Use this email address and the temporary password below. You can set your own once you are in."
+      : opts.tempPassword
+        ? "Use this email address. A temporary password has been set for you - whoever added you will pass it on. You can set your own once you are in."
+        : "Use this email address - no password, a sign-in code is emailed to you.";
+    const creds = opts.tempPasswordPlain
+      ? `<div style="margin:14px 0;padding:12px 14px;border-radius:8px;background:#FAF0DC;border:1px solid #E4CFA1">
+          <div style="font-size:12px;color:#7A5B12;font-weight:700">Your temporary password</div>
+          <div style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:18px;letter-spacing:0.02em;margin:6px 0">${esc(opts.tempPasswordPlain)}</div>
+          <div style="font-size:12px;color:#7A5B12">${
+            opts.tempExpiresOn
+              ? `Works until ${esc(opts.tempExpiresOn)}, then sign-in goes back to emailed codes.`
+              : "Temporary - set your own password once you are in."
+          }</div>
+        </div>`
+      : "";
     await sendEmail(
       [opts.to],
       `${opts.inviterName} invited you to ${brand}`,
       await wrap(`${esc(opts.inviterName)} added you to <b>${esc(opts.orgName)}</b>'s workspace on ${esc(brand)}.
         ${url ? `${btn(`${url}/login`, "Sign in")}
-        ${mutedLine(how)}` : ""}`,
+        ${mutedLine(how)}` : ""}
+        ${creds}`,
       { preheader: `${opts.inviterName} added you to ${opts.orgName}'s workspace`, prefsFooter: false }),
     );
+    return true;
   } catch (e) {
     console.error("[notify] invite email failed:", (e as Error).message);
+    /* Reported rather than only logged. Every other notification here is a
+       courtesy on top of something the app already recorded, so swallowing a
+       failure costs an FYI. An INVITATION is the thing itself - and a resend
+       carrying a password has already invalidated the one they had, so a
+       silent failure leaves somebody strictly worse off than before it ran.
+       Callers that treat it as a courtesy can go on ignoring this. */
+    return false;
   }
 }
 

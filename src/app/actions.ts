@@ -7253,6 +7253,64 @@ export async function setClientTempPassword(
   return made;
 }
 
+/**
+ * Send somebody's invitation again, with a working password in it.
+ *
+ * The invitation that matters is rarely the first one. An address gets a typo,
+ * a first email lands in quarantine, somebody starts three months after they
+ * were added - and the operator's only recourse was to remove the person and
+ * add them back, which is a destructive edit standing in for a resend.
+ *
+ * A resend always mints a FRESH temporary password and prints it in the email.
+ * Fresh because it has to be: the stored one is a scrypt hash, so there is no
+ * "the" password to resend - the plaintext existed for one HTTP response and
+ * is gone. And in the email by decision: a resend exists because somebody
+ * cannot get in, and making them wait for a phone call to finish the job is
+ * the same stall the resend is meant to end. The cost is real and bounded -
+ * a live credential sits in an inbox until it expires - which is why this
+ * mints rather than reveals, and why the expiry is printed beside it.
+ *
+ * Any previous password stops working the moment this runs. That is the point:
+ * one invitation is live at a time, and it is the one they were just sent.
+ */
+export async function resendInvite(
+  allowlistId: number, days?: number,
+): Promise<{ error?: string; password?: string; expiresOn?: string; mailed?: boolean }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, allowlistId));
+  if (!row || row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  const { org } = gate;
+  const email = row.entry.trim().toLowerCase();
+  // A domain entry covers everybody at a company and belongs to no mailbox.
+  if (email.startsWith("@")) return { error: "That is a whole domain, not a person." };
+
+  // Same bootstrap as setClientTempPassword: somebody approved but never signed
+  // in has no users row yet, and a password needs one to hang on.
+  const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+  if (!existing) await db.insert(users).values({ email });
+
+  const made = await mintTempPassword(u, email, days ?? TEMP_DAYS_DEFAULT);
+  if ("error" in made) return made;
+
+  const mailed = await notifyInvite({
+    to: email, inviterName: u.name, orgName: org.name,
+    tempPasswordPlain: made.password, tempExpiresOn: made.expiresOn,
+  });
+  await audit({
+    actor: u.email, entityType: "auth", entityId: email,
+    action: mailed
+      ? `resent ${email}'s invitation with a new temporary password, good until ${made.expiresOn}`
+      : `minted a new temporary password for ${email}, good until ${made.expiresOn} - the invitation email did NOT go out`,
+  });
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  /* The password stands either way - it is already set, and telling the caller
+     otherwise would be a second lie on top of the failed send. What changes is
+     whether the operator still has to make the phone call. */
+  return { ...made, mailed };
+}
+
 /** Take it back. Codes never stopped working, so this takes nothing away. */
 export async function clearClientTempPassword(allowlistId: number): Promise<{ error?: string }> {
   const u = await requireStaff();

@@ -7,6 +7,7 @@ import {
   addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
+  resendInvite,
   setClientSeesMoney,
   setStartView,
 } from "@/app/actions";
@@ -270,7 +271,7 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
    * is the only moment it exists anywhere a human can see it - which is the
    * whole point, and the reason the card says so out loud.
    */
-  const [minted, setMinted] = useState<null | { who: string; password: string; expiresOn: string }>(null);
+  const [minted, setMinted] = useState<null | { who: string; password: string; expiresOn: string; mailed?: boolean; failed?: boolean }>(null);
   const addPerson = (invite: boolean) => {
     setAddError("");
     startTransition(async () => {
@@ -406,6 +407,31 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
               )}
               {isStaff && !domain && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
+                  {/* The invitation that matters is rarely the first one. Until
+                      now the only way to send another was to remove the person
+                      and add them back - a destructive edit standing in for a
+                      resend, which also threw away everything set on the row. */}
+                  <button className="btn link" disabled={pending}
+                    title="Email their invitation again, with a new temporary password in it"
+                    onClick={async () => {
+                      if (!(await confirmDialog({
+                        title: `Resend ${r.entry}'s invitation?`,
+                        body: "They get the invitation again with a NEW temporary password printed in it. Any password they have now stops working.",
+                        action: "Send it",
+                      }))) return;
+                      setPeopleError("");
+                      startTransition(async () => {
+                        const res = await resendInvite(r.id);
+                        if (res?.error) { setPeopleError(res.error); return; }
+                        setMinted({
+                          who: r.name || r.entry, password: res.password!, expiresOn: res.expiresOn!,
+                          mailed: res.mailed, failed: !res.mailed,
+                        });
+                        toast(res.mailed
+                          ? { message: `Invitation resent to ${r.entry}` }
+                          : { message: "Password set, but the email did not go out", tone: "bad" });
+                      });
+                    }}>resend invite</button>
                   <button className="btn link" disabled={pending}
                     title="Set a password they can use while sign-in codes are not arriving"
                     onClick={() => {
@@ -485,8 +511,16 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
               {minted.password}
             </div>
             <div className="mut t-meta">
-              Works until {minted.expiresOn}, then sign-in goes back to emailed codes. Read it to them -
-              it is not in any email, and this is the only time it is shown.
+              Works until {minted.expiresOn}, then sign-in goes back to emailed codes.{" "}
+              {/* The same card serves both buttons, and the two differ on the
+                  one fact somebody needs: whether they still have to make the
+                  phone call. Saying "not in any email" after a resend mailed it
+                  would be the app describing the opposite of what it just did. */}
+              {minted.failed
+                ? "The invitation email did NOT go out, and the password they had before has already stopped working - so this has to be read to them. It is the only time it is shown."
+                : minted.mailed
+                  ? "It is in the invitation they were just sent - this copy is here so you can read it to them as well."
+                  : "Read it to them - it is not in any email, and this is the only time it is shown."}
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button className="btn sm" onClick={() => {
