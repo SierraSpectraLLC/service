@@ -16,7 +16,7 @@ import { resolveRate } from "@/lib/rates";
 import { contractProposal, renewalFromBurn } from "@/lib/quotes";
 import { allInvoices } from "@/lib/invoiceData";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import RetainerCard from "@/components/RetainerCard";
 import { FacetStrip, PageHead, Panel, Toolbar } from "@/components/ui";
@@ -40,7 +40,7 @@ export default async function ContractsPage({ searchParams }: {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const { f = "", period: periodParam } = await searchParams;
-  const { period, seesPayroll, figures: fig } = await financeContext(user, periodParam);
+  const { period, seesPayroll, figures: fig } = await booksContext(user, periodParam);
 
   const today = shopToday();
   const [rows, orgRows, cards, billed, systemRows] = await Promise.all([
@@ -153,7 +153,7 @@ export default async function ContractsPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "contracts", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "contracts", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money/contracts"
       title="Contracts"

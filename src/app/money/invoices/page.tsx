@@ -9,7 +9,7 @@ import { shopToday } from "@/lib/shopday";
 import { allInvoices, asStatementRow } from "@/lib/invoiceData";
 import { invoiceView, STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import { NewInvoiceButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
@@ -26,7 +26,7 @@ export default async function InvoicesPage({ searchParams }: {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const { q = "", standing = "", period: periodParam } = await searchParams;
-  const { period, seesPayroll, figures: fig } = await financeContext(user, periodParam);
+  const { period, seesPayroll, figures: fig } = await booksContext(user, periodParam);
 
   const today = shopToday();
   const [full, orgRows] = await Promise.all([
@@ -89,7 +89,7 @@ export default async function InvoicesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "invoices", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "invoices", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money/invoices"
       title="Invoices"

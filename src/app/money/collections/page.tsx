@@ -11,7 +11,7 @@ import { brokenPromiseLine, CHANNEL_LABEL, ladderFor } from "@/lib/dunning";
 import { feeClause } from "@/lib/billingPolicy";
 import { STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import DunningRungButton from "@/components/DunningRungButton";
 import { EmptyState, Id, PageHead, Panel, Pill } from "@/components/ui";
 
@@ -32,7 +32,7 @@ export default async function CollectionsPage({ searchParams }: {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const { period, seesPayroll, figures: fig } =
-    await financeContext(user, (await searchParams).period);
+    await booksContext(user, (await searchParams).period);
 
   const today = shopToday();
   const [board, orgRows] = await Promise.all([
@@ -48,7 +48,7 @@ export default async function CollectionsPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "collections", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "collections", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money/collections"
       title="Collections"

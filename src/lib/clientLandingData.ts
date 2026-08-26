@@ -48,12 +48,21 @@ export async function clientTodos(opts: {
    * Money is money either way, so quotes and invoices stay.
    */
   mode?: "lab" | "reseller";
+  /**
+   * Whether this reader may see their organization's money at all.
+   *
+   * False drops the quote and invoice chores entirely rather than leaving them
+   * unlinked, because the chore IS the figure: "Pay invoice 104 - $4,200, 9
+   * days past terms" tells a reader everything the page they cannot open
+   * would have. See maySeeOrgMoney.
+   */
+  money?: boolean;
 }): Promise<ClientTodo[]> {
-  const { orgId, today, systems, systemIds, mode = "lab" } = opts;
+  const { orgId, today, systems, systemIds, mode = "lab", money = true } = opts;
 
   const [quoteRows, invoiceRows, pmRows] = await Promise.all([
-    db.select().from(quotes).where(eq(quotes.orgId, orgId)),
-    invoicesForOrg(orgId),
+    money ? db.select().from(quotes).where(eq(quotes.orgId, orgId)) : [],
+    money ? invoicesForOrg(orgId) : [],
     systemIds.length
       ? db.select({
           id: pmSchedules.id, instrumentId: pmSchedules.instrumentId,

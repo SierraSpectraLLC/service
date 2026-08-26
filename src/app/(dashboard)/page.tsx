@@ -15,7 +15,9 @@ import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { currentUser, requireUser, viewContext } from "@/lib/authz";
-import { forTenant, maySeeAgreements, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import {
+  forTenant, maySeeAgreements, maySeeOrgMoney, viewTenant, visibleOrgs, visibleSystemIds,
+} from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
@@ -29,6 +31,7 @@ import ResellerLanding from "@/components/ResellerLanding";
 import { PageHead } from "@/components/ui";
 import ClientCoverage from "@/components/ClientCoverage";
 import MoneyCard from "@/components/MoneyCard";
+import { seesBooksFor } from "@/lib/financeData";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
@@ -129,6 +132,7 @@ export default async function Home({ searchParams }: {
   // Systems the client's sheet dropped but we still track (flagged by sheet-sync).
   // Internal parity detail, so staff eyes only.
   const isStaff = user.role === "owner" || user.role === "staff";
+  const seesBooks = isStaff && await seesBooksFor(user);
   const droppedFromSheet = new Set(
     isStaff ? openRowDiffs.filter((d) => d.sheetValue === "(missing from sheet)").map((d) => d.externalId) : []
   );
@@ -379,6 +383,10 @@ export default async function Home({ searchParams }: {
          the pipeline's ordinary business look like a list of things they were
          late for. See the note on clientTodos. */
       mode: orgSelf?.resaleEnabled ? "reseller" : "lab",
+      /* And money only for somebody at this organization who may read its
+         money - the chore names the figure, so withholding the page and
+         keeping the chore would withhold nothing. */
+      money: await maySeeOrgMoney(user, user.orgId),
       /* The state travels with the queue, because holding a system is only a
          chore when something is pending on it - see queueNeedsThem. `systems`
          is built from `data` one-for-one just above, so the index lines up. */
@@ -550,8 +558,11 @@ export default async function Home({ searchParams }: {
         }))} />
       )}
       {/* Whose move is it, in money - above the board, because an unbilled
-          closed job is work that is finished and still costing. */}
-      {isStaff && <MoneyCard />}
+          closed job is work that is finished and still costing. The owner's,
+          though: three lines naming what the shop is owed and by whom are the
+          books in miniature, and the dashboard is the one page everybody on
+          the staff opens every morning. See lib/books. */}
+      {seesBooks && <MoneyCard />}
       <Dashboard
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}

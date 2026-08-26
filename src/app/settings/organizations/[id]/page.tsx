@@ -172,6 +172,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           return {
             id: r.id, entry: r.entry, canEdit: r.canEdit, canSeeAgreements: r.canSeeAgreements,
             canSeePayroll: r.canSeePayroll,
+            canSeeMoney: r.canSeeMoney,
             name: a ? [a.firstName, a.lastName].filter(Boolean).join(" ") || a.name || "" : "",
             title: a?.title ?? "",
             signedIn: !!a?.lastSeenAt,

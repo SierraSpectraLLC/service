@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, or, type AnyColumn, type SQL } from "dri
 import { db } from "@/db";
 import { assets, assetShares, clientAllowlist, instruments, orgs, systemShares, workOrders } from "@/db/schema";
 import type { Role, SessionUser } from "@/lib/authz";
+import { maySeeBooks } from "@/lib/books";
 import { isHouse } from "@/lib/houseRole";
 import {
   actingOrgId, houseOfRecord, isPlatformStaff, tenantOf, tenantScope, tenantViewer,
@@ -286,4 +287,35 @@ export async function maySeeAgreements(
   // absence of an explicit grant is not a denial, it is "the org's default",
   // and the org's default is what everyone had before this switch existed.
   return rows.length === 0 ? true : rows[0].canSee;
+}
+
+/**
+ * May this person read their own organization's MONEY - the quotes it has been
+ * sent and the invoices it owes?
+ *
+ * The client half of the books rule. An operator has an owner role, so keeping
+ * its position to the owner is a rule rather than a setting (lib/books, and
+ * the /money section enforces it); a client organization has no owner role, so
+ * the same wall has to be a per-person flag on the sign-in entry, exactly as
+ * agreements are.
+ *
+ * Staff pass through: they do not read a client's money HERE - /orders is the
+ * client's own room and sends them to /money, which has its own gate. Denying
+ * them at this function would just be a second answer to a question already
+ * answered somewhere better.
+ */
+export async function maySeeOrgMoney(
+  user: { role: string; email: string; orgId: number | null },
+  orgId: number,
+): Promise<boolean> {
+  if (isHouse(user.role)) return true;
+  const rows = await db.select({ canSee: clientAllowlist.canSeeMoney })
+    .from(clientAllowlist)
+    .where(and(eq(clientAllowlist.orgId, orgId), eq(clientAllowlist.entry, user.email.toLowerCase())));
+  // Same reading as maySeeAgreements: a domain-wildcard entry (@lab.com) has
+  // no row of its own, and no row is the org's default rather than a denial.
+  return maySeeBooks({
+    email: user.email, role: user.role, orgId: user.orgId, operatorOrgId: null,
+    canSeeMoney: rows.length === 0 ? true : rows[0].canSee,
+  }, orgId);
 }

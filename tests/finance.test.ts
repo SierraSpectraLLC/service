@@ -79,13 +79,13 @@ describe("the rail", () => {
     groups.flatMap((g) => g.entries.map((e) => e.key));
 
   it("groups the section the way money moves through it", () => {
-    const groups = financeRail({ seesPayroll: true });
+    const groups = financeRail({ seesBooks: true, seesPayroll: true });
     expect(groups.map((g) => g.label)).toEqual(["Position", "Money in", "Money out", "Analysis"]);
     expect(keysOf(groups)).toEqual([...FINANCE_KEYS]);
   });
 
   it("DROPS payroll entirely for a reader who may not read one", () => {
-    const groups = financeRail({ seesPayroll: false });
+    const groups = financeRail({ seesBooks: true, seesPayroll: false });
     expect(keysOf(groups)).not.toContain("payroll");
     // Not hidden behind a disabled state either: nothing in the rendered rail
     // should so much as name it, because a badge is a figure.
@@ -93,21 +93,46 @@ describe("the rail", () => {
   });
 
   it("keeps every other room when payroll is dropped", () => {
-    const without = keysOf(financeRail({ seesPayroll: false }));
+    const without = keysOf(financeRail({ seesBooks: true, seesPayroll: false }));
     expect(without).toHaveLength(FINANCE_KEYS.length - 1);
     expect(without).toContain("overhead");
     expect(without).toContain("costing");
   });
 
+  it("leaves a reader who may not read the books the two rooms that are theirs", () => {
+    const groups = financeRail({ seesBooks: false, seesPayroll: false });
+    expect(keysOf(groups)).toEqual(["purchasing", "reimbursements"]);
+    // An engineer raises purchase orders and claims back what they spent, and
+    // both were doors of their own before this section existed. Taking them
+    // away with the books would not be a confidentiality rule, it would be a
+    // broken app - see WORKING_ROOMS.
+    expect(groups.map((g) => g.label)).toEqual(["Money out"]);
+  });
+
+  it("names no room a non-owner may not enter - not the overview, not costing", () => {
+    const groups = financeRail({ seesBooks: false, seesPayroll: false });
+    const rendered = JSON.stringify(groups);
+    for (const gone of ["overview", "quotes", "invoices", "collections", "contracts", "overhead", "payroll", "costing"]) {
+      expect(rendered).not.toMatch(new RegExp(gone, "i"));
+    }
+  });
+
+  it("never lets the payroll flag alone open the register", () => {
+    // Belt and braces: the two rules are asked separately and could in
+    // principle disagree, and the answer when they do is the stricter one.
+    const groups = financeRail({ seesBooks: false, seesPayroll: true });
+    expect(keysOf(groups)).not.toContain("payroll");
+  });
+
   it("carries the window across every link", () => {
-    const groups = financeRail({ seesPayroll: true, period: "ytd" });
+    const groups = financeRail({ seesBooks: true, seesPayroll: true, period: "ytd" });
     for (const e of groups.flatMap((g) => g.entries)) {
       expect(e.href).toContain("period=ytd");
     }
   });
 
   it("points every room at /money, where they all now live", () => {
-    const byKey = new Map(financeRail({ seesPayroll: true })
+    const byKey = new Map(financeRail({ seesBooks: true, seesPayroll: true })
       .flatMap((g) => g.entries).map((e) => [e.key, e.href]));
     expect(byKey.get("purchasing")).toBe("/money/purchasing");
     expect(byKey.get("reimbursements")).toBe("/money/reimbursements");
@@ -212,7 +237,7 @@ describe("the section is a rail, not a permission boundary", () => {
     for (const p of ["src/app/money/purchasing/page.tsx", "src/app/money/payroll/page.tsx"]) {
       // The figures are not even computed for them - a number they may not
       // have never enters the request.
-      expect(read(p), p).toMatch(/isStaffRole\(user\.role\)\s*\n?\s*\?\s*await financeContext|isStaffRole\(user\.role\) \? await financeContext/);
+      expect(read(p), p).toMatch(/isStaffRole\(user\.role\)\s*\n?\s*\?\s*await railContext|isStaffRole\(user\.role\) \? await railContext/);
     }
   });
 
@@ -226,16 +251,18 @@ describe("the section is a rail, not a permission boundary", () => {
     expect(src).toMatch(/rail=\{inSection && fin/);
   });
 
-  it("computes the section's permission in exactly one place", () => {
-    // Every page reads seesPayroll from financeContext rather than deriving
-    // it, so the rail and the lane totals cannot disagree. /payroll is the one
-    // exception and is excluded deliberately: it keeps its OWN maySeePayroll
-    // call, which is what lets a client contact with the flag still reach it -
-    // asserted just above, and the reason this section is a rail rather than a
-    // permission boundary.
+  it("computes the section's permissions in exactly one place", () => {
+    // Every page reads seesPayroll and seesBooks from the one context call
+    // rather than deriving either, so the rail and the lane totals cannot
+    // disagree. /payroll is the one exception and is excluded deliberately: it
+    // keeps its OWN maySeePayroll call, which is what lets a client contact
+    // with the flag still reach it - asserted just above, and the reason this
+    // section is a rail rather than a permission boundary.
     const lib = read("src/lib/financeData.ts");
-    expect(lib).toMatch(/export async function financeContext/);
-    expect(lib).toMatch(/maySeePayroll\(\{/);
+    expect(lib).toMatch(/export async function booksContext/);
+    expect(lib).toMatch(/export async function railContext/);
+    expect(lib).toMatch(/maySeePayroll\(/);
+    expect(lib).toMatch(/maySeeBooks\(/);
     const pages = [
       "src/app/money/page.tsx", "src/app/money/quotes/page.tsx",
       "src/app/money/invoices/page.tsx", "src/app/money/collections/page.tsx",
@@ -243,10 +270,36 @@ describe("the section is a rail, not a permission boundary", () => {
       "src/app/money/expenses/page.tsx", "src/app/money/reimbursements/page.tsx",
       "src/app/money/purchasing/page.tsx", "src/app/money/payroll/page.tsx",
     ];
-    for (const p of pages) expect(read(p), p).toMatch(/financeContext\(user,/);
+    for (const p of pages) expect(read(p), p).toMatch(/(books|rail)Context\(user,/);
     for (const p of pages.filter((x) => x !== "src/app/money/payroll/page.tsx")) {
       expect(read(p), p).not.toMatch(/maySeePayroll/);
     }
+    // And nobody asks the books question for themselves on a page.
+    for (const p of pages) expect(read(p), p).not.toMatch(/maySeeBooks/);
+  });
+
+  it("READS THE BOOKS ONLY THROUGH THE CALL THAT GATES THEM", () => {
+    // The eight rooms that are the shop's position all enter through
+    // booksContext, which redirects a reader who may not read them. That is
+    // deliberately the SAME call that hands over the figures: there is no
+    // ordering in which a page fetches first and checks afterwards, and no
+    // eleventh page that forgets the guard while remembering the data.
+    for (const p of [
+      "src/app/money/page.tsx", "src/app/money/quotes/page.tsx",
+      "src/app/money/invoices/page.tsx", "src/app/money/collections/page.tsx",
+      "src/app/money/contracts/page.tsx", "src/app/money/costing/page.tsx",
+      "src/app/money/expenses/page.tsx",
+    ]) {
+      expect(read(p), p).toMatch(/booksContext\(user,/);
+      expect(read(p), p).not.toMatch(/railContext/);
+    }
+    // And the two working rooms go the other way: they must NOT be gated,
+    // because an engineer raises purchase orders and claims expenses.
+    for (const p of ["src/app/money/purchasing/page.tsx", "src/app/money/reimbursements/page.tsx"]) {
+      expect(read(p), p).toMatch(/railContext\(user,/);
+      expect(read(p), p).not.toMatch(/booksContext/);
+    }
+    expect(read("src/lib/financeData.ts")).toMatch(/if \(!seesBooks\) redirect\("\/"\);/);
   });
 
   it("renders the same rail on all ten pages", () => {

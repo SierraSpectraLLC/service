@@ -21,7 +21,7 @@ import {
  * it becomes one row that scrolls sideways and never wraps. A person who has
  * learned one of the two record shapes should get this one for free.
  */
-export default function FinanceRail({ active, amounts = {}, seesPayroll, period = "month" }: {
+export default function FinanceRail({ active, amounts = {}, seesBooks, seesPayroll, period = "month" }: {
   active: FinanceKey;
   /** Cents per section. A section with no figure shows no badge. */
   amounts?: FinanceAmounts;
@@ -31,9 +31,15 @@ export default function FinanceRail({ active, amounts = {}, seesPayroll, period 
    * entry with a figure beside it would be worse than nothing.
    */
   seesPayroll: boolean;
+  /**
+   * Whether this reader may read the shop's position at all. False leaves the
+   * two working rooms - Purchasing and Reimbursements - and takes the rest of
+   * the section with it, badges included. See lib/books.
+   */
+  seesBooks: boolean;
   period?: Period;
 }) {
-  const groups = financeRail({ seesPayroll, period });
+  const groups = financeRail({ seesBooks, seesPayroll, period });
   return (
     /* Heading, list, heading, list - a flat sequence rather than a wrapper per
        group, because that is the shape the phone layout needs: the rail itself

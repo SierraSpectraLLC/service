@@ -5,7 +5,7 @@ import { isStaffRole } from "@/lib/tenants";
 import { formatCents, formatDollars } from "@/lib/money";
 import { brandForTenant } from "@/lib/brand";
 import { costingBoard } from "@/lib/invoiceData";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import { periodDays, periodSpan } from "@/lib/finance";
 import FinanceShell from "@/components/FinanceShell";
 import PositionLine from "@/components/PositionLine";
@@ -37,7 +37,7 @@ export default async function MoneyPage({ searchParams }: {
   // lib/financeData. A page that worked out `seesPayroll` slightly differently
   // from the rail beside it is the leak this whole section is built around.
   const { period, today, seesPayroll, figures: fig } =
-    await financeContext(user, (await searchParams).period);
+    await booksContext(user, (await searchParams).period);
   const [brand, board] = await Promise.all([
     brandForTenant(myTenantOrgId(user)),
     costingBoard(today, periodDays(today, period)),
@@ -61,7 +61,7 @@ export default async function MoneyPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "overview", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "overview", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money"
       title="Financial"

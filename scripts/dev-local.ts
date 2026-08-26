@@ -55,9 +55,14 @@ const FIXTURE = `
 
   INSERT INTO users (id, name, email, role, onboarded_at) VALUES
     ('dev-user', 'Dev Owner', '${OWNER}', 'owner', now()),
+    -- A staff account that is NOT the owner. Half the permission rules in this
+    -- app run between those two - payroll, the books, who may read what a job
+    -- billed - and none of them can be checked from an owner session.
+    ('dev-bill', 'Bill Reyes', 'bill@sierraspectra.test', 'staff', now()),
     ('dev-new', '', 'new@local.test', 'tech', NULL);
   INSERT INTO sessions (session_token, user_id, expires) VALUES
     ('devtoken', 'dev-user', now() + interval '30 days'),
+    ('stafftoken', 'dev-bill', now() + interval '30 days'),
     ('newtoken', 'dev-new', now() + interval '30 days');
 
   -- The directory is assembled from these, never typed in: staff are house
@@ -621,6 +626,7 @@ async function main() {
   console.log(`[dev:local] database: ${DATA_DIR}`);
   await seed();
   console.log(`[dev:local] session cookie: authjs.session-token=devtoken (owner ${OWNER})`);
+  console.log("[dev:local] ... stafftoken (Bill Reyes, staff at Sierra Spectra - not the owner)");
   const child = spawn("npx", ["next", "dev", "-p", PORT], {
     stdio: "inherit",
     env: {

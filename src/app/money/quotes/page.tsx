@@ -9,7 +9,7 @@ import { shopToday } from "@/lib/shopday";
 import { allQuotes, quoteTotal } from "@/lib/invoiceData";
 import { daysToExpiry, quoteStanding, STANDING_LABEL, STANDING_TONE } from "@/lib/quotes";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import { NewQuoteButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
@@ -26,7 +26,7 @@ export default async function QuotesPage({ searchParams }: {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const { q = "", standing = "", period: periodParam } = await searchParams;
-  const { period, seesPayroll, figures: fig } = await financeContext(user, periodParam);
+  const { period, seesPayroll, figures: fig } = await booksContext(user, periodParam);
 
   const today = shopToday();
   const [full, orgRows] = await Promise.all([
@@ -90,7 +90,7 @@ export default async function QuotesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "quotes", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "quotes", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money/quotes"
       title="Quotes"

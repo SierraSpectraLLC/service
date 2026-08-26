@@ -112,11 +112,24 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // company's own owner, or a person at a client whose flag was turned on. An
   // entry that leads to a page which redirects is worse than no entry, and
   // here it would also be an entry that names a thing they cannot have.
-  const seesPayroll = user?.role === "owner"
-    || (user?.orgId != null && (
-      await db.select({ on: clientAllowlist.canSeePayroll }).from(clientAllowlist)
-        .where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => [])
-    )[0]?.on === true);
+  const [allowRow] = user?.orgId != null
+    ? await db.select({ payroll: clientAllowlist.canSeePayroll, money: clientAllowlist.canSeeMoney })
+        .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => [])
+    : [];
+  const seesPayroll = user?.role === "owner" || allowRow?.payroll === true;
+  /* The shop's own books - what it has invoiced, collected, committed and is
+     owed. The owner's, and nobody else's on the staff side: an engineer needs
+     Purchasing and Reimbursements, which are their own doors below, and has no
+     work that requires knowing what the company took in this quarter. See
+     lib/books, where the rule lives, and lib/finance for the two rooms that
+     stay open. */
+  const seesBooks = user?.role === "owner";
+  /* The client half of the same rule: the quotes their organization has been
+     sent and the invoices it owes. Their org has no owner role to fall back
+     on, so this is a per-person flag that defaults ON - the switch exists to
+     take the privilege away from a named person, not to remove it from
+     everybody by shipping. */
+  const seesOwnMoney = allowRow ? allowRow.money !== false : true;
   const hasStock = isStaff || (user?.orgId != null && (
     await db.select({ id: stockrooms.id }).from(stockrooms)
       .leftJoin(stockroomShares, eq(stockroomShares.stockroomId, stockrooms.id))
@@ -165,13 +178,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        rather than "Billing" because the section stopped being about billing
        the moment purchasing, reimbursements, overhead and payroll joined it -
        see lib/finance. */
-    { href: "/money", label: "Financial" },
+    ...(seesBooks ? [{ href: "/money", label: "Financial" }] : []),
   ] : [
     { href: "/", label: resells ? "Your pipeline" : "Your lab" },
     { href: "/work", label: "Requests" },
     /* Quotes and invoices, named for what the client does with them rather
        than for what the shop filed. */
-    ...(isClientOrg ? [{ href: "/orders", label: "Approvals" }] : []),
+    ...(isClientOrg && seesOwnMoney ? [{ href: "/orders", label: "Approvals" }] : []),
     ...(resells
       ? [{ href: "/listings", label: "Listings" }]
       : isClientOrg ? [{ href: "/store", label: "Parts" }] : []),
@@ -263,7 +276,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   ] : [
     { href: "/", label: resells ? "Pipeline" : "Your lab", icon: "home" },
     { href: "/work", label: "Requests", icon: "work" },
-    ...(isClientOrg ? [{ href: "/orders", label: "Approvals", icon: "approvals" as const }] : []),
+    ...(isClientOrg && seesOwnMoney ? [{ href: "/orders", label: "Approvals", icon: "approvals" as const }] : []),
     ...(resells
       ? [{ href: "/listings", label: "Listings", icon: "parts" as const }]
       : isClientOrg ? [{ href: "/store", label: "Parts", icon: "parts" as const }] : []),

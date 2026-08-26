@@ -15,7 +15,7 @@ import NeededPartsCard from "@/components/NeededPartsCard";
 import NewPoButton from "@/components/NewPoButton";
 import { DataTable, Dot, FacetStrip, Id, Legend, Pill, Toolbar } from "@/components/ui";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { railContext } from "@/lib/financeData";
 import { isStaffRole } from "@/lib/tenants";
 import type { DataRow } from "@/components/ui/DataTable";
 import DeleteRowAction from "@/components/DeleteRowAction";
@@ -39,7 +39,7 @@ export default async function PurchasingPage({ searchParams }: {
      the front page, and an entry that leads nowhere is worse than no entry.
      The figures are not computed for them either - a number they may not have
      never enters the request. */
-  const fin = isStaffRole(user.role) ? await financeContext(user, periodParam) : null;
+  const fin = isStaffRole(user.role) ? await railContext(user, periodParam) : null;
 
   const [rooms, myShares, orgRows] = await Promise.all([
     db.select().from(stockrooms).where(forTenant(stockrooms.tenantOrgId, readTenant(user))).orderBy(asc(stockrooms.name)),
@@ -139,7 +139,7 @@ export default async function PurchasingPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={fin && { active: "purchasing", amounts: fin.figures.amounts, seesPayroll: fin.seesPayroll }}
+      rail={fin && { active: "purchasing", amounts: fin.amounts, seesBooks: fin.seesBooks, seesPayroll: fin.seesPayroll }}
       period={fin?.period ?? "month"}
       path="/money/purchasing"
       title="Purchasing"

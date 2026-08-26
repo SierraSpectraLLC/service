@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { maySeeOrgMoney } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
@@ -24,6 +25,9 @@ export default async function ClientQuotePage({ params }: { params: Promise<{ id
   if (user.orgId === null) redirect("/");
   const [org] = await db.select().from(orgs).where(eq(orgs.id, user.orgId));
   if (!org || org.kind !== "client") redirect("/");
+  /* What their organization has been quoted and billed is their organization's
+     money, not everybody's who can sign in to it. See maySeeOrgMoney. */
+  if (!(await maySeeOrgMoney(user, org.id))) redirect("/");
   const id = parseInt((await params).id, 10);
   if (!Number.isInteger(id)) notFound();
 

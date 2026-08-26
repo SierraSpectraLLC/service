@@ -11,7 +11,7 @@ import { shopToday } from "@/lib/shopday";
 import { WO_LABEL } from "@/lib/workOrders";
 import ExpenseReportsPanel, { type ReportRow } from "@/components/ExpenseReportsPanel";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { railContext } from "@/lib/financeData";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +32,8 @@ export default async function ExpensesPage({ searchParams }: {
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
-  const { period, seesPayroll, figures: fig } =
-    await financeContext(user, (await searchParams).period);
+  const { period, seesBooks, seesPayroll, amounts } =
+    await railContext(user, (await searchParams).period);
   const isOwner = user.role === "owner";
   const t = readTenant(user);
 
@@ -74,7 +74,7 @@ export default async function ExpensesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "reimbursements", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "reimbursements", amounts, seesBooks, seesPayroll }}
       period={period}
       path="/money/reimbursements"
       title="Reimbursements"

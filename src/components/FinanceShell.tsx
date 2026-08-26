@@ -22,7 +22,7 @@ export default function FinanceShell({
   rail, period, path, title, sub, actions, banner, children,
 }: {
   /** Null for a reader who is not in the section. See above - this matters. */
-  rail: { active: FinanceKey; amounts?: FinanceAmounts; seesPayroll: boolean } | null;
+  rail: { active: FinanceKey; amounts?: FinanceAmounts; seesBooks: boolean; seesPayroll: boolean } | null;
   period: Period;
   /** This page's own path, so the period picker returns to it. */
   path: string;
@@ -58,7 +58,7 @@ export default function FinanceShell({
       {banner}
       <div className="rail-body">
         <FinanceRail active={rail.active} amounts={rail.amounts}
-          seesPayroll={rail.seesPayroll} period={period} />
+          seesBooks={rail.seesBooks} seesPayroll={rail.seesPayroll} period={period} />
         <main className="rail-main">{children}</main>
       </div>
     </div>

@@ -6,7 +6,7 @@ import { clientAllowlist, expenses, houseMembers, orgs, payroll, timeEntries, us
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { railContext } from "@/lib/financeData";
 import { myTenantOrgId } from "@/lib/authz";
 import { forTenant } from "@/lib/tenancy";
 import { shopToday } from "@/lib/shopday";
@@ -59,7 +59,7 @@ export default async function PayrollPage({ searchParams }: {
      the operator's books does not belong beside a pay stub. It would also be
      nine links that redirect them. */
   const fin = isStaffRole(user.role)
-    ? await financeContext(user, (await searchParams).period)
+    ? await railContext(user, (await searchParams).period)
     : null;
   const inSection = fin?.seesPayroll === true;
   const all = (await db.select().from(payroll).where(eq(payroll.orgId, mine))
@@ -156,7 +156,7 @@ export default async function PayrollPage({ searchParams }: {
   return (
     <FinanceShell
       rail={inSection && fin
-        ? { active: "payroll", amounts: fin.figures.amounts, seesPayroll: fin.seesPayroll }
+        ? { active: "payroll", amounts: fin.amounts, seesBooks: fin.seesBooks, seesPayroll: fin.seesPayroll }
         : null}
       period={fin?.period ?? "month"}
       path="/money/payroll"

@@ -10,7 +10,7 @@ import { visibleDirectory } from "@/lib/directory";
 import { shopToday } from "@/lib/shopday";
 import { payrollForMonth, recentMonths, type PayRow } from "@/lib/payroll";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import OverheadPanel from "@/components/OverheadPanel";
 import { PageHead } from "@/components/ui";
 
@@ -28,7 +28,7 @@ export default async function OverheadExpensesPage({ searchParams }: {
   try { user = await requireUser(); } catch { redirect("/login"); }
   if (!isStaffRole(user.role)) redirect("/");
   const { period, seesPayroll, figures: fig } =
-    await financeContext(user, (await searchParams).period);
+    await booksContext(user, (await searchParams).period);
 
   const [rows, people, categoryRows] = await Promise.all([
     db.select().from(expenses)
@@ -60,7 +60,7 @@ export default async function OverheadExpensesPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "overhead", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "overhead", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money/expenses"
       title="Overhead"

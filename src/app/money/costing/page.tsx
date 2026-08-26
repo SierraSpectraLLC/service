@@ -8,7 +8,7 @@ import { costingBoard } from "@/lib/invoiceData";
 import { short, SLOW_PAY_DAYS } from "@/lib/costing";
 import { periodDays, periodSpan } from "@/lib/finance";
 import FinanceShell from "@/components/FinanceShell";
-import { financeContext } from "@/lib/financeData";
+import { booksContext } from "@/lib/financeData";
 import { EmptyState, Id, PageHead, Panel, Pill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +35,7 @@ export default async function CostingPage({ searchParams }: {
   // the section had two answers to "over what period" and no way to carry one
   // across a click. It reads the section's window now - see lib/finance.
   const { period, seesPayroll, figures: fig } =
-    await financeContext(user, (await searchParams).period);
+    await booksContext(user, (await searchParams).period);
   const today = shopToday();
   const { jobs, clients, loadedLaborCents } = await costingBoard(today, periodDays(today, period));
 
@@ -43,7 +43,7 @@ export default async function CostingPage({ searchParams }: {
 
   return (
     <FinanceShell
-      rail={{ active: "costing", amounts: fig.amounts, seesPayroll }}
+      rail={{ active: "costing", amounts: fig.amounts, seesBooks: true, seesPayroll }}
       period={period}
       path="/money/costing"
       title="Job costing"

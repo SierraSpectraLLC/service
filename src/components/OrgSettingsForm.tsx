@@ -7,6 +7,7 @@ import {
   addClientAccess, addClientPerson, removeClientAccess,
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
+  setClientSeesMoney,
 } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
@@ -27,6 +28,7 @@ type Entry = {
   name?: string;
   title?: string;
   canSeePayroll?: boolean;
+  canSeeMoney?: boolean;
   /** Whether they have ever actually been here. */
   signedIn?: boolean;
   /** "their own" | "expired" | "6d left" | "" - see lib/tempPassword. */
@@ -357,6 +359,25 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
                 </label>
               ) : r.canSeePayroll ? (
                 <span className="pill neutral">payroll</span>
+              ) : null}
+              {/* What their organization has been quoted and billed. On by
+                  default - unlike payroll, and for the reason in
+                  setClientSeesMoney: their org has no owner role to fall back
+                  on, so this is taken away from a named person rather than
+                  withheld from everybody. */}
+              {isOwner ? (
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
+                  title="Whether this person may read their own organization's quotes and invoices - what the work has cost them">
+                  <input type="checkbox" checked={r.canSeeMoney !== false} disabled={pending} style={{ width: 14, height: 14 }}
+                    onChange={(e) => startTransition(async () => {
+                      const res = await setClientSeesMoney(r.id, e.target.checked);
+                      if (res?.error) setPeopleError(res.error);
+                      else toast({ message: e.target.checked ? `${r.entry} may read the quotes and invoices` : `${r.entry} no longer reads the quotes and invoices` });
+                    })} />
+                  quotes &amp; invoices
+                </label>
+              ) : r.canSeeMoney !== false ? (
+                <span className="pill neutral">quotes &amp; invoices</span>
               ) : null}
               {isStaff && !domain && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>

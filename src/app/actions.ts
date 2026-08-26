@@ -7297,6 +7297,37 @@ export async function setClientSeesPayroll(id: number, canSee: boolean): Promise
   return {};
 }
 
+/**
+ * Who at a client may read their organization's MONEY - the quotes it has been
+ * sent and the invoices it owes.
+ *
+ * Defaults ON, like agreements and unlike payroll, and for a reason worth
+ * writing down: an operator has an owner role, so keeping ITS books to the
+ * owner is a rule with no switch (lib/books). A client organization has no
+ * owner role. Shipping this off would leave some labs with nobody who could
+ * open their own invoice until somebody here granted it back, which is a
+ * broken account rather than a private one. So it is taken away per person,
+ * deliberately, rather than removed from everybody by upgrading.
+ */
+export async function setClientSeesMoney(id: number, canSee: boolean): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row || row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  if (row.canSeeMoney === canSee) return {};
+  await db.update(clientAllowlist).set({ canSeeMoney: canSee }).where(eq(clientAllowlist.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: `${row.entry} ${canSee ? "may now read" : "may no longer read"} their organization's quotes and invoices`,
+    field: "can_see_money", oldValue: String(row.canSeeMoney), newValue: String(canSee),
+  });
+  revalidatePath("/settings");
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  revalidatePath("/orders");
+  return {};
+}
+
 // ---------------- Payroll ----------------
 // The most guarded rows in the app. Every one of these actions decides access
 // through lib/payroll rather than through the tenancy helpers the rest of the

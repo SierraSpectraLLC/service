@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { and, eq, gte, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
@@ -13,6 +14,7 @@ import { poTotals } from "@/lib/po";
 import { shopToday } from "@/lib/shopday";
 import { formatCents } from "@/lib/money";
 import { maySeePayroll, payrollForMonth, type PayRow, type PayrollViewer } from "@/lib/payroll";
+import { maySeeBooks, type BooksViewer } from "@/lib/books";
 import {
   CHASE_DAYS, RENEWAL_DAYS, STALE_QUOTE_DAYS,
   addYear, daysBetween, monthlyContractCents, monthsIn, periodFor, periodStart, rankDecisions,
@@ -65,6 +67,55 @@ export type FinanceFigures = {
 const contractLive = (a: { status: string; endsOn: string }, today: string): boolean =>
   a.status === "active" && (a.endsOn === "" || a.endsOn >= today);
 
+/** What the two working rooms are worth - the only figures a non-owner gets. */
+export type SpendFigures = {
+  purchasingCents: number;
+  openPos: number;
+  reimbursementsCents: number;
+  reimbursementReports: number;
+};
+
+/**
+ * Committed spend and unpaid claims.
+ *
+ * Its own function because two readers now need it at two depths: the owner,
+ * as two lines of a whole position, and everybody else, as the only two
+ * figures in the section that are theirs. One copy, so the badge an engineer
+ * sees on Purchasing is the same number the overview adds up.
+ */
+export async function spendFigures(tenantOrgId: number | null): Promise<SpendFigures> {
+  const [poRows, poLineRows, reportRows, reportExpenses] = await Promise.all([
+    db.select().from(purchaseOrders).where(forTenant(purchaseOrders.tenantOrgId, tenantOrgId)),
+    db.select().from(poLines),
+    db.select().from(expenseReports)
+      .where(and(forTenant(expenseReports.tenantOrgId, tenantOrgId), eq(expenseReports.status, "submitted"))),
+    db.select().from(expenses).where(forTenant(expenses.tenantOrgId, tenantOrgId)),
+  ]);
+
+  // Committed spend: ordered and not yet in hand. A received order has already
+  // become stock, and counting it again would double the same dollar.
+  const linesByPo = new Map<number, typeof poLineRows>();
+  for (const l of poLineRows) {
+    const list = linesByPo.get(l.poId);
+    if (list) list.push(l); else linesByPo.set(l.poId, [l]);
+  }
+  const openPos = poRows.filter((p) => p.status === "sent" || p.status === "partial");
+
+  // Claimed and not yet paid out. The pool a person has spent but not claimed
+  // is theirs to submit, not the company's to owe.
+  const reportIds = new Set(reportRows.map((r) => r.id));
+
+  return {
+    purchasingCents: openPos.reduce(
+      (n, p) => n + poTotals(linesByPo.get(p.id) ?? []).cents, 0),
+    openPos: openPos.length,
+    reimbursementsCents: reportExpenses
+      .filter((e) => e.reportId !== null && reportIds.has(e.reportId))
+      .reduce((n, e) => n + e.amountCents, 0),
+    reimbursementReports: reportRows.length,
+  };
+}
+
 export async function financeFigures(
   user: SessionUser,
   today: string,
@@ -84,18 +135,14 @@ export async function financeFigures(
   };
   const mayReadPay = mine !== null && maySeePayroll(viewer, mine);
 
-  const [invoiceRows, quoteRows, unbilled, paidRows, poRows, poLineRows, reportRows, reportExpenses, overheadRows, contractRows, orgRows, payRows] =
+  const [invoiceRows, quoteRows, unbilled, paidRows, spend, overheadRows, contractRows, orgRows, payRows] =
     await Promise.all([
       allInvoices(),
       allQuotes(),
       unbilledJobs(),
       db.select().from(payments)
         .where(and(forTenant(payments.tenantOrgId, t), gte(payments.receivedOn, from))),
-      db.select().from(purchaseOrders).where(forTenant(purchaseOrders.tenantOrgId, t)),
-      db.select().from(poLines),
-      db.select().from(expenseReports)
-        .where(and(forTenant(expenseReports.tenantOrgId, t), eq(expenseReports.status, "submitted"))),
-      db.select().from(expenses).where(forTenant(expenses.tenantOrgId, t)),
+      spendFigures(t),
       db.select().from(expenses)
         .where(and(
           isNull(expenses.workOrderId),
@@ -120,23 +167,7 @@ export async function financeFigures(
     .filter((q) => quoteStanding(q.row, today) === "awaiting")
     .reduce((n, q) => n + quoteTotal(q), 0);
 
-  // Committed spend: ordered and not yet in hand. A received order has already
-  // become stock, and counting it again would double the same dollar.
-  const linesByPo = new Map<number, typeof poLineRows>();
-  for (const l of poLineRows) {
-    const list = linesByPo.get(l.poId);
-    if (list) list.push(l); else linesByPo.set(l.poId, [l]);
-  }
-  const openPos = poRows.filter((p) => p.status === "sent" || p.status === "partial");
-  const purchasingCents = openPos.reduce(
-    (n, p) => n + poTotals(linesByPo.get(p.id) ?? []).cents, 0);
-
-  // Claimed and not yet paid out. The pool a person has spent but not claimed
-  // is theirs to submit, not the company's to owe.
-  const reportIds = new Set(reportRows.map((r) => r.id));
-  const reimbursementsCents = reportExpenses
-    .filter((e) => e.reportId !== null && reportIds.has(e.reportId))
-    .reduce((n, e) => n + e.amountCents, 0);
+  const { purchasingCents, openPos, reimbursementsCents, reimbursementReports } = spend;
 
   const overheadCents = overheadRows.reduce((n, e) => n + e.amountCents, 0);
 
@@ -195,8 +226,8 @@ export async function financeFigures(
       paidCents: paidRows.reduce((n, p) => n + p.amountCents, 0),
     },
     moneyOut: {
-      purchasingCents, openPos: openPos.length,
-      reimbursementsCents, reimbursementReports: reportRows.length,
+      purchasingCents, openPos,
+      reimbursementsCents, reimbursementReports,
       overheadCents, payrollCents,
     },
     contractsMonthlyCents,
@@ -236,13 +267,86 @@ export async function financeFigures(
         key: "reimbursements",
         tone: "warn" as Decision["tone"],
         title: `${formatCents(reimbursementsCents)} of field spend is waiting on you`,
-        detail: `${reportRows.length} report${reportRows.length === 1 ? "" : "s"} submitted and not paid out`,
+        detail: `${reimbursementReports} report${reimbursementReports === 1 ? "" : "s"} submitted and not paid out`,
         href: "/money/reimbursements",
       }] : []),
     ]),
   };
 }
 
+
+/**
+ * Who this reader is, for both money questions at once.
+ *
+ * One lookup, because the two flags live in the same allowlist row and asking
+ * twice is how a page ends up with a rail that disagrees with itself.
+ */
+async function moneyViewer(user: SessionUser): Promise<{
+  mine: number | null; seesBooks: boolean; seesPayroll: boolean;
+}> {
+  const mine = myTenantOrgId(user);
+  const [allowRow] = user.orgId === null ? [] : await db
+    .select({ canSeePayroll: clientAllowlist.canSeePayroll, canSeeMoney: clientAllowlist.canSeeMoney })
+    .from(clientAllowlist)
+    .where(eq(clientAllowlist.entry, user.email.trim().toLowerCase()));
+  const shared = { email: user.email, role: user.role, orgId: user.orgId, operatorOrgId: mine };
+  return {
+    mine,
+    seesBooks: mine !== null && maySeeBooks(
+      { ...shared, canSeeMoney: allowRow?.canSeeMoney ?? true } satisfies BooksViewer, mine),
+    seesPayroll: mine !== null && maySeePayroll(
+      { ...shared, canSeePayroll: allowRow?.canSeePayroll ?? false } satisfies PayrollViewer, mine),
+  };
+}
+
+/**
+ * May this person read the operator's books - the one question, asked from
+ * outside the section.
+ *
+ * The dashboard's money card and the "Financial" nav word both need it, and
+ * neither is a page in the section, so neither should be paying for a whole
+ * set of figures to find out.
+ */
+export async function seesBooksFor(user: SessionUser): Promise<boolean> {
+  return (await moneyViewer(user)).seesBooks;
+}
+
+/**
+ * Enough to draw the rail, and nothing else.
+ *
+ * For the two working rooms - Purchasing and Reimbursements - which an
+ * engineer reaches as part of their job and an owner reaches as two lines of
+ * the position. A reader who may not read the books gets the two figures that
+ * are theirs and no others: not zeroed, ABSENT, so the rail has nothing to put
+ * a badge on. Zeroing them would have been the leak with extra steps, since
+ * "Collections $0" and "Collections withheld" look identical and only one of
+ * them is true.
+ */
+export async function railContext(user: SessionUser, periodParam: unknown): Promise<{
+  period: Period;
+  today: string;
+  seesBooks: boolean;
+  seesPayroll: boolean;
+  amounts: FinanceAmounts;
+}> {
+  const period = periodFor(periodParam);
+  const today = shopToday();
+  const { mine, seesBooks, seesPayroll } = await moneyViewer(user);
+
+  if (seesBooks) {
+    const figures = await financeFigures(user, today, period, { operatorOrgId: mine });
+    return { period, today, seesBooks, seesPayroll, amounts: figures.amounts };
+  }
+
+  const spend = await spendFigures(readTenant(user));
+  return {
+    period, today, seesBooks, seesPayroll,
+    amounts: {
+      purchasing: spend.purchasingCents,
+      reimbursements: spend.reimbursementsCents,
+    },
+  };
+}
 
 /**
  * Everything a page in the financial section needs before it renders: the
@@ -252,8 +356,14 @@ export async function financeFigures(
  * because the permission question in particular must be asked the same way
  * everywhere. A page that computed `seesPayroll` slightly differently from the
  * rail beside it is exactly the leak this section had to be built around.
+ *
+ * IT ALSO IS THE GATE. Every room here is the shop's position, so a reader who
+ * may not read the books is turned away by the same call that would have
+ * handed them the figures - there is no way to render one of these pages
+ * without asking. A guard the caller has to remember is a guard that gets
+ * forgotten on the eleventh page; see lib/books for who gets through.
  */
-export async function financeContext(user: SessionUser, periodParam: unknown): Promise<{
+export async function booksContext(user: SessionUser, periodParam: unknown): Promise<{
   period: Period;
   today: string;
   /** Whether the payroll register is readable by this person, at all. */
@@ -262,15 +372,8 @@ export async function financeContext(user: SessionUser, periodParam: unknown): P
 }> {
   const period = periodFor(periodParam);
   const today = shopToday();
-  const mine = myTenantOrgId(user);
-
-  const [allowRow] = user.orgId === null ? [] : await db
-    .select({ canSeePayroll: clientAllowlist.canSeePayroll }).from(clientAllowlist)
-    .where(eq(clientAllowlist.entry, user.email.trim().toLowerCase()));
-  const seesPayroll = mine !== null && maySeePayroll({
-    email: user.email, role: user.role, orgId: user.orgId,
-    operatorOrgId: mine, canSeePayroll: allowRow?.canSeePayroll ?? false,
-  }, mine);
+  const { mine, seesBooks, seesPayroll } = await moneyViewer(user);
+  if (!seesBooks) redirect("/");
 
   return {
     period, today, seesPayroll,

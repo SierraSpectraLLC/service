@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
+import { seesBooksFor } from "@/lib/financeData";
 import { readTenant } from "@/lib/tenancy";
 import { quoteById, qtyOf } from "@/lib/invoiceData";
 import { getBrand } from "@/lib/brand";
@@ -16,6 +17,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   let user;
   try { user = await requireStaff(); } catch { return NextResponse.json({ error: "Staff only" }, { status: 403 }); }
+  /* A spreadsheet of what a client was charged is the books in one file, and a
+     URL with an id in it is guessable in a way the page it hangs off is not.
+     Same rule as the page - see lib/books. */
+  if (!(await seesBooksFor(user))) return NextResponse.json({ error: "Owner only" }, { status: 403 });
   const id = parseInt((await ctx.params).id, 10);
   if (!Number.isInteger(id)) return NextResponse.json({ error: "Bad id" }, { status: 400 });
 

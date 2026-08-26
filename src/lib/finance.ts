@@ -103,6 +103,21 @@ const ENTRIES: (FinanceEntry & { group: string })[] = [
 
 const GROUP_ORDER = ["Position", "Money in", "Money out", "Analysis"];
 
+/**
+ * The two rooms that are not the books.
+ *
+ * Raising a purchase order and claiming back a hotel are things an engineer
+ * DOES, not facts about how the business is doing - they sit in the Operations
+ * nav for exactly that reason, and both were doors of their own before this
+ * section existed. Closing them along with the rest would take a tech's own
+ * expense report away from the tech, which is not a confidentiality rule, it is
+ * a broken app. Everything else here is the shop's position and belongs to
+ * whoever owns the shop - see lib/books.
+ */
+export const WORKING_ROOMS: readonly FinanceKey[] = ["purchasing", "reimbursements"] as const;
+
+export const isWorkingRoom = (key: FinanceKey): boolean => WORKING_ROOMS.includes(key);
+
 /** What each room is called, wherever it is named - rail, crumb or title. */
 export const FINANCE_LABEL: Record<FinanceKey, string> =
   Object.fromEntries(ENTRIES.map((e) => [e.key, e.label])) as Record<FinanceKey, string>;
@@ -114,13 +129,25 @@ export const FINANCE_LABEL: Record<FinanceKey, string> =
  * not showing a figure with the label removed. An entry that names a thing
  * somebody cannot have is worse than no entry, and a rail badge is a figure:
  * "Payroll $18,600" leaks the number whether or not the link works.
+ *
+ * The books collapse the same way, and for the same reason. A reader who is
+ * not the owner still reaches Purchasing and Reimbursements, so they still get
+ * a rail; what they get is a rail of the two rooms that are theirs, with no
+ * "Invoices $84,000" beside it. Dropping the LINKS while keeping the badges
+ * would have been the leak this file exists to make impossible - the number is
+ * the secret, not the anchor tag.
  */
 export function financeRail(opts: {
+  /** Whether this reader may read the shop's position at all - see lib/books. */
+  seesBooks: boolean;
   seesPayroll: boolean;
   period?: Period;
 }): FinanceGroup[] {
   const period = opts.period ?? "month";
-  const visible = ENTRIES.filter((e) => e.key !== "payroll" || opts.seesPayroll);
+  const visible = ENTRIES.filter((e) =>
+    isWorkingRoom(e.key) ? true
+      : e.key === "payroll" ? opts.seesBooks && opts.seesPayroll
+        : opts.seesBooks);
   return GROUP_ORDER
     .map((label) => ({
       label,

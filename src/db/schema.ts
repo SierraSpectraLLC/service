@@ -2694,6 +2694,23 @@ export const clientAllowlist = pgTable("client_allowlist", {
    * and for an obvious reason.
    */
   canSeePayroll: boolean("can_see_payroll").notNull().default(false),
+  /**
+   * Whether this person may read their ORGANIZATION'S MONEY - the quotes it
+   * has been sent and the invoices it owes, which together are what the
+   * relationship has cost. A lab manager signs those off; the technician who
+   * logs in to see whether the LC is fixed has no business in them.
+   *
+   * Defaults TRUE, unlike payroll, and the asymmetry is deliberate. The house
+   * side of this rule needs no column at all - an operator has an OWNER role,
+   * so restricting the books to the owner is a rule rather than a setting, and
+   * it is safe because the owner keeps them. A client organization has no
+   * owner role. Shipping this false would leave some labs with nobody at all
+   * who could open their own invoice until an operator went in and granted it
+   * back, which is a broken account rather than a private one. So the switch
+   * exists to take the privilege away deliberately, per person, the way
+   * can_see_agreements does - never to remove it from people by upgrading.
+   */
+  canSeeMoney: boolean("can_see_money").notNull().default(true),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);

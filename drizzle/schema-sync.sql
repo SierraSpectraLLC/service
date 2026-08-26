@@ -3301,6 +3301,7 @@ END $$;
 
 -- Who at an organization may read its payroll. Off until somebody says so.
 ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_payroll" boolean NOT NULL DEFAULT false;
+ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_money" boolean NOT NULL DEFAULT true;
 
 -- po_lines has always DECLARED a cascading parent in schema.ts and never had
 -- the constraint here, so nothing enforced it: deleting an order would have
