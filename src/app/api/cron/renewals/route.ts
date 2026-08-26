@@ -38,7 +38,8 @@ export async function GET(req: Request) {
     const due = needsAttention(all, today);
     if (!due.length) return NextResponse.json({ sent: 0, checked: all.length });
 
-    const orgIds = [...new Set(due.map((a) => a.orgId))];
+    const orgIds = [...new Set(due.flatMap(
+      (a) => [a.orgId, a.providerOrgId].filter((x): x is number => x !== null)))];
     const orgRows = orgIds.length
       ? await db.select({ id: orgs.id, name: orgs.name }).from(orgs).where(inArray(orgs.id, orgIds))
       : [];
@@ -59,18 +60,30 @@ export async function GET(req: Request) {
         to, orgId: a.orgId,
         orgName: orgRows.find((o) => o.id === a.orgId)?.name ?? "a client",
         label: [a.number, a.title].filter(Boolean).join(" ") || KIND_LABEL[a.kind],
-        line: `${standing(a, today) === "expired" ? "Expired" : "Up for renewal"}. ${renewalLine(a, today)}`,
+        // Whose paper, when it is not ours - otherwise a notice about a
+        // manufacturer's contract reads as a notice about one of ours.
+        line: `${standing(a, today) === "expired" ? "Expired" : "Up for renewal"}${
+          a.providerOrgId === null ? "" : ` (held by ${
+            orgRows.find((o) => o.id === a.providerOrgId)?.name ?? "another company"})`
+        }. ${renewalLine(a, today)}`,
         parts: parts.tracked ? `${formatCents(parts.used)} of ${formatCents(parts.included)} parts` : "",
         visits: visits.tracked ? `${visits.used} of ${visits.included} visits` : "",
       });
       sent++;
 
-      // And draft the renewal itself, prefilled from what the term actually
-      // cost to serve. The argument for a price is the burn - "you used six
-      // visits and $4,900 of parts" is a conversation, and "our rates went up"
-      // is not. Once per agreement: a second draft every week would bury the
-      // first one nobody has sent yet.
-      if (await draftRenewalQuote(a, used).catch(() => false)) drafted++;
+      /* And draft the renewal itself, prefilled from what the term actually
+         cost to serve. The argument for a price is the burn - "you used six
+         visits and $4,900 of parts" is a conversation, and "our rates went up"
+         is not. Once per agreement: a second draft every week would bury the
+         first one nobody has sent yet.
+
+         Never for somebody else's paper. The NOTICE above is worth sending -
+         a client whose manufacturer contract lapses in sixty days is the best
+         lead this workspace will get all quarter, and it goes to our own staff
+         rather than to them. Quoting a renewal of it is not ours to do: the
+         burn would be zero (none of that work is in this record) and the quote
+         would be an offer to renew a contract we do not hold. */
+      if (a.providerOrgId === null && await draftRenewalQuote(a, used).catch(() => false)) drafted++;
     }
     return NextResponse.json({ sent, drafted, checked: all.length });
   } catch (e) {

@@ -97,6 +97,11 @@ export function coverageFor(input: {
     id: number; number: string; orgId: number; status: string;
     startsOn: string; endsOn: string; instrumentIds: number[];
     laborCovered: boolean; partsCovered: boolean;
+    /**
+     * Who provides the service. Null is us; anything else is somebody else's
+     * paper and cannot absorb our labour - see the filter below.
+     */
+    providerOrgId?: number | null;
   }[];
   orgId: number | null;
   instrumentId: number | null;
@@ -107,6 +112,14 @@ export function coverageFor(input: {
   if (input.orgId === null) return NO_COVERAGE;
   const live = input.agreements
     .filter((a) => a.orgId === input.orgId && a.status === "active")
+    /* OURS ONLY. A client under contract with the manufacturer has a real,
+       in-force agreement on file that covers this exact system - and none of
+       it is a promise WE made. Reading it here would mark our labour and our
+       parts as covered and take them off the invoice, which is the whole
+       day's work done for free because somebody else sold a contract.
+       Optional on the input, and absent means null, so every caller that
+       predates the column keeps behaving as it did. */
+    .filter((a) => (a.providerOrgId ?? null) === null)
     .filter((a) => (!a.startsOn || a.startsOn <= input.today) && (!a.endsOn || a.endsOn >= input.today))
     .filter((a) => a.instrumentIds.length === 0 || (input.instrumentId !== null && a.instrumentIds.includes(input.instrumentId)))
     .sort((a, b) => (a.endsOn || "9999").localeCompare(b.endsOn || "9999"));

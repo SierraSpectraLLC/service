@@ -7,11 +7,12 @@ import {
   discussionPosts, assets, discussionReads, vocabTerms, systemShares, orgs, accessRequests, eodUpdates,
   serviceVisits, workOrders, orgSites,
   pmSchedules, procedures, signoffs, timeEntries, partPrices, custodyEvents, queueEvents,
-  catalogRefs, validationDocs, validationSignatures,
+  catalogRefs, validationDocs, validationSignatures, agreements,
 } from "@/db/schema";
 import { requireUser, viewContext } from "@/lib/authz";
 import {
-  assertSystemVisible, canEditSystem, forTenant, readTenant, viewTenant, visibleOrgs, visibleSystemIds,
+  assertSystemVisible, canEditSystem, forTenant, maySeeAgreements, readTenant, viewTenant,
+  visibleOrgs, visibleSystemIds,
 } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { audienceLine, canSeePost, type Audience } from "@/lib/discussionScope";
@@ -21,7 +22,7 @@ import { getBrand } from "@/lib/brand";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
-import { shopDay, shopTime, shopToday } from "@/lib/shopday";
+import { shopDay, shopMonthDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
 import { partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
@@ -62,6 +63,8 @@ import PanelLayout from "@/components/PanelLayout";
 import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
 import { CLIENT_GROUP_LABEL, clientMaySee, queueNeedsThem } from "@/lib/clientView";
+import { coverageOf, type CoverageAgreement } from "@/lib/coverage";
+import SystemCoverage from "@/components/SystemCoverage";
 import { stateOf } from "@/lib/clientLandingData";
 import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
@@ -415,6 +418,44 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
      being reserved for something that needs an answer. Nothing is lost: every
      fact it carried is on the Queue panel one card down, permanently. */
   const handback = !isStaff && queueMine && !somethingPending;
+  /* Who services this one, and until when.
+     A system's OWNER is who a contract is written with, so a house-stewarded
+     system (no owner) has nobody to hold one and gets no coverage read at
+     all - rather than an empty read that would render as "no contract on
+     file" about a machine that is ours outright. */
+  const covRows = inst.ownerOrgId === null ? [] : await db.select({
+    id: agreements.id, title: agreements.title, number: agreements.number,
+    status: agreements.status, startsOn: agreements.startsOn, endsOn: agreements.endsOn,
+    renewNoticeDays: agreements.renewNoticeDays, instrumentIds: agreements.instrumentIds,
+    providerOrgId: agreements.providerOrgId,
+  }).from(agreements)
+    .where(and(
+      eq(agreements.orgId, inst.ownerOrgId),
+      eq(agreements.kind, "contract"),
+      forTenant(agreements.tenantOrgId, inst.tenantOrgId),
+    ))
+    .catch(() => []);
+  const coverAgreements: CoverageAgreement[] = covRows.map((a) => ({
+    ...a,
+    // Null stays null - it is what makes an agreement ours.
+    providerName: a.providerOrgId === null
+      ? null
+      : orgName.get(a.providerOrgId) ?? "another company",
+  }));
+  const coverage = coverageOf(inst.id, coverAgreements, today, brand.operatorName);
+  /* Whether this reader may open the paper itself. Who services the system is
+     not a money fact and everyone who can see the record gets it; the terms
+     behind it are, and stay behind the organization's own gate. */
+  const canSeePaper = inst.ownerOrgId !== null && await maySeeAgreements(user, inst.ownerOrgId);
+
+  /* The last job THIS workspace closed on it. Not "last serviced": a machine
+     under contract with the manufacturer may well have been serviced last
+     month by somebody whose work never reaches this record, and the panel says
+     whose work it is reporting for exactly that reason. */
+  const lastClosed = woRows
+    .filter((w) => w.closedAt !== null)
+    .sort((a, b) => (b.closedAt as Date).getTime() - (a.closedAt as Date).getTime())[0];
+
   /* Dismissing speaks for the whole organization - their colleagues stop
      seeing the line and the shop reads the name as a receipt - so it takes the
      same role every other write does. A read-only account still sees the
@@ -540,7 +581,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
            changes, so both sides of a conversation are looking at the same
            shape of page. */
         groups={groupsFor(isStaff, [
-          { key: "now", label: "Now", keys: ["queue", "custody"],
+          { key: "now", label: "Now", keys: ["queue", "coverage", "custody"],
             badge: !queueMine ? `${queueDays}d` : undefined, badgeTone: "warn" },
           { key: "work", label: "Work",
             keys: ["workorders", "tasks", "hours", "parts", "discussion"],
@@ -596,6 +637,27 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 ownerResaleEnabled: resaleFlagFor(inst.ownerOrgId, resaleOrgs, user.operatorOrgId ?? null),
                 alreadyListed: inst.forSale,
               })}
+            />
+          ) },
+          /* Who services it, and when anybody here last did. Beside the queue
+             because both answer the same standing question from opposite
+             sides: who has it now, and who is on the hook for it at all. */
+          { key: "coverage", label: "Coverage", node: (
+            <SystemCoverage
+              coverage={coverage}
+              today={today}
+              operatorName={brand.operatorName}
+              lastService={lastClosed
+                ? {
+                    on: shopMonthDay(lastClosed.closedAt as Date),
+                    number: lastClosed.number,
+                    title: lastClosed.title,
+                  }
+                : null}
+              // Only for somebody their own organization lets read the paper.
+              agreementHref={coverage.agreementId !== null && canSeePaper
+                ? (isStaff ? "/money/contracts" : "/settings/agreements")
+                : undefined}
             />
           ) },
           // Whose move it is. High on the page: on a parked system it's the first thing that explains why nothing is happening.

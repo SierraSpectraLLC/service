@@ -220,6 +220,8 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
     agreements: agreementRows.map((a) => ({
       id: a.id, number: a.number, orgId: a.orgId, status: a.status,
       startsOn: a.startsOn, endsOn: a.endsOn, instrumentIds: a.instrumentIds,
+      // Somebody else's contract cannot absorb our labour - see coverageFor.
+      providerOrgId: a.providerOrgId,
       // A service contract carries the labor; parts pass through unless the
       // paper carries an allowance for them.
       laborCovered: a.kind === "contract",

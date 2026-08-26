@@ -33,6 +33,12 @@ export default function ClientCoverage({ agreements, today, operatorName }: {
     partsUnlimited: boolean;
     laborIncludedMinutes: number;
     pmPartsIncluded: boolean;
+    /**
+     * Who provides it. Null is the operator - and it is named anyway, because
+     * a card headed "Your coverage" that lists a manufacturer's contract and
+     * one of ours without saying which is which is worse than either alone.
+     */
+    providerName: string | null;
   }[];
   today: string;
   operatorName: string;
@@ -49,13 +55,21 @@ export default function ClientCoverage({ agreements, today, operatorName }: {
         return (
           <Panel key={a.id}
             title={a.title || a.number || "Service agreement"}
-            actions={<Pill tone={STANDING_TONE[s]}>{STANDING_LABEL[s]}</Pill>}
+            actions={
+              <>
+                {/* Whose paper, before what it includes. */}
+                <Pill tone={a.providerName === null ? "good" : "info"}>
+                  {a.providerName ?? operatorName}
+                </Pill>
+                <Pill tone={STANDING_TONE[s]}>{STANDING_LABEL[s]}</Pill>
+              </>
+            }
             hint={
               a.endsOn
                 ? <>Runs {a.startsOn || "from an unrecorded date"} to <b>{a.endsOn}</b>
                     {left !== null && left >= 0 ? ` · ${left} day${left === 1 ? "" : "s"} left` : ""}
                     {noticeSoon && a.renewNoticeDays > 0
-                      ? ` · renewal notice is ${a.renewNoticeDays} days, so now is when to talk to ${operatorName}`
+                      ? ` · renewal notice is ${a.renewNoticeDays} days, so now is when to talk to ${a.providerName ?? operatorName}`
                       : ""}</>
                 : <>Open-ended · no end date recorded</>
             }

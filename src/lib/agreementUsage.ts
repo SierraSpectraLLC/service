@@ -46,9 +46,19 @@ const within = (col: Parameters<typeof gte>[0], a: Pick<AgreementLike, "startsOn
 
 export async function usageFor(
   a: Pick<AgreementLike, "startsOn" | "endsOn">
-    & { instrumentIds?: number[]; pmPartsIncluded?: boolean; includedKits?: string },
+    & {
+      instrumentIds?: number[]; pmPartsIncluded?: boolean; includedKits?: string;
+      /** Null is us. See the guard on the first line. */
+      providerOrgId?: number | null;
+    },
   orgId: number,
 ): Promise<Usage> {
+  /* Nothing to count on somebody else's paper. Every figure below is drawn
+     from work THIS workspace recorded - our parts, our jobs, our hours - and
+     none of it is spent against a contract the manufacturer holds. Reporting
+     "3 of 8 visits used" on an Agilent contract would be inventing a drawdown
+     out of visits Agilent never made. */
+  if ((a.providerOrgId ?? null) !== null) return NOTHING;
   // Their systems: what labour and visits are counted against. Read once.
   // A contract assigned to specific systems counts only those - that is what
   // lets one client run a full-service contract on the TOC and a PM-only one

@@ -453,12 +453,24 @@ export default async function Home({ searchParams }: {
           where={initial.where ?? ""}
           coverage={
             <ClientCoverage today={today} operatorName={brand.operatorName}
-              agreements={coverRows.filter((a) => a.status === "active").map((a) => ({
+              agreements={coverRows
+                .filter((a) => a.status === "active")
+                /* Only paper that touches a system this account actually has.
+                   An account-wide contract ([] instrument list) always counts;
+                   one written against systems they no longer hold does not,
+                   and used to sit on the card promising visits on a machine
+                   that had left the building. */
+                .filter((a) => a.instrumentIds.length === 0
+                  || a.instrumentIds.some((id) => rows.some((r) => r.id === id)))
+                .map((a) => ({
                 id: a.id, title: a.title, number: a.number, status: a.status,
                 startsOn: a.startsOn, endsOn: a.endsOn, renewNoticeDays: a.renewNoticeDays,
                 visitsIncluded: a.visitsIncluded, visitsUnlimited: a.visitsUnlimited,
                 partsAllowanceCents: a.partsAllowanceCents, partsUnlimited: a.partsUnlimited,
                 laborIncludedMinutes: a.laborIncludedMinutes, pmPartsIncluded: a.pmPartsIncluded,
+                providerName: a.providerOrgId === null
+                  ? null
+                  : orgNames.find((o) => o.id === a.providerOrgId)?.name ?? "another company",
               }))} />
           }
           thisYear={[

@@ -235,7 +235,10 @@ export function rankTodos(list: ClientTodo[]): ClientTodo[] {
  * how the sausage is made.
  */
 export const CLIENT_PANELS = [
-  "queue", "system", "assets", "site", "workorders", "maintenance",
+  // "coverage" is theirs before it is ours: who services this machine and
+  // until when is the client's own question, and the page used to answer it
+  // by counting what they could see.
+  "queue", "coverage", "system", "assets", "site", "workorders", "maintenance",
   "parts", "photos", "validation", "files", "reference", "discussion",
 ] as const;
 

@@ -32,6 +32,11 @@ async function covering(orgId: number, instrumentId: number | null): Promise<Row
   const today = shopToday();
   const rows = await db.select().from(agreements).where(eq(agreements.orgId, orgId));
   return rows.filter((a) => {
+    /* Ours only. These flags say "one visit left on your contract" at the
+       moment somebody opens a job - a promise about what WE will absorb. A
+       contract the manufacturer holds makes no such promise, and counting our
+       jobs against its allowance would talk somebody out of billing. */
+    if (a.providerOrgId !== null) return false;
     const st = standing(a, today);
     if (st !== "active" && st !== "expiring") return false;
     return a.instrumentIds.length === 0

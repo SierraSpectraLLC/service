@@ -106,6 +106,8 @@ export async function draftSourceFor(woId: number): Promise<DraftSource | null> 
     agreements: agreementRows.map((a) => ({
       id: a.id, number: a.number, orgId: a.orgId, status: a.status,
       startsOn: a.startsOn, endsOn: a.endsOn, instrumentIds: a.instrumentIds,
+      // Somebody else's contract cannot absorb our labour - see coverageFor.
+      providerOrgId: a.providerOrgId,
       laborCovered: a.kind === "contract",
       partsCovered: a.kind === "contract" && (a.partsUnlimited || a.partsAllowanceCents > 0),
     })),
@@ -581,6 +583,8 @@ export async function costingBoard(today: string, windowDays: number): Promise<{
       agreements: agreementRows.map((a) => ({
         id: a.id, number: a.number, orgId: a.orgId, status: a.status,
         startsOn: a.startsOn, endsOn: a.endsOn, instrumentIds: a.instrumentIds,
+      // Somebody else's contract cannot absorb our labour - see coverageFor.
+      providerOrgId: a.providerOrgId,
         laborCovered: a.kind === "contract",
         partsCovered: a.kind === "contract" && (a.partsUnlimited || a.partsAllowanceCents > 0),
       })),
