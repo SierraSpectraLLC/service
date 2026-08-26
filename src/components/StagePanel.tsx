@@ -4,7 +4,8 @@ import { useOptimistic, useState, useTransition } from "react";
 import { setBlockedReason, toggleStage } from "@/app/actions";
 import { BLOCKED_STAGE } from "@/lib/stages";
 import { choiceDialog } from "@/components/ui/ConfirmDialog";
-import { blockLabel, type BlockOrgChoice } from "@/lib/blocks";
+import { blockLabel } from "@/lib/blocks";
+import type { PartyChoice } from "@/lib/parties";
 import { toast } from "@/components/ui/Toast";
 
 /**
@@ -16,7 +17,7 @@ import { toast } from "@/components/ui/Toast";
  * actions.toggleStage.
  */
 const askBlock = (
-  action: string, orgs: BlockOrgChoice[], heldBy: number, existing = "", context?: string,
+  action: string, orgs: PartyChoice[], heldBy: number, existing = "", context?: string,
 ) => choiceDialog({
   title: "Why is this system blocked?",
   context,
@@ -44,7 +45,7 @@ export default function StagePanel({
   /** What the block-reason dialog acts on, e.g. the system's external id. */
   systemLabel?: string;
   /** Who a block on this system may be put under, the default first. */
-  blockOrgs?: BlockOrgChoice[];
+  blockOrgs?: PartyChoice[];
   /** Who the current block is under, when there is one. */
   blockedOrgId?: number | null;
   /** That organization's name, blank when it is the obvious party. */
@@ -56,7 +57,7 @@ export default function StagePanel({
   const [optimisticStages, applyToggle] = useOptimistic(stages, (cur: string[], stage: string) =>
     cur.includes(stage) ? cur.filter((s) => s !== stage) : [...cur, stage]
   );
-  // blockOrgs arrives with the default first (see lib/blocks.blockOrgChoices),
+  // blockOrgs arrives with the default first (see lib/parties.partyChoices),
   // so the head of the list is "us" for whoever is looking.
   const fallbackOrg = blockOrgs[0]?.id ?? 0;
 

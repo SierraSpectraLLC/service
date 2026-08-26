@@ -107,7 +107,7 @@ import {
   GASES, GAS_STATES, ATTACH_KINDS, MODULE_KINDS, ASSET_STATES, BLOCKED_STAGE,
   autoFg, cleanBlockReason, isBlocking, partOpen, stageChange, validBlockReason,
 } from "@/lib/stages";
-import { blockParties } from "@/lib/blockData";
+import { systemParties, systemPartiesFor } from "@/lib/partyData";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
@@ -440,7 +440,7 @@ export async function toggleStage(
      bench and the chase is ours. See lib/blocks. */
   let heldBy: number | null = null;
   if (blocking) {
-    const parties = await blockParties(inst, u.orgId);
+    const parties = await systemParties(inst, u.orgId);
     // "Us" means something different depending on who is asking: for the shop
     // it is the workspace the system lives in, for a client editor working
     // their own machine it is their own company. Both are always in `parties`
@@ -492,7 +492,7 @@ export async function setBlockedReason(
      the caller is only rewording. */
   let heldBy: number | null | undefined = undefined;
   if (blockedOrgId !== null) {
-    const parties = await blockParties(inst, u.orgId);
+    const parties = await systemParties(inst, u.orgId);
     if (!parties.some((p) => p.id === blockedOrgId)) {
       return { error: "That organization has nothing to do with this system" };
     }
@@ -2605,6 +2605,12 @@ type PartInput = {
   moduleKind?: string;
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; status: string; note: string;
+  /**
+   * Who is fabricating it, on the made lane. Undefined leaves whatever is
+   * stored alone; null is us. NEVER derived from requestedOrgId - who was
+   * asked to buy a thing is not who is at the printer. See lib/stages.
+   */
+  makerOrgId?: number | null;
   // The day it actually went in or came out, YYYY-MM-DD. Blank leaves whatever
   // is stored alone rather than clearing it: a service date is a fact about the
   // machine, and an unrelated edit to the note must not quietly erase one.
@@ -2708,7 +2714,7 @@ function cleanPartInput(data: PartInput): PartInput {
 const today = () => shopToday();
 
 const partStamps = (
-  before: { status: string; receivedAt: string; installedAt: string; removedAt: string },
+  before: { status: string; receivedAt: string; madeAt?: string; installedAt: string; removedAt: string },
   status: string,
   given: { installedAt?: string; removedAt?: string } = {},
 ) => partDates(before, status, given, today());
@@ -2812,9 +2818,43 @@ export async function intakeModule(
   return { assetId: created.id };
 }
 
+/**
+ * Who is making this part, checked against the parties that actually have a
+ * hold on the machine it is for.
+ *
+ * `undefined` leaves the stored value alone - an edit to a note must not clear
+ * an attribution nobody touched. `null` is us. Anything else has to be on the
+ * same list the picker was built from (lib/partyData), so an id from a stale
+ * tab, or a guess, cannot park a print job on a company with no connection to
+ * the system.
+ *
+ * A part with no system behind it - a loose asset, a client's move job - has
+ * no party list to check against, so the only answers there are us and the
+ * asker's own organization. That is the whole truthful set in that case.
+ */
+async function resolveMaker(
+  given: number | null | undefined,
+  instrumentId: number | null,
+  u: { orgId: number | null },
+): Promise<{ makerOrgId: number | null } | { error: string }> {
+  if (given === undefined) return { makerOrgId: null };
+  if (given === null) return { makerOrgId: null };
+  if (instrumentId === null) {
+    return u.orgId !== null && given === u.orgId
+      ? { makerOrgId: given }
+      : { error: "That organization has nothing to do with this part" };
+  }
+  const parties = await systemPartiesFor(instrumentId, u.orgId);
+  return parties.some((x) => x.id === given)
+    ? { makerOrgId: given }
+    : { error: "That organization has nothing to do with this part" };
+}
+
 const partStatusVerb = (status: string) =>
   status === "Installed" ? "installed" : status === "Removed" ? "pulled"
-    : status === "Suggested" ? "suggested" : null;
+    : status === "Suggested" ? "suggested"
+      : status === "Being made" ? "started making"
+        : status === "Made" ? "finished making" : null;
 
 export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ error?: string; flag?: string; expanded?: number }> {
   const u = await requireEditor();
@@ -2829,8 +2869,10 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
   // Staff of the tenant see prices; a partner from another workspace does not,
   // however senior they are at their own company.
   if (!canSeeCosts(u, payer, tenant)) { data.cost = ""; data.po = ""; }
-  const stamps = partStamps({ status: "", receivedAt: "", installedAt: "", removedAt: "" }, data.status,
+  const stamps = partStamps({ status: "", receivedAt: "", madeAt: "", installedAt: "", removedAt: "" }, data.status,
     { installedAt: raw.installedAt, removedAt: raw.removedAt });
+  const maker = await resolveMaker(raw.makerOrgId, t0.instrumentId, u);
+  if ("error" in maker) return maker;
   const taggedAsset = t0.asset;
   // Only a schedule that actually belongs to this record - a stale id from an
   // open tab must not attribute somebody's part to another system's PM.
@@ -2840,7 +2882,7 @@ export async function createPart(target: WorkTarget, raw: PartInput): Promise<{ 
     t0.instrumentId !== null ? eq(pmSchedules.instrumentId, t0.instrumentId) : eq(pmSchedules.assetId, t0.assetId!),
   )))[0]?.id ?? null;
   const [p] = await db.insert(parts).values({
-    ...data, ...stamps, pmScheduleId: pmOk, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
+    ...data, ...stamps, ...maker, pmScheduleId: pmOk, assetId: t0.assetId, name: data.name.trim(), note: data.note.trim(), instrumentId: t0.instrumentId,
     workOrderId: t0.workOrderId,
     // The summable copy, parsed after the redaction strip so it follows cost.
     costCents: parseMoney(data.cost),
@@ -2931,8 +2973,15 @@ export async function updatePart(partId: number, raw: PartInput) {
         before.instrumentId !== null ? eq(pmSchedules.instrumentId, before.instrumentId)
           : eq(pmSchedules.assetId, before.assetId!),
       )))[0]?.id ?? null;
+  /* Undefined leaves the stored maker alone: a caller that knows nothing about
+     fabrication - the intake dialog, an older form - must not clear an
+     attribution by saving a note. */
+  const maker = raw.makerOrgId === undefined
+    ? {}
+    : await resolveMaker(raw.makerOrgId, before.instrumentId, u);
+  if ("error" in maker) return maker;
   await db.update(parts).set({
-    ...data, ...stamps, assetId, name: data.name.trim(), note: data.note.trim(),
+    ...data, ...stamps, ...maker, assetId, name: data.name.trim(), note: data.note.trim(),
     costCents: parseMoney(data.cost), pmScheduleId: pmNext,
   }).where(eq(parts.id, partId));
   const verb = partStatusVerb(data.status);

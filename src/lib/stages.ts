@@ -90,18 +90,62 @@ export const validBlockReason = (raw: string): boolean =>
   cleanBlockReason(raw).length >= MIN_BLOCK_REASON;
 
 export const TASK_STATES = ["Open", "In progress", "Blocked", "Done"] as const;
-// "Suggested" comes before commitment: the engineer diagnosing thinks the
-// switch assembly is the fix, but nobody has agreed to buy anything yet. It
-// never counts against a parts allowance (lib/agreementUsage counts Installed)
-// and never trips the entitlement flag - promoting it to Needed is the moment
-// of commitment, and that is where the machinery wakes up.
-export const PART_STATES = ["Suggested", "Needed", "Ordered", "In transit", "Received", "Backordered", "Installed", "Removed"] as const;
-/** True while a part still needs someone to do something (order, chase, install). */
+/**
+ * TWO WAYS A PART ARRIVES, and only one of them was ever in here.
+ *
+ * The list was a procurement pipeline end to end - ordered, shipped, received -
+ * which is right until a client decides to stop buying a bracket and start
+ * printing it. Then every word is wrong: nothing is on order, no carrier has
+ * it, and it will never be "received" because nobody is sending it. The only
+ * honest options left were to leave it sitting on "Needed" for three weeks
+ * while somebody made it, or to lie about an order.
+ *
+ * So there are two lanes now, sharing both ends. "Needed" is still the moment
+ * of commitment and it does not care which way the part comes; "Installed" and
+ * "Removed" are still how it ends. Between them a part is either BOUGHT
+ * (Ordered -> In transit -> Received, with Backordered as the stall) or MADE
+ * (Being made -> Made). The two never mix on one row, which is what makes
+ * either lane readable on a board.
+ *
+ * "Suggested" comes before commitment: the engineer diagnosing thinks the
+ * switch assembly is the fix, but nobody has agreed to buy - or make -
+ * anything yet. It never counts against a parts allowance (lib/agreementUsage
+ * counts Installed) and never trips the entitlement flag; promoting it to
+ * Needed is the moment of commitment, and that is where the machinery wakes up.
+ */
+export const PART_STATES = [
+  "Suggested", "Needed",
+  "Ordered", "In transit", "Received", "Backordered",
+  "Being made", "Made",
+  "Installed", "Removed",
+] as const;
+
+/**
+ * True while a part still needs someone to do something (order, make, chase,
+ * install).
+ *
+ * "Made" closes for the same reason "Received" does: the part exists and is in
+ * somebody's hand, and the only thing left is fitting it - which is the
+ * install step, not a chase. A part still on the printer is emphatically open.
+ */
 export function partOpen(status: string): boolean {
-  return status !== "Received" && status !== "Installed" && status !== "Removed";
+  return status !== "Received" && status !== "Made"
+    && status !== "Installed" && status !== "Removed";
 }
 /** Statuses where PO/carrier/tracking/ordered/ETA are relevant - the form hides them otherwise. */
 export const ORDER_STATES = ["Ordered", "In transit", "Received", "Backordered"] as const;
+/**
+ * Statuses where somebody is FABRICATING the part rather than buying it - the
+ * lane where "who is making it" is the question and a PO number is not.
+ *
+ * The mirror of ORDER_STATES, and used the same way: the form shows the maker
+ * here and the order paperwork there, so one row never carries both a tracking
+ * number and a print job.
+ */
+export const MAKE_STATES = ["Being made", "Made"] as const;
+
+export const isMadeState = (status: string): boolean =>
+  (MAKE_STATES as readonly string[]).includes(status);
 export const CARRIERS = ["", "UPS", "FedEx", "USPS", "DHL", "Freight", "Other"] as const;
 export const ATTACH_KINDS = ["Tune report", "Test data", "Report", "Photo", "Manual", "Other"] as const;
 
@@ -189,6 +233,11 @@ export const PART_TONE: Record<string, Tone> = {
   "In transit": "info",
   Received: "good",
   Backordered: "bad",
+  // The made lane borrows the bought lane's tones rather than inventing two
+  // more: work in somebody's hands reads the same whether it is on a truck or
+  // on a printer, and a part that exists reads the same however it got here.
+  "Being made": "info",
+  Made: "good",
   Installed: "good",
   Removed: "neutral",
 };

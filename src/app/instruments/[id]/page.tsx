@@ -20,7 +20,7 @@ import { schedulePartsOf } from "@/lib/procedures";
 import { scheduleLine } from "@/lib/pmRequest";
 import { getBrand } from "@/lib/brand";
 import { blockHolderName } from "@/lib/blocks";
-import { blockParties } from "@/lib/blockData";
+import { systemParties } from "@/lib/partyData";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
 import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
@@ -358,10 +358,11 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const partyName = (orgId: number | null) => (orgId === null ? brand.operatorName : orgName.get(orgId) ?? "a former organization");
-  /* Who a block on this system may be put under, and who the current one is
-     under. The list is read here rather than in the panel so the picker offers
-     exactly what the action will accept - see lib/blockData. */
-  const blockOrgs = await blockParties(inst, user.orgId);
+  /* The organizations with a real hold on this system: who a block may be put
+     under, and who could be making a part for it. One read, because it is one
+     question - and read here rather than in the panels so every picker offers
+     exactly what the actions will accept. See lib/partyData. */
+  const parties = await systemParties(inst, user.orgId);
   const blockHolder = blockHolderName(inst.blockedOrgId, inst.tenantOrgId, partyName);
   // Which house. On a system shared in from another service company, their staff
   // are a provider on it, not its house - so its house's internal notes are not
@@ -630,7 +631,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                 photoSrc: coverSrc, photoFraming: coverId !== null ? coverFraming : systemStock?.photoFraming ?? "",
                 photoIsStock: coverId === null && systemStock !== null }}
               gxpStanding={gxpStanding}
-              blockOrgs={blockOrgs} blockHolder={blockHolder}
+              blockOrgs={parties} blockHolder={blockHolder}
               label={systemLabel(inst, assetRows)}
               // Companies, not just the strings already typed onto systems -
               // see lib/clientNames for what that was hiding. Staff only: the
@@ -840,7 +841,8 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
               moduleModels={vocabRows.filter((v) => v.kind === "model")
                 .map((v) => ({ assetType: v.assetType, name: v.name, manufacturer: v.manufacturer }))}
-              pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />
+              pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))}
+              makers={parties} />
           ) },
           // Provenance, and the handoff that extends it - staff only, because a change of hands needs a witness at the operator.
           { key: "custody", label: "Ownership history", node: (

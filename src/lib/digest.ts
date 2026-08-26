@@ -35,7 +35,7 @@ import {
   appSettings, auditLog, eodUpdates, instrumentGases, instruments, orgs, parts, procedures, taskResults, tasks, workOrders,
 } from "@/db/schema";
 import { blockSide } from "@/lib/blocks";
-import { BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
+import { isMadeState, BLOCKED_STAGE, GAS_TONE, STAGE_COLOR, gasAttention, partOpen } from "@/lib/stages";
 import { TONE_HEX } from "@/lib/tones";
 import { daysSince } from "@/lib/queue";
 import { houseEmails } from "@/lib/house";
@@ -76,7 +76,8 @@ export type Court = "partner" | "us" | "supplier";
  */
 export type PendingCause =
   | "blocked" | "ship" | "task" | "workorder"
-  | "part-order" | "part-tracking" | "part-transit" | "part-backorder";
+  | "part-order" | "part-tracking" | "part-transit" | "part-backorder"
+  | "part-making";
 
 export type PendingItem = {
   systemId: number;
@@ -132,6 +133,8 @@ export type PendingCtx = {
     requestedOrgId: number | null; requestedAt: Date | null;
     /** Set when the part sits on one of OUR purchase orders. */
     poId: number | null;
+    /** Who is fabricating it, on the made lane. Null is us. See lib/stages. */
+    makerOrgId?: number | null;
   }[];
   now: Date;
 };
@@ -220,6 +223,22 @@ export function pendingForSystem(
     const who = theirs ? ctx.orgName(buyer) : ctx.operatorName;
     // Only a formal request carries a date, so only it can be aged.
     const asked = p.requestedAt ? daysSince(p.requestedAt, ctx.now) : null;
+    /* A part somebody is MAKING is not on order, so none of the buying
+       branches below describe it - and before this it matched none of them and
+       raised nothing at all, which is how a bracket could sit on a printer for
+       three weeks without appearing on anybody's morning list. Courted by who
+       is at the printer, which is a recorded fact rather than a guess: the
+       buyer rule underneath would have read "the client asked for it" as "the
+       client is making it", and those are different sentences. */
+    if (isMadeState(p.status)) {
+      if (p.status !== "Being made") continue;
+      const mine = (p.makerOrgId ?? null) === null
+        || (ctx.sectionOrgId !== null && p.makerOrgId !== ctx.sectionOrgId);
+      add(mine ? "us" : "partner", mine ? ctx.operatorName : ctx.orgName(p.makerOrgId ?? null),
+        `Being made: ${p.name}${p.eta ? ` - due ${p.eta}` : " - no date yet"}`,
+        "part-making", p.name, asked, p.eta);
+      continue;
+    }
     if (p.status === "Needed") {
       add(court, who, theirs ? `Part to order: ${p.name}` : `Part needed: ${p.name}`, "part-order", p.name, asked);
     } else if ((p.status === "Ordered" || p.status === "In transit") && p.tracking) {
@@ -481,6 +500,7 @@ export async function collectDigest(tenantOrgId: number | null, sinceDays = 1): 
             openParts: openParts.map((p) => ({
               name: p.name, status: p.status, eta: p.eta, tracking: p.tracking,
               requestedOrgId: p.requestedOrgId, requestedAt: p.requestedAt, poId: p.poId,
+              makerOrgId: p.makerOrgId,
             })),
           }));
           section.followUps.push(...followUpsForSystem(i, blockedTasks.length));

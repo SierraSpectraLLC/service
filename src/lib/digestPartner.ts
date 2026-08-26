@@ -421,6 +421,11 @@ function askFor(cause: PendingCause, subjects: string[]): string {
     case "ship": return "Confirm the shipping details";
     case "task": return `Blocked: ${what}`;
     case "part-transit": return `${what} in transit`;
+    /* Their bench, so the ask is a DATE, not the work. "Finish making it"
+       would be this shop telling a customer how to run their own shop; when
+       it will be ready is the thing we actually need in order to plan around
+       it, and the only thing that is ours to ask for. */
+    case "part-making": return `Expected date for ${what}`;
   }
 }
 

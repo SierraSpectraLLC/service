@@ -1073,11 +1073,28 @@ export const parts = pgTable("parts", {
   orderedAt: text("ordered_at").notNull().default(""),
   eta: text("eta").notNull().default(""),
   receivedAt: text("received_at").notNull().default(""),
+  /**
+   * Who is fabricating this part, when it is being made rather than bought.
+   *
+   * Only meaningful on the made lane (lib/stages.MAKE_STATES) and CHOSEN
+   * there, never inferred from requested_org_id above - who was asked to buy
+   * something is a different fact from who is at the printer, and reading one
+   * as the other is how a client who took a bracket in house would still have
+   * shown on our morning list as somebody we were waiting on to place an
+   * order. Null is us, the same reading as instruments.blocked_org_id.
+   */
+  makerOrgId: integer("maker_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /**
+   * The day it came off the printer or the mill - the made lane's answer to
+   * received_at, and kept apart from it because a part nobody sent was never
+   * received. Blank until it reaches "Made".
+   */
+  madeAt: text("made_at").notNull().default(""),
   installedAt: text("installed_at").notNull().default(""),
   removedAt: text("removed_at").notNull().default(""),
   // Install/swap detail: what it replaced, serial in/out, where it came from.
   note: text("note").notNull().default(""),
-  // Needed | Ordered | In transit | Received | Backordered | Installed | Removed
+  // See lib/stages.PART_STATES - two lanes, bought and made, sharing both ends.
   status: text("status").notNull().default("Needed"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("parts_instrument_idx").on(t.instrumentId)]);

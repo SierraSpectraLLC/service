@@ -13,7 +13,7 @@ import SalePanel from "./SalePanel";
 import { updateInstrument, updateInstrumentNotes, deleteInstrument, setInstrumentLead, setInstrumentArchived } from "@/app/actions";
 import { STANDING_TONE } from "@/lib/gxp";
 import Dialog from "@/components/ui/Dialog";
-import type { BlockOrgChoice } from "@/lib/blocks";
+import type { PartyChoice } from "@/lib/parties";
 import { toast } from "@/components/ui/Toast";
 
 type Inst = {
@@ -64,7 +64,7 @@ export default function SystemPanel({ instrument, label, clients, categories, st
   /** Derived qualification standing - null on unregulated systems. See lib/gxp. */
   gxpStanding: { label: string; tone: "ok" | "warn" | "bad"; reasons: string[] } | null;
   /** Who a block on this system may be put under, the default first. */
-  blockOrgs?: BlockOrgChoice[];
+  blockOrgs?: PartyChoice[];
   /** Who the current block is under, blank when it is the obvious party. */
   blockHolder?: string;
   /** Today's client-report line, when the EOD module is on and the viewer may see it. */

@@ -12,6 +12,7 @@ import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeeCosts, redactParts } from "@/lib/redact";
+import { systemPartiesFor } from "@/lib/partyData";
 import SharePanel from "@/components/SharePanel";
 import SalePanel from "@/components/SalePanel";
 import DailyUpdatePanel from "@/components/DailyUpdatePanel";
@@ -450,7 +451,12 @@ export default async function AssetPage({ params }: { params: Promise<{ id: stri
               moduleTypes={vocab.filter((v) => v.kind === "asset_type").map((v) => v.name)}
               moduleModels={vocab.filter((v) => v.kind === "model")
                 .map((v) => ({ assetType: v.assetType, name: v.name, manufacturer: v.manufacturer }))}
-              pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))} />
+              pmJobs={pmRows.map((r) => ({ id: r.id, title: r.title }))}
+              /* A unit on a system inherits that system's parties; a spare on
+                 the shelf has none, and the picker simply does not appear. */
+              makers={asset.instrumentId === null
+                ? []
+                : await systemPartiesFor(asset.instrumentId, user.orgId)} />
           ) },
           { key: "photos", label: "Photos", node: (
             <PhotosPanel target={target} coverId={coverId}

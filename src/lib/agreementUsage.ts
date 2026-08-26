@@ -19,7 +19,7 @@
 //   Labour is time logged against their systems inside the term. Not against
 //   their work orders, because plenty of real work predates anybody opening one.
 
-import { and, eq, gte, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, parts, timeEntries, workOrders } from "@/db/schema";
 import { parseKits, type AgreementLike, type Usage } from "@/lib/agreements";
@@ -80,6 +80,14 @@ export async function usageFor(
       // Fitted, not merely ordered. A part sitting in a box has not been spent
       // on their behalf yet, and billing it would be billing for a shelf.
       eq(parts.status, "Installed"),
+      /* A part THEY made is not a part we supplied.
+         The allowance is what this contract entitles them to have bought for
+         them, so a bracket the client printed themselves must not eat it -
+         charging a lab two dollars of their own filament against the parts
+         cover we owe them is the same shape of error as counting an Agilent
+         contract's visits as our drawdown. Their cost still shows on the part;
+         it just is not spend under this paper. See lib/stages for the lane. */
+      or(isNull(parts.makerOrgId), ne(parts.makerOrgId, orgId)),
       sql`${parts.installedAt} <> ''`,
       within(parts.installedAt, a),
       scoped.length ? inArray(parts.instrumentId, scoped) : undefined,

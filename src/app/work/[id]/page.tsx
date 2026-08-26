@@ -12,6 +12,7 @@ import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, re
 import { getBrand } from "@/lib/brand";
 import { visitFlag } from "@/lib/entitlementFlags";
 import { canSeeCosts, redactParts } from "@/lib/redact";
+import { systemPartiesFor } from "@/lib/partyData";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { formatHours } from "@/lib/hours";
 import { formatCents } from "@/lib/money";
@@ -488,7 +489,10 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
           moduleTypes={vocabRows.filter((v) => v.kind === "asset_type").map((v) => v.name)}
           moduleModels={vocabRows.filter((v) => v.kind === "model")
             .map((v) => ({ assetType: v.assetType, name: v.name, manufacturer: v.manufacturer }))}
-          showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)} />
+          showCosts={canSeeCosts(user, inst?.ownerOrgId ?? asset?.ownerOrgId ?? null, wo.tenantOrgId)}
+          /* A job on a system offers that system's parties; a client's move or
+             survey has no system behind it and so no picker. */
+          makers={inst ? await systemPartiesFor(inst.id, user.orgId) : []} />
       )}
       <ExpensesPanel workOrderId={wo.id} today={today} canEdit={canAdd} isStaff={staff}
         policy={resolveExpensePolicy(settingsForPolicy?.expensePolicy ?? null)}

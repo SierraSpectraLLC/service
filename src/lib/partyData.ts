@@ -1,24 +1,22 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, orgs, systemShares } from "@/db/schema";
-import { blockOrgChoices, type BlockOrgChoice } from "@/lib/blocks";
+import { partyChoices, type PartyChoice } from "@/lib/parties";
 
 /**
- * The organizations one system's block may be put under.
+ * The organizations with a real hold on one system - the workspace it lives
+ * in, the organization that owns it, and anyone it is shared with to work on.
  *
- * Read here rather than assembled twice, because the picker the person sees
- * and the list the server will accept have to be the same list. A picker that
+ * Read here rather than assembled twice, because the picker a person sees and
+ * the list the server will accept have to be the same list. A picker that
  * offered more than the action allowed would fail on save; one that offered
- * less would quietly make an option unreachable.
- *
- * The parties are the ones with a real hold on this machine: the workspace it
- * lives in, the organization that owns it, and anyone it is shared with to
- * work on. Deliberately not every org on the instance - see blockOrgChoices.
+ * less would quietly make an option unreachable. Deliberately not every org on
+ * the instance - see lib/parties.
  */
-export async function blockParties(
+export async function systemParties(
   inst: { id: number; tenantOrgId: number | null; ownerOrgId: number | null },
   viewerOrgId: number | null,
-): Promise<BlockOrgChoice[]> {
+): Promise<PartyChoice[]> {
   const shared = (await db.select({ orgId: systemShares.orgId })
     .from(systemShares).where(eq(systemShares.instrumentId, inst.id))).map((r) => r.orgId);
   const ids = [...new Set([inst.tenantOrgId, inst.ownerOrgId, ...shared]
@@ -38,15 +36,15 @@ export async function blockParties(
         : "shared with";
     return [{ id, name: o.name, note }];
   });
-  return blockOrgChoices(parties, viewerOrgId);
+  return partyChoices(parties, viewerOrgId);
 }
 
 /** The same list, for the one system a caller already holds by id. */
-export async function blockPartiesFor(
+export async function systemPartiesFor(
   instrumentId: number, viewerOrgId: number | null,
-): Promise<BlockOrgChoice[]> {
+): Promise<PartyChoice[]> {
   const [inst] = await db.select({
     id: instruments.id, tenantOrgId: instruments.tenantOrgId, ownerOrgId: instruments.ownerOrgId,
   }).from(instruments).where(eq(instruments.id, instrumentId));
-  return inst ? blockParties(inst, viewerOrgId) : [];
+  return inst ? systemParties(inst, viewerOrgId) : [];
 }

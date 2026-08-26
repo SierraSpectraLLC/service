@@ -2,7 +2,10 @@
 
 import { confirmReason } from "@/components/ui/ConfirmDialog";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
-import { CARRIERS, PART_STATES, PART_TONE, ORDER_STATES, trackUrl } from "@/lib/stages";
+import {
+  CARRIERS, MAKE_STATES, PART_STATES, PART_TONE, ORDER_STATES, isMadeState, trackUrl,
+} from "@/lib/stages";
+import type { PartyChoice } from "@/lib/parties";
 import { modelsForType, moduleTypeOptions, type CatalogModel } from "@/lib/moduleTypes";
 import { intakeModule } from "@/app/actions";
 import { parseSpecs, serializeSpecs, SPECS_MAX_PAIRS, type SpecPair } from "@/lib/partSpecs";
@@ -21,6 +24,10 @@ type Part = {
   vendor: string; po: string; cost: string;
   carrier: string; tracking: string; orderedAt: string; eta: string; receivedAt: string;
   installedAt: string; removedAt: string; note: string; status: string; createdAt: string;
+  /** Who is fabricating it, on the made lane. Null is us. See lib/stages. */
+  makerOrgId?: number | null;
+  /** The day it came off the printer - the made lane's receivedAt. */
+  madeAt?: string;
   /** Set on a part that came out of a kit - rendered under it, never on its own. */
   parentPartId?: number | null;
   /** The maintenance job this part belongs to, if somebody said. */
@@ -65,11 +72,11 @@ function PartAssetSelect({ part, systemAssets }: { part: Part; systemAssets: { i
   );
 }
 
-const empty = { kind: "part", moduleKind: "", expandKit: true, pmScheduleId: null as number | null, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false };
+const empty = { kind: "part", moduleKind: "", expandKit: true, pmScheduleId: null as number | null, assetId: null as number | null, name: "", partNumber: "", serial: "", qty: "", vendor: "", po: "", cost: "", carrier: "", tracking: "", orderedAt: "", eta: "", status: "Needed", note: "", installedAt: "", removedAt: "", requestReplacement: false, makerOrgId: null as number | null };
 
 const money = (s: string) => parseFloat(s.replace(/[^0-9.]/g, ""));
 
-export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [], moduleModels = [] }: {
+export default function PartsPanel({ target, parts, systemAssets, canEdit, isStaff, showCosts, priceBook = [], serviceEvents = [], visitNames = {}, pmJobs = [], moduleTypes = [], moduleModels = [], makers = [] }: {
   target: WorkTarget; parts: Part[]; systemAssets: { id: number; label: string }[]; canEdit: boolean; isStaff: boolean;
   /** Jobs completed, by day, so a visit can be named after the work it was. */
   serviceEvents?: ServiceEvent[];
@@ -96,6 +103,14 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
    * shop already knows by name instead of asking somebody to retype one.
    */
   moduleModels?: CatalogModel[];
+  /**
+   * Who could be making a part for this record, the default first.
+   *
+   * Only meaningful on the made lane (lib/stages.MAKE_STATES). Empty - a part
+   * with no system behind it - simply hides the picker, and the maker stays
+   * us, which is the only thing that can be true there.
+   */
+  makers?: PartyChoice[];
 }) {
   const assetLabel = (id: number | null) => systemAssets.find((a) => a.id === id)?.label ?? null;
   const [form, setForm] = useState<null | { mode: "new" } | { mode: "edit"; id: number }>(null);
@@ -143,7 +158,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const openEdit = (p: Part) => {
     // A date input only accepts a calendar day, so a row still carrying one of
     // the old year-less strings opens blank and says what is stored underneath.
-    setDraft({ kind: p.kind, moduleKind: p.moduleKind ?? "", expandKit: false, pmScheduleId: p.pmScheduleId ?? null, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false });
+    setDraft({ kind: p.kind, moduleKind: p.moduleKind ?? "", expandKit: false, pmScheduleId: p.pmScheduleId ?? null, assetId: p.assetId, name: p.name, partNumber: p.partNumber, serial: p.serial, qty: p.qty, vendor: p.vendor, po: p.po, cost: p.cost, carrier: p.carrier, tracking: p.tracking, orderedAt: p.orderedAt, eta: p.eta, status: p.status, note: p.note, installedAt: isoDay(p.installedAt), removedAt: isoDay(p.removedAt), requestReplacement: false, makerOrgId: p.makerOrgId ?? null });
     setSpecPairs(parseSpecs(p.specs));
     setForm({ mode: "edit", id: p.id });
   };
@@ -191,6 +206,14 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
   const showOrderFields =
     (ORDER_STATES as readonly string[]).includes(draft.status) ||
     !!(draft.po || draft.carrier || draft.tracking || draft.orderedAt || draft.eta);
+
+  /* The made lane's mirror of the order paperwork. A part somebody is printing
+     has no PO and no carrier; what it has is somebody making it, and that is
+     the one thing a morning list needs in order to know who to ask. Kept
+     visible while a row still carries a maker, the same rule as above, so
+     switching a row back to Ordered does not hide a fact it is still holding. */
+  const showMakeFields =
+    (MAKE_STATES as readonly string[]).includes(draft.status) || draft.makerOrgId !== null;
 
   const saveVisitName = (day?: string, title?: string) => {
     const d = day ?? naming?.day;
@@ -440,6 +463,18 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
               </div>
             </>
           )}
+          {showMakeFields && makers.length > 0 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+              <label style={{ margin: 0 }}>Being made by</label>
+              <select value={draft.makerOrgId ?? ""} aria-label="Being made by"
+                onChange={(e) => setDraft({ ...draft, makerOrgId: e.target.value ? parseInt(e.target.value) : null })}
+                className="t-small" style={{ width: "auto", maxWidth: 280 }}>
+                {makers.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name} - {m.note}</option>
+                ))}
+              </select>
+            </div>
+          )}
           {/* When the work actually happened, which is often not the day
               somebody got round to recording it. Shown whenever the row is
               finished or heading there, since that is when it means anything. */}
@@ -551,7 +586,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   ))}
                 </div>
               )}
-              {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.installedAt || p.removedAt) && (
+              {(p.tracking || p.eta || p.orderedAt || p.receivedAt || p.madeAt || p.installedAt || p.removedAt) && (
                 <div className="t-small" style={{ marginTop: 5, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
                   {p.tracking && (link
                     ? <a className="mono" href={link} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>{p.carrier} {p.tracking} ↗</a>
@@ -559,8 +594,23 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   {p.orderedAt && <span className="mut">Ordered {p.orderedAt}</span>}
                   {p.eta && <span className="mut">ETA {p.eta}</span>}
                   {p.receivedAt && <span style={{ color: "var(--t-good-fg)" }}>Received {dayText(p.receivedAt)}</span>}
+                  {/* "Made", never "Received": nobody sent it. */}
+                  {p.madeAt && <span style={{ color: "var(--t-good-fg)" }}>Made {dayText(p.madeAt)}</span>}
                   {p.installedAt && <span style={{ color: "#085041", fontWeight: 700 }}>Installed {dayText(p.installedAt)}</span>}
                   {p.removedAt && <span style={{ color: "#64748B" }}>Pulled {dayText(p.removedAt)}</span>}
+                </div>
+              )}
+              {/* Always named, unlike the block line, and for the opposite
+                  reason: a block is one fact about the whole system, so naming
+                  the reader's own company there is a frame. This is a row in a
+                  list whose rows differ - one bracket on our printer, one on
+                  theirs - and a blank on the rows that are ours would read as
+                  "nobody recorded it" rather than "us". */}
+              {isMadeState(p.status) && p.makerOrgId != null
+                && makers.some((m) => m.id === p.makerOrgId) && (
+                <div className="t-small" style={{ marginTop: 5, color: "var(--t-info-fg)" }}>
+                  {p.status === "Made" ? "Made by " : "Being made by "}
+                  <b>{makers.find((m) => m.id === p.makerOrgId)!.name}</b>
                 </div>
               )}
               {p.pmScheduleId != null && pmJobs.some((j) => j.id === p.pmScheduleId) && (

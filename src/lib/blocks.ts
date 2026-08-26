@@ -75,34 +75,3 @@ export function blockHolderName(
  */
 export const blockLabel = (holder: string): string =>
   holder ? `Blocked with ${holder}` : "Blocked";
-
-/** One organization a block may be put under. */
-export type BlockOrgChoice = { id: number; name: string; note: string };
-
-/**
- * Which organizations this system's block may be put under, best first.
- *
- * Three parties can genuinely hold a block on one machine: the shop working
- * it, the organization that owns it, and anyone it has been shared with to
- * work on. Nobody else - a picker that listed the whole instance would let a
- * block be parked on a company with no connection to the system, and on a
- * multi-operator instance it would also hand over the client list.
- *
- * The blocker's own organization sorts first because it is the default and the
- * common case: if we are working on a system and block it, it is blocked with
- * us, whoever the reason happens to name.
- */
-export function blockOrgChoices(
-  parties: { id: number; name: string; note: string }[],
-  viewerOrgId: number | null,
-): BlockOrgChoice[] {
-  const seen = new Set<number>();
-  const out: BlockOrgChoice[] = [];
-  for (const p of parties) {
-    if (p.id <= 0 || seen.has(p.id)) continue;
-    seen.add(p.id);
-    out.push(p);
-  }
-  return out.sort((a, b) =>
-    (a.id === viewerOrgId ? 0 : 1) - (b.id === viewerOrgId ? 0 : 1));
-}

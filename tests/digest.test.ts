@@ -46,7 +46,7 @@ const ctx = (over: Partial<PendingCtx> = {}): PendingCtx => ({
 
 const part = (over: Partial<PendingCtx["openParts"][number]> = {}) => ({
   name: "Rotor seal", status: "Needed", eta: "", tracking: "",
-  requestedOrgId: null, requestedAt: null, poId: null, ...over,
+  requestedOrgId: null, requestedAt: null, poId: null, makerOrgId: null, ...over,
 });
 
 describe("handed off is not blocked", () => {
@@ -137,6 +137,52 @@ describe("whose court a wait sits in", () => {
     expect(items.map((x) => x.what)).toEqual([
       "Blocked: no bench space", "Blocked task: Vacuum won't hold",
     ]);
+  });
+
+  it("RAISES A PART SOMEBODY IS MAKING - it used to raise nothing at all", () => {
+    // None of the buying branches describe a print job, so before this a
+    // bracket could sit on a printer for three weeks and never appear on
+    // anybody's morning list. The ask is a DATE, which is what is missing.
+    const [item] = pendingForSystem(
+      sys(), ctx({ openParts: [part({ name: "Sparger bracket", status: "Being made", makerOrgId: 5 })] }));
+    expect(item).toMatchObject({ cause: "part-making", court: "partner", who: "LabZen" });
+    expect(item.what).toMatch(/no date yet/);
+  });
+
+  it("says the date when the maker gave one", () => {
+    const [item] = pendingForSystem(
+      sys(), ctx({ openParts: [part({ status: "Being made", makerOrgId: 5, eta: "Sep 3" })] }));
+    expect(item.what).toMatch(/due Sep 3/);
+    expect(item.eta).toBe("Sep 3");
+  });
+
+  it("keeps OUR print job in our own court", () => {
+    // Null is us, and so is a maker who is not this engagement's organization.
+    for (const makerOrgId of [null, 3, 9]) {
+      const [item] = pendingForSystem(
+        sys(), ctx({ openParts: [part({ status: "Being made", makerOrgId })] }));
+      expect(item.court, String(makerOrgId)).toBe("us");
+      expect(item.who, String(makerOrgId)).toBe("Sierra Spectra");
+    }
+  });
+
+  it("does not read who ASKED for a part as who is making it", () => {
+    // The trap. requestedOrgId is who was asked to buy something; a client who
+    // took the bracket in house would otherwise still have read as somebody we
+    // were waiting on to place an order.
+    const [item] = pendingForSystem(sys(), ctx({
+      openParts: [part({ status: "Being made", requestedOrgId: 5, makerOrgId: null })],
+    }));
+    expect(item.court).toBe("us");
+    expect(item.what).not.toMatch(/order/i);
+  });
+
+  it("says nothing more about a part once it has been made", () => {
+    // It exists and it is in hand. The only thing left is fitting it, which is
+    // the install step rather than something to chase every morning.
+    expect(pendingForSystem(sys(), ctx({
+      openParts: [part({ status: "Made", makerOrgId: 5 })],
+    }))).toEqual([]);
   });
 
   it("Waiting to ship is ours - the system is done, the shipment is not", () => {

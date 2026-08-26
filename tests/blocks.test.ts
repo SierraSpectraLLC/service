@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  blockHolderName, blockLabel, blockOrgChoices, blockOrgId, blockSide,
-} from "@/lib/blocks";
+import { blockHolderName, blockLabel, blockOrgId, blockSide } from "@/lib/blocks";
 
 /**
  * Whose block is it.
@@ -73,41 +71,5 @@ describe("naming the holder", () => {
     // fault. "with" is the queue's word for possession and it is the right
     // one here too.
     expect(blockLabel("Coastal Analytical")).not.toMatch(/by/i);
-  });
-});
-
-describe("who may be offered", () => {
-  const parties = [
-    { id: OPERATOR, name: "Sierra Spectra", note: "working it" },
-    { id: CLIENT, name: "Lab Zen", note: "owns it" },
-    { id: 9, name: "Coastal Analytical", note: "shared with" },
-  ];
-
-  it("puts the asker's own organization first, because it is the default", () => {
-    expect(blockOrgChoices(parties, CLIENT).map((c) => c.id)).toEqual([CLIENT, OPERATOR, 9]);
-    expect(blockOrgChoices(parties, OPERATOR).map((c) => c.id)).toEqual([OPERATOR, CLIENT, 9]);
-  });
-
-  it("keeps the given order when the asker belongs to none of them", () => {
-    expect(blockOrgChoices(parties, null).map((c) => c.id)).toEqual([OPERATOR, CLIENT, 9]);
-  });
-
-  it("lists an organization once even when it is two of the parties", () => {
-    // A shop that owns the machine it is working is both "working it" and
-    // "owns it"; the picker must not show Sierra Spectra twice.
-    const dupe = [
-      { id: OPERATOR, name: "Sierra Spectra", note: "working it" },
-      { id: OPERATOR, name: "Sierra Spectra", note: "owns it" },
-      { id: CLIENT, name: "Lab Zen", note: "shared with" },
-    ];
-    expect(blockOrgChoices(dupe, OPERATOR).map((c) => c.id)).toEqual([OPERATOR, CLIENT]);
-    expect(blockOrgChoices(dupe, OPERATOR)[0].note).toBe("working it");
-  });
-
-  it("carries the note that says why each one is on the list", () => {
-    // Two of the three can be the same kind of company and the names alone do
-    // not tell you which one owns the machine.
-    expect(blockOrgChoices(parties, OPERATOR).map((c) => c.note))
-      .toEqual(["working it", "owns it", "shared with"]);
   });
 });

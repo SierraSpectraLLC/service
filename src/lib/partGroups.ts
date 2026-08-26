@@ -161,14 +161,17 @@ export function partGroups<T extends PartLike>(
  * price would be a worse answer than leaving it.
  */
 export function partDates(
-  before: { status: string; receivedAt: string; installedAt: string; removedAt: string },
+  before: { status: string; receivedAt: string; madeAt?: string; installedAt: string; removedAt: string },
   status: string,
   given: { installedAt?: string; removedAt?: string },
   today: string,
-): { receivedAt: string; installedAt: string; removedAt: string } {
+): { receivedAt: string; madeAt: string; installedAt: string; removedAt: string } {
   const entering = (s: string) => status === s && before.status !== s;
   return {
     receivedAt: entering("Received") ? today : before.receivedAt,
+    // The made lane's arrival stamp. Its own field rather than receivedAt,
+    // because a part nobody sent was never received - see the column.
+    madeAt: entering("Made") ? today : (before.madeAt ?? ""),
     installedAt: isoDay(given.installedAt) || (entering("Installed") ? today : before.installedAt),
     removedAt: isoDay(given.removedAt) || (entering("Removed") ? today : before.removedAt),
   };
