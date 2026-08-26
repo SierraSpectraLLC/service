@@ -256,6 +256,13 @@ export default function DevUiGallery() {
       <div className="navframe" id="nav-mobile">
         <div className="navframe-bar">
           <MobileNav
+            tabs={[
+              { href: "/", label: "Today", icon: "home" },
+              { href: "/work", label: "Work", icon: "work" },
+              { href: "/assets", label: "Assets", icon: "assets" },
+              { href: "/inbox", label: "Inbox", icon: "inbox" },
+              { href: "/documents", label: "Library", icon: "library" },
+            ]}
             links={[
               { href: "/", label: "Dashboard" },
               { href: "/work", label: "Work orders" },

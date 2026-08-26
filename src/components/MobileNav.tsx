@@ -36,15 +36,35 @@ const LibraryIcon = () => (
   <svg {...S} aria-hidden><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
 );
 
-const TABS = [
-  { href: "/", label: "Today", icon: <HomeIcon /> },
-  { href: "/work", label: "Work", icon: <WorkIcon /> },
-  { href: "/assets", label: "Assets", icon: <AssetsIcon /> },
-  { href: "/inbox", label: "Inbox", icon: <InboxTabIcon /> },
-  { href: "/documents", label: "Library", icon: <LibraryIcon /> },
-];
+const ApprovalsIcon = () => (
+  <svg {...S} aria-hidden><path d="M8 4h8a2 2 0 0 1 2 2v14l-6-3-6 3V6a2 2 0 0 1 2-2z" /><path d="M9.5 10.5l1.8 1.8 3.2-3.4" /></svg>
+);
+const PartsIcon = () => (
+  <svg {...S} aria-hidden><path d="M12 3.5 20 8v8l-8 4.5L4 16V8z" /><path d="M4 8l8 4.5L20 8M12 12.5V21" /></svg>
+);
 
-export default function MobileNav({ links, groups, settingsHref, userName, orgName }: {
+/**
+ * The tab bar's five, by key.
+ *
+ * The bar used to be a module constant with no role input at all: every signed-
+ * in person got Today / Work / Assets / Inbox / Library, including the /inbox
+ * tab, which appears in neither nav branch, and three labels that disagreed
+ * with the ones beside them on a desktop. The phone was the one surface where
+ * a client could not be given their own product, because nothing here knew who
+ * was holding it.
+ */
+const TAB_ICON = {
+  home: <HomeIcon />, work: <WorkIcon />, assets: <AssetsIcon />,
+  inbox: <InboxTabIcon />, library: <LibraryIcon />,
+  approvals: <ApprovalsIcon />, parts: <PartsIcon />,
+} as const;
+
+export type TabKey = keyof typeof TAB_ICON;
+export type TabItem = { href: string; label: string; icon: TabKey };
+
+export default function MobileNav({ tabs, links, groups, settingsHref, userName, orgName }: {
+  /** The five daily destinations, chosen by whoever is holding the phone. */
+  tabs: TabItem[];
   links: { href: string; label: string }[];
   groups: NavGroup[];
   settingsHref: string | null;
@@ -104,11 +124,11 @@ export default function MobileNav({ links, groups, settingsHref, userName, orgNa
       )}
 
       <nav className="mnav-tabbar no-print" aria-label="Primary">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Link key={t.href} href={t.href}
             aria-current={isActive(t.href) ? "page" : undefined}
             className={isActive(t.href) ? "active" : undefined}>
-            {t.icon}
+            {TAB_ICON[t.icon]}
             {t.label}
           </Link>
         ))}

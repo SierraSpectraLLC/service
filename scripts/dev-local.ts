@@ -420,6 +420,9 @@ const FIXTURE = `
   UPDATE disputes SET tenant_org_id = 3;
   UPDATE dunning_events SET tenant_org_id = 3;
   UPDATE share_links SET tenant_org_id = 3 WHERE kind <> 'files';
+  -- Agreements too. Unstamped, they are invisible to every screen that filters
+  -- by tenant, which is how the fixture had contracts nobody's portal showed.
+  UPDATE agreements SET tenant_org_id = 3;
   -- The workspace shape production always has and raw inserts skip: client
   -- orgs hang off their operator, and the bench belongs to the workspace.
   -- Without these the digest - which scopes strictly, as a send must - sees
@@ -447,6 +450,27 @@ const FIXTURE = `
   -- lib/agreementUsage draws a parts allowance down against.
   UPDATE parts SET owner_org_id = i.owner_org_id FROM instruments i
     WHERE parts.instrument_id = i.id;
+
+  -- What each client can SEE. Ownership and visibility are separate axes here:
+  -- owner_org_id is whose machine it is, system_shares is who may look, and a
+  -- client reads their portal entirely through the second (lib/tenancy
+  -- scopeFor). Without these rows the fixture's client signs in to an empty
+  -- lab, which made the whole client-facing half of the app untestable
+  -- locally - the seed had owners but no shares.
+  INSERT INTO system_shares (instrument_id, org_id, access, added_by)
+    SELECT id, owner_org_id, 'edit', 'fixture' FROM instruments WHERE owner_org_id IS NOT NULL
+    ON CONFLICT DO NOTHING;
+
+  -- Somewhere to be. Two sites for Lab Zen so the multi-site grouping on the
+  -- client landing has something to group by; one system left unassigned, the
+  -- ordinary case of an account that never named its rooms.
+  INSERT INTO org_sites (org_id, name, address) VALUES
+    (1, 'Fremont', '4001 Cushing Pkwy, Fremont, CA'),
+    (1, 'Hayward', '2300 Industrial Blvd, Hayward, CA');
+  UPDATE instruments SET site_id = (SELECT id FROM org_sites WHERE name = 'Fremont')
+    WHERE client = 'Lab Zen' AND external_id IN ('LZ-001', 'LZ-002');
+  UPDATE instruments SET site_id = (SELECT id FROM org_sites WHERE name = 'Hayward')
+    WHERE client = 'Lab Zen' AND external_id = 'LZ-003';
 
 
   INSERT INTO pm_schedules (instrument_id, title, assignee, every_days, next_due, last_done) VALUES

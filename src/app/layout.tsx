@@ -12,7 +12,7 @@ import { welcomeRedirect } from "@/lib/welcome";
 import { PATH_HEADER } from "@/middleware";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 import HeaderNav from "@/components/HeaderNav";
-import MobileNav from "@/components/MobileNav";
+import MobileNav, { type TabItem } from "@/components/MobileNav";
 import AccountMenu from "@/components/AccountMenu";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
@@ -80,13 +80,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Staff always get the Stock link; an org only gets it once it has a room of
   // its own or one shared with it, so a client without inventory sees no
   // dead end.
-  // Remote support in the client's nav only when their own tier is on - an entry
-  // leading to a page that redirects is worse than no entry. Same forgiving read
-  // as every other count in the shell.
-  const orgRemoteOn = !isStaff && modules.remote && user?.orgId != null && (
-    await db.select({ on: orgs.remoteAccessEnabled }).from(orgs).where(eq(orgs.id, user.orgId))
-      .catch(() => [])
-  )[0]?.on === true;
+  // One read of the viewer's own organization, for the three facts a client's
+  // nav turns on. Remote support only when their tier is on - an entry leading
+  // to a page that redirects is worse than no entry. Whether they are a CLIENT
+  // org at all, because /store and /orders both bounce a non-staff member of a
+  // provider org (store/page.tsx and orders/page.tsx check org.kind), and
+  // shipping them those two doors ships two dead ends. And whether they resell,
+  // which changes what their landing is even about.
+  const [ownOrg] = user?.orgId != null
+    ? await db.select({
+        kind: orgs.kind, remote: orgs.remoteAccessEnabled, resale: orgs.resaleEnabled,
+      }).from(orgs).where(eq(orgs.id, user.orgId)).catch(() => [])
+    : [];
+  const orgRemoteOn = !isStaff && modules.remote && ownOrg?.remote === true;
+  const isClientOrg = !isStaff && ownOrg?.kind === "client";
   // Payroll is in the nav only for somebody who may actually read one: the
   // company's own owner, or a person at a client whose flag was turned on. An
   // entry that leads to a page which redirects is worse than no entry, and
@@ -126,23 +133,33 @@ export default async function RootLayout({ children }: { children: React.ReactNo
      contains. The primary links are where the work is; the long tail lives
      in two labelled menus - Operations for the shop's rhythms, Library for
      files and tools - instead of one flat "More". */
-  const navLinks = [
+  /* Two products, not one product with things hidden.
+     Staff get the shop: a board, the work, the equipment, the money. A client
+     gets five doors onto their own relationship, in their own words - they do
+     not file a work order, they ask for help, and the work order is what the
+     shop creates in response. See lib/clientView for the rest of that
+     vocabulary. Anything a particular account happens to have (its own
+     stockroom, remote support, its own payroll) is a capability rather than a
+     door, and lives in the group below. */
+  const navLinks = isStaff ? [
     { href: "/", label: "Dashboard" },
-    /* For everyone, not just staff. A work order exists so that both sides
-       read the same state, and hiding the list from the people who asked for
-       the work would undo the point. */
     { href: "/work", label: "Work orders" },
     { href: "/assets", label: "Assets" },
     ...(hasStock ? [{ href: "/stock", label: "Inventory" }] : []),
     /* Money is staff work: a client sees their own bills through their own
-       portal token, never through a nav word that lists everybody's.
-       "Financial" rather than "Billing" because the section stopped being
-       about billing the moment purchasing, reimbursements, overhead and
-       payroll joined it - see lib/finance. */
-    ...(isStaff ? [{ href: "/money", label: "Financial" }] : []),
-    /* The store is the client's door; staff buy through Purchasing. Orders
-       sits beside it: what they asked for, and what is waiting on them. */
-    ...(!isStaff ? [{ href: "/store", label: "Parts" }, { href: "/orders", label: "Orders" }] : []),
+       portal, never through a nav word that lists everybody's. "Financial"
+       rather than "Billing" because the section stopped being about billing
+       the moment purchasing, reimbursements, overhead and payroll joined it -
+       see lib/finance. */
+    { href: "/money", label: "Financial" },
+  ] : [
+    { href: "/", label: "Your lab" },
+    { href: "/work", label: "Requests" },
+    /* Quotes and invoices, named for what the client does with them rather
+       than for what the shop filed. */
+    ...(isClientOrg ? [{ href: "/orders", label: "Approvals" }] : []),
+    ...(isClientOrg ? [{ href: "/store", label: "Parts" }] : []),
+    { href: "/documents", label: "Documents" },
   ];
   const navGroups = isStaff ? [
     {
@@ -190,29 +207,40 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       ],
     },
   ] : [
-    // Same two menus as staff see, so the shape of the app does not change
-    // with who is reading it - a client asking where remote support lives
-    // gets the same answer as the engineer.
-    ...(orgRemoteOn || seesPayroll ? [{
-      label: "Operations",
+    /* One group, and only what this particular account actually has. Gallery
+       and PDF studio are gone from a client's nav: they are operator tools for
+       assembling paperwork, and a client who wants a packet is handed one
+       rather than sent to build it. Files is not here either - it was promoted
+       to Documents, a door of its own, because it is the second most used
+       thing a client comes for. */
+    ...(hasStock || orgRemoteOn || seesPayroll ? [{
+      label: "Your account",
       items: [
+        // Their own shelf, when they keep one - not the shop's inventory.
+        ...(hasStock ? [{ href: "/stock", label: "Your inventory" }] : []),
         ...(orgRemoteOn ? [{ href: "/remote", label: "Remote support" }] : []),
         // Their own company's payroll, kept on their own side of the wall.
         ...(seesPayroll ? [{ href: "/money/payroll", label: "Payroll" }] : []),
       ],
     }] : []),
-    // An organization's own tools: its file shelf and the studio. Both used
-    // to be staff-only, which left a client with nowhere to keep a document
-    // and no way to assemble a packet.
-    {
-      label: "Library",
-      items: [
-        { href: "/documents", label: "Files" },
-        { href: "/gallery", label: "Gallery" },
-        { href: "/pdf", label: "PDF studio" },
-      ],
-    },
   ];
+  /* The phone's five. Staff keep the shop's daily run; a client gets the same
+     five doors their header shows, so the two surfaces stop disagreeing about
+     what the app contains. */
+  const navTabs: TabItem[] = isStaff ? [
+    { href: "/", label: "Today", icon: "home" },
+    { href: "/work", label: "Work", icon: "work" },
+    { href: "/assets", label: "Assets", icon: "assets" },
+    { href: "/inbox", label: "Inbox", icon: "inbox" },
+    { href: "/documents", label: "Library", icon: "library" },
+  ] : [
+    { href: "/", label: "Your lab", icon: "home" },
+    { href: "/work", label: "Requests", icon: "work" },
+    ...(isClientOrg ? [{ href: "/orders", label: "Approvals", icon: "approvals" as const }] : []),
+    ...(isClientOrg ? [{ href: "/store", label: "Parts", icon: "parts" as const }] : []),
+    { href: "/documents", label: "Documents", icon: "library" },
+  ];
+
   const settingsHref =
     user?.role === "owner" ? "/settings"
       : isStaff ? "/settings/catalog"
@@ -241,7 +269,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             {/* The burger renders here (mobile only); the drawer and tab bar
                 it controls are fixed overlays, so their DOM home is moot. */}
             {user && (
-              <MobileNav links={navLinks} groups={navGroups} settingsHref={settingsHref}
+              <MobileNav tabs={navTabs} links={navLinks} groups={navGroups} settingsHref={settingsHref}
                 userName={user.name || user.email} orgName={user.orgName || brand.operatorName} />
             )}
             <Link href="/" className="brand">

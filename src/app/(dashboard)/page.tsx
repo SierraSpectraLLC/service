@@ -1,11 +1,11 @@
-import { and, asc, eq, desc, inArray, isNull, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, isNull, lte, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, attachments, workOrders, users } from "@/db/schema";
+import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, orgSites, attachments, workOrders, users, pmSchedules, agreements } from "@/db/schema";
 import { daysSince, queueView } from "@/lib/queue";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
-import { shopTime } from "@/lib/shopday";
+import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { BLOCKED_STAGE, GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
 import { expiryAttention, expiryLabel } from "@/lib/gxp";
 import { getStageDefs } from "@/lib/stageDefs";
@@ -13,20 +13,26 @@ import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { currentUser, requireUser, viewContext } from "@/lib/authz";
-import { forTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, maySeeAgreements, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 import Landing from "@/components/Landing";
+import ClientLanding, { type ClientSystem } from "@/components/ClientLanding";
+import { clientTodos, stateOf, whySentence } from "@/lib/clientLandingData";
+import { PageHead } from "@/components/ui";
+import ClientCoverage from "@/components/ClientCoverage";
 import MoneyCard from "@/components/MoneyCard";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
 export const dynamic = "force-dynamic";
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; f?: string; sort?: string }> }) {
+export default async function Home({ searchParams }: {
+  searchParams: Promise<{ q?: string; f?: string; sort?: string; where?: string }>;
+}) {
   const initial = await searchParams;
   // The apex answers strangers now, so a missing session is not an error here
   // - it is the other half of this route. Bouncing to /login would have made
@@ -52,7 +58,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
     db.select().from(parts).where(mine(parts.instrumentId)),
     db.select().from(instrumentGases).where(mine(instrumentGases.instrumentId)),
     db.select().from(auditLog).where(mine(auditLog.instrumentId)).orderBy(desc(auditLog.createdAt)).limit(200),
-    db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row"))),
+    // Sheet parity is an internal reconciliation, and this is the one query on
+    // the page with neither mine() nor a tenant filter. Its result was thrown
+    // away for non-staff at the point of use, which meant every client page
+    // load paid for a scan of everybody's diffs to compute nothing.
+    user.role === "owner" || user.role === "staff"
+      ? db.select().from(sheetDiffs).where(and(eq(sheetDiffs.resolved, false), eq(sheetDiffs.field, "Row")))
+      : Promise.resolve([]),
     getStageDefs(await viewTenant(user)),
     // Who work can be assigned to: the logins of the organizations this viewer
     // works with. See lib/directory.
@@ -71,6 +83,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
     id: workOrders.id, number: workOrders.number, title: workOrders.title,
     severity: workOrders.severity, state: workOrders.state, assignee: workOrders.assignee,
     instrumentId: workOrders.instrumentId, assetId: workOrders.assetId,
+    // For the client's "visits this year" - one more column on a query the
+    // board already runs, rather than a second pass over the same table.
+    closedAt: workOrders.closedAt,
   }).from(workOrders).where(mine(workOrders.instrumentId));
   // Dated paper on regulated systems only - the whole point of the GxP flag is
   // that a loaner's expired delivery note never nags anybody.
@@ -215,6 +230,162 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
       queueReason: i.queueReason,
     };
   });
+
+  /* ── The client's own product ──────────────────────────────────────────
+     Everything below runs only for a non-staff viewer, and only for one who
+     belongs to an organization. Staff pay nothing for it; a client stops
+     paying for the parts of the board that were never theirs. */
+  if (!isStaff && user.orgId !== null) {
+    const pmDueRows = rows.length
+      ? await db.select({ instrumentId: pmSchedules.instrumentId, nextDue: pmSchedules.nextDue })
+          .from(pmSchedules)
+          .where(and(
+            inArray(pmSchedules.instrumentId, rows.map((r) => r.id)),
+            eq(pmSchedules.paused, false),
+            lte(pmSchedules.nextDue, today),
+          ))
+          .orderBy(asc(pmSchedules.nextDue))
+      : [];
+    /* Where each instrument is. A named site when the account has one - the
+       word a manager at Hayward uses - and the room or bench otherwise. One
+       field with one meaning, because the card shows it and the grouping
+       reads it, and two would eventually disagree. */
+    const siteIds = [...new Set(rows.map((r) => r.siteId).filter((x): x is number => x !== null))];
+    const siteRows = siteIds.length
+      ? await db.select({ id: orgSites.id, name: orgSites.name }).from(orgSites)
+          .where(inArray(orgSites.id, siteIds)).catch(() => [])
+      : [];
+    const siteName = new Map(siteRows.map((x) => [x.id, x.name]));
+
+    /* Last visit: the most recent CLOSED job on this instrument. A visit is a
+       job somebody finished, which is the only record of one this app keeps -
+       it is not inferred from an audit line, which would count a field edit as
+       an engineer standing in the room. */
+    const lastVisitAt = new Map<number, Date>();
+    for (const w of woRows) {
+      if (w.instrumentId === null || w.closedAt === null) continue;
+      const seen = lastVisitAt.get(w.instrumentId);
+      if (!seen || w.closedAt > seen) lastVisitAt.set(w.instrumentId, w.closedAt);
+    }
+    const lastVisitBySys = new Map(
+      [...lastVisitAt].map(([id, at]) => [id, shopMonthDay(at)] as const));
+
+    const pmBySys = new Map<number, string>();
+    for (const p of pmDueRows) {
+      if (p.instrumentId !== null && !pmBySys.has(p.instrumentId)) pmBySys.set(p.instrumentId, p.nextDue);
+    }
+
+    // The worst open job per system, for the sentence under the card.
+    const woBySys = new Map<number, typeof openWos>();
+    for (const w of openWos) {
+      if (w.instrumentId === null) continue;
+      woBySys.set(w.instrumentId, [...(woBySys.get(w.instrumentId) ?? []), w]);
+    }
+
+    const systems: ClientSystem[] = data.map((d) => {
+      const jobs = (woBySys.get(d.id) ?? [])
+        .sort((a, b) => severityOf(a.severity).rank - severityOf(b.severity).rank);
+      const state = stateOf({
+        down: d.down,
+        openSeverities: jobs.map((w) => w.severity),
+        stages: d.stages,
+        pmDue: pmBySys.has(d.id),
+      });
+      const src = rows.find((r) => r.id === d.id);
+      return {
+        id: d.id,
+        externalId: d.externalId,
+        label: d.label,
+        location: (src?.siteId !== null && src?.siteId !== undefined
+          ? siteName.get(src.siteId) : "") || src?.location || "",
+        state,
+        why: whySentence({
+          state,
+          openWo: jobs[0] ? { number: jobs[0].number, title: jobs[0].title } : null,
+          blockedDays: d.blockedDays,
+          blockReason: src?.blockedReason ?? "",
+          pmDue: pmBySys.get(d.id) ?? "",
+          openParts: d.openParts,
+          lastVisit: lastVisitBySys.get(d.id) ?? "",
+        }),
+        /* Whose move it is, as the card's footer says it. The QUEUE is one
+           axis and maintenance is another - lib/pmQueue deliberately hands a
+           system back out of the client's queue the day a PM falls due - but
+           to the person reading the card they are the same question, and a
+           footer reading "With Sierra Spectra" above a list that says "book a
+           window" is the page arguing with itself. Either is their move. */
+        yourMove: d.queueMine || pmBySys.has(d.id),
+        lastVisit: lastVisitBySys.get(d.id) ?? "",
+      };
+    });
+
+    const todos = await clientTodos({
+      orgId: user.orgId, today,
+      systems: data.map((d) => ({
+        id: d.id, externalId: d.externalId, queueMine: d.queueMine, queueReason: d.queueReason,
+      })),
+      systemIds: rows.map((r) => r.id),
+    });
+
+    // Visits: closed jobs this calendar year, split the way the work orders
+    // themselves are already labelled. Both halves are counted, never derived.
+    const yearStart = `${today.slice(0, 4)}-01-01`;
+    const closedThisYear = woRows.filter((w) =>
+      w.closedAt !== null && w.closedAt.toISOString().slice(0, 10) >= yearStart);
+    const planned = closedThisYear.filter((w) => w.severity === "Planned").length;
+
+    const orgSelf = orgNames.find((o) => o.id === user.orgId);
+
+    /* Their own paper, and only if their own organization lets this person
+       read it - the same gate the agreements page uses. Scoped to the org AND
+       stamped tenant, because an agreement belongs to one workspace. */
+    const canSeePaper = await maySeeAgreements(user, user.orgId);
+    const coverRows = canSeePaper
+      ? await db.select().from(agreements)
+          .where(and(
+            eq(agreements.orgId, user.orgId),
+            eq(agreements.kind, "contract"),
+            forTenant(agreements.tenantOrgId, await viewTenant(user)),
+          ))
+          .orderBy(asc(agreements.endsOn))
+          .catch(() => [])
+      : [];
+    return (
+      <div className="container wide">
+        <PageHead
+          title="Your lab"
+          sub={`${rows.length} instrument${rows.length === 1 ? "" : "s"} under service with ${brand.operatorName}`}
+        />
+        <ClientLanding
+          systems={systems}
+          todos={todos}
+          operatorName={brand.operatorName}
+          orgName={orgSelf?.name ?? "your organization"}
+          q={initial.q ?? ""}
+          where={initial.where ?? ""}
+          coverage={
+            <ClientCoverage today={today} operatorName={brand.operatorName}
+              agreements={coverRows.filter((a) => a.status === "active").map((a) => ({
+                id: a.id, title: a.title, number: a.number, status: a.status,
+                startsOn: a.startsOn, endsOn: a.endsOn, renewNoticeDays: a.renewNoticeDays,
+                visitsIncluded: a.visitsIncluded, visitsUnlimited: a.visitsUnlimited,
+                partsAllowanceCents: a.partsAllowanceCents, partsUnlimited: a.partsUnlimited,
+                laborIncludedMinutes: a.laborIncludedMinutes, pmPartsIncluded: a.pmPartsIncluded,
+              }))} />
+          }
+          thisYear={[
+            { value: String(rows.length), label: `instrument${rows.length === 1 ? "" : "s"} under service` },
+            {
+              value: String(closedThisYear.length),
+              label: closedThisYear.length === 1
+                ? `visit this year · ${planned} planned, ${closedThisYear.length - planned} unplanned`
+                : `visits this year · ${planned} planned, ${closedThisYear.length - planned} unplanned`,
+            },
+          ]}
+        />
+      </div>
+    );
+  }
 
   // The changelog the platform shows its own users, on the one page everyone
   // lands on. Cards this person has already dismissed never come back.

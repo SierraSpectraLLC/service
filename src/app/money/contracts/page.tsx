@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { inArray, asc, desc, eq } from "drizzle-orm";
+import { and, inArray, asc, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { attachments, agreements, instruments, orgs, rateCards } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
+import { forTenant, readTenant } from "@/lib/tenancy";
 import { formatCents } from "@/lib/money";
 import { shopDay, shopToday } from "@/lib/shopday";
 import { standing } from "@/lib/agreements";
@@ -41,7 +42,10 @@ export default async function ContractsPage({ searchParams }: {
 
   const today = shopToday();
   const [rows, orgRows, cards, billed, systemRows] = await Promise.all([
-    db.select().from(agreements).where(eq(agreements.kind, "contract"))
+    // Tenant-filtered like every other agreements read (settings/agreements
+    // does the same). Without it this page lists every workspace's contracts.
+    db.select().from(agreements)
+      .where(and(eq(agreements.kind, "contract"), forTenant(agreements.tenantOrgId, readTenant(user))))
       .orderBy(asc(agreements.endsOn), desc(agreements.id)),
     db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs),
     db.select().from(rateCards),

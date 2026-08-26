@@ -1448,3 +1448,110 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
    navigate should look like a row title, not like a link. */
 .plain { text-decoration: none; color: inherit; }
 .plain:hover { text-decoration: underline; }
+
+/* ── The client's own product ───────────────────────────────────────────────
+   A client has been reading the staff board with the staff's things hidden:
+   the same stage machinery, the same seeded "Ours to move" facet, a header
+   that says Dashboard. These are the surfaces that replace it - see
+   lib/clientView for the rules and the vocabulary. */
+
+/* What the shop is waiting on THEM for. The mirror of the record page's
+   standing line: the shop has a screen that says whose move every system is,
+   and the client has had none, so a quote sat unanswered for a fortnight
+   without anybody being told they were the reason. */
+.waiting {
+  background: var(--t-warn-bg); border-left: 3px solid var(--t-warn-fg);
+  border-radius: 0 8px 8px 0; padding: 12px; margin-bottom: 16px;
+}
+.waiting > h2 {
+  margin: 0 0 8px; font-size: var(--fs-body); font-weight: 750; color: var(--t-warn-fg);
+}
+.waiting ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.waiting li {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-size: var(--fs-body); background: rgba(255, 255, 255, 0.6);
+  border-radius: 7px; padding: 7px 12px;
+}
+.waiting li .grow { flex: 1 1 260px; min-width: 0; }
+.waiting li .sub { display: block; font-size: var(--fs-meta); color: var(--mut); }
+
+/* The attention wall. Cards are for exceptions, at every account size; what
+   changes with scale is how much healthy inventory collapses behind one line. */
+.wall { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); }
+.inst {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-sm); overflow: hidden; text-align: left;
+  display: flex; flex-direction: column; text-decoration: none; color: inherit;
+  border-top: 4px solid var(--t-good-fg);
+  transition: box-shadow 0.14s ease, transform 0.14s ease;
+}
+@media (prefers-reduced-motion: reduce) { .inst { transition: none; } }
+.inst:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.inst.warn { border-top-color: var(--t-warn-fg); }
+.inst.bad { border-top-color: var(--t-bad-fg); }
+.inst.info { border-top-color: var(--t-info-fg); }
+.inst .top { padding: 12px 16px 8px; }
+.inst .state {
+  display: flex; align-items: center; gap: 7px; font-size: var(--fs-micro);
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.9px;
+}
+.inst.good .state { color: var(--t-good-fg); }
+.inst.warn .state { color: var(--t-warn-fg); }
+.inst.bad .state { color: var(--t-bad-fg); }
+.inst.info .state { color: var(--t-info-fg); }
+.inst .state i { width: 8px; height: 8px; border-radius: 999px; background: currentColor; }
+.inst h4 { margin: 5px 0 1px; font-size: var(--fs-title); font-weight: 750; line-height: 1.25; }
+.inst .make { font-size: var(--fs-small); color: var(--mut); }
+.inst .why { padding: 8px 16px 12px; font-size: var(--fs-body); flex: 1 1 auto; }
+.inst .foot {
+  border-top: 1px solid var(--line); padding: 8px 16px; display: flex;
+  align-items: center; gap: 8px; font-size: var(--fs-meta); color: var(--mut);
+}
+.inst .foot .rt { margin-left: auto; }
+
+/* Everything that needs nothing, as one line you can open. At four instruments
+   this is unnecessary; at thirty-four it is the whole trick. A real <details>,
+   so it is keyboard-operable without a line of JavaScript. */
+.healthy {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.healthy > summary {
+  list-style: none; cursor: pointer; padding: 12px 16px; display: flex;
+  align-items: center; gap: 12px; font-size: var(--fs-body); flex-wrap: wrap;
+}
+.healthy > summary::-webkit-details-marker { display: none; }
+.healthy > summary:hover { background: #FBFCFD; }
+.healthy > summary .dot { width: 9px; height: 9px; border-radius: 999px; background: var(--t-good-fg); }
+.healthy > summary .rt { margin-left: auto; color: var(--link); font-size: var(--fs-meta); font-weight: 600; }
+.healthy .list { border-top: 1px solid var(--line); padding: 8px 16px 12px; }
+
+/* Grouping for an account spread over more than one room or building. */
+.site { margin-bottom: 16px; }
+.site > h4 {
+  margin: 0 0 8px; font-size: var(--fs-body); font-weight: 750;
+  display: flex; align-items: center; gap: 8px;
+}
+.site > h4 .c { font-family: var(--mono); font-size: var(--fs-meta); font-weight: 700; color: var(--mut); }
+
+/* The reseller's pipeline. Stage columns, because a unit in refurbishment is a
+   position in a process rather than a bench that has to stay up - stages.ts
+   says as much about "In service" being a resting state. */
+.pipe { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); }
+.stage-col {
+  background: var(--card); border: 1px solid var(--line); border-radius: 9px;
+  padding: 8px 12px; display: flex; flex-direction: column; gap: 2px;
+  text-align: left; text-decoration: none; color: inherit;
+}
+.stage-col:hover { border-color: #C6D0DE; background: #FBFCFD; }
+.stage-col .lab {
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.7px;
+  font-weight: 700; color: var(--slate);
+}
+.stage-col .c {
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+  font-size: var(--fs-page); font-weight: 700; letter-spacing: -1px; line-height: 1.15;
+}
+.stage-col .age { font-size: var(--fs-meta); color: var(--mut); }
+.stage-col.hot { border-color: #EFC9C9; background: var(--t-bad-bg); }
+.stage-col.hot .c, .stage-col.hot .lab, .stage-col.hot .age { color: var(--t-bad-fg); }
