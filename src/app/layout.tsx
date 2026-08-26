@@ -228,7 +228,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
            configuration. It still lives at its Settings URL - this is the
            short way in. */
         { href: "/settings/catalog", label: "Equipment catalog" },
-        { href: "/settings/parts", label: "Parts book" },
+        { href: "/settings/parts", label: "Parts catalog" },
         { href: "/documents", label: "Files" },
         { href: "/gallery", label: "Gallery" },
         { href: "/pdf", label: "PDF studio" },

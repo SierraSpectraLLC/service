@@ -30,7 +30,7 @@ const loadCatalog = (): Promise<LookupPart[]> => {
 export const forgetCatalog = () => { cache = null; };
 
 /**
- * A part number that resolves against the parts book before it is inserted.
+ * A part number that resolves against the parts catalog before it is inserted.
  *
  * One field for the two ways somebody arrives at a part: with the box in their
  * hand and a number on it, or knowing what the thing is called and not its

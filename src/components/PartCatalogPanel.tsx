@@ -46,11 +46,11 @@ const emptyDraft = {
 };
 
 /**
- * The shop's own parts book: what each number IS.
+ * The shop's own parts catalog: what each number IS.
  *
  * The list on the right of this panel is the one that makes a catalog actually
  * get filled in - the numbers already used on real work that nothing has ever
- * described. Asking somebody to type out their parts book from scratch is how a
+ * described. Asking somebody to type out their parts catalog from scratch is how a
  * catalog stays empty; asking them to name the twelve numbers they used last
  * month is a job somebody finishes.
  */
@@ -243,14 +243,14 @@ export default function PartCatalogPanel({ items, assetTypes, modelsByType, pric
       {/* One spelling of "Shimadzu", wherever it's typed - see Settings → Catalog. */}
       <datalist id="maker-book">{makers.map((m) => <option key={m} value={m} />)}</datalist>
       <PageHead
-        title="Parts book"
+        title="Parts catalog"
         sub="What each part number means."
         actions={<button className="btn sm primary" onClick={() => openAdd()}>+ Part number</button>}
       />
       <Toolbar
         search={
           <input value={query} onChange={(e) => setQuery(e.target.value)}
-            placeholder="Your number, theirs, a name or a maker" aria-label="Search the parts book" />
+            placeholder="Your number, theirs, a name or a maker" aria-label="Search the parts catalog" />
         }
         facets={
           <FacetStrip

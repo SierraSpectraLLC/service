@@ -36,7 +36,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
       { href: "/settings/procedures", label: "Procedures & maintenance", ownerOnly: false },
       // What each part number IS, and the paper behind the work. Curated by
       // staff rather than by the owner alone, like the rest of the catalog.
-      { href: "/settings/parts", label: "Parts book", ownerOnly: false },
+      { href: "/settings/parts", label: "Parts catalog", ownerOnly: false },
     ],
   },
   {

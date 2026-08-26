@@ -137,7 +137,7 @@ export default function NeededPartsCard({ parts, rooms, canOrder }: {
           )}
           {vendors.length === 0 && (
             <div className="mut t-meta" style={{ marginTop: 6 }}>
-              None of these name a vendor. Set one on the part, or in the parts book.
+              None of these name a vendor. Set one on the part, or in the parts catalog.
             </div>
           )}
           {askOrgs.length > 1 && (

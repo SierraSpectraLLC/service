@@ -190,7 +190,7 @@ export type UncataloguedPart = {
  * Part numbers used in the shop that the catalog has never heard of.
  *
  * The list that makes cataloguing tractable: rather than asking somebody to type
- * out their whole parts book, show them the numbers they have actually used and
+ * out their whole parts catalog, show them the numbers they have actually used and
  * let them name those. Deduplicated the way part numbers dedupe, with the first
  * spelling kept - the catalog should be seeded with what people really type -
  * and enriched across sources: the name comes from whichever mention had one.

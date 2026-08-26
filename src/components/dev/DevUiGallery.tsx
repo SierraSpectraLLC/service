@@ -276,7 +276,7 @@ export default function DevUiGallery() {
                 { href: "/metrics", label: "Metrics" }, { href: "/archive", label: "Archived" },
               ] },
               { label: "Library", items: [
-                { href: "/settings/catalog", label: "Equipment catalog" }, { href: "/settings/parts", label: "Parts book" },
+                { href: "/settings/catalog", label: "Equipment catalog" }, { href: "/settings/parts", label: "Parts catalog" },
                 { href: "/documents", label: "Files" }, { href: "/gallery", label: "Gallery" },
                 { href: "/pdf", label: "PDF studio" }, { href: "/import", label: "Import spreadsheet" },
               ] },
@@ -391,7 +391,7 @@ export default function DevUiGallery() {
         }>
         <div className="pf2">
           <Field label="Estimated hours" required error="Needed to quote."><input className="mono" /></Field>
-          <Field label="Parts needed"><input placeholder="Add from the parts book..." /></Field>
+          <Field label="Parts needed"><input placeholder="Add from the parts catalog..." /></Field>
         </div>
       </Dialog>
     </div>

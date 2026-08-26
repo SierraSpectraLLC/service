@@ -371,7 +371,7 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
             </div>
             <div>
               <label>Part number</label>
-              {/* Resolves against the parts book first: the name comes with it,
+              {/* Resolves against the parts catalog first: the name comes with it,
                   so a described part is never re-described by hand. */}
               <PartNumberField value={draft.partNumber} placeholder="G6303-80060" className=""
                 onChange={(partNumber) => setDraft({ ...draft, partNumber })}

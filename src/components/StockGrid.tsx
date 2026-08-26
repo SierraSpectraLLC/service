@@ -26,7 +26,7 @@ const filled = (r: Row) => !!r.partNumber.trim();
  */
 export default function StockGrid({ stockroomId, knownParts, onDone }: {
   stockroomId: number;
-  /** Numbers from the parts book, the price book and existing shelves, with
+  /** Numbers from the parts catalog, the price book and existing shelves, with
       the book's name where it has one - autocomplete plus description fill.
       `resolvesTo` is set on a number that is somebody ELSE's spelling of the
       part - the maker's, or one it superseded - and names the number the book
@@ -44,7 +44,7 @@ export default function StockGrid({ stockroomId, knownParts, onDone }: {
     setRows((rs) => rs.map((r, n) => {
       if (n !== i) return r;
       const next = { ...r, [key]: value };
-      // Typing a number the parts book knows fills the description in, the
+      // Typing a number the parts catalog knows fills the description in, the
       // same way the book fills names on the shelf - one source of truth.
       //
       // And typing SOMEBODY ELSE'S number for the same part - the maker's, or

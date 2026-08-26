@@ -64,7 +64,7 @@ export default async function StockroomPage({ params, searchParams }: {
   const [buySettings] = await db.select({ crossDockDays: appSettings.crossDockDays })
     .from(appSettings).where(eq(appSettings.id, 1));
   const crossDockDays = buySettings?.crossDockDays ?? 1;
-  // The parts book: what each number IS. A shelf line whose number the book
+  // The parts catalog: what each number IS. A shelf line whose number the book
   // knows borrows its name, and the add-grid offers the book's numbers.
   const bookRows = await db.select({ id: partCatalog.id, partNumber: partCatalog.partNumber, name: partCatalog.name })
     .from(partCatalog).where(and(forTenant(partCatalog.tenantOrgId, readTenant(user)), eq(partCatalog.archived, false)))

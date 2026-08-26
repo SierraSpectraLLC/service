@@ -24,6 +24,7 @@ import {
   allNumbers, catalogEntry, catalogName, cleanAliases, currentNumber, MAX_PART_PHOTOS,
   numberClash, PART_KINDS, PART_KIND_LABEL, type PartAlias,
 } from "@/lib/partCatalog";
+import { checkRows, type PartImportRow, type RowProblem } from "@/lib/partImport";
 // Aliased: lib/stock exports a KIND_LABEL too (shelf, van, ...), imported below
 // and lexically first, so the bare name here silently meant the wrong map -
 // which made every new agreement throw on its own audit line.
@@ -117,7 +118,7 @@ import { drivingRoute, geocode } from "@/lib/geo";
 import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
-import { bestPrice } from "@/lib/priceBook";
+import { bestPrice, normalizePn } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind, mayReceiveKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
 import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
@@ -11870,7 +11871,7 @@ export async function removeCatalogRef(id: number): Promise<{ error?: string }> 
 }
 
 /**
- * The parts book, for pickers that need to name a part rather than have one
+ * The parts catalog, for pickers that need to name a part rather than have one
  * typed - the contract's included kits, most of all. Kits lead, because that
  * is what a PM contract entitles somebody to.
  */
@@ -11889,7 +11890,7 @@ export async function listCatalogPartsForPicker(): Promise<{
 }
 
 /**
- * The parts book as a part-number field needs it: every live entry with its
+ * The parts catalog as a part-number field needs it: every live entry with its
  * other numbers and its cover photo.
  *
  * Fetched once per field on first use and filtered in the browser rather than
@@ -11978,6 +11979,123 @@ export async function addCatalogPart(data: CatalogInput): Promise<{ error?: stri
   revalidatePath("/settings/parts");
   return { id: row.id };
 }
+
+/**
+ * A whole sheet: parts and the vendors who sell them, in one pass.
+ *
+ * The two entries this replaces asked for the same forty part numbers twice -
+ * once to say what each one IS and once to say what it costs - when a vendor's
+ * quote sheet arrives with both on one line. See lib/partImport for the shape.
+ *
+ * BLANK LEAVES WHAT IS ON FILE ALONE. A sheet that names a vendor and a price
+ * and nothing else must not wipe the description somebody wrote by hand last
+ * year, and a re-import of an export must not depend on every column surviving
+ * the round trip. The only way to clear a field stays the form.
+ *
+ * Repeating a part number is how a part gets a second vendor, not a collision:
+ * the catalog half is upserted once per number and every row's price half is
+ * taken. That is what a real quote comparison looks like - twenty parts, four
+ * vendors each, eighty lines.
+ */
+export async function importParts(rows: PartImportRow[]): Promise<{
+  error?: string; parts?: number; created?: number; updated?: number;
+  prices?: number; problems?: RowProblem[];
+}> {
+  const u = await requireStaff();
+  const { ok, problems } = checkRows(rows);
+  if (!ok.length) return { error: "Nothing on that sheet to import", problems };
+  if (ok.length > 500) return { error: "Import 500 rows at a time", problems };
+  /* ONE UNIVERSE FOR THE LOOKUP AND THE INSERT, which is the bug this line
+     exists to have fixed. Reading in a wider scope than the stamp writes in
+     means a part can be seen and still not be found - so a sheet exported from
+     this page re-imports as a second copy of every part, and the unique index
+     that should have caught it does not fire because the two rows differ by
+     tenant. Same scope addCatalogPart uses, for the same reason. */
+  const tenant = myTenantOrgId(u);
+  const mine = await loadAliases(
+    await db.select().from(partCatalog).where(forTenant(partCatalog.tenantOrgId, tenant)));
+  /* Every number an entry answers to, not just its primary. A catalog that let
+     two entries answer to one number would resolve it to whichever came first,
+     so the same box would describe itself differently depending on the screen -
+     the invariant addCatalogPart refuses a hand-typed number for, and one a
+     five-hundred-line import can break five hundred times as fast. */
+  const byPn = new Map<string, typeof mine[number]>();
+  for (const c of mine) {
+    for (const n of allNumbers(c)) if (!byPn.has(normalizePn(n))) byPn.set(normalizePn(n), c);
+  }
+
+  let created = 0, updated = 0;
+  const seen = new Set<string>();
+  for (const r of ok) {
+    const pn = r.partNumber.trim().slice(0, 80);
+    const norm = normalizePn(pn);
+    // One catalog write per number however many vendor rows it has.
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+
+    /* Everything this sheet says about the part, and nothing it does not.
+       An absent cell is silence, not an instruction. */
+    const said = {
+      ...(r.name.trim() ? { name: r.name.trim().slice(0, 160) } : {}),
+      ...(r.manufacturer.trim() ? { manufacturer: r.manufacturer.trim().slice(0, 80) } : {}),
+      ...(r.mfrPartNumber.trim() ? { mfrPartNumber: r.mfrPartNumber.trim().slice(0, 80) } : {}),
+      ...((PART_KINDS as readonly string[]).includes(r.kind.trim().toLowerCase())
+        ? { kind: r.kind.trim().toLowerCase() } : {}),
+      ...(r.fits.trim() ? { assetTypes: splitCell(r.fits) } : {}),
+      ...(r.models.trim() ? { models: splitCell(r.models) } : {}),
+      ...(r.note.trim() ? { note: r.note.trim().slice(0, 500) } : {}),
+    };
+
+    const existing = byPn.get(norm);
+    if (existing) {
+      if (Object.keys(said).length) {
+        await db.update(partCatalog).set(said).where(eq(partCatalog.id, existing.id));
+        updated++;
+      }
+    } else {
+      const [row] = await db.insert(partCatalog).values({
+        partNumber: pn, tenantOrgId: tenant, createdBy: u.email, ...said,
+      }).returning();
+      // Into the index under every number it now answers to, so a later line
+      // naming the manufacturer's number finds the entry this line just made
+      // rather than filing a second one beside it.
+      const added = { ...row, aliases: [] };
+      for (const n of allNumbers(added)) byPn.set(normalizePn(n), added);
+      created++;
+    }
+  }
+  await audit({
+    actor: u.email, entityType: "part_catalog", entityId: 0, tenantOrgId: tenant,
+    action: `imported a parts sheet: ${created} new, ${updated} updated across ${seen.size} part numbers`,
+  });
+
+  /* The price half goes through the price book's own write path rather than a
+     second copy of it - so a re-priced pair is audited as a re-pricing here
+     exactly as it is when somebody pastes a quote sheet into the price card. */
+  const priced = ok.filter((r) => r.vendor.trim() && r.price.trim());
+  const res = priced.length ? await addPartPrices(priced.map((r) => ({
+    partNumber: r.partNumber, vendor: r.vendor, price: r.price,
+    isOem: yesish(r.oem), url: r.url, leadDays: r.leadDays,
+    dropShips: yesish(r.blindShip), expediteOk: yesish(r.overnight),
+    // Deliberately NOT r.name: this action has already catalogued the part
+    // properly, and addPartPrices' stub-maker would be a second, thinner one.
+  })) as PartPriceInput[]) : {};
+
+  revalidatePath("/settings/parts");
+  return {
+    parts: seen.size, created, updated,
+    prices: (res.created ?? 0) + (res.updated ?? 0),
+    problems: [...problems, ...(res.failures ?? []).map((f) => ({
+      line: f.row, partNumber: f.name, problem: f.error,
+    }))],
+  };
+}
+
+/** "Pump; Autosampler" -> ["Pump", "Autosampler"]. Semicolons, in a CSV. */
+const splitCell = (s: string): string[] =>
+  [...new Set(s.split(";").map((x) => x.trim()).filter(Boolean))];
+
+const yesish = (s: string): boolean => /^(y|yes|true|1|oem)$/i.test((s ?? "").trim());
 
 export async function updateCatalogPart(id: number, data: CatalogInput): Promise<{ error?: string }> {
   const u = await requireStaff();

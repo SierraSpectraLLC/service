@@ -14,6 +14,7 @@ import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
 import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
 import PartCatalogPanel from "@/components/PartCatalogPanel";
 import PriceBookCard from "@/components/PriceBookCard";
+import PartImportCard from "@/components/PartImportCard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
  * keeping this a lookup rather than a foreign key is that a part fitted at 2am
  * lands in the record whether or not anybody has catalogued it - so the page
  * leads with the numbers already in use that nothing describes, which is the
- * list that makes filling a parts book a job somebody finishes.
+ * list that makes filling a parts catalog a job somebody finishes.
  */
 export default async function PartsCatalogPage({ searchParams }: { searchParams: Promise<{ f?: string }> }) {
   let user;
@@ -71,7 +72,7 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
     }))),
   ].filter((u) => u.partNumber.trim());
   // Vendor prices live beside the numbers they price - this page - rather than
-  // dangling off the equipment catalog, where they read as a second parts book.
+  // dangling off the equipment catalog, where they read as a second parts catalog.
   const priceRows = await db.select({
     id: partPrices.id, partNumber: partPrices.partNumber, vendor: partPrices.vendor,
     isOem: partPrices.isOem, priceCents: partPrices.priceCents, url: partPrices.url, note: partPrices.note,
@@ -163,6 +164,7 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
         makers={bookNames}
         initialFacet={f}
       />
+      <PartImportCard downloadName="parts-catalog" />
       <PriceBookCard prices={priceRows} today={today} knownVendors={[...new Set([...bookNames, ...priceRows.map((p) => p.vendor)])].sort()} />
     </div>
   );

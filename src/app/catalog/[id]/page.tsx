@@ -242,10 +242,10 @@ export default async function ModelPage({ params, searchParams }: {
       {tab === "parts" && <div className="card">
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
           <div className="card-title">Parts &amp; consumables</div>
-          <Link href="/settings/parts" className="btn link" style={{ marginLeft: "auto" }}>Open the parts book</Link>
+          <Link href="/settings/parts" className="btn link" style={{ marginLeft: "auto" }}>Open the parts catalog</Link>
         </div>
         <div className="mut t-meta" style={{ marginBottom: 8 }}>
-          Everything the parts book files under {term.name} - and under any {term.assetType.toLowerCase()} generally.
+          Everything the parts catalog files under {term.name} - and under any {term.assetType.toLowerCase()} generally.
         </div>
         {modelParts.map((p) => (
           <div key={p.id} style={{ padding: "6px 0", borderTop: "1px solid var(--line)" }}>
@@ -267,7 +267,7 @@ export default async function ModelPage({ params, searchParams }: {
         ))}
         {modelParts.length === 0 && (
           <div className="mut t-small">
-            Nothing filed yet. Tag parts to {term.name} in the parts book and they appear here.
+            Nothing filed yet. Tag parts to {term.name} in the parts catalog and they appear here.
           </div>
         )}
         {maintenanceParts.length > 0 && (

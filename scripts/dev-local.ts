@@ -270,12 +270,16 @@ const FIXTURE = `
   -- The parts book the store sells from. Models match Lab Zen's bench so the
   -- "For your systems" facet has something to say; one row has no price so
   -- "priced on request" renders too.
-  INSERT INTO part_catalog (part_number, name, manufacturer, kind, asset_types, models, created_by) VALUES
-    ('5188-5365', 'Septa, 11 mm, 50/pk',      'Agilent', 'consumable', '{"GC"}', '{"7890B"}', 'dev@local.test'),
-    ('G1960-80039', 'Oil mist filter',        'Agilent', 'part', '{"Vacuum pump"}', '{}', 'dev@local.test'),
-    ('WAT271066', 'ESI capillary',            'Waters',  'part', '{"Mass spec"}', '{"6495C"}', 'dev@local.test'),
-    ('ED-A72401', 'nXDS tip seal kit',        'Edwards', 'kit',  '{"Vacuum pump"}', '{"Edwards nXDS10i"}', 'dev@local.test'),
-    ('228-45703-91', 'LC-30 plunger seal',    'Shimadzu','consumable', '{"Pump"}', '{"LC-30AD"}', 'dev@local.test');
+  -- STAMPED, like every row the app itself writes. Unstamped fixtures made dev
+  -- diverge from production in a way that hid a real bug: the catalog is read
+  -- and written per workspace, so rows belonging to nobody are found by some
+  -- queries and not others.
+  INSERT INTO part_catalog (tenant_org_id, part_number, name, manufacturer, kind, asset_types, models, created_by) VALUES
+    (3, '5188-5365', 'Septa, 11 mm, 50/pk',      'Agilent', 'consumable', '{"GC"}', '{"7890B"}', 'dev@local.test'),
+    (3, 'G1960-80039', 'Oil mist filter',        'Agilent', 'part', '{"Vacuum pump"}', '{}', 'dev@local.test'),
+    (3, 'WAT271066', 'ESI capillary',            'Waters',  'part', '{"Mass spec"}', '{"6495C"}', 'dev@local.test'),
+    (3, 'ED-A72401', 'nXDS tip seal kit',        'Edwards', 'kit',  '{"Vacuum pump"}', '{"Edwards nXDS10i"}', 'dev@local.test'),
+    (3, '228-45703-91', 'LC-30 plunger seal',    'Shimadzu','consumable', '{"Pump"}', '{"LC-30AD"}', 'dev@local.test');
 
   -- Photos on two rows, so the shelf thumbnail and the part page's hero and
   -- thumbnail strip have something to show. Inline SVG: no blob store to run.

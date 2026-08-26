@@ -231,7 +231,7 @@ export default function AgreementsPanel({
   extra?: Record<number, string>;
 }) {
   const [sheet, setSheet] = useState<null | { id?: number; orgId: number }>(null);
-  // The parts book, for naming an included kit instead of typing its number.
+  // The parts catalog, for naming an included kit instead of typing its number.
   const [book, setBook] = useState<{ partNumber: string; name: string; kind: string }[] | null>(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [error, setError] = useState("");
@@ -768,7 +768,7 @@ export default function AgreementsPanel({
                     up("included", { includedKits: [...draft.includedKits, { partNumber: hit.partNumber, name: hit.name, qty: 1 }] });
                   }}
                   className="t-small">
-                  <option value="">＋ Add a kit from the parts book...</option>
+                  <option value="">＋ Add a kit from the parts catalog...</option>
                   {(book ?? []).map((b) => (
                     <option key={b.partNumber} value={b.partNumber}>
                       {b.kind === "kit" ? "▣ " : ""}{b.partNumber}{b.name ? ` - ${b.name}` : ""}
