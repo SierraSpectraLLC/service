@@ -2333,7 +2333,11 @@ export async function requestPmPart(scheduleId: number, partNumber?: string): Pr
   //
   // Priced on the number being BOUGHT: the price book is keyed by PN, and a
   // superseded number is exactly the one nobody has a current price under.
-  const book = await db.select().from(partPrices);
+  // The SCHEDULE's workspace, not the instance's. A price book read across the
+  // tenant line lets another operator's vendor offer win bestPrice and land on
+  // this shop's part row as its cost and its supplier.
+  const book = await db.select().from(partPrices)
+    .where(forTenant(partPrices.tenantOrgId, s.tenantOrgId));
   const best = bestPrice(book, orderPn);
   const [p] = await db.insert(parts).values({
     instrumentId, assetId: s.assetId, name, partNumber: orderPn,
@@ -10478,7 +10482,10 @@ export async function issueStock(
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
 
-  const book = await db.select().from(partPrices);
+  // The STOCKROOM's workspace - the room is the thing that has a tenant here,
+  // since a stock line hangs off it rather than carrying a stamp of its own.
+  const book = await db.select().from(partPrices)
+    .where(forTenant(partPrices.tenantOrgId, acc.room.tenantOrgId));
   const best = bestPrice(book, item.partNumber);
   const unitCents = item.unitCostCents ?? best?.priceCents ?? null;
   const name = item.name || `PN ${item.partNumber}`;

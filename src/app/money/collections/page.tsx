@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { readTenant } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
@@ -36,7 +37,7 @@ export default async function CollectionsPage({ searchParams }: {
 
   const today = shopToday();
   const [board, orgRows] = await Promise.all([
-    collectionsBoard(today),
+    collectionsBoard(today, readTenant(user)),
     db.select({ id: orgs.id, name: orgs.name }).from(orgs),
   ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));

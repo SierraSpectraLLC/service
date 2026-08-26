@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/authz";
+import { readTenant } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
@@ -37,7 +38,7 @@ export default async function CostingPage({ searchParams }: {
   const { period, seesPayroll, figures: fig } =
     await booksContext(user, (await searchParams).period);
   const today = shopToday();
-  const { jobs, clients, loadedLaborCents } = await costingBoard(today, periodDays(today, period));
+  const { jobs, clients, loadedLaborCents } = await costingBoard(today, periodDays(today, period), readTenant(user));
 
   const label = periodSpan(today, period);
 

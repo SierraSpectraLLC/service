@@ -15,9 +15,7 @@ import { systemLabel } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import { currentUser, requireUser, viewContext } from "@/lib/authz";
-import {
-  forTenant, maySeeAgreements, maySeeOrgMoney, viewTenant, visibleOrgs, visibleSystemIds,
-} from "@/lib/tenancy";
+import { forTenant, maySeeAgreements, maySeeOrgMoney, readTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { clientOptions } from "@/lib/clientNames";
 import { shelveRecords } from "@/lib/records";
 import { severityOf, woOpen } from "@/lib/workOrders";
@@ -589,7 +587,7 @@ export default async function Home({ searchParams }: {
           though: three lines naming what the shop is owed and by whom are the
           books in miniature, and the dashboard is the one page everybody on
           the staff opens every morning. See lib/books. */}
-      {seesBooks && <MoneyCard />}
+      {seesBooks && <MoneyCard tenantOrgId={readTenant(user)} />}
       <Dashboard
         data={data}
         stageDefs={stageDefList.map((d) => ({ name: d.name, bg: d.bg, fg: d.fg }))}

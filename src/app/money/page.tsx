@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireUser, myTenantOrgId } from "@/lib/authz";
+import { readTenant } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents, formatDollars } from "@/lib/money";
 import { brandForTenant } from "@/lib/brand";
@@ -40,7 +41,7 @@ export default async function MoneyPage({ searchParams }: {
     await booksContext(user, (await searchParams).period);
   const [brand, board] = await Promise.all([
     brandForTenant(myTenantOrgId(user)),
-    costingBoard(today, periodDays(today, period)),
+    costingBoard(today, periodDays(today, period), readTenant(user)),
   ]);
 
   const { moneyIn: mIn, moneyOut: mOut } = fig;

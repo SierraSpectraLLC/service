@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { orgs, workOrders } from "@/db/schema";
 import { requireOwner } from "@/lib/authz";
 import { allInvoices, qtyOf } from "@/lib/invoiceData";
+import { forTenant, readTenant } from "@/lib/tenancy";
 import {
   exportFileName, feesCsv, inMonth, invoicesCsv, paymentsCsv,
 } from "@/lib/accountingExport";
@@ -16,7 +17,8 @@ export const dynamic = "force-dynamic";
  * single most sensitive thing this application can emit.
  */
 export async function GET(req: Request) {
-  try { await requireOwner(); } catch { return NextResponse.json({ error: "Owner only" }, { status: 403 }); }
+  let u;
+  try { u = await requireOwner(); } catch { return NextResponse.json({ error: "Owner only" }, { status: 403 }); }
 
   const url = new URL(req.url);
   const month = (url.searchParams.get("month") ?? "").slice(0, 7);
@@ -26,9 +28,10 @@ export async function GET(req: Request) {
   }
 
   const [full, orgRows, woRows] = await Promise.all([
-    allInvoices(),
+    allInvoices(readTenant(u)),
     db.select({ id: orgs.id, name: orgs.name }).from(orgs),
-    db.select({ id: workOrders.id, number: workOrders.number }).from(workOrders),
+    db.select({ id: workOrders.id, number: workOrders.number }).from(workOrders)
+      .where(forTenant(workOrders.tenantOrgId, readTenant(u))),
   ]);
   const orgName = (id: number) => orgRows.find((o) => o.id === id)?.name ?? "";
   const woNumber = (id: number | null) => woRows.find((w) => w.id === id)?.number ?? "";

@@ -12,9 +12,9 @@ import { invoiceView, isOpen } from "@/lib/statement";
  * overdue one is ours again. Staff only, and computed - there is no cached
  * figure here to go stale overnight.
  */
-export default async function MoneyCard() {
+export default async function MoneyCard({ tenantOrgId }: { tenantOrgId: number | null }) {
   const today = shopToday();
-  const [full, unbilled] = await Promise.all([allInvoices(), unbilledJobs(12)]);
+  const [full, unbilled] = await Promise.all([allInvoices(tenantOrgId), unbilledJobs(tenantOrgId, 12)]);
   const views = full.map((f) => invoiceView(asStatementRow(f), today)).filter(isOpen);
 
   const unbilledCents = unbilled.reduce((n, j) => n + j.valueCents, 0);

@@ -48,7 +48,11 @@ export async function runDunning(now = new Date()): Promise<DunningResult> {
   ]);
   const orgById = new Map(allOrgs.map((o) => [o.id, o]));
 
-  const board = await collectionsBoard(today);
+  // null, and this is the one place that is right: the collections pass is a
+  // system job rather than somebody's screen, and it must walk every workspace
+  // on the instance. What may be sent is still decided per invoice, from the
+  // policy of the organization that owes it.
+  const board = await collectionsBoard(today, null);
   const out: DunningResult = { sent: [], skipped: [], waiting: [] };
 
   for (const item of board) {

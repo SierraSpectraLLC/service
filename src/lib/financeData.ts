@@ -137,9 +137,9 @@ export async function financeFigures(
 
   const [invoiceRows, quoteRows, unbilled, paidRows, spend, overheadRows, contractRows, orgRows, payRows] =
     await Promise.all([
-      allInvoices(),
-      allQuotes(),
-      unbilledJobs(),
+      allInvoices(t),
+      allQuotes(t),
+      unbilledJobs(t),
       db.select().from(payments)
         .where(and(forTenant(payments.tenantOrgId, t), gte(payments.receivedOn, from))),
       spendFigures(t),

@@ -133,7 +133,7 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
 
   // What it costs to be owed the money, per client. Same loader Costing uses,
   // so the two pages cannot disagree about it.
-  const payDays = (await costingBoard(shopToday(), days).catch(() => ({ clients: [] })))
+  const payDays = (await costingBoard(shopToday(), days, readTenant(user)).catch(() => ({ clients: [] })))
     .clients.filter((c) => c.daysToPay !== null);
 
   return (

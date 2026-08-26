@@ -25,6 +25,7 @@ import {
   type DraftLine, type ExpenseRow, type PartRow, type TimeRow,
 } from "@/lib/billing";
 import { resolvePolicy } from "@/lib/billingPolicy";
+import { forTenant } from "@/lib/tenancy";
 import { bestPrice } from "@/lib/priceBook";
 import { resolveRate, type RateCard } from "@/lib/rates";
 import { dueDate, invoiceView, isOpen, type InvoiceRow } from "@/lib/statement";
@@ -114,10 +115,14 @@ export async function draftSourceFor(woId: number): Promise<DraftSource | null> 
     orgId: wo.orgId, instrumentId: wo.instrumentId, today,
   });
 
+  // Both of these are the JOB's workspace, not the instance's. Unscoped, another
+  // operator's default rate card can win resolveRate's last clause and another
+  // operator's vendor offer can win bestPrice - so a draft invoice quietly bills
+  // at somebody else's numbers.
   const [cards, site, book] = await Promise.all([
-    db.select().from(rateCards),
+    db.select().from(rateCards).where(forTenant(rateCards.tenantOrgId, wo.tenantOrgId)),
     inst?.siteId ? db.select().from(orgSites).where(eq(orgSites.id, inst.siteId)).then((r) => r[0] ?? null) : Promise.resolve(null),
-    db.select().from(partPrices),
+    db.select().from(partPrices).where(forTenant(partPrices.tenantOrgId, wo.tenantOrgId)),
   ]);
   const rate = resolveRate(cards, { orgId: wo.orgId, agreementId: coverage.agreementId });
 
@@ -228,8 +233,8 @@ async function hydrate(rows: (typeof invoices.$inferSelect)[]): Promise<FullInvo
 /* Request-cached: the financial section computes its rail badges from the same
    rows the page under it is already reading, and React's cache dedupes the two
    within one render rather than running the query twice. */
-export const allInvoices = cache(async (): Promise<FullInvoice[]> => {
-  const rows = await db.select().from(invoices);
+export const allInvoices = cache(async (tenantOrgId: number | null): Promise<FullInvoice[]> => {
+  const rows = await db.select().from(invoices).where(forTenant(invoices.tenantOrgId, tenantOrgId));
   return (await hydrate(rows)).sort((a, b) => b.row.id - a.row.id);
 });
 
@@ -314,10 +319,12 @@ export type UnbilledJob = {
  * which is slower and is the point: the number on this list is the number the
  * draft page will show, because it came from the same function.
  */
-export const unbilledJobs = cache(async (limit = 25): Promise<UnbilledJob[]> => {
-  const closed = await db.select().from(workOrders).where(eq(workOrders.state, "closed"));
+export const unbilledJobs = cache(async (tenantOrgId: number | null, limit = 25): Promise<UnbilledJob[]> => {
+  const closed = await db.select().from(workOrders)
+    .where(and(eq(workOrders.state, "closed"), forTenant(workOrders.tenantOrgId, tenantOrgId)));
   const billed = new Set(
-    (await db.select({ woId: invoices.workOrderId, status: invoices.status }).from(invoices))
+    (await db.select({ woId: invoices.workOrderId, status: invoices.status }).from(invoices)
+      .where(forTenant(invoices.tenantOrgId, tenantOrgId)))
       .filter((r) => r.status !== "void" && r.woId !== null)
       .map((r) => r.woId as number),
   );
@@ -386,14 +393,14 @@ export async function creditForMany(orgIds: number[], today: string): Promise<Ma
 }
 
 /** Every open invoice in the workspace that has a rung due today. */
-export async function collectionsBoard(today: string): Promise<{
+export async function collectionsBoard(today: string, tenantOrgId: number | null): Promise<{
   invoice: FullInvoice;
   view: ReturnType<typeof invoiceView>;
   step: ReturnType<typeof nextAction>;
   policy: BillingPolicy;
   brokenPromise: boolean;
 }[]> {
-  const all = await allInvoices();
+  const all = await allInvoices(tenantOrgId);
   const out = [];
   for (const f of all) {
     const view = invoiceView(asStatementRow(f), today);
@@ -419,10 +426,10 @@ export async function collectionsBoard(today: string): Promise<{
  * no per-org variant of this, because a client sees their own money through
  * their own portal token and nowhere else.
  */
-export async function moneyDigest(today: string): Promise<MoneyInput> {
+export async function moneyDigest(today: string, tenantOrgId: number | null): Promise<MoneyInput> {
   const [board, jobs, orgRows] = await Promise.all([
-    collectionsBoard(today),
-    unbilledJobs(12),
+    collectionsBoard(today, tenantOrgId),
+    unbilledJobs(tenantOrgId, 12),
     db.select({ id: orgs.id, name: orgs.name }).from(orgs),
   ]);
   const name = (id: number) => orgRows.find((o) => o.id === id)?.name ?? "";
@@ -468,8 +475,8 @@ export async function moneyDigest(today: string): Promise<MoneyInput> {
   // Quotes inside a week of lapsing. A quote nobody answered is revenue that
   // simply evaporates, and it evaporates quietly - there is no aging report it
   // ever appears on.
-  const quoteRows = await allQuotes();
-  const links = await db.select().from(shareLinks);
+  const quoteRows = await allQuotes(tenantOrgId);
+  const links = await db.select().from(shareLinks).where(forTenant(shareLinks.tenantOrgId, tenantOrgId));
   const staleQuotes = stale(quoteRows.map((q) => q.row), today).map((row) => {
     const f = quoteRows.find((x) => x.row.id === row.id)!;
     return {
@@ -513,8 +520,8 @@ async function hydrateQuotes(rows: (typeof quotes.$inferSelect)[]): Promise<Full
 }
 
 /** Every quote in the workspace, newest first. Internal surfaces only. */
-export const allQuotes = cache(async (): Promise<FullQuote[]> => {
-  const rows = await db.select().from(quotes);
+export const allQuotes = cache(async (tenantOrgId: number | null): Promise<FullQuote[]> => {
+  const rows = await db.select().from(quotes).where(forTenant(quotes.tenantOrgId, tenantOrgId));
   return (await hydrateQuotes(rows)).sort((a, b) => b.row.id - a.row.id);
 });
 
@@ -545,16 +552,17 @@ export async function quoteForOrg(id: number, orgId: number): Promise<FullQuote 
  * the invoice actually raised against it. A job with no invoice bills nothing
  * and says so; it is the leak the Overview names, seen from the other side.
  */
-export async function costingBoard(today: string, windowDays: number): Promise<{
+export async function costingBoard(today: string, windowDays: number, tenantOrgId: number | null): Promise<{
   jobs: JobMargin[];
   clients: ClientMargin[];
   loadedLaborCents: number;
 }> {
   const [woRows, orgRows, settings, full] = await Promise.all([
-    db.select().from(workOrders).where(eq(workOrders.state, "closed")),
+    db.select().from(workOrders)
+      .where(and(eq(workOrders.state, "closed"), forTenant(workOrders.tenantOrgId, tenantOrgId))),
     db.select({ id: orgs.id, name: orgs.name, termsDays: orgs.termsDays }).from(orgs),
     settingsRow(),
-    allInvoices(),
+    allInvoices(tenantOrgId),
   ]);
   const loaded = settings?.loadedLaborCents ?? 0;
   const orgName = (id: number | null) => orgRows.find((o) => o.id === id)?.name ?? "";
@@ -569,7 +577,7 @@ export async function costingBoard(today: string, windowDays: number): Promise<{
         db.select().from(parts).where(inArray(parts.workOrderId, ids)),
         db.select().from(timeEntries).where(inArray(timeEntries.workOrderId, ids)),
         db.select().from(expenses).where(inArray(expenses.workOrderId, ids)),
-        db.select().from(agreements),
+        db.select().from(agreements).where(forTenant(agreements.tenantOrgId, tenantOrgId)),
       ])
     : [[], [], [], []];
 

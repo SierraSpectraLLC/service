@@ -51,7 +51,7 @@ export default async function ContractsPage({ searchParams }: {
       .orderBy(asc(agreements.endsOn), desc(agreements.id)),
     db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs),
     db.select().from(rateCards),
-    allInvoices(),
+    allInvoices(readTenant(user)),
     db.select({
       id: instruments.id, ownerOrgId: instruments.ownerOrgId,
       externalId: instruments.externalId, model: instruments.model,

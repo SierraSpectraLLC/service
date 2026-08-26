@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { readTenant } from "@/lib/tenancy";
 import { isStaffRole } from "@/lib/tenants";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
@@ -30,7 +31,7 @@ export default async function InvoicesPage({ searchParams }: {
 
   const today = shopToday();
   const [full, orgRows] = await Promise.all([
-    allInvoices(),
+    allInvoices(readTenant(user)),
     db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs),
   ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));

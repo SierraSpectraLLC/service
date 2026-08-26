@@ -859,7 +859,10 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
   // calls this, and tests/digestMoney.test.ts asserts the partner output
   // carries no currency at all, because that rule is one bad merge away from
   // being untrue.
-  const money = await moneyDigest(shopToday()).then(renderMoneySection).catch(() => "");
+  // The edition's OWN workspace. Unscoped, one operator's morning mail carried
+  // every other operator's receivables - client names, balances and all - which
+  // is also what a preview would have shown anybody holding a demo login.
+  const money = await moneyDigest(shopToday(), tenantOrgId).then(renderMoneySection).catch(() => "");
   const body = renderDigestBody(sections, true, operatorName, window) + money;
 
   const busy = n.partner + n.us + n.followUps + n.gas + n.failed;

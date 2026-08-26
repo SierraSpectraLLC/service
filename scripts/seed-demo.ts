@@ -320,6 +320,18 @@ async function wipe(db: Db, orgId: number, emails: string[]): Promise<void> {
   await some(taskIds, async () => itemIds.push(...pick(await db.select({ id: checklistItems.id })
     .from(checklistItems).where(inArray(checklistItems.taskId, taskIds)))));
 
+  // What was uploaded, collected BEFORE the rows that name it are deleted.
+  // Deleting the rows alone would leave the bytes in the operator's Blob store
+  // with nothing left pointing at them - billed forever, and unfindable.
+  const blobUrls = [
+    ...(await db.select({ url: attachments.url }).from(attachments)
+      .where(eq(attachments.tenantOrgId, orgId))).map((r) => r.url),
+    ...(await db.select({ url: vocabTerms.photoUrl }).from(vocabTerms)
+      .where(eq(vocabTerms.tenantOrgId, orgId))).map((r) => r.url),
+  ];
+  await some(catalogIds, async () => blobUrls.push(...(await db.select({ url: partPhotos.url })
+    .from(partPhotos).where(inArray(partPhotos.catalogId, catalogIds))).map((r) => r.url)));
+
   // Children first, deepest first: an item note hangs off a checklist item,
   // which hangs off a task.
   await some(itemIds, () => db.delete(itemNotes).where(inArray(itemNotes.itemId, itemIds)));
@@ -389,6 +401,23 @@ async function wipe(db: Db, orgId: number, emails: string[]): Promise<void> {
 
   // The organizations last, clients before the operator that owns them.
   await db.delete(orgs).where(inArray(orgs.id, orgIds));
+
+  // Then the bytes. Inline copies have nothing to delete, and a failure here is
+  // reported rather than thrown: the workspace is already gone by this point,
+  // and leaving the caller with an error would suggest otherwise.
+  const stored = [...new Set(blobUrls.filter((u) => u.startsWith("https://")))];
+  if (stored.length && process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      const { del } = await import("@vercel/blob");
+      await del(stored);
+      say(`Deleted ${stored.length} uploaded file${stored.length === 1 ? "" : "s"} from Blob.`);
+    } catch (e) {
+      warn(`The rows are gone but ${stored.length} Blob file(s) could not be deleted `
+        + `(${(e as Error).message}). They are under the demo/ prefix if you want to remove them by hand.`);
+    }
+  } else if (stored.length) {
+    warn(`${stored.length} uploaded file(s) are still in Blob - set BLOB_READ_WRITE_TOKEN to have them removed.`);
+  }
 }
 
 /** Every address this seed invents, so a wipe can find them again. */
