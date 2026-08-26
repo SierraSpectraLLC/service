@@ -8,6 +8,7 @@ import {
   setClientAccessRole, setClientSeesAgreements, removeOrg, setSheetOrg, setOrgStorageLimit,
   setOrgRemoteAccess, setOrgResale, setClientTempPassword, clearClientTempPassword, setClientSeesPayroll,
   setClientSeesMoney,
+  setStartView,
 } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { TEMP_DAYS_DEFAULT, TEMP_DAYS_MAX } from "@/lib/tempPassword";
@@ -29,6 +30,7 @@ type Entry = {
   title?: string;
   canSeePayroll?: boolean;
   canSeeMoney?: boolean;
+  startView?: string;
   /** Whether they have ever actually been here. */
   signedIn?: boolean;
   /** "their own" | "expired" | "6d left" | "" - see lib/tempPassword. */
@@ -379,6 +381,29 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
               ) : r.canSeeMoney !== false ? (
                 <span className="pill neutral">quotes &amp; invoices</span>
               ) : null}
+              {/* WHERE THEY START. Only where this organization has a second
+                  view to start them in - a lab has one shape, so there is
+                  nothing here to choose and a picker would be a question with
+                  one answer. A starting point only: the moment they pick for
+                  themselves, theirs wins. See lib/viewMode. */}
+              {isOwner && resaleOn && !domain && (
+                <label className="t-meta" style={{ display: "flex", alignItems: "center", gap: 4, margin: 0, fontWeight: 400, color: "var(--slate)", textTransform: "none", letterSpacing: 0 }}
+                  title="Which view this person opens the app in, until they choose for themselves">
+                  starts in
+                  <select value={r.startView ?? ""} disabled={pending}
+                    aria-label={`Starting view for ${r.entry}`}
+                    className="t-meta" style={{ width: "auto", padding: "1px 4px" }}
+                    onChange={(e) => startTransition(async () => {
+                      const res = await setStartView(r.id, e.target.value);
+                      if (res?.error) setPeopleError(res.error);
+                      else toast({ message: "Saved the starting view" });
+                    })}>
+                    <option value="">their company&apos;s default</option>
+                    <option value="lab">Equipment</option>
+                    <option value="reseller">Sales pipeline</option>
+                  </select>
+                </label>
+              )}
               {isStaff && !domain && (
                 <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                   <button className="btn link" disabled={pending}

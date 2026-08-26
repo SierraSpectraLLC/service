@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { agreements, assets, instruments, orgSites, orgs, users } from "@/db/schema";
+import { agreements, assets, clientAllowlist, instruments, orgSites, orgs, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, viewTenant, visibleSystemIds } from "@/lib/tenancy";
@@ -76,7 +76,9 @@ export default async function UnitsPage({ searchParams }: {
      lib/viewMode. */
   const [me] = await db.select({ viewMode: users.viewMode }).from(users)
     .where(eq(users.email, user.email.toLowerCase())).catch(() => []);
-  const resells = resellerView(me?.viewMode ?? "", org?.resale ?? false);
+  const [startRow] = await db.select({ startView: clientAllowlist.startView })
+    .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => []);
+  const resells = resellerView(me?.viewMode ?? "", startRow?.startView ?? "", org?.resale ?? false);
   const noun = resells ? "unit" : "instrument";
 
   // Where each one lives, when the account has named its sites.

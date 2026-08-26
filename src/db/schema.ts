@@ -37,6 +37,12 @@ export const users = pgTable("users", {
    * who never touched this. See lib/viewMode.
    */
   viewMode: text("view_mode").notNull().default(""),
+  /**
+   * When this person was shown where the view switch lives. Null = never, and
+   * the card is waiting for them. Once, not on a timer: a tutorial that comes
+   * back is an interruption, and this one is three sentences about a menu.
+   */
+  viewTourAt: timestamp("view_tour_at"),
   passwordHash: text("password_hash").notNull().default(""),
   passwordSetAt: timestamp("password_set_at"),
   /**
@@ -2793,6 +2799,22 @@ export const clientAllowlist = pgTable("client_allowlist", {
    * can_see_agreements does - never to remove it from people by upgrading.
    */
   canSeeMoney: boolean("can_see_money").notNull().default(true),
+  /**
+   * WHICH VIEW THIS PERSON STARTS IN - "lab" or "reseller", blank to follow
+   * their organization's own shape.
+   *
+   * Set by the operator, before the person has ever signed in, which is the
+   * whole point: a COO put in charge of the equipment at a reselling company
+   * should not have to find a menu on his first morning to stop being shown a
+   * pipeline of stock. It is a STARTING point and nothing more - the moment he
+   * chooses for himself (users.view_mode) his answer wins and this stops
+   * mattering.
+   *
+   * A value the organization has no view for is refused on the way in and
+   * ignored on the way out - see lib/viewMode, which clamps at read time so a
+   * company that stops reselling cannot leave its people on a pipeline.
+   */
+  startView: text("start_view").notNull().default(""),
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("allowlist_entry_unique").on(t.entry)]);

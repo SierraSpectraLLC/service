@@ -358,7 +358,8 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
        the org directly would hand them a pipeline under an equipment nav. See
        lib/viewMode. */
     expect(page).toMatch(/mode: asReseller \? "reseller" : "lab"/);
-    expect(page).toMatch(/resellerView\(meRow\?\.viewMode \?\? "", orgSelf\?\.resaleEnabled \?\? false\)/);
+    expect(page).toMatch(
+      /resellerView\(\s*meRow\?\.viewMode \?\? "", startRow\?\.startView \?\? "", orgSelf\?\.resaleEnabled \?\? false\)/);
     expect(page).toMatch(/if \(asReseller\) \{/);
   });
 
@@ -371,11 +372,22 @@ describe("what is an alert on a reseller's landing, and what is not", () => {
     ]) {
       expect(read(f), f).toMatch(/resellerView\(/);
     }
-    // And nothing decides the SHAPE off the raw flag any more. The one place
-    // that still reads it decides a company CAPABILITY - whether they ship -
-    // which no screen preference may move.
+    /* And nothing decides the SHAPE off the raw flag any more. Asserted as
+       "every read is feeding one of the sanctioned readers" rather than as a
+       COUNT, because a count rots the moment a legitimate reader is added -
+       it did, when asking which views a company HAS became its own question -
+       and a rotting assertion teaches the next person to bump the number. */
     const page = read("src/app/(dashboard)/page.tsx");
-    expect(page.match(/resaleEnabled/g) ?? []).toHaveLength(2);
+    const reads = [...page.matchAll(/resaleEnabled/g)].map((m) =>
+      page.slice(Math.max(0, (m.index ?? 0) - 220), (m.index ?? 0) + 40));
+    expect(reads.length).toBeGreaterThan(0);
+    for (const ctx of reads) {
+      // The view rule, which clamps it, or the offer of a second view, which
+      // asks the same question - never a branch that picks a landing itself.
+      expect(/resellerView\(|mayChooseView\(|showShipping=/.test(ctx), ctx).toBe(true);
+    }
+    // And the one read OUTSIDE the view rule is still the company capability.
+    expect(reads.filter((c) => /showShipping=/.test(c))).toHaveLength(1);
   });
 
   it("counts units in the pipeline, not positions", () => {

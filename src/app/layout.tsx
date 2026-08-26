@@ -55,8 +55,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
      off it and the view switch wants another, and two round trips for two
      columns of the same row is a round trip nobody needed. */
   const [me] = user
-    ? await db.select({ onboardedAt: users.onboardedAt, viewMode: users.viewMode })
-        .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => [])
+    ? await db.select({
+        onboardedAt: users.onboardedAt, viewMode: users.viewMode, viewTourAt: users.viewTourAt,
+      }).from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => [])
     : [];
   if (user) {
     const to = welcomeRedirect(true, me?.onboardedAt ?? null, (await headers()).get(PATH_HEADER) ?? "/");
@@ -120,18 +121,22 @@ export default async function RootLayout({ children }: { children: React.ReactNo
      landing and the roster, so a person who switched cannot get a pipeline nav
      over a lab page. See lib/viewMode. */
   const orgResells = ownOrg?.resale === true;
-  /* Off this person's own row rather than off the session: it is a screen
-     preference, and widening the session for one would put it in every token
-     and every cached identity in the app. */
-  const resells = !isStaff && resellerView(me?.viewMode ?? "", orgResells);
   // Payroll is in the nav only for somebody who may actually read one: the
   // company's own owner, or a person at a client whose flag was turned on. An
   // entry that leads to a page which redirects is worse than no entry, and
   // here it would also be an entry that names a thing they cannot have.
   const [allowRow] = user?.orgId != null
-    ? await db.select({ payroll: clientAllowlist.canSeePayroll, money: clientAllowlist.canSeeMoney })
+    ? await db.select({
+        payroll: clientAllowlist.canSeePayroll, money: clientAllowlist.canSeeMoney,
+        startView: clientAllowlist.startView,
+      })
         .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => [])
     : [];
+  /* Three answers, closest first: what this person chose (off their own user
+     row rather than the session - widening the session for a screen preference
+     would put it in every token in the app), where the operator started them,
+     and what their company is. See lib/viewMode. */
+  const resells = !isStaff && resellerView(me?.viewMode ?? "", allowRow?.startView ?? "", orgResells);
   const seesPayroll = user?.role === "owner" || allowRow?.payroll === true;
   /* The shop's own books - what it has invoiced, collected, committed and is
      owed. The owner's, and nobody else's on the staff side: an engineer needs

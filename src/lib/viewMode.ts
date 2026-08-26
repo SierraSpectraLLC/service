@@ -35,20 +35,48 @@ export const isViewPref = (v: string): v is ViewPref =>
   v === "" || (VIEW_MODES as readonly string[]).includes(v);
 
 /**
- * The shape this person actually gets.
+ * WHICH VIEWS THIS COMPANY HAS AT ALL.
  *
- * One function, because four places used to derive it from the org flag on
- * their own - the nav, the landing, the roster and the landing's to-do list -
- * and a person who switched would otherwise get a pipeline nav over a lab
- * page.
+ * The equipment view is universal - every company that owns instruments has
+ * instruments to keep running. The pipeline only exists for a company that
+ * sells things, and a standard client must never land on one: an empty
+ * pipeline is not a harmless extra screen, it is the app telling a lab it is
+ * something it is not.
  */
-export function viewModeFor(pref: string, orgResells: boolean): ViewMode {
-  if (isViewPref(pref) && pref !== "") return pref;
-  return orgResells ? "reseller" : "lab";
+export function availableViews(orgResells: boolean): ViewMode[] {
+  return orgResells ? ["lab", "reseller"] : ["lab"];
 }
 
-export const resellerView = (pref: string, orgResells: boolean): boolean =>
-  viewModeFor(pref, orgResells) === "reseller";
+export const viewAllowed = (mode: string, orgResells: boolean): boolean =>
+  (availableViews(orgResells) as readonly string[]).includes(mode);
+
+/**
+ * The shape this person actually gets, from three answers in order of who is
+ * closest to the question.
+ *
+ * `own` is what they chose for themselves and wins outright. `assigned` is
+ * where the operator started them - the right view for a COO in charge of
+ * equipment at a reselling company, set before he ever signs in - and it holds
+ * until he says otherwise. The org's flag is the fallback under both.
+ *
+ * AND THE ANSWER IS CLAMPED, at read time, every time. A start view set while
+ * a company resold, or a choice made before they stopped, must not survive as
+ * a pipeline on a lab's screen - and the check belonging here rather than only
+ * at the two write paths is what makes that true without either of them having
+ * to be revisited when the org flag changes underneath them.
+ */
+export function viewModeFor(
+  own: string, assigned: string, orgResells: boolean,
+): ViewMode {
+  const wanted = isViewPref(own) && own !== "" ? own
+    : isViewPref(assigned) && assigned !== "" ? assigned
+      : orgResells ? "reseller" : "lab";
+  return viewAllowed(wanted, orgResells) ? wanted : "lab";
+}
+
+export const resellerView = (
+  own: string, assigned: string, orgResells: boolean,
+): boolean => viewModeFor(own, assigned, orgResells) === "reseller";
 
 /**
  * What the switch calls each one, in the words of somebody choosing.
@@ -76,4 +104,5 @@ export const VIEW_BLURB: Record<ViewMode, string> = {
  * teaches somebody the app is not for them. The moment their org turns resale
  * on, everybody there gets the choice.
  */
-export const mayChooseView = (orgResells: boolean): boolean => orgResells;
+export const mayChooseView = (orgResells: boolean): boolean =>
+  availableViews(orgResells).length > 1;

@@ -109,7 +109,7 @@ import {
   autoFg, cleanBlockReason, isBlocking, partOpen, stageChange, validBlockReason,
 } from "@/lib/stages";
 import { systemParties, systemPartiesFor } from "@/lib/partyData";
-import { isViewPref } from "@/lib/viewMode";
+import { VIEW_LABEL, isViewPref, viewAllowed, type ViewMode } from "@/lib/viewMode";
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
@@ -9756,6 +9756,59 @@ export async function setMyPhone(raw: string): Promise<{ error?: string }> {
  * act on the record, and a trail full of "changed their view" is a trail
  * somebody has to read past to find the changes that mattered.
  */
+/**
+ * Where a person STARTS, set by the operator before they ever sign in.
+ *
+ * The reason this exists rather than leaving everybody on their company's
+ * default: a COO put in charge of the equipment at a reselling company should
+ * not have to find a menu on his first morning to stop being shown a pipeline
+ * of stock. Somebody who already knows what he does can say so for him.
+ *
+ * It is a STARTING point and nothing more. The moment he chooses for himself
+ * (setMyViewMode) his answer wins and this stops mattering - which is why
+ * changing it later moves nobody who has already decided.
+ *
+ * Refused where the organization has no such view: a standard client cannot be
+ * started on a reseller screen, because there is no reseller screen there to
+ * start them on. lib/viewMode clamps the same answer again at read time, so a
+ * company that stops reselling does not strand anybody it was set for.
+ */
+export async function setStartView(id: number, mode: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientAllowlist).where(eq(clientAllowlist.id, id));
+  if (!row || row.orgId === null) return { error: "Not found" };
+  const gate = await adminOrgGate(u, row.orgId);
+  if ("error" in gate) return gate;
+  if (!isViewPref(mode)) return { error: "Unknown view" };
+  const [org] = await db.select({ resale: orgs.resaleEnabled }).from(orgs).where(eq(orgs.id, row.orgId));
+  if (mode !== "" && !viewAllowed(mode, org?.resale ?? false)) {
+    return { error: `${VIEW_LABEL[mode as ViewMode]} isn't a view this organization has` };
+  }
+  if (row.startView === mode) return {};
+  await db.update(clientAllowlist).set({ startView: mode }).where(eq(clientAllowlist.id, id));
+  await audit({
+    actor: u.email, entityType: "settings", entityId: row.entry,
+    action: mode
+      ? `${row.entry} now starts in the ${VIEW_LABEL[mode as ViewMode].toLowerCase()} view`
+      : `${row.entry} now starts in their organization's default view`,
+    field: "start_view", oldValue: row.startView, newValue: mode,
+  });
+  revalidatePath("/", "layout");
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  return {};
+}
+
+/**
+ * "I have seen where the switch lives." Stamped once and never asked again.
+ */
+export async function dismissViewTour(): Promise<{ error?: string }> {
+  const u = await requireUser();
+  await db.update(users).set({ viewTourAt: new Date() })
+    .where(eq(users.email, u.email.toLowerCase()));
+  revalidatePath("/");
+  return {};
+}
+
 export async function setMyViewMode(mode: string): Promise<{ error?: string }> {
   const u = await requireUser();
   if (!isViewPref(mode)) return { error: "Unknown view" };

@@ -1,7 +1,7 @@
 import { and, asc, eq, desc, inArray, isNull, lte, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
-import { instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, orgSites, attachments, workOrders, users, pmSchedules, agreements } from "@/db/schema";
+import { clientAllowlist, instruments, instrumentGases, parts, auditLog, sheetDiffs, tasks, assets, vocabTerms, engagementRecords, orgs, orgSites, attachments, workOrders, users, pmSchedules, agreements } from "@/db/schema";
 import { coverageOf, coverageSummary, type CoverageAgreement } from "@/lib/coverage";
 import { dayOf, lastVisitBy, visitsOf, visitsThisYear, type Completion } from "@/lib/serviceHistory";
 import { daysSince, queueView } from "@/lib/queue";
@@ -32,7 +32,8 @@ import { PageHead } from "@/components/ui";
 import ClientCoverage from "@/components/ClientCoverage";
 import MoneyCard from "@/components/MoneyCard";
 import { seesBooksFor } from "@/lib/financeData";
-import { resellerView } from "@/lib/viewMode";
+import { mayChooseView, resellerView } from "@/lib/viewMode";
+import ViewTour from "@/components/ViewTour";
 import WhatsNew from "@/components/WhatsNew";
 import { WHATS_NEW, unseenFor } from "@/lib/whatsNew";
 
@@ -380,9 +381,23 @@ export default async function Home({ searchParams }: {
        reselling company opens a pipeline of stock when what they came for is
        whether the instruments are running. Same rule the nav reads, so a page
        and the nav above it cannot disagree. See lib/viewMode. */
-    const [meRow] = await db.select({ viewMode: users.viewMode }).from(users)
-      .where(eq(users.email, user.email.toLowerCase())).catch(() => []);
-    const asReseller = resellerView(meRow?.viewMode ?? "", orgSelf?.resaleEnabled ?? false);
+    const [meRow] = await db.select({ viewMode: users.viewMode, viewTourAt: users.viewTourAt })
+      .from(users).where(eq(users.email, user.email.toLowerCase())).catch(() => []);
+    const [startRow] = await db.select({ startView: clientAllowlist.startView })
+      .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => []);
+    const asReseller = resellerView(
+      meRow?.viewMode ?? "", startRow?.startView ?? "", orgSelf?.resaleEnabled ?? false);
+    /* Said once, on the page they land on: which view they are in and where
+       the switch is. The account menu is the right home for a personal setting
+       and the wrong place to discover one - somebody started in a view by
+       their operator has no reason to suspect there is another. Only where
+       there IS another; teaching a control somebody does not have is noise. */
+    const tour = mayChooseView(orgSelf?.resaleEnabled ?? false) && !meRow?.viewTourAt
+      ? <ViewTour
+          mode={asReseller ? "reseller" : "lab"}
+          other={asReseller ? "lab" : "reseller"}
+          assigned={(startRow?.startView ?? "") !== "" && (meRow?.viewMode ?? "") === ""} />
+      : null;
 
     const todos = await clientTodos({
       orgId: user.orgId, today,
@@ -440,6 +455,7 @@ export default async function Home({ searchParams }: {
 
       return (
         <div className="container wide">
+          {tour}
           <PageHead
             title="Your pipeline"
             /* Their stock, not our account list. "16 units with Sierra
@@ -482,6 +498,7 @@ export default async function Home({ searchParams }: {
       : [];
     return (
       <div className="container wide">
+        {tour}
         <PageHead
           title="Your lab"
           /* It used to read "N instruments under service with us" from the

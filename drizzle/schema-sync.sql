@@ -732,6 +732,7 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "remote_group_id" text NOT NULL DEFA
 -- Many operators on one instance: the org tree, per-operator staff, and the
 -- tenant stamp every top-level record carries. See src/lib/tenants.ts.
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "view_mode" text NOT NULL DEFAULT '';
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "view_tour_at" timestamp;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_hash" text NOT NULL DEFAULT '';
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "password_set_at" timestamp;
 ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "phone" text NOT NULL DEFAULT '';
@@ -3326,6 +3327,7 @@ END $$;
 -- Who at an organization may read its payroll. Off until somebody says so.
 ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_payroll" boolean NOT NULL DEFAULT false;
 ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "can_see_money" boolean NOT NULL DEFAULT true;
+ALTER TABLE "client_allowlist" ADD COLUMN IF NOT EXISTS "start_view" text NOT NULL DEFAULT '';
 
 -- po_lines has always DECLARED a cascading parent in schema.ts and never had
 -- the constraint here, so nothing enforced it: deleting an order would have
