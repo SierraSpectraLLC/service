@@ -1423,6 +1423,15 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .ledger .grow { flex: 1 1 auto; min-width: 0; }
 .ledger .grow .sub { display: block; font-size: var(--fs-meta); color: var(--mut); }
 .ledger .money { flex-shrink: 0; }
+/* A row carrying more than a label and a figure. On a phone five things in
+   one flex line crush the name to nothing - min-width:0 lets .grow collapse,
+   so an id wraps to one letter a line and "CA-001" reads "C/ 001". Here the
+   name takes the whole first line and everything else flows under it. Opt-in
+   rather than global: a money row is two columns and should stay two. */
+@media (max-width: 620px) {
+  .ledger.wrap { flex-wrap: wrap; row-gap: 4px; }
+  .ledger.wrap > .grow { flex: 1 0 100%; }
+}
 .ledger.total { border-top: 2px solid var(--ink); font-weight: 750; padding-top: 9px; }
 
 .bignum {

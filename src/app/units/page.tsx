@@ -178,10 +178,15 @@ export default async function UnitsPage({ searchParams }: {
         }
       />
 
-      <Panel title={stage || "All"} count={shown.length}
+      {/* Titled by what is being looked at, never "All 16" directly under a
+          chip reading "All 16". The count comes back only when a search has
+          narrowed things, because that is the one time it is not already on
+          the chip above. */}
+      <Panel title={stage || (resells ? "Units" : "Instruments")}
+        count={needle ? shown.length : undefined}
         empty={`No ${noun} matches that.`}>
         {shown.map((u) => (
-          <div key={u.id} className="ledger">
+          <div key={u.id} className="ledger wrap">
             <span className="grow">
               <Link href={`/instruments/${u.id}`} className="plain" style={{ fontWeight: 600 }}>
                 <Id>{u.externalId}</Id>
@@ -192,9 +197,16 @@ export default async function UnitsPage({ searchParams }: {
               </span>
             </span>
             {u.forSale && <Pill tone="accent">Listed</Pill>}
-            {/* Only where it is not ours - a badge on every row says nothing.
-                Same rule the collapsed strip on the lab landing uses. */}
-            {u.coverage.state !== "ours" && (
+            {/* Coverage, and only where it says something.
+                Not for a reseller at all: their units are stock heading for a
+                sale, not benches somebody keeps running, so NONE of them is
+                under a service contract and the badge landed on all sixteen
+                rows saying nothing sixteen times. Same reason their landing
+                carries no uptime figure - the question does not apply to a
+                machine that is meant to be in pieces.
+                And for a lab, only where it is not ours: a badge on every row
+                is the same noise in a different costume. */}
+            {!resells && u.coverage.state !== "ours" && (
               <Pill tone={COVERAGE[u.coverage.state].tone}>{coverageBadge(u.coverage)}</Pill>
             )}
             {u.stages.length > 0 && (

@@ -393,6 +393,39 @@ describe("the roster a reseller could not reach", () => {
     expect(layout).toMatch(/\{ href: "\/", label: resells \? "Your pipeline" : "Your lab" \}/);
   });
 
+  it("does not crush the id on a phone", () => {
+    /* Five things in one flex line at 390px collapsed the name column to
+       nothing - .ledger .grow carries min-width:0, so an id wrapped one
+       letter to a line and "CA-001" read "C/ 001". The name takes the whole
+       first line there and the pills flow under it. */
+    const src = read("src/app/units/page.tsx");
+    expect(src).toMatch(/className="ledger wrap"/);
+    const css = read("src/app/globals.css");
+    expect(css).toMatch(/\.ledger\.wrap \{ flex-wrap: wrap/);
+    expect(css).toMatch(/\.ledger\.wrap > \.grow \{ flex: 1 0 100%/);
+    // Opt-in, not global: a money row is two columns and should stay two.
+    expect(css).not.toMatch(/\n\.ledger \{[^}]*flex-wrap: wrap/);
+  });
+
+  it("keeps the coverage badge off a reseller's stock entirely", () => {
+    /* Their units are inventory heading for a sale, not benches somebody
+       keeps running, so NONE of them is under a service contract - the badge
+       landed on all sixteen rows saying nothing sixteen times. Same reason
+       their landing carries no uptime figure. */
+    const src = read("src/app/units/page.tsx");
+    expect(src).toMatch(/\{!resells && u\.coverage\.state !== "ours" &&/);
+  });
+
+  it("does not title the list with the chip above it", () => {
+    // "All 16" as a panel title, directly under a chip reading "All 16".
+    const src = read("src/app/units/page.tsx");
+    expect(src).not.toMatch(/title=\{stage \|\| "All"\}/);
+    expect(src).toMatch(/title=\{stage \|\| \(resells \? "Units" : "Instruments"\)\}/);
+    // The count returns only when a search has narrowed things - the one time
+    // it is not already on the chip.
+    expect(src).toMatch(/count=\{needle \? shown\.length : undefined\}/);
+  });
+
   it("says nothing rather than zero where no stage event was logged", () => {
     // "0 d" would read as "arrived today", which is the opposite of unknown -
     // the same rule the pipeline's missing median follows.
