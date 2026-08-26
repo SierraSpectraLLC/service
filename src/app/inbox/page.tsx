@@ -43,6 +43,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   return (
     <div className="container page">
       <InboxPanel
+        isStaff={isStaffRole(user.role)}
         items={items.map((n) => ({
           id: n.id, kind: n.kind, title: n.title, href: n.href,
           when: shopTime(n.createdAt), read: n.readAt !== null,

@@ -117,7 +117,7 @@ import { getBrand } from "@/lib/brand";
 import { parseSpecs, serializeSpecs } from "@/lib/partSpecs";
 import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice } from "@/lib/priceBook";
-import { NOTIFY_KINDS, isNotifyKind } from "@/lib/inbox";
+import { NOTIFY_KINDS, isNotifyKind, mayReceiveKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
 import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
@@ -4540,6 +4540,11 @@ export async function markAllNotificationsRead() {
 export async function setNotificationPref(kind: string, emailOn: boolean): Promise<{ error?: string }> {
   const u = await requireUser();
   if (!isNotifyKind(kind)) return { error: "Unknown notification kind" };
+  /* And not one this person can never receive. Hiding the switch is what the
+     inbox does; this is the door behind it, so a hand-made call cannot leave a
+     client holding a preference row for the operator's usage report. Absent
+     rather than forbidden: naming the kind back would confirm it exists. */
+  if (!mayReceiveKind(kind, isStaffRole(u.role))) return { error: "Unknown notification kind" };
   const email = u.email.toLowerCase();
   await db.insert(notificationPrefs)
     .values({ email, kind, emailOn })

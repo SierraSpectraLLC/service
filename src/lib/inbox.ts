@@ -8,27 +8,65 @@
  */
 export const DESKTOP_KEY = "notify:desktop";
 
+/**
+ * WHO CAN EVER RECEIVE ONE.
+ *
+ * "house" means the audience is always houseEmails() - the operator's own
+ * staff - so the notification cannot reach a client no matter what they set.
+ * "all" means a client genuinely can be on the recipient list.
+ *
+ * This is an audience fact, not a permission: preferences here only MUTE the
+ * email on a notification somebody was already going to get. Nothing a client
+ * switched on ever subscribed them to anything. But the list was shown whole
+ * to everybody, and that had two costs. Seven of seventeen rows could never
+ * fire for a client, which buries the ones that can. And two of the seven -
+ * "Somebody signs in to the portal for the first time" and "The weekly report
+ * of who is using the portal" - told every client of every tenant that their
+ * portal use is watched and reported on. That is the operator's business to
+ * disclose in their own words, not a checkbox's to leak on their behalf.
+ */
+export type NotifyAudience = "house" | "all";
+
 export const NOTIFY_KINDS = [
-  { kind: "task_assigned", label: "A task is assigned to me" },
-  { kind: "system_assigned", label: "I'm made lead on a system" },
-  { kind: "discussion", label: "Discussion posts and @mentions" },
-  { kind: "mention", label: "I'm @mentioned in a task note" },
-  { kind: "access_request", label: "Access requests and ownership claims" },
-  { kind: "gas_empty", label: "A gas is marked empty" },
-  { kind: "queue", label: "A system moves into my queue" },
-  { kind: "handoff", label: "A system changes hands" },
-  { kind: "issue", label: "A client reports a problem" },
-  { kind: "pm_request", label: "A client asks for maintenance" },
-  { kind: "renewal", label: "A contract is coming up for renewal" },
-  { kind: "parts_request", label: "We're asked to order parts for our systems" },
-  { kind: "message", label: "Somebody messages me directly" },
-  { kind: "drop", label: "Files arrive through a drop link I made" },
-  { kind: "model_proposal", label: "A model not in the catalog gets recorded" },
-  { kind: "sign_in", label: "Somebody signs in to the portal for the first time" },
-  { kind: "usage_report", label: "The weekly report of who is using the portal" },
-] as const;
+  { kind: "task_assigned", label: "A task is assigned to me", audience: "all" },
+  { kind: "system_assigned", label: "I'm made lead on a system", audience: "all" },
+  { kind: "discussion", label: "Discussion posts and @mentions", audience: "all" },
+  { kind: "mention", label: "I'm @mentioned in a task note", audience: "all" },
+  // The OWNING org's editors rule on access to their own equipment, so this
+  // reaches them as well as staff - see actions.ownerAudience.
+  { kind: "access_request", label: "Access requests and ownership claims", audience: "all" },
+  { kind: "gas_empty", label: "A gas is marked empty", audience: "house" },
+  { kind: "queue", label: "A system moves into my queue", audience: "all" },
+  { kind: "handoff", label: "A system changes hands", audience: "all" },
+  // Both of these are a client's own message ARRIVING at the shop. Showing a
+  // client the switch implies they might be told about their own report.
+  { kind: "issue", label: "A client reports a problem", audience: "house" },
+  { kind: "pm_request", label: "A client asks for maintenance", audience: "house" },
+  { kind: "renewal", label: "A contract is coming up for renewal", audience: "house" },
+  // Asked OF the owner, so the owner hears it too.
+  { kind: "parts_request", label: "We're asked to order parts for our systems", audience: "all" },
+  { kind: "message", label: "Somebody messages me directly", audience: "all" },
+  { kind: "drop", label: "Files arrive through a drop link I made", audience: "all" },
+  { kind: "model_proposal", label: "A model not in the catalog gets recorded", audience: "house" },
+  { kind: "sign_in", label: "Somebody signs in to the portal for the first time", audience: "house" },
+  { kind: "usage_report", label: "The weekly report of who is using the portal", audience: "house" },
+] as const satisfies readonly { kind: string; label: string; audience: NotifyAudience }[];
 
 export type NotifyKind = (typeof NOTIFY_KINDS)[number]["kind"];
+
+/**
+ * The kinds worth offering this person a switch for.
+ *
+ * A switch that can never do anything is not a neutral extra row: it is a
+ * claim about what happens on this instance, read by somebody who is not
+ * supposed to be reading it.
+ */
+export const notifyKindsFor = (isStaff: boolean): readonly (typeof NOTIFY_KINDS)[number][] =>
+  isStaff ? NOTIFY_KINDS : NOTIFY_KINDS.filter((k) => k.audience === "all");
+
+/** Can this kind ever reach this person at all? */
+export const mayReceiveKind = (kind: string, isStaff: boolean): boolean =>
+  notifyKindsFor(isStaff).some((k) => k.kind === kind);
 
 export const isNotifyKind = (k: string): k is NotifyKind =>
   NOTIFY_KINDS.some((n) => n.kind === k);

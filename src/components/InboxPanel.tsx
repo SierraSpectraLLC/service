@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useTransition } from "react";
 import { markNotificationRead, markAllNotificationsRead, setNotificationPref } from "@/app/actions";
-import { NOTIFY_KINDS } from "@/lib/inbox";
+import { NOTIFY_KINDS, notifyKindsFor } from "@/lib/inbox";
 import DesktopAlerts from "@/components/DesktopAlerts";
 import { DataTable, Dot, FacetStrip, Legend, PageHead, Panel, Toolbar } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
@@ -14,11 +14,18 @@ export type InboxItem = {
   read: boolean;
 };
 
-export default function InboxPanel({ items, prefs, filter }: {
+export default function InboxPanel({ items, prefs, filter, isStaff }: {
   items: InboxItem[];
   prefs: { kind: string; emailOn: boolean }[];
   /** From the URL (?kind=, ?unread=1), so a filtered inbox is a link. */
   filter: { kind?: string; unread?: string };
+  /**
+   * Staff get every switch; a client gets only the kinds that can actually
+   * reach them. See notifyKindsFor - a switch that can never do anything is
+   * not a neutral extra row, it is a claim about this instance being read by
+   * somebody it was not written for.
+   */
+  isStaff: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const unread = items.filter((i) => !i.read).length;
@@ -96,7 +103,7 @@ export default function InboxPanel({ items, prefs, filter }: {
 
       <Panel title="Email preferences"
         hint="Which kinds also email you.">
-        {NOTIFY_KINDS.map((k) => (
+        {notifyKindsFor(isStaff).map((k) => (
           <label key={k.kind} className="t-body" style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 0", cursor: "pointer" }}>
             <input type="checkbox" checked={emailOn(k.kind)} disabled={pending} className="check"
               onChange={(e) => {

@@ -5,7 +5,8 @@ import { users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { displayName } from "@/lib/directory";
-import { NOTIFY_KINDS } from "@/lib/inbox";
+import { notifyKindsFor } from "@/lib/inbox";
+import { isStaffRole } from "@/lib/tenants";
 import WelcomeForm from "@/components/WelcomeForm";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,10 @@ export default async function WelcomePage() {
           // Their address, read as a name, for them to correct rather than
           // compose from nothing. The same guess the directory makes.
           suggested={displayName(me?.name ?? null, email)}
-          kinds={NOTIFY_KINDS.map((k) => ({ kind: k.kind, label: k.label }))}
+          // The very first screen somebody sees. Offering a client a switch for
+          // "the weekly report of who is using the portal" here is the worst
+          // possible moment to be leaking what the operator watches.
+          kinds={notifyKindsFor(isStaffRole(user.role)).map((k) => ({ kind: k.kind, label: k.label }))}
           brandName={brand.name}
         />
       </div>
