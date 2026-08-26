@@ -228,17 +228,24 @@ export function rankTodos(list: ClientTodo[]): ClientTodo[] {
  * safe direction for a surface that shows another company their machine.
  *
  * What is left out is left out because it is the shop's working memory, not
- * because it is secret. Internal tasks are how an engineer breaks a job into
- * steps; hours are what the shop pays itself; the daily update is a note to
- * tomorrow's engineer; the activity log is every field anybody ever edited. A
- * client reading those learns nothing they can act on and quite a lot about
- * how the sausage is made.
+ * because it is secret. Hours are what the shop pays itself; the daily update
+ * is a note to tomorrow's engineer; the activity log is every field anybody
+ * ever edited. A client reading those learns nothing they can act on and quite
+ * a lot about how the sausage is made.
  */
 export const CLIENT_PANELS = [
   // "coverage" is theirs before it is ours: who services this machine and
   // until when is the client's own question, and the page used to answer it
   // by counting what they could see.
   "queue", "coverage", "system", "assets", "site", "workorders", "maintenance",
+  // "tasks" was left out on the reasoning that a task is how an engineer
+  // breaks a job into steps - true of most of them, and false of the ones that
+  // matter here. Work gets assigned ACROSS the wall: a shop hands the client's
+  // own engineer the five things to do before the install, and until this was
+  // in the list those five were invisible to everybody at that company,
+  // including the person they were given to. See clientOwnTasks, which is what
+  // keeps the shop's own step-by-step out of it.
+  "tasks",
   "parts", "photos", "validation", "files", "reference", "discussion",
 ] as const;
 
@@ -281,4 +288,35 @@ export function medianDays(values: number[]): number | null {
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+}
+
+/**
+ * WHICH tasks on a shared system are the client's business.
+ *
+ * Showing them the panel is not the same as showing them the list. Most tasks
+ * on a machine really are the shop's working memory - "check whether the old
+ * board is still under warranty", "ask Agilent what the lead time is" - and a
+ * client reading those learns nothing they can act on. But a task ASSIGNED TO
+ * ONE OF THEIR PEOPLE is a thing their company owes, and one they RAISED is
+ * their own question coming back to them. Both are theirs.
+ *
+ * Assignment is the test rather than a new switch on the task, because the
+ * assignment already happened and already means this: the person it was given
+ * to got an email about it (lib/notify), so the app has already told that
+ * company the task exists. A panel that then hid it would be the app keeping a
+ * secret it had already given away.
+ *
+ * `theirs` is the set of directory names belonging to the reader's own
+ * organization - names rather than addresses because that is what a task
+ * stores, and the same qualified form the assignee dropdown writes.
+ */
+export const CLIENT_RAISED = ["issue", "pm_request"] as const;
+
+export function clientOwnTasks<T extends { assignee: string; origin: string }>(
+  tasks: T[], theirs: Set<string>,
+): T[] {
+  const mine = new Set([...theirs].map((n) => n.trim().toLowerCase()).filter(Boolean));
+  return tasks.filter((t) =>
+    (CLIENT_RAISED as readonly string[]).includes(t.origin)
+    || mine.has(t.assignee.trim().toLowerCase()));
 }

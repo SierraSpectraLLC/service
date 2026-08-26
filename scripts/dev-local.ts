@@ -177,6 +177,19 @@ const FIXTURE = `
   UPDATE work_orders SET closed_at = now() - interval '6 days',
     close_summary = 'Torch and injector replaced, ignition verified.' WHERE number = 'WO-0407';
 
+  -- TASKS ACROSS THE WALL, which the fixture never had - and which is why a
+  -- client seeing none of them went unnoticed. Three assigned to Lab Zen's own
+  -- editor (the shop handing their engineer the install list), one the shop's
+  -- own working memory, and one the client raised themselves. Lab Zen must see
+  -- exactly the first three and the last; Sierra Spectra sees all five.
+  INSERT INTO tasks (tenant_org_id, instrument_id, title, state, assignee, origin, sort_order) VALUES
+    (3, 1, 'Install new collision cell',         'Open', 'Maria Chen',  '',      1),
+    (3, 1, 'Install and set up the autosampler', 'Open', 'Maria Chen',  '',      2),
+    (3, 1, 'Connect exhaust and ventilation',    'Open', 'Maria Chen',  '',      3),
+    (3, 1, 'Check whether the old board is still under warranty',
+                                                 'Open', 'Bill Reyes',  '',      4),
+    (3, 1, 'Carryover on the blank injections',  'Open', '',            'issue', 5);
+
   INSERT INTO stockrooms (name, kind, keeper, location) VALUES
     ('Main stockroom', 'shop', 'joe', 'Back wall');
 

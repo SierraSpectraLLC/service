@@ -64,7 +64,9 @@ import QueuePanel from "@/components/QueuePanel";
 import PanelLayout from "@/components/PanelLayout";
 import StandingLine from "@/components/StandingLine";
 import { modeFor, standingTone } from "@/lib/panelMode";
-import { CLIENT_GROUP_LABEL, clientMaySee, queueNeedsThem } from "@/lib/clientView";
+import {
+  CLIENT_GROUP_LABEL, clientMaySee, clientOwnTasks, queueNeedsThem,
+} from "@/lib/clientView";
 import { advisoryByCoverage, coverageOf, type CoverageAgreement } from "@/lib/coverage";
 import { dayOf } from "@/lib/serviceHistory";
 import SystemCoverage from "@/components/SystemCoverage";
@@ -246,7 +248,23 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     ...[...new Set(assetRows.map((a) => a.kind))]
       .map((k) => ({ assetType: k, model: "", label: `any ${k.toLowerCase()}` })),
   ];
-  const evidenceTasks = taskRows.map((t) => {
+  const isStaff = user.role === "owner" || user.role === "staff";
+
+  /* WHAT THIS READER'S COMPANY IS ACTUALLY LOOKING AT.
+     Staff see every task on the machine. A client sees the ones assigned to
+     their own people and the ones they raised - see clientOwnTasks, which owns
+     the rule and says why assignment is the test rather than a new switch.
+     Scoped HERE, above everything client-facing that reads a task, because the
+     panel was not the only surface: the validation shelf offers "which task is
+     the evidence for this signature" as a list of titles, and that list was
+     every internal task on the record. `taskRows` stays whole below it for the
+     aggregates that are legitimately about the machine rather than about who
+     owes what. */
+  const theirNames = new Set(
+    isStaff ? [] : peopleRows.filter((m) => m.org === user.orgName).map((m) => m.name));
+  const myTasks = isStaff ? taskRows : clientOwnTasks(taskRows, theirNames);
+
+  const evidenceTasks = myTasks.map((t) => {
     const pr = procRows.find((x) => x.id === t.procedureId);
     return { id: t.id, title: t.title, required: (pr?.required ?? false) && pr?.kind === "test" };
   });
@@ -286,7 +304,6 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const canEdit = await canEditSystem(user, instId);
   // Other systems this person may write to, for copying a batch of tasks across.
   const copyTargets = canEdit ? await copyTargetsFor(user, instId) : [];
-  const isStaff = user.role === "owner" || user.role === "staff";
   const modules = await getModules();
   const { persona } = await viewContext();
   // ---- photos -------------------------------------------------------------
@@ -383,7 +400,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
 
   // Which of these are tests, and what each one read - see lib/taskTests.
   const taskTests = await loadTaskTests(taskRows);
-  const fullTasks = taskRows.map((t) => ({
+  const fullTasks = myTasks.map((t) => ({
     ...t,
     ...testFieldsFor(taskTests, t.id),
     createdAt: t.createdAt.toISOString(),
@@ -395,6 +412,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     notes: tNotes.filter((n) => n.taskId === t.id).map((n) => ({ ...n, createdAt: n.createdAt.toISOString() })),
   }));
 
+
   // Who the composer may offer for an @mention: this record's readers, and
   // nobody else - see lib/mentionAudience.
   const mentionable = await mentionableOn(peopleRows, { instrumentId: instId, assetId: null });
@@ -403,7 +421,10 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // any panel. Only what needs an eye gets a tone.
   const today = shopToday();
   const openWos = woRows.filter((w) => woOpen(w.state));
-  const openTasks = taskRows.filter((t) => t.state !== "Done");
+  /* The badge on the rail leads to the task list, so it counts what opens -
+     a count of things somebody cannot reach is what it showed while the panel
+     was missing entirely. */
+  const openTasks = fullTasks.filter((t) => t.state !== "Done");
   const overdueTasks = openTasks.filter((t) => t.dueDate && t.dueDate < today).length;
   const pmDue = pmRows.filter((sc) => !sc.paused && sc.nextDue <= today).length;
   const queueMine = queueView(user, inst) === "mine";
@@ -782,6 +803,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               today={shopToday()} canEdit={canEdit}
               people={isStaff ? directoryNames(peopleRows) : []}
               orders={woRows.map((w) => {
+                /* Deliberately every task on the job, not just the ones this
+                   reader may open. It is a PROGRESS figure - "12 tasks, 4
+                   done" - and it discloses no titles; scoping it would tell a
+                   client "0 tasks" about a job with twelve steps planned,
+                   which is the same false quiet as the "0 of 1" the coverage
+                   line used to report. The badge that leads to the task LIST
+                   is scoped, because that one has to match what opens. */
                 const mine = taskRows.filter((t) => t.workOrderId === w.id);
                 return {
                   id: w.id, number: w.number, title: w.title, severity: w.severity,
