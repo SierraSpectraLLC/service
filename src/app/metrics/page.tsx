@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { and, asc, eq, gte, or } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, or } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments, stageEvents, tasks, timeEntries, parts, queueEvents } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
@@ -70,6 +70,12 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
         readTenant(user) === null ? undefined : or(
           eq(instruments.tenantOrgId, readTenant(user)!),
           eq(assets.tenantOrgId, readTenant(user)!),
+          // A part on neither a system nor a unit has no parent to take a
+          // scope from. Both joins are LEFT, so without this arm the two
+          // equalities above are NULL rather than false and the row is
+          // dropped - which would silently under-count the Shelf stock
+          // bucket below. It is an orphan either way; count it.
+          and(isNull(parts.instrumentId), isNull(parts.assetId)),
         ),
       )),
   ]);

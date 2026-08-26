@@ -19,19 +19,34 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
-/** `path` -> why a whole-table read is correct there. */
+/**
+ * `path::table` -> why a whole-table read is correct there.
+ *
+ * Keyed on the PAIR, not the file. actions.ts is twelve thousand lines; letting
+ * one justified read there bless every future one in the same file would empty
+ * this guard out quietly, which is the failure mode it exists to prevent.
+ */
 const ALLOWED: Record<string, string> = {
-  "src/app/api/cron/renewals/route.ts":
+  "src/app/api/cron/renewals/route.ts::agreements":
     "The platform's weekly sweep. Every agreement is chased by its OWN operator - " +
     "the loop mails houseEmails(a.tenantOrgId) - and nothing is rendered to a person.",
-  "src/lib/recurringRun.ts":
+  "src/lib/recurringRun.ts::agreements":
     "Same: the recurring-billing cron, behind CRON_SECRET. Each cycle is raised " +
     "against its own agreement, which carries the stamp the invoice inherits.",
-  "src/app/settings/tenants/page.tsx":
+  "src/app/settings/tenants/page.tsx::instruments":
     "The platform owner's meter - seats, clients, systems and machines PER " +
     "workspace. Counting across tenants is the page's entire job, and " +
     "requirePlatformOwner is the gate that makes it the right person's job.",
-  "src/lib/eodEmail.ts":
+  "src/app/settings/tenants/page.tsx::remoteDevices":
+    "Same page, same meter: machines per workspace is one of the numbers a price " +
+    "is built from.",
+  "src/app/actions.ts::purchaseOrders":
+    "PO numbers are globally unique - po_number_unique is UNIQUE(number), not " +
+    "UNIQUE(tenant, number) - so the scan that picks the next one has to see the " +
+    "whole table or two workspaces climb into each other. It returns numbers, " +
+    "never rows. Making the constraint per-tenant is the real fix and is a " +
+    "migration; until then this read is load-bearing.",
+  "src/lib/eodEmail.ts::instruments":
     "Selects tenant_org_id explicitly and filters in JS: see mine() a few lines " +
     "down, applied to all three row sets before anything is grouped or sent.",
 };
@@ -98,14 +113,14 @@ describe("no tenant-stamped table is read across the whole instance by accident"
   });
 
   it("every unpredicated read is one somebody justified", () => {
-    const unexplained = nakedReads(tables).filter((h) => !(h.file in ALLOWED));
+    const unexplained = nakedReads(tables).filter((h) => !(`${h.file}::${h.table}` in ALLOWED));
     expect(unexplained.map((h) => `${h.file}:${h.line} reads all of ${h.table}`)).toEqual([]);
   });
 
   it("the allowlist has no stale entries", () => {
     // An entry left behind after its read was scoped would quietly re-bless the
     // next unscoped read added to that same file.
-    const files = new Set(nakedReads(tables).map((h) => h.file));
-    expect(Object.keys(ALLOWED).filter((f) => !files.has(f))).toEqual([]);
+    const live = new Set(nakedReads(tables).map((h) => `${h.file}::${h.table}`));
+    expect(Object.keys(ALLOWED).filter((k) => !live.has(k))).toEqual([]);
   });
 });

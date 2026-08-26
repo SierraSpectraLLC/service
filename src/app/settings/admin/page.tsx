@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/db";
 import { orgSites, instruments, orgs, systemShares, assets, accessRequests, engagementRecords, users } from "@/db/schema";
@@ -72,7 +72,14 @@ export default async function AdminSettingsPage() {
       .innerJoin(orgs, eq(orgs.id, engagementRecords.orgId))
       .where(and(
         isNull(engagementRecords.supersededAt),
-        tenant === null ? undefined : eq(orgs.parentOrgId, tenant),
+        tenant === null ? undefined : or(
+        // tenantOf(), spelled in SQL: an org belongs to its parent, EXCEPT an
+        // operator org, which belongs to itself and is created with a null
+        // parent. Matching on parentOrgId alone therefore dropped every
+        // operator-held record - including the reading operator's own.
+        eq(orgs.parentOrgId, tenant),
+        and(eq(orgs.isOperator, true), eq(orgs.id, tenant)),
+      ),
       ))
       .orderBy(asc(engagementRecords.revokedAt)),
   ]);

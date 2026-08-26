@@ -41,17 +41,29 @@ export default async function PdfStudioPage() {
     .where(and(
       ilike(attachments.fileName, "%.pdf"),
       // The house sees its house - not every house. `house` is true for ANY
-      // operator's staff, so without the stamp this listed every PDF filed on
-      // the instance, by name, to whoever signed in last.
-      forTenant(attachments.tenantOrgId, readTenant(user)),
-      house ? undefined : or(
-        scope.all ? undefined : scope.ids.length ? inArray(attachments.instrumentId, scope.ids) : sql`false`,
-        seeAssets === null ? undefined : seeAssets.length ? inArray(attachments.assetId, seeAssets) : sql`false`,
-        // The org's own shelf: homeless files stamped to it.
-        user.orgId === null ? sql`false` : and(
-          isNull(attachments.instrumentId), isNull(attachments.assetId), eq(attachments.orgId, user.orgId),
-        ),
-      ),
+      // operator's staff, so on its own it listed every PDF on the instance.
+      //
+      // But the stamp cannot simply be ANDed over the top: an attachment
+      // carries the RECORD's tenant, not the uploader's (see resolveTarget -
+      // "an engineer from another operator, invited onto a system, files work
+      // that belongs to the company whose system it is"). So a system shared
+      // IN from another operator carries their stamp, and ANDing dropped those
+      // files from this studio - including ones this operator's own engineers
+      // put there. Their own workspace OR anything they can actually reach.
+      house
+        ? or(
+            forTenant(attachments.tenantOrgId, readTenant(user)),
+            scope.all ? undefined : scope.ids.length ? inArray(attachments.instrumentId, scope.ids) : undefined,
+            seeAssets === null ? undefined : seeAssets.length ? inArray(attachments.assetId, seeAssets) : undefined,
+          )
+        : or(
+            scope.all ? undefined : scope.ids.length ? inArray(attachments.instrumentId, scope.ids) : sql`false`,
+            seeAssets === null ? undefined : seeAssets.length ? inArray(attachments.assetId, seeAssets) : sql`false`,
+            // The org's own shelf: homeless files stamped to it.
+            user.orgId === null ? sql`false` : and(
+              isNull(attachments.instrumentId), isNull(attachments.assetId), eq(attachments.orgId, user.orgId),
+            ),
+          ),
     ))
     .orderBy(desc(attachments.createdAt))
     .limit(400);

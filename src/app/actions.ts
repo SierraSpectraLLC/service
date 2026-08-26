@@ -3646,9 +3646,17 @@ export async function recordLibraryFiles(
     const f = await folderById(u, folderId);
     if (f && (f.orgId ?? null) === (u.orgId ?? null)) dest = f.id;
   }
+  // Stamped with the same answer the READER resolves - storeTenantFor - or the
+  // file lands in a store nobody can open. myTenantOrgId is u.operatorOrgId ??
+  // u.rootOperatorOrgId, and a client carries no operator (auth.ts sets it from
+  // the house_members row, which a client has none of), so a client of a second
+  // operator had their uploads stamped with the ROOT operator while the shelf
+  // they were filed on resolves to their own. The file uploaded, the audit line
+  // was written, and the page came back empty.
+  const stamp = await storeTenantFor(u.orgId, u);
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
-      ...f, description: f.description.trim(), kind: "Report", tenantOrgId: myTenantOrgId(u),
+      ...f, description: f.description.trim(), kind: "Report", tenantOrgId: stamp,
       instrumentId: null, assetId: null, orgId: u.orgId, folderId: dest, uploadedBy: u.name,
     })))
     .returning();
@@ -10715,11 +10723,14 @@ export async function createPurchaseOrder(data: {
   if (!usable.length && !data.allowEmpty) return { error: "An order needs at least one line" };
   if (usable.length > 200) return { error: "200 lines at a time" };
 
-  // Numbered within the workspace that owns the order. Across all of them the
-  // series jumped over other operators' orders, which both leaks their volume
-  // and makes one company's PO numbers depend on another's.
-  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders)
-    .where(forTenant(purchaseOrders.tenantOrgId, acc.room.tenantOrgId ?? myTenantOrgId(u)));
+  // Deliberately NOT tenant-scoped, and this is the one place in this sweep
+  // where that is right: po_number_unique (schema.ts) is UNIQUE(number) across
+  // the whole table, not per workspace. Scoping the scan let two workspaces
+  // climb their own series independently until they met, and the meeting is an
+  // unhandled constraint violation on somebody's screen. The scan reveals only
+  // the highest number in use, never a row; making the constraint per-tenant is
+  // the real fix and is a migration, not a predicate.
+  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
   const [po] = await db.insert(purchaseOrders).values({
     tenantOrgId: acc.room.tenantOrgId ?? myTenantOrgId(u),
     number: nextPoNumber(existing.map((r) => r.number)),
