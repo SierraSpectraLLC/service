@@ -2,7 +2,7 @@ import { asc, desc, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { providerNameOf, providerNames } from "@/lib/providers";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { attachments, agreements, instruments, orgs } from "@/db/schema";
 import { requireStaff } from "@/lib/authz";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
@@ -75,7 +75,9 @@ export default async function AgreementsPage({ searchParams }: { searchParams: P
   // want a different page.
   const usage = await usageForAll(rows);
   const provNames = await providerNames(rows);
-  const brand = await getBrand();
+  // Whose contracts these are - see brandForTenant. `tenant` is null for
+  // platform staff, which falls back to the instance operator as it should.
+  const brand = await brandForTenant(tenant);
   const nothing = { partsCents: 0, visits: 0, laborMinutes: 0, pmPartsCents: 0 };
 
   const shaped = rows.map((r) => ({

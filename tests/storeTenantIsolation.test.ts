@@ -153,17 +153,68 @@ describe("platform staff still see the whole instance", () => {
 });
 
 describe("the organization directory", () => {
+  // Sierra Spectra (1) runs the instance; Cascade (2) is a workspace on it.
+  const cascadeOwner = {
+    email: "owner@cascade.test", role: "owner", orgId: null,
+    operatorOrgId: 2, rootOperatorOrgId: 1,
+  };
+
   it("a client of one operator is not visible to the other", async () => {
     const { visibleOrgs } = await import("@/lib/tenancy");
-    const asCascade = await visibleOrgs({
-      email: "owner@cascade.test", role: "owner", orgId: null,
-      operatorOrgId: 2, rootOperatorOrgId: 1,
-    } as never);
-    const seen = asCascade.map((o) => o.name);
+    const seen = (await visibleOrgs(cascadeOwner as never)).map((o) => o.name);
     expect(seen).toContain("Ellison BioLabs");
     expect(seen).not.toContain("Lab Zen");
-    // Operators stay visible to each other by design: that directory is what
-    // makes a client bringing in a second service company possible at all.
+  });
+
+  it("the company that runs the instance is not in a tenant's directory", async () => {
+    // The landlord is not a peer on the directory. Left in, it was the one
+    // company every workspace saw named in its own org list, its share pickers
+    // and its queue badges - which is how a workspace handed to a prospective
+    // buyer told them who the seller was.
+    const { visibleOrgs } = await import("@/lib/tenancy");
+    const seen = (await visibleOrgs(cascadeOwner as never)).map((o) => o.name);
+    expect(seen).not.toContain("Sierra Spectra");
+    expect(seen).toContain("Cascade Instrument"); // its own workspace still is
+  });
+
+  it("but its own clients still see it - it is their provider", async () => {
+    const { visibleOrgs } = await import("@/lib/tenancy");
+    const labZen = {
+      email: "lab@zen.test", role: "client_editor", orgId: 3,
+      operatorOrgId: 1, rootOperatorOrgId: 1,
+    };
+    const seen = (await visibleOrgs(labZen as never)).map((o) => o.name);
     expect(seen).toContain("Sierra Spectra");
+  });
+
+  it("and its own staff still see the whole instance", async () => {
+    const { visibleOrgs } = await import("@/lib/tenancy");
+    const sierraStaff = {
+      email: "joe@sierra.test", role: "owner", orgId: null,
+      operatorOrgId: 1, rootOperatorOrgId: 1,
+    };
+    const seen = (await visibleOrgs(sierraStaff as never)).map((o) => o.name);
+    expect(seen).toEqual(expect.arrayContaining([
+      "Sierra Spectra", "Cascade Instrument", "Lab Zen", "Ellison BioLabs",
+    ]));
+  });
+});
+
+describe("who the app says is doing the work", () => {
+  // brandForTenant, not getBrand. getBrand names the company that RUNS the
+  // instance, so passing it as `operatorName` made a second workspace's
+  // dashboard read "Sierra Spectra is waiting on you" and would have put that
+  // company's name on the demo's contracts and sign-offs - the "false
+  // statement about who did the work" lib/brand warns about in its own header.
+  it("names the workspace whose record it is", async () => {
+    const { brandForTenant } = await import("@/lib/brand");
+    expect((await brandForTenant(2)).operatorName).toBe("Cascade Instrument");
+    expect((await brandForTenant(1)).operatorName).toBe("Sierra Spectra");
+  });
+
+  it("falls back to the instance operator when there is no tenant", async () => {
+    // Platform staff and single-operator instances read null here.
+    const { brandForTenant } = await import("@/lib/brand");
+    expect((await brandForTenant(null)).operatorName).toBe("Sierra Spectra");
   });
 });

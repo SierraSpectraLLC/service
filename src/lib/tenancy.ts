@@ -184,6 +184,14 @@ export const forTenant = (col: AnyColumn, tenantOrgId: number | null): SQL | und
  * Operators stay visible to everyone, because that is the directory that makes
  * cross-company work possible - a client bringing in another service company has
  * to be able to name it. Clients are visible only inside their own tenant.
+ *
+ * With one exception: the operator that RUNS the instance. It is the landlord,
+ * not a peer on the directory, and it is the one company every other workspace
+ * would otherwise see named in its own org list, share pickers and queue
+ * badges - which is how a workspace handed to somebody else told them who the
+ * seller was. Its own clients still see it through the tenantOf test below,
+ * because it IS their provider, and its own staff read `t === null` above and
+ * see the whole instance unchanged.
  */
 export async function visibleOrgs(user: SessionUser) {
   const t = readTenant(user);
@@ -191,8 +199,9 @@ export async function visibleOrgs(user: SessionUser) {
   // to change when the rule changes.
   const rows = await db.select().from(orgs).orderBy(asc(orgs.name));
   if (t === null) return rows;
+  const root = user.rootOperatorOrgId;
   return rows.filter((o) =>
-    o.isOperator || tenantOf(o) === t || o.id === user.orgId);
+    (o.isOperator && o.id !== root) || tenantOf(o) === t || o.id === user.orgId);
 }
 
 // ---- assertions for server actions -----------------------------------------

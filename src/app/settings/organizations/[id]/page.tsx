@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { providerNameOf, providerNames } from "@/lib/providers";
 import { agreements, appSettings, attachments, clientAllowlist, instruments, orgs, orgSites, remoteDevices, systemShares, users } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { shopDay } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
 import OrgSettingsForm from "@/components/OrgSettingsForm";
@@ -60,7 +60,9 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     db.select().from(appSettings).where(eq(appSettings.id, 1)),
     db.select().from(clientAllowlist).where(eq(clientAllowlist.orgId, orgId)).orderBy(asc(clientAllowlist.entry)),
     db.select({ id: systemShares.id }).from(systemShares).where(eq(systemShares.orgId, orgId)),
-    getBrand(),
+    // The operator that serves THIS organization, which is not the instance's
+    // when a second workspace has clients of its own.
+    tenantOfOrg(orgId).then(brandForTenant),
   ]);
   if (!org) notFound();
   const quota = await storeQuota(orgId, tenant);

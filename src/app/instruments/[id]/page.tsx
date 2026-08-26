@@ -18,7 +18,7 @@ import { canSeeCosts, redactParts } from "@/lib/redact";
 import { audienceLine, canSeePost, type Audience } from "@/lib/discussionScope";
 import { schedulePartsOf } from "@/lib/procedures";
 import { scheduleLine } from "@/lib/pmRequest";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { blockHolderName } from "@/lib/blocks";
 import { systemParties } from "@/lib/partyData";
 import { consentModeFor, remoteAbility } from "@/lib/remoteAccess";
@@ -355,7 +355,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   // wrote it and is invisible to everyone else, this instance's operator
   // included. Names come from the orgs table so a multi-party thread reads as a
   // conversation between companies rather than a wall of first names.
-  const brand = await getBrand();
+  const brand = await brandForTenant(inst.tenantOrgId);
 
   // The PC that drives this instrument, if one is enrolled against it. Reaching
   // it belongs on the instrument's own page: an engineer who has just read what

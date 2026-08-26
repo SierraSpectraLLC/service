@@ -3,7 +3,7 @@ import { and, inArray, asc, desc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { providerNameOf, providerNames } from "@/lib/providers";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { attachments, agreements, instruments, orgs, rateCards } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
@@ -71,7 +71,7 @@ export default async function ContractsPage({ searchParams }: {
 
   const usage = await usageForAll(rows);
   const provNames = await providerNames(rows);
-  const brand = await getBrand();
+  const brand = await brandForTenant(readTenant(user));
   const nothing = { partsCents: 0, visits: 0, laborMinutes: 0, pmPartsCents: 0 };
 
   const shaped = rows.map((r) => ({

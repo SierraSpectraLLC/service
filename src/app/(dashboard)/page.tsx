@@ -5,7 +5,7 @@ import { clientAllowlist, instruments, instrumentGases, parts, auditLog, sheetDi
 import { coverageOf, coverageSummary, type CoverageAgreement } from "@/lib/coverage";
 import { dayOf, lastVisitBy, visitsOf, visitsThisYear, type Completion } from "@/lib/serviceHistory";
 import { daysSince, queueView } from "@/lib/queue";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant, getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { BLOCKED_STAGE, GAS_SYMBOL, gasAttention, partOpen, assetAttention } from "@/lib/stages";
@@ -110,7 +110,12 @@ export default async function Home({ searchParams }: {
   // board sees who they're waiting on.
   const [orgNames, brand] = await Promise.all([
     visibleOrgs(user),
-    getBrand(),
+    // The viewer's workspace, not the instance's. getBrand() names the company
+    // that RUNS the instance, so on a second workspace every "us" badge, every
+    // "waiting on you" line and the coverage panel read out the landlord's
+    // company name. viewTenant is the right one here because a client reads
+    // their own operator's name, which is exactly who they are waiting on.
+    brandForTenant(await viewTenant(user)),
   ]);
   const queueName = (id: number | null) =>
     id === null ? brand.operatorName : orgNames.find((o) => o.id === id)?.name ?? "another organization";
