@@ -46,6 +46,26 @@ export function weekdayOfShopDay(iso: string): number {
   return new Date(`${iso}T12:00:00Z`).getUTCDay();
 }
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * "2026-08-26" -> "Tue Aug 26". The date a digest names itself by.
+ *
+ * Built from the STRING, never by formatting a Date in a timezone. The shop
+ * day is already a calendar day - re-interpreting it as an instant is how a
+ * subject line ends up one day behind the edition it is on, which is the exact
+ * bug that matters now that the subject and the thread root both carry the
+ * date and have to agree.
+ */
+export function dayLabelOfShopDay(iso: string): string {
+  const [, m, d] = iso.split("-");
+  const day = parseInt(d, 10);
+  const mon = MONTHS[parseInt(m, 10) - 1];
+  if (!mon || Number.isNaN(day)) return iso;
+  return `${WEEKDAYS[weekdayOfShopDay(iso)]} ${mon} ${day}`;
+}
+
 /**
  * How many days the next edition must reach back: from the last send to
  * today, floor one. This is what makes skipped days WORK rather than lose

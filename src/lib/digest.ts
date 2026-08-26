@@ -46,11 +46,13 @@ import { shopDay, shopHour, shopToday } from "@/lib/shopday";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { EMAIL, emailShell, esc } from "@/lib/emailTheme";
 import { mailHost, threadHeaders, threadRootId } from "@/lib/emailThread";
-import { digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel } from "@/lib/digestDays";
+import {
+  dayLabelOfShopDay, digestDayEnabled, digestGapDays, weekdayOfShopDay, windowLabel,
+} from "@/lib/digestDays";
 import { moneyDigest } from "@/lib/invoiceData";
 import { renderMoneySection } from "@/lib/digestMoney";
 import {
-  dayLabel, partnerPreheader, partnerView, renderPartnerDigest, renderPartnerDigestText,
+  partnerPreheader, partnerView, renderPartnerDigest, renderPartnerDigestText,
 } from "@/lib/digestPartner";
 
 // ---------------------------------------------------------------------------
@@ -763,11 +765,6 @@ function renderSection(section: DigestSection, internal: boolean, operatorName: 
     + renderBoard(section, internal);
 }
 
-const todayLabel = () => new Date().toLocaleDateString("en-US", {
-  timeZone: process.env.SHOP_TZ || "America/Los_Angeles",
-  weekday: "short", month: "short", day: "numeric",
-});
-
 /** Cross-section totals, for the subject line and the summary strip. */
 export function digestCounts(sections: DigestSection[]) {
   const all = sections.flatMap((s) => s.pending);
@@ -835,7 +832,7 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
   const gap = digestGapDays(await lastSentFor(tenantOrgId, null), shopToday());
   const { sections, operatorName, window } = await collectDigest(tenantOrgId, gap);
   const n = digestCounts(sections);
-  const today = todayLabel();
+  const today = dayLabelOfShopDay(shopToday());
   const url = appUrl();
 
   // The money section. Internal edition only - composePartnerDigest never
@@ -846,11 +843,16 @@ export async function composeDigest(tenantOrgId: number | null = null): Promise<
   const body = renderDigestBody(sections, true, operatorName, window) + money;
 
   const busy = n.partner + n.us + n.followUps + n.gas + n.failed;
-  // Constant on purpose: a subject carrying the date or the day's counts
-  // started a new Gmail conversation every morning. The counts are in the
-  // preheader, which is the line an inbox shows beside the subject anyway.
-  // See lib/emailThread.
-  const subject = `${operatorName} daily digest`;
+  /* Dated, so each morning is its own thing in the inbox: findable, forwardable
+     and repliable without dragging four other days along with it. The counts
+     stay in the preheader - a subject that carried them would be a different
+     subject every day for reasons nobody scanning an inbox cares about, and
+     the preheader is the line shown beside the subject anyway.
+
+     The thread root carries the same day (see sendDigestEdition), because
+     References beats the subject in most clients: a dated subject on a shared
+     root is thirty differently-named messages inside one conversation. */
+  const subject = `${operatorName} daily digest · ${today}`;
   const html = emailShell({
     brand: brand.operatorName,
     logoUrl: brand.operatorLogoUrl || undefined,
@@ -883,7 +885,7 @@ export async function composePartnerDigest(
   const view = partnerView({
     section: { ...section, work: section.work, offSystem: section.offSystem },
     operatorName,
-    dateLabel: dayLabel(new Date()),
+    dateLabel: dayLabelOfShopDay(shopToday()),
     portalUrl: appUrl(),
     blockedStage: BLOCKED_STAGE,
     // The same window the work section uses. Handbacks inside it are news;
@@ -894,10 +896,11 @@ export async function composePartnerDigest(
   });
   const preheader = partnerPreheader(view);
 
-  // Constant, for the same reason as the internal edition's: a subject that
-  // carries the date starts a new conversation every morning.
+  /* The same date as the internal edition's, and the same date this email
+     prints at the top of itself - one value, so the subject and the page can
+     never disagree about which morning this is. */
   return {
-    subject: `${operatorName} × ${section.name}: daily digest`,
+    subject: `${operatorName} × ${section.name}: daily digest · ${view.dateLabel}`,
     html: renderPartnerDigest(view, preheader),
     text: renderPartnerDigestText(view, preheader),
   };
@@ -958,17 +961,21 @@ export async function sendDigestEdition(
   tenantOrgId: number | null, orgId: number | null,
 ): Promise<EditionResult> {
   const today = shopToday();
-  // One running conversation per engagement rather than a fresh email every
-  // morning - see lib/emailThread. The key names the engagement, so a client's
-  // chain and our own never merge.
+  // One conversation per engagement PER DAY - see lib/emailThread. The key
+  // names the engagement so a client's chain and our own never merge, and the
+  // day makes each morning its own entity, matching the dated subject. What
+  // still threads is the only thing that should: two copies of the SAME
+  // edition, a cron run and a hand-pressed "send now".
   // Anchored to the address the digest itself sends from, so the chain and
-  // the sender stay coherent. Changing that address starts one fresh chain -
+  // the sender stay coherent. Changing that address splits one day's copies -
   // a one-time cost, and the honest one: it is a new sender.
   const from = reportFrom();
   const replyTo = replyToAddress();
   const host = mailHost(from);
   const send = (to: string[], subject: string, html: string, key: string, text?: string) =>
-    sendEmail(to, subject, html, { from, replyTo, text, headers: threadHeaders(threadRootId(key, host)) });
+    sendEmail(to, subject, html, {
+      from, replyTo, text, headers: threadHeaders(threadRootId(key, host, today)),
+    });
   if (orgId === null) {
     const to = await houseEmails(tenantOrgId);
     if (!to.length) return { sent: false, to: [], reason: "nobody to send to" };

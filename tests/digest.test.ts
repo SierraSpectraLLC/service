@@ -1,9 +1,12 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   courts, digestCounts, digestDue, followUpsForSystem, handoffFor, pendingForSystem,
   type PendingCtx,
 } from "@/lib/digest";
-import { digestGapDays, parseDigestDays, serializeDigestDays, windowLabel } from "@/lib/digestDays";
+import {
+  dayLabelOfShopDay, digestGapDays, parseDigestDays, serializeDigestDays, windowLabel,
+} from "@/lib/digestDays";
 
 // The digest's hard questions are pinned here, case by case:
 //
@@ -339,5 +342,76 @@ describe("which days count", () => {
     expect(serializeDigestDays([5, 1, 3])).toBe("1,3,5");
     expect(serializeDigestDays([0, 1, 2, 3, 4, 5, 6])).toBe("");
     expect(serializeDigestDays([9, -1] as number[])).toBe("");
+  });
+});
+
+describe("the date a digest names itself by", () => {
+  // The subject carries it and so does the thread root, so this string decides
+  // whether each morning is its own entity in an inbox.
+
+  it("reads as a date somebody says out loud", () => {
+    expect(dayLabelOfShopDay("2026-08-26")).toBe("Wed Aug 26");
+    expect(dayLabelOfShopDay("2026-01-01")).toBe("Thu Jan 1");
+    expect(dayLabelOfShopDay("2026-12-31")).toBe("Thu Dec 31");
+  });
+
+  it("does not drop or pad the day of the month", () => {
+    // "Aug 06" is a stamp, not something anybody says.
+    expect(dayLabelOfShopDay("2026-08-06")).toBe("Thu Aug 6");
+  });
+
+  it("NAMES THE DAY THE ISO STRING NAMES, in any timezone", () => {
+    // The trap: formatting a shop day as an instant and rendering it in a
+    // timezone puts the subject one day behind the edition it is on, which is
+    // exactly the disagreement between subject and thread root that would
+    // undo the whole change. Built from the string, so no timezone can move
+    // it - asserted from both sides of UTC.
+    const saved = process.env.SHOP_TZ;
+    try {
+      for (const tz of ["Pacific/Auckland", "America/Los_Angeles", "UTC", "Asia/Kolkata"]) {
+        process.env.SHOP_TZ = tz;
+        expect(dayLabelOfShopDay("2026-08-26"), tz).toBe("Wed Aug 26");
+      }
+    } finally {
+      if (saved === undefined) delete process.env.SHOP_TZ; else process.env.SHOP_TZ = saved;
+    }
+  });
+
+  it("gives every day of a month its own label", () => {
+    const labels = Array.from({ length: 31 }, (_, i) =>
+      dayLabelOfShopDay(`2026-08-${String(i + 1).padStart(2, "0")}`));
+    expect(new Set(labels).size).toBe(31);
+  });
+
+  it("returns the date rather than a broken label when it is not one", () => {
+    expect(dayLabelOfShopDay("")).toBe("");
+    expect(dayLabelOfShopDay("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("the subject line and the thread root agree about which day it is", () => {
+  const read = (p: string) => readFileSync(p, "utf8");
+
+  it("dates both editions' subjects", () => {
+    const src = read("src/lib/digest.ts");
+    expect(src).toMatch(/const subject = `\$\{operatorName\} daily digest · \$\{today\}`/);
+    expect(src).toMatch(/subject: `\$\{operatorName\} × \$\{section\.name\}: daily digest · \$\{view\.dateLabel\}`/);
+  });
+
+  it("passes the day to the thread root, so the headers say what the subject says", () => {
+    // The half that is easy to forget and impossible to see in an inbox until
+    // a month of dated subjects has quietly stacked inside one conversation:
+    // References beats the subject line in most clients.
+    expect(read("src/lib/digest.ts")).toMatch(/threadRootId\(key, host, today\)/);
+  });
+
+  it("takes that day from ONE value, not two reads of the clock", () => {
+    // Both editions' labels come from shopToday() rather than from their own
+    // new Date(), so a digest composed at 23:59:59 and sent a tick later
+    // cannot carry a subject naming one day and a root naming the next.
+    const src = read("src/lib/digest.ts");
+    expect(src).toMatch(/dayLabelOfShopDay\(shopToday\(\)\)/);
+    expect(src).not.toMatch(/dayLabel\(new Date\(\)\)/);
+    expect(src).not.toMatch(/toLocaleDateString/);
   });
 });
