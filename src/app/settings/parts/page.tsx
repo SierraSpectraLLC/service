@@ -13,7 +13,6 @@ import { makerNames } from "@/lib/makersData";
 import { uncatalogued, type UsedPart } from "@/lib/partCatalog";
 import { parseProcParts, schedulePartsOf } from "@/lib/procedures";
 import PartCatalogPanel from "@/components/PartCatalogPanel";
-import PriceBookCard from "@/components/PriceBookCard";
 import PartImportCard from "@/components/PartImportCard";
 
 export const dynamic = "force-dynamic";
@@ -165,7 +164,16 @@ export default async function PartsCatalogPage({ searchParams }: { searchParams:
         initialFacet={f}
       />
       <PartImportCard downloadName="parts-catalog" />
-      <PriceBookCard prices={priceRows} today={today} knownVendors={[...new Set([...bookNames, ...priceRows.map((p) => p.vendor)])].sort()} />
+      {/* The price book card is HIDDEN, not deleted - see PriceBookCard, which
+          still compiles and still works. Its two jobs both have another home
+          now: a part's own vendors and prices are edited on the part, in the
+          catalog panel above, and a whole sheet of them arrives through the
+          import. What only it did was show every vendor price across every
+          part at once. Whether anybody misses that is the question this answers,
+          and the answer arrives faster from an empty page than from a survey.
+          To restore it: import PriceBookCard from "@/components/PriceBookCard"
+          and render it here with prices={priceRows}, today={today} and
+          knownVendors from bookNames - all three are still read just above. */}
     </div>
   );
 }
