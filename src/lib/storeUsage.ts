@@ -7,7 +7,7 @@ import { getBrand } from "@/lib/brand";
 import { quotaFor, type Quota } from "@/lib/storage";
 import type { SessionUser } from "@/lib/authz";
 import { isHouse } from "@/lib/houseRole";
-import { visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
+import { tenantOfOrg, visibleAssetIds, visibleSystemIds } from "@/lib/tenancy";
 
 /**
  * The operator is reachable two ways - as the house (org null, which is what
@@ -155,12 +155,40 @@ export async function storeFiles(orgId: number | null, tenant: number | null, li
   }));
 }
 
+/**
+ * Which workspace's store this is - the one question every caller here has to
+ * agree on, because the file list, the meter and the upload gate all ask it
+ * separately and a disagreement between them is a bug the module already has a
+ * comment about ("a page called storage that showed one file while the meter
+ * beside it read 195 KB").
+ *
+ * A store belongs to a workspace, not to whoever is looking at it. So this is
+ * deliberately NOT readTenant(): that returns null for platform staff, and a
+ * store spanning every tenant at once is not a store - it would count another
+ * company's bytes against this company's ceiling. Platform staff reach another
+ * workspace's client stores through the store switcher, which is the support
+ * path; what they lose is a merged view of every operator's house shelf, which
+ * was never a coherent page.
+ */
+export async function storeTenantFor(
+  orgId: number | null,
+  // The minimal shape rather than SessionUser, and myTenantOrgId inlined below
+  // rather than imported: lib/authz reaches @/auth and pulls the whole Auth.js
+  // stack in with it, which is what has kept this module importable on its own
+  // (tests/storeTenantIsolation loads it against a real in-process Postgres).
+  user: { operatorOrgId: number | null; rootOperatorOrgId: number | null },
+): Promise<number | null> {
+  const mine = user.operatorOrgId ?? user.rootOperatorOrgId; // = lib/authz.myTenantOrgId
+  if (orgId === null) return mine;
+  return (await tenantOfOrg(orgId)) ?? mine;
+}
+
 /** Usage and ceiling together, ready for the meter. */
 export async function storeQuota(orgId: number | null, tenant: number | null): Promise<Quota & { storeName: string }> {
   const [used, limitMb, storeName] = await Promise.all([
     storeUsedBytes(orgId, tenant),
-    storeLimitMb(orgId),
-    storeLabel(orgId),
+    storeLimitMb(orgId, tenant),
+    storeLabel(orgId, tenant),
   ]);
   return { ...quotaFor(used, limitMb), storeName };
 }
@@ -220,18 +248,35 @@ export async function visibleNotOwnedFiles(user: SessionUser, limit = 200): Prom
     }));
 }
 
-/** The ceiling in megabytes. 0 = none. */
-export async function storeLimitMb(orgId: number | null): Promise<number> {
-  const id = orgId ?? (await getBrand()).operatorOrgId;
+/**
+ * The ceiling in megabytes. 0 = none.
+ *
+ * The house shelf is org_id NULL in EVERY workspace, so "which org's ceiling"
+ * cannot be answered from orgId alone - and answering it from getBrand() names
+ * the company that runs the INSTANCE, which is the same mistake storeKeys above
+ * was fixed for and this was not. A second operator's storage page read the
+ * first's limit. Null tenant falls back to the brand, which is right for the
+ * instance operator and for an instance that has never named one.
+ */
+export async function storeLimitMb(orgId: number | null, tenant: number | null = null): Promise<number> {
+  const id = orgId ?? tenant ?? (await getBrand()).operatorOrgId;
   if (id === null) return 0; // no operator org configured yet: don't invent a wall
   const [row] = await db.select({ mb: orgs.storageLimitMb }).from(orgs).where(eq(orgs.id, id));
   return row?.mb ?? 0;
 }
 
-async function storeLabel(orgId: number | null): Promise<string> {
-  if (orgId !== null) {
-    const [row] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId));
-    return row?.name ?? "This organization";
+/**
+ * What the meter calls this store. Same trap as the ceiling above: unqualified,
+ * every workspace's own shelf was labelled with the instance operator's name -
+ * so a second service company opened Files and read someone else's company name
+ * over their own documents.
+ */
+async function storeLabel(orgId: number | null, tenant: number | null): Promise<string> {
+  const id = orgId ?? tenant;
+  if (id !== null) {
+    const [row] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, id));
+    if (row?.name) return row.name;
+    return orgId !== null ? "This organization" : "";
   }
   const brand = await getBrand();
   return brand.operatorName || brand.name;

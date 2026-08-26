@@ -6,10 +6,10 @@ import { attachments, dropLinks, folders as foldersTable, instruments, orgs, sha
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { shopTime, shopToday } from "@/lib/shopday";
-import { storeFiles, storeQuota, visibleNotOwnedFiles } from "@/lib/storeUsage";
+import { storeFiles, storeQuota, storeTenantFor, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
 import { fmtBytes } from "@/lib/storage";
-import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import StoreFileList from "@/components/StoreFileList";
 import FileLinksCard, { type StoreLink } from "@/components/FileLinksCard";
 import LibraryUpload from "@/components/LibraryUpload";
@@ -66,9 +66,13 @@ export default async function DocumentsPage(
     : user.orgId;
   const isOwnStore = viewing === user.orgId;
 
+  // The store's own workspace - not the reader's. See storeTenantFor: the list,
+  // the meter and the upload gate have to resolve this the same way or the page
+  // contradicts itself.
+  const storeTenant = await storeTenantFor(viewing, user);
   const [rows, quota, orgRows, brand, guestRows, cloud] = await Promise.all([
-    storeFiles(viewing, readTenant(user), CAP).catch(() => []),
-    storeQuota(viewing, readTenant(user)),
+    storeFiles(viewing, storeTenant, CAP).catch(() => []),
+    storeQuota(viewing, storeTenant),
     reachable,
     getBrand(),
     // Readable, but somebody else's - a system shared with them, or one they
@@ -83,7 +87,6 @@ export default async function DocumentsPage(
   // filed where it belongs; see lib/folders.
   // Scoped by tenant as well as by org, because the house shelf is org_id NULL
   // in every workspace - so "the folders with no org" is otherwise everybody's.
-  const storeTenant = readTenant(user);
   const folderRows = await db.select({ id: foldersTable.id, name: foldersTable.name, parentId: foldersTable.parentId })
     .from(foldersTable)
     .where(and(

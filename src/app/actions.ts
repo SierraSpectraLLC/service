@@ -87,7 +87,7 @@ import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
 import { fits, fmtBytes, overQuotaMessage, MB } from "@/lib/storage";
-import { storeFiles, storeQuota, storeUsedBytes } from "@/lib/storeUsage";
+import { storeFiles, storeQuota, storeTenantFor, storeUsedBytes } from "@/lib/storeUsage";
 import { audit } from "@/lib/audit";
 import {
   canMoveFolder, cleanFolderName, depthOf, descendantIds, MAX_DEPTH, nameTaken,
@@ -3095,7 +3095,8 @@ export async function recordAttachments(
   // Charged to whoever OWNS the record, not to whoever pressed upload: a tune
   // report on a client's system is the client's paperwork, and the shop filing
   // it on their behalf shouldn't pay for their storage.
-  const guard = await guardStorage(await storeOwnerForTarget(t0), myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
+  const owner = await storeOwnerForTarget(t0);
+  const guard = await guardStorage(owner, await storeTenantFor(owner, u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
   const rows = await db.insert(attachments)
     .values(files.map((f) => ({
@@ -3139,7 +3140,8 @@ export async function addPhotos(
   const t0 = await resolveTarget(target);
   if ("error" in t0) return t0;
   const onSystem = t0.instrumentId !== null && t0.assetId === null;
-  const guard = await guardStorage(await storeOwnerForTarget(t0), myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
+  const owner = await storeOwnerForTarget(t0);
+  const guard = await guardStorage(owner, await storeTenantFor(owner, u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
 
   const rows = await db.insert(attachments).values(files.map((f) => ({
@@ -3634,7 +3636,7 @@ export async function recordLibraryFiles(
   // An org's files land on its shelf; the house's land on the operator's.
   const u = await requireEditor();
   if (!files.length) return {};
-  const guard = await guardStorage(u.orgId, myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
+  const guard = await guardStorage(u.orgId, await storeTenantFor(u.orgId, u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
   // Dropped into an open folder, they belong in it. Checked rather than
   // trusted: the id comes from a URL, and a folder in somebody else's store
@@ -3926,7 +3928,7 @@ export async function uploadAgreementPapers(
   if (!a) return { error: "Not found" };
   const gate = await adminOrgGate(u, a.orgId);
   if ("error" in gate) return gate;
-  const guard = await guardStorage(u.orgId, myTenantOrgId(u), files.reduce((n, f) => n + (f.size || 0), 0));
+  const guard = await guardStorage(u.orgId, await storeTenantFor(u.orgId, u), files.reduce((n, f) => n + (f.size || 0), 0));
   if (guard) return guard;
   const rows = await db.insert(attachments).values(files.map((f) => ({
     fileName: f.fileName, url: f.url, size: f.size, description: "",
@@ -7037,7 +7039,7 @@ export async function setOrgStorageLimit(orgId: number, limitMb: number): Promis
   if ("error" in gate) return gate;
   const { org } = gate;
   if (mb > 0) {
-    const used = await storeUsedBytes(orgId, myTenantOrgId(u));
+    const used = await storeUsedBytes(orgId, await storeTenantFor(orgId, u));
     if (used > mb * MB) {
       return { error: `${org.name} is already storing ${fmtBytes(used)}. Set at least that, or have them remove files first.` };
     }
@@ -11876,7 +11878,7 @@ export async function listStoreFilesForRef(): Promise<{
   files: { id: number; fileName: string; kind: string; description: string; size: number; isPhoto: boolean; where: string }[];
 }> {
   const u = await requireStaff();
-  const rows = await storeFiles(u.orgId ?? null, readTenant(u), 500).catch(() => []);
+  const rows = await storeFiles(u.orgId ?? null, await storeTenantFor(u.orgId ?? null, u), 500).catch(() => []);
   return {
     files: rows.map((r) => ({
       id: r.id, fileName: r.fileName, kind: r.kind, description: r.description, size: r.size,

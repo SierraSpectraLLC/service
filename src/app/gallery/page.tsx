@@ -6,10 +6,10 @@ import { assets, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getBrand } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
-import { storeFiles } from "@/lib/storeUsage";
+import { storeFiles, storeTenantFor } from "@/lib/storeUsage";
 import { groupStoredFiles } from "@/lib/storeGroup";
 import { isPhotoFile } from "@/lib/photos";
-import { readTenant, visibleOrgs } from "@/lib/tenancy";
+import { visibleOrgs } from "@/lib/tenancy";
 import GalleryGrid from "@/components/GalleryGrid";
 import { FacetStrip, PageHead, Toolbar } from "@/components/ui";
 
@@ -48,8 +48,10 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
     ? (wanted !== null && reachable.some((o) => o.id === wanted) ? wanted : null)
     : user.orgId;
 
+  // The store's own workspace, resolved the same way Documents resolves it.
+  const storeTenant = await storeTenantFor(viewing, user);
   const [rows, orgRows, brand] = await Promise.all([
-    storeFiles(viewing, readTenant(user), CAP).catch(() => []),
+    storeFiles(viewing, storeTenant, CAP).catch(() => []),
     reachable,
     getBrand(),
   ]);

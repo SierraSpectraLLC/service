@@ -104,6 +104,41 @@ describe("one operator's house shelf is not another's", () => {
   });
 });
 
+describe("a store is one workspace's store, never a merged one", () => {
+  // storeTenantFor is the single answer the file list, the meter and the upload
+  // gate all have to share. It deliberately does NOT return null for platform
+  // staff: a store spanning every tenant would count another company's bytes
+  // against this company's ceiling, and the ceiling itself (storeLimitMb) and
+  // the name on the meter (storeLabel) used to be read off the INSTANCE
+  // operator for everybody - so a second company's storage page showed the
+  // first company's name and the first company's limit.
+  const viewer = (operatorOrgId: number) => ({
+    email: "owner@test", role: "owner", orgId: null,
+    operatorOrgId, rootOperatorOrgId: 1,
+  });
+
+  it("the house shelf resolves to the asker's own workspace", async () => {
+    const { storeTenantFor } = await import("@/lib/storeUsage");
+    expect(await storeTenantFor(null, viewer(2) as never)).toBe(2);
+    // Platform staff too: "our own shelf" means ours, not everyone's merged.
+    expect(await storeTenantFor(null, viewer(1) as never)).toBe(1);
+  });
+
+  it("a client org's store resolves to the operator that serves it", async () => {
+    const { storeTenantFor } = await import("@/lib/storeUsage");
+    // Org 4 is Ellison BioLabs, a client of operator 2 - even when the platform
+    // owner is the one looking.
+    expect(await storeTenantFor(4, viewer(1) as never)).toBe(2);
+    expect(await storeTenantFor(3, viewer(2) as never)).toBe(1);
+  });
+
+  it("the meter is named and sized for the store, not the instance", async () => {
+    const { storeQuota } = await import("@/lib/storeUsage");
+    expect((await storeQuota(null, 2)).storeName).toBe("Cascade Instrument");
+    expect((await storeQuota(null, 1)).storeName).toBe("Sierra Spectra");
+  });
+});
+
 describe("platform staff still see the whole instance", () => {
   // Null tenant has to keep meaning "no restriction" - somebody supports every
   // workspace, and that is the reason the rule is written this way at all.
