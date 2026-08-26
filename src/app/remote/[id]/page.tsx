@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { db } from "@/db";
 import { instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
+import { readTenant } from "@/lib/tenancy";
 import { getModules } from "@/lib/flags";
 import { deviceWithOrg } from "@/lib/remote";
 import { deviceLabel, deviceSubLabel } from "@/lib/deviceName";
@@ -31,7 +32,8 @@ export const dynamic = "force-dynamic";
  * on a monitor with room for all of it. Here the window is the layout.
  */
 export default async function RemoteSessionPage({ params }: { params: Promise<{ id: string }> }) {
-  try { await requireUser(); } catch { redirect("/login"); }
+  let user;
+  try { user = await requireUser(); } catch { redirect("/login"); }
   const { remote: moduleOn } = await getModules();
   if (!moduleOn) redirect("/");
 
@@ -42,6 +44,12 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
   const row = await deviceWithOrg(deviceId);
   if (!row) notFound();
   const { device } = row;
+  // The refusal below stops the CONNECTION, not the page: the machine's
+  // nickname, hostname, client and system are rendered either way. Device ids
+  // are sequential, so without this a signed-in user of any workspace could
+  // walk them and read another company's lab estate off the headings.
+  const tenant = readTenant(user);
+  if (tenant !== null && device.tenantOrgId !== tenant) notFound();
 
   const [system] = device.instrumentId === null ? [] : await db
     .select({ externalId: instruments.externalId }).from(instruments)

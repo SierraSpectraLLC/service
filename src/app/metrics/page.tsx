@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { and, asc, eq, gte } from "drizzle-orm";
+import { and, asc, eq, gte, or } from "drizzle-orm";
 import { db } from "@/db";
-import { instruments, stageEvents, tasks, timeEntries, parts, queueEvents } from "@/db/schema";
+import { assets, instruments, stageEvents, tasks, timeEntries, parts, queueEvents } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { getStageDefs } from "@/lib/stageDefs";
 import { getSystemLabels } from "@/lib/systemLabel";
@@ -56,8 +56,22 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
       .from(tasks).where(and(eq(tasks.origin, "pm"), forTenant(tasks.tenantOrgId, readTenant(user)))),
     db.select().from(timeEntries)
       .where(and(gte(timeEntries.date, windowStartIso), forTenant(timeEntries.tenantOrgId, readTenant(user)))),
+    // Parts carry no stamp of their own - a part belongs to whatever record it
+    // sits on - so the scope comes from that record. Unscoped, every other
+    // workspace's part cost landed in the "(no client)" bucket below (its
+    // instrument is not in clientOf, which is built from THIS workspace's
+    // systems) and was summed into the parts-spend figure.
     db.select({ instrumentId: parts.instrumentId, costCents: parts.costCents, createdAt: parts.createdAt })
-      .from(parts).where(gte(parts.createdAt, windowStart)),
+      .from(parts)
+      .leftJoin(instruments, eq(instruments.id, parts.instrumentId))
+      .leftJoin(assets, eq(assets.id, parts.assetId))
+      .where(and(
+        gte(parts.createdAt, windowStart),
+        readTenant(user) === null ? undefined : or(
+          eq(instruments.tenantOrgId, readTenant(user)!),
+          eq(assets.tenantOrgId, readTenant(user)!),
+        ),
+      )),
   ]);
 
   // ---- window reports (pure math in lib/reports) ----
