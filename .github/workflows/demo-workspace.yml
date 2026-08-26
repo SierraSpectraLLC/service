@@ -5,6 +5,10 @@
 #
 # Setup, once, all of it from the GitHub web UI:
 #   Settings > Environments > New environment: demo
+#   (any name works - if you call it something else, type that name into the
+#    workflow's `environment` input when you run it. A name that does not match
+#    is the one failure mode here that is silent: GitHub creates an empty
+#    environment rather than complaining, and every secret reads as unset.)
 #   Add these secrets TO THAT ENVIRONMENT (not to the repository - an
 #   environment secret is readable only by a job that names the environment,
 #   so ordinary CI cannot see your production connection string):
@@ -41,6 +45,14 @@ on:
         description: "Stripe Connect account for the demo, test mode (optional)"
         type: string
         default: ""
+      # Named rather than hardcoded because getting this wrong is silent:
+      # `environment: demo` against an environment actually called something
+      # else does not fail, it CREATES an empty one and the job runs on with no
+      # secrets at all. If your secrets live somewhere else, type its name here.
+      environment:
+        description: "Environment holding the secrets (must match Settings > Environments exactly)"
+        type: string
+        default: demo
 
 # One at a time: two runs against one database is a race nobody needs.
 concurrency: demo-workspace
@@ -48,7 +60,7 @@ concurrency: demo-workspace
 jobs:
   run:
     runs-on: ubuntu-latest
-    environment: demo
+    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
 
@@ -62,17 +74,38 @@ jobs:
       - name: Check the inputs before touching anything
         env:
           ACTION: ${{ inputs.action }}
+          ENVIRONMENT: ${{ inputs.environment }}
           HAS_DB: ${{ secrets.DATABASE_URL != '' }}
           HAS_PW: ${{ secrets.DEMO_PASSWORD != '' }}
+          HAS_BLOB: ${{ secrets.BLOB_READ_WRITE_TOKEN != '' }}
+          # Same page, one panel higher. A connection string typed in there is
+          # plainly visible to whoever typed it and completely invisible here.
+          DB_AS_VAR: ${{ vars.DATABASE_URL != '' }}
         run: |
+          echo "Environment requested: '$ENVIRONMENT'"
+          echo "  DATABASE_URL as a secret:      $HAS_DB"
+          echo "  DEMO_PASSWORD as a secret:     $HAS_PW"
+          echo "  BLOB token as a secret:        $HAS_BLOB"
+          echo "  DATABASE_URL as a VARIABLE:    $DB_AS_VAR"
+
           if [ "$HAS_DB" != "true" ]; then
-            echo "::error::No DATABASE_URL secret on the 'demo' environment. See the comment at the top of this file."
+            # "It is not set" is the one thing this is usually NOT, and saying
+            # it sent somebody to stare at a secret that was plainly there. A
+            # repository-level secret would have resolved here too, so an empty
+            # one means the job is not looking where the value actually is.
+            if [ "$DB_AS_VAR" = "true" ]; then
+              echo "::error::DATABASE_URL is set as a VARIABLE on '$ENVIRONMENT', not as a secret. An environment page has both panels and they take the same names. Delete it from Variables and add it under Environment secrets - a connection string belongs there anyway, since variables are printed in logs."
+            elif [ "$HAS_PW" != "true" ] && [ "$HAS_BLOB" != "true" ]; then
+              echo "::error::This job could not see ANY secret, which usually means the environment name does not match. It asked for one called '$ENVIRONMENT'; GitHub does not fail on a name that does not exist - it creates an empty one and carries on. Open Settings > Environments and compare the name character for character; if yours is called something else, re-run and type that name into the 'environment' input. (Secrets set at repository level would have resolved here too, so that is not the cause.)"
+            else
+              echo "::error::DATABASE_URL is not set on the '$ENVIRONMENT' environment, though other secrets there are visible. Add it: the pooled Neon connection string."
+            fi
             exit 1
           fi
           # A generated password would have to be printed to be useful, and a
           # printed password is a credential in a log. So: supply one.
           if { [ "$ACTION" = "seed" ] || [ "$ACTION" = "reset" ]; } && [ "$HAS_PW" != "true" ]; then
-            echo "::error::Add a DEMO_PASSWORD secret to the 'demo' environment first - at least 10 characters."
+            echo "::error::Add a DEMO_PASSWORD secret to the '$ENVIRONMENT' environment first - at least 10 characters."
             exit 1
           fi
 
@@ -94,7 +127,7 @@ jobs:
             wipe)  FLAGS="--wipe" ;;
           esac
           if [ "${{ inputs.keep_instance_settings }}" = "true" ]; then
-            FLAGS="$FLAGS --no-modules --no-defaults"
+            FLAGS="$FLAGS --no-modules"
           fi
           if [ -n "${{ inputs.stripe_account }}" ]; then
             FLAGS="$FLAGS --stripe-account=${{ inputs.stripe_account }}"
