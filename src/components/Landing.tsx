@@ -183,8 +183,14 @@ export default function Landing({
           from the highest-authority page on the site. */}
       {showLibrary && (
         <section className="lp-band-white">
+          {/* Three children, and the third is only the button. On a desk it
+              sits under the copy in the left column, where the eye lands after
+              reading it. Stacked on a phone that same DOM order put "browse
+              all 3 models" ABOVE the three models - offering the index before
+              showing anybody what was in it. Ordered, a phone reads copy, then
+              examples, then the way in. See `.lp-split`. */}
           <div className="container lp-split">
-            <div>
+            <div className="lp-split-head">
               <div className="lp-head">
                 <p className="lp-eyebrow mut">Open to everyone, no account</p>
                 <h2>The equipment library</h2>
@@ -195,18 +201,19 @@ export default function Landing({
                   takes to keep it running.
                 </p>
               </div>
-              <Link className="lp-btn plain" href="/equipment">
-                Browse all {library.models} models
-              </Link>
             </div>
 
-            <div>
+            <div className="lp-split-list">
               {library.featured.length > 0 && (
                 <div className="lp-chips">
                   {library.featured.map((m) => (
                     <Link key={m.slug} className="lp-chip" href={`/equipment/${m.slug}`}>
                       {m.manufacturer && <span className="mk">{m.manufacturer}</span>}
                       <span>{m.name}</span>
+                      {/* What kind of module it is, pushed right by `.kind`.
+                          Without it the column is three names with no way to
+                          tell a pump from a mass spec at a glance. */}
+                      {m.assetType && <span className="kind">{m.assetType}</span>}
                     </Link>
                   ))}
                 </div>
@@ -219,6 +226,12 @@ export default function Landing({
               {library.makers.length > library.featured.length && (
                 <p className="lp-makers">{library.makers.join(" · ")}</p>
               )}
+            </div>
+
+            <div className="lp-split-act">
+              <Link className="lp-btn plain" href="/equipment">
+                Browse all {library.models} models
+              </Link>
             </div>
           </div>
         </section>
