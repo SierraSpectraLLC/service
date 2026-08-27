@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import Landing from "@/components/Landing";
 import { EMPTY_LIBRARY } from "@/lib/landingData";
 
@@ -143,5 +144,49 @@ describe("the hero survives the instance's own colours", () => {
     // unreadable for every one of them who picked something light.
     render(<Landing {...props} headerColor="#F2E9C8" />);
     expect(heroFg()).toBe("rgb(23,42,74)");
+  });
+});
+
+/**
+ * The page's styling is one block of globals.css, and once already it was
+ * lost whole.
+ *
+ * A branch that forked before the landing page landed rewrote globals.css for
+ * its own reasons; the merge took that side, and all 277 lines of `.lp` went
+ * with it. Every test in this file still passed - they assert markup, and the
+ * markup was untouched - so the front door shipped as unstyled HTML: buttons
+ * rendered as bare underlined links running into each other, the hero and the
+ * exhibit as a wall of left-aligned text. Nothing anywhere said the classes
+ * this component names have to exist.
+ *
+ * This does. It is a cheap check for a whole category of silent breakage: not
+ * "does the CSS look right", which no unit test can answer, but "is it there
+ * at all", which is the way it actually failed.
+ */
+describe("the styles the page names actually exist", () => {
+  const COMPONENT = readFileSync("src/components/Landing.tsx", "utf8");
+  const CSS = readFileSync("src/app/globals.css", "utf8");
+
+  it("defines every lp-* class the component uses", () => {
+    // Comments in the component quote class names as prose; strip them so a
+    // reference in a note is not mistaken for one in the markup.
+    const markup = COMPONENT.replace(/\/\*[\s\S]*?\*\//g, "");
+    const used = [...new Set([...markup.matchAll(/\blp-[a-z0-9-]+/g)].map((m) => m[0]))].sort();
+    // If this ever reaches zero the component stopped using the block, and
+    // the check below is passing for the wrong reason.
+    expect(used.length).toBeGreaterThan(15);
+    const missing = used.filter((c) => !new RegExp(`\\.${c}[\\s,{:.>]`).test(CSS));
+    expect(missing, `classes used by Landing.tsx with no rule in globals.css: ${missing.join(", ")}`)
+      .toEqual([]);
+  });
+
+  it("still declares the scale the block is built on", () => {
+    // The root element is `.lp` itself, which carries every --lp-* token the
+    // rest of the block reads. Losing just this rule would leave every class
+    // defined and every size resolving to nothing.
+    expect(CSS).toMatch(/\.lp \{/);
+    for (const token of ["--lp-h1", "--lp-h2", "--lp-lead", "--lp-body", "--lp-meta"]) {
+      expect(CSS, `${token} is not declared`).toContain(`${token}:`);
+    }
   });
 });

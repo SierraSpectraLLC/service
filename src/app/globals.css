@@ -1695,3 +1695,343 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 @media (max-width: 640px) {
   .rank-row { grid-template-columns: minmax(70px, 1fr) minmax(50px, 1.6fr) auto; }
 }
+
+
+/* ── The landing page ───────────────────────────────────────────────────────
+   Everything above this line dresses an application: dense, 13-14px, cards on
+   a tint, sized so a technician can hold a work order and a parts list on one
+   screen. That scale is right for the app and wrong for the apex, where the
+   reader has no account, no context and no reason to squint - a 19px <h1> in
+   a 760px column reads as a table caption, which is exactly what the old
+   landing page looked like.
+
+   So the landing page gets its own scale and its own widths, and gets them
+   under one `.lp` prefix that nothing else on the instance uses. The tokens
+   are re-declared on `.lp` rather than on :root so the app's type scale is
+   untouched by anything here - a landing-page change can never resize a work
+   order. Colours stay the house tokens: this is the same product, louder.
+
+   Bands are full-bleed and set their own background, because a marketing page
+   whose sections all float in one tinted column has no rhythm. Each band puts
+   a `.container` inside itself to hold the measure. */
+.lp {
+  --lp-h1:   clamp(30px, 4.6vw, 50px);
+  --lp-h2:   clamp(21px, 2.4vw, 28px);
+  --lp-h3:   17px;
+  --lp-lead: clamp(15px, 1.35vw, 18px);
+  --lp-body: 15px;
+  --lp-meta: 13px;
+  /* The proof figures. Steps down on a phone, which is why it is a token with
+     one override rather than a literal in two places. */
+  --lp-fig: var(--fs-metric);
+  /* The measure. Prose past ~68 characters is harder to read, not more
+     generous, so the hero copy is clamped well inside the band. */
+  --lp-measure: 62ch;
+  font-size: var(--lp-body);
+  line-height: 1.6;
+}
+.lp section { padding: clamp(40px, 6vw, 76px) 0; }
+.lp .container { max-width: 1080px; }
+.lp h1, .lp h2, .lp h3 { color: var(--navy); letter-spacing: -0.02em; margin: 0; }
+.lp h1 { font-size: var(--lp-h1); line-height: 1.06; font-weight: 800; }
+.lp h2 { font-size: var(--lp-h2); line-height: 1.15; font-weight: 800; }
+.lp h3 { font-size: var(--lp-h3); line-height: 1.3; font-weight: 750; }
+.lp p { margin: 0; }
+.lp .lp-lead { font-size: var(--lp-lead); line-height: 1.55; max-width: var(--lp-measure); }
+.lp .lp-eyebrow {
+  font-size: var(--lp-meta); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.09em; margin: 0 0 14px;
+}
+
+/* ── Hero ───────────────────────────────────────────────────────────────────
+   Painted with the instance's OWN header colour, passed down from the layout
+   rather than hardcoded navy: an operator who themes the header green and
+   then meets a navy slab directly under it is looking at a broken page, not a
+   brand. Text colour flips by luminance the same way the header's does, so a
+   pale theme stays readable instead of going white-on-white. */
+.lp-hero { position: relative; overflow: hidden; }
+/* The wash: a soft off-centre highlight so a large flat field of one colour
+   has some depth to it. Pointer-events off - it covers the whole band. */
+.lp-hero::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 90% at 88% -20%, rgba(255,255,255,0.16), transparent 60%);
+}
+.lp-hero > .container { position: relative; z-index: 1; }
+.lp-hero h1 { color: inherit; max-width: 18ch; }
+/* Copy left, exhibit right. One column until there is genuinely room for two -
+   a hero split at 760px gives both halves too little and reads as a bug. */
+.lp-hero-grid { display: grid; gap: clamp(32px, 5vw, 56px); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 940px) {
+  .lp-hero-grid { grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr); align-items: center; }
+}
+.lp-hero .lp-lead { margin-top: 18px; opacity: 0.88; }
+.lp-hero .lp-eyebrow { opacity: 0.72; }
+.lp-hero-acts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 28px; }
+.lp-hero-note { font-size: var(--lp-meta); opacity: 0.66; margin-top: 12px; }
+
+/* The proof strip under the hero copy: counts that are already public, set in
+   the mono face because they are figures rather than prose. */
+.lp-figures { display: flex; flex-wrap: wrap; gap: 16px 30px; margin-top: 34px; }
+.lp-figures > div { padding: 2px 0; }
+.lp-fig-n {
+  font-family: var(--mono); font-size: var(--lp-fig); font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+/* nowrap on the label so a figure never splits across two lines - the strip
+   may wrap BETWEEN figures, but "MODELS / DOCUMENTED" stacked under its own
+   number reads as two figures instead of one. */
+.lp-fig-l {
+  font-size: var(--lp-meta); text-transform: uppercase; letter-spacing: 0.07em;
+  font-weight: 600; opacity: 0.7; margin-top: 3px; white-space: nowrap;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────────
+   Not `.btn`: those are 12-13px controls built to sit in a toolbar next to
+   twenty siblings, and at that size on a hero they read as disabled. Same
+   shapes and the same house colours, one step up in every dimension. */
+.lp-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: var(--lp-body); font-weight: 700; line-height: 1;
+  padding: 13px 20px; border-radius: 9px; border: 1px solid transparent;
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+}
+.lp-btn:active { transform: translateY(1px); }
+.lp-btn:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.lp-btn.accent { background: var(--coral); color: #fff; border-color: var(--coral); }
+.lp-btn.accent:hover { background: var(--coral-2); border-color: var(--coral-2); }
+.lp-btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); }
+.lp-btn.primary:hover { background: var(--navy-2); border-color: var(--navy-2); }
+.lp-btn.plain { background: #fff; color: var(--navy); border-color: var(--line); }
+.lp-btn.plain:hover { background: #F4F7FB; border-color: #D3DAE4; }
+/* On the hero, where the background is the instance's colour and no fixed
+   pair of greys is safe: borrow the foreground and let it carry both states. */
+.lp-btn.ghost { background: transparent; color: inherit; border-color: currentColor; opacity: 0.75; }
+.lp-btn.ghost:hover { opacity: 1; }
+
+/* ── The two doors ──────────────────────────────────────────────────────────
+   The page's whole job, so they are the first thing under the hero and they
+   are told apart on sight rather than by reading the eyebrow: a coloured rail
+   down the left edge, coral for the lab door and navy for the platform door,
+   matching the button each one ends in. */
+/* min(320px, 100%) rather than a bare 320px: a track floor wider than the
+   container does not shrink, it overflows, so on a 320px phone (SE, and every
+   Android that reports 320) the two doors ran 32px off the right edge and
+   took the page's horizontal scroll with them. The min() clamps the floor to
+   whatever room there actually is. Same reasoning on .lp-grid below. */
+.lp-doors { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); }
+.lp-door {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  border-left: 4px solid var(--lp-rail, var(--line));
+  padding: 26px 26px 24px; display: flex; flex-direction: column;
+  box-shadow: var(--shadow-sm); transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+.lp-door:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.lp-door.lab { --lp-rail: var(--coral); }
+.lp-door.shop { --lp-rail: var(--navy); }
+.lp-door .lp-eyebrow { margin-bottom: 10px; }
+.lp-door.lab .lp-eyebrow { color: var(--coral-2); }
+.lp-door.shop .lp-eyebrow { color: var(--navy); }
+.lp-door > p { margin-top: 12px; color: var(--mut); }
+.lp-door > .lp-btn { margin-top: 22px; align-self: flex-start; }
+
+/* Three concrete things, replacing a paragraph of prose nobody finishes. The
+   marker is drawn rather than a list-style, so it lines up with the cap
+   height of the first line instead of the baseline. */
+.lp-points { list-style: none; margin: 16px 0 0; padding: 0; flex: 1; }
+.lp-points li {
+  position: relative; padding-left: 22px; margin-bottom: 9px;
+  color: var(--ink); font-size: var(--lp-body); line-height: 1.5;
+}
+.lp-points li::before {
+  content: ""; position: absolute; left: 4px; top: 8px;
+  width: 6px; height: 6px; border-radius: 50%; background: var(--lp-rail, var(--slate));
+}
+
+/* ── Bands ──────────────────────────────────────────────────────────────────
+   Alternating grounds, so the eye can tell one section from the next without
+   a rule between them. `.tint` is the page background the app already uses. */
+.lp-band-white { background: var(--card); }
+.lp-band-tint { background: var(--bg); }
+.lp-head { max-width: var(--lp-measure); margin-bottom: 26px; }
+.lp-head > p { margin-top: 12px; color: var(--mut); font-size: var(--lp-lead); line-height: 1.55; }
+
+/* ── What the system holds ──────────────────────────────────────────────────
+   Named modules, not adjectives. Every entry here is a route that exists. */
+/* minmax(300px) rather than 232: six cells in a 1048px container fell as four
+   and then two, and an orphan row of two reads as a section that ran out
+   rather than one that is six things long. Three and three. */
+.lp-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); }
+.lp-cell {
+  border: 1px solid var(--line); border-radius: 12px; padding: 18px 18px 16px;
+  background: var(--card);
+}
+.lp-cell h3 { margin-bottom: 6px; }
+.lp-cell p { color: var(--mut); font-size: var(--lp-meta); line-height: 1.55; }
+
+/* ── The hero exhibit ───────────────────────────────────────────────────────
+   One record, drawn rather than screenshotted. The page spends four sections
+   claiming that everything about a machine hangs off a single record; this is
+   the only part of it a reader can take in without reading, and a hero with
+   copy on the left and nothing on the right reads as a page that did not
+   finish loading.
+
+   Drawn, not captured, for three reasons: a screenshot of this app is a
+   screenshot of somebody's instruments, it goes stale the day the UI moves,
+   and it is unreadable at a third of a hero. So the vocabulary is real -
+   these are lib/stages stage names and the app's own pills and tones - and
+   every particular is generic. NOTHING here may name a client: which customer
+   owns what is the one fact a service company can never publish
+   (lib/publicCatalog), and a plausible-looking name on the front page is
+   worse than a real one, because nobody can tell which it was. */
+.lp-exhibit {
+  background: var(--card); border-radius: 14px; border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 24px 60px rgba(10, 22, 44, 0.34); overflow: hidden;
+  color: var(--ink); font-size: var(--fs-body); line-height: 1.45;
+}
+.lp-ex-head { padding: 16px 18px 14px; border-bottom: 1px solid var(--line); }
+.lp-ex-top { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.lp-ex-kind {
+  font-size: var(--fs-micro); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--slate);
+}
+.lp-ex-name {
+  font-size: var(--fs-title); font-weight: 800; color: var(--navy);
+  letter-spacing: -0.2px; margin-top: 5px;
+}
+.lp-ex-sn { font-family: var(--mono); font-size: var(--fs-meta); color: var(--mut); margin-top: 3px; }
+.lp-ex-rows { padding: 4px 0; }
+.lp-ex-row {
+  display: flex; align-items: center; gap: 9px; padding: 9px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.lp-ex-row:last-child { border-bottom: 0; }
+.lp-ex-row .who { margin-left: auto; font-size: var(--fs-meta); color: var(--mut); white-space: nowrap; }
+.lp-ex-foot {
+  padding: 11px 18px; background: var(--bg); border-top: 1px solid var(--line);
+  font-size: var(--fs-meta); color: var(--mut);
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+/* Phones get the exhibit last and a little smaller - it is evidence for the
+   claim above it, not the first thing anybody should have to scroll past. */
+@media (max-width: 939px) {
+  .lp-exhibit { max-width: 460px; }
+}
+
+/* ── Library exhibit ────────────────────────────────────────────────────────
+   Real published models, linked. The apex is the highest-authority page on
+   the site, so these are not decoration - they are the internal links that
+   give each model page a way in. */
+/* Head left, models right. The head is clamped to the measure and the band is
+   1080 wide, so full-width rows left the right half of this section blank.
+   Three children rather than two so the button can be placed independently:
+   under the copy on a desk, after the examples on a phone. Explicit `order`
+   is what the single-column case runs on; the two-column case overrides it
+   with real grid placement, where order is ignored. */
+.lp-split {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  row-gap: 18px; column-gap: clamp(26px, 4vw, 52px);
+}
+.lp-split-head { order: 1; }
+.lp-split-list { order: 2; }
+.lp-split-act  { order: 3; }
+@media (min-width: 880px) {
+  .lp-split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .lp-split-head { grid-column: 1; grid-row: 1; }
+  .lp-split-act  { grid-column: 1; grid-row: 2; align-self: start; }
+  /* Spans both rows so a long model list lengthens the band rather than
+     leaving the button stranded in the middle of its own column. */
+  .lp-split-list { grid-column: 2; grid-row: 1 / span 2; }
+}
+.lp-split .lp-head { margin-bottom: 0; }
+.lp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.lp-chip {
+  display: flex; align-items: baseline; gap: 8px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card);
+  padding: 12px 15px; text-decoration: none; color: var(--ink);
+  font-size: var(--lp-body); font-weight: 700;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.lp-chip:hover { border-color: var(--sky); background: #F7FAFD; }
+.lp-chip .mk { color: var(--mut); font-weight: 500; }
+/* What kind of thing it is, pushed right - the column reads as an index of
+   the library rather than a row of tags. */
+.lp-chip .kind {
+  margin-left: auto; font-size: var(--lp-meta); font-weight: 600;
+  color: var(--slate); white-space: nowrap;
+}
+/* Inside the two-column band the models stack, so the right half has the same
+   height as the left instead of three pills over a void. */
+.lp-split .lp-chips { flex-direction: column; flex-wrap: nowrap; }
+/* The manufacturers a stranger recognises, when there is no model to link. */
+.lp-makers {
+  font-family: var(--mono); font-size: var(--lp-meta); color: var(--mut);
+  line-height: 1.9; max-width: var(--lp-measure);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────────
+   The one on the root layout prints a build sha, which is for us. This one is
+   for the reader: what the product is, and the three places to go next. */
+.lp-foot { background: var(--navy); color: #fff; }
+.lp-foot a { color: #fff; text-decoration: none; opacity: 0.78; }
+.lp-foot a:hover { opacity: 1; text-decoration: underline; }
+.lp-foot-row {
+  display: flex; flex-wrap: wrap; gap: 18px 28px; align-items: baseline;
+  justify-content: space-between; padding: 34px 0 30px;
+}
+.lp-foot-name { font-weight: 800; letter-spacing: 0.04em; font-size: var(--lp-body); }
+.lp-foot-links { display: flex; flex-wrap: wrap; gap: 20px; font-size: var(--lp-meta); font-weight: 600; }
+.lp-foot-note { font-size: var(--lp-meta); opacity: 0.62; max-width: 52ch; margin-top: 6px; }
+
+/* ── Phones ─────────────────────────────────────────────────────────────────
+   The desktop page is a composition: copy beside an exhibit, two doors read
+   side by side, a three-up grid. A 390px screen holds none of that, and
+   forcing it would make things worse rather than closer to the original -
+   two doors squeezed into two columns, or a six-cell grid at 170px a cell,
+   is a page nobody can read.
+
+   What DOES carry over is the DENSITY. The stack inherited desk spacing and
+   nothing else: 40px above and below five bands, 18px card padding sized for
+   a 1080px column, a 26px figure. That ran the phone to nearly four screens
+   of scroll with a third of it empty, which is what makes a stacked page feel
+   like a fallback instead of the design. These rules close it up. The type
+   scale is left alone - it is already fluid, and shrinking body copy to save
+   scroll is how a phone page becomes unreadable. */
+@media (max-width: 560px) {
+  .lp section { padding: 30px 0; }
+  .lp { --lp-fig: var(--fs-page); }
+
+  /* Hero: tighten the run from headline to exhibit, so the one piece of the
+     page that shows the product is not four scrolls down. */
+  .lp-hero .lp-lead { margin-top: 14px; }
+  .lp-hero-acts { margin-top: 22px; gap: 8px; }
+  .lp-hero-acts > .lp-btn { flex: 1 1 auto; justify-content: center; }
+  .lp-figures { gap: 14px 26px; margin-top: 24px; }
+  .lp-btn { padding: 12px 17px; }
+  /* Full width rather than 460: at 375 the capped card left a margin down one
+     side only, which reads as a mistake rather than as a gutter. */
+  .lp-exhibit { max-width: none; }
+  .lp-ex-head { padding: 14px 15px 12px; }
+  .lp-ex-row { padding: 8px 15px; gap: 8px; }
+  .lp-ex-foot { padding: 10px 15px; }
+
+  /* Doors and cells: the padding was set for a 500px column. */
+  .lp-doors { gap: 12px; }
+  .lp-door { padding: 20px 18px 18px; }
+  .lp-door > .lp-btn { margin-top: 18px; }
+  .lp-points { margin-top: 13px; }
+  .lp-points li { margin-bottom: 7px; padding-left: 20px; }
+  .lp-head { margin-bottom: 18px; }
+  .lp-grid { gap: 10px; }
+  .lp-cell { padding: 15px 16px 14px; }
+  .lp-chips { gap: 7px; }
+  .lp-chip { padding: 11px 14px; }
+  .lp-foot-row { padding: 26px 0 24px; gap: 14px 24px; }
+}
+
+/* The exhibit's right-hand column is the first thing to run out of room. It
+   is a secondary label - who holds the queue, how often the PM comes round -
+   so it goes rather than wrapping the line it sits on. */
+@media (max-width: 380px) {
+  .lp-ex-row .who { display: none; }
+}
