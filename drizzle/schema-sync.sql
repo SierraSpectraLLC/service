@@ -3415,3 +3415,9 @@ END $$;
 -- src/db/schema.ts and lib/appearance.resolveLook.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "spectrum_stops" text NOT NULL DEFAULT '';
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "spectrum_height" integer;
+
+-- What an expense report IS and why it happened, in the filer's words. Both
+-- optional: a report with no name reads as it always did (person + the span of
+-- its rows). See src/db/schema.ts.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "purpose" text NOT NULL DEFAULT '';

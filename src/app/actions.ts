@@ -8264,10 +8264,17 @@ async function workableReport(u: SessionUser, id: number) {
  * the row it writes carries their name, not the filer's, because the money is
  * owed to them.
  */
-export async function createExpenseReport(onBehalfOf?: string): Promise<{ error?: string; id?: number }> {
+export async function createExpenseReport(
+  opts: {
+    onBehalfOf?: string;
+    /** What this claim is, in the filer's words. Optional - see the column. */
+    title?: string;
+    purpose?: string;
+  } = {},
+): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   let person = u.name;
-  const want = (onBehalfOf ?? "").trim();
+  const want = (opts.onBehalfOf ?? "").trim();
   if (want && want !== u.name) {
     if (!(await mayAdminPeople(u))) return { error: "Only HR can open a report in somebody else's name" };
     // forTenant, so the platform's own administrator can open a report while
@@ -8282,18 +8289,51 @@ export async function createExpenseReport(onBehalfOf?: string): Promise<{ error?
     if (!member) return { error: "That is not somebody on your roster" };
     person = member.name;
   }
+  const title = (opts.title ?? "").trim().slice(0, 120);
+  const purpose = (opts.purpose ?? "").trim().slice(0, 500);
   const [report] = await db.insert(expenseReports).values({
-    tenantOrgId: readTenant(u), person, status: "draft", submittedBy: u.email,
+    tenantOrgId: readTenant(u), person, status: "draft", submittedBy: u.email, title, purpose,
   }).returning();
   await audit({
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
-    action: person === u.name
+    action: (person === u.name
       ? "opened a draft expense report"
-      : `opened a draft expense report for ${person}`,
+      : `opened a draft expense report for ${person}`)
+      + (title ? ` - "${title}"` : ""),
   });
   revalidatePath("/money/reimbursements");
   revalidatePath("/people");
   return { id: report.id };
+}
+
+/**
+ * Rename a claim, or say again what it was for.
+ *
+ * Creation-time naming without an edit path makes a typo permanent, and a
+ * report is open for as long as the trip takes - what it was for is often
+ * clearer on the way back than on the way out. Same gate as every other edit
+ * to a report: whose claim it is, inside the tenant, and only while it is
+ * still editable.
+ */
+export async function nameExpenseReport(
+  reportId: number, data: { title: string; purpose: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const report = await workableReport(u, reportId);
+  if (!report) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `That report is ${report.status} - it is fixed now` };
+  const title = data.title.trim().slice(0, 120);
+  const purpose = data.purpose.trim().slice(0, 500);
+  if (title === report.title && purpose === report.purpose) return {};
+  await db.update(expenseReports).set({ title, purpose }).where(eq(expenseReports.id, reportId));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
+    action: title ? `named ${report.person}'s expense report "${title}"` : `cleared the name on ${report.person}'s expense report`,
+    field: "title", oldValue: report.title, newValue: title,
+  });
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${reportId}`);
+  return {};
 }
 
 /**
@@ -15269,7 +15309,8 @@ export async function saveRecurringTerms(
   // Keep the cursor where it is once it is running: retuning the amount must
   // not silently re-bill a month, and must not skip one either.
   const nextOn = every === 0 ? ""
-    : ag.billNextOn || openingCursor({ startsOn: ag.startsOn, billDayOfMonth: day }, today);
+    : ag.billNextOn || openingCursor(
+        { startsOn: ag.startsOn, billDayOfMonth: day, billEveryMonths: every }, today);
 
   await db.update(agreements).set({
     billEveryMonths: every, billAmountCents: cents,

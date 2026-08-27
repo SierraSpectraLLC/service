@@ -380,10 +380,18 @@ describe("the route move", () => {
   it("converts every revalidatePath, including the interpolated ones", () => {
     const src = read("src/app/actions.ts");
     expect(src).not.toMatch(/revalidatePath\(["`]\/(purchasing|expenses|payroll)/);
-    // And the new ones are actually there, so this cannot pass by deletion.
-    expect((src.match(/revalidatePath\(["`]\/money\/purchasing/g) ?? [])).toHaveLength(5);
-    expect((src.match(/revalidatePath\(["`]\/money\/reimbursements/g) ?? [])).toHaveLength(17);
-    expect((src.match(/revalidatePath\(["`]\/money\/payroll/g) ?? [])).toHaveLength(4);
+    /*
+     * And the new ones are actually there, so this cannot pass by deletion.
+     *
+     * A FLOOR, not an exact count. The exact count was the intent stated
+     * literally, and it made every new action that touches one of these rooms
+     * a test failure with nothing wrong - the number went 17 to 19 because a
+     * report gained a name. What this test is for is that the conversion did
+     * not happen by removing the calls; a floor says that and nothing else.
+     */
+    expect((src.match(/revalidatePath\(["`]\/money\/purchasing/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    expect((src.match(/revalidatePath\(["`]\/money\/reimbursements/g) ?? []).length).toBeGreaterThanOrEqual(17);
+    expect((src.match(/revalidatePath\(["`]\/money\/payroll/g) ?? []).length).toBeGreaterThanOrEqual(4);
   });
 
   it("redirects every old path permanently, sub-paths included", () => {

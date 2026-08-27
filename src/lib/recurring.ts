@@ -80,14 +80,47 @@ export function firstCycle(startsOn: string, dayOfMonth: number): string {
   return inMonth >= startsOn ? inMonth : addMonths(inMonth, 1, dayOfMonth);
 }
 
-/** Where the cursor should start when somebody first turns recurring on. */
-export const openingCursor = (a: Pick<RecurringTerms, "startsOn" | "billDayOfMonth">, today: string): string => {
+/**
+ * Where the cursor should start when somebody first turns recurring on.
+ *
+ * A contract that started long ago does not get eleven months raised the
+ * moment somebody ticks the box - history is backfilled deliberately, not by a
+ * checkbox - so the cursor opens at the next cycle that has not happened yet.
+ *
+ * "NEXT CYCLE" MEANS THE NEXT ONE ON THE CADENCE, walked forward from the
+ * contract's own first cycle. It used to mean the next occurrence of the
+ * day-of-month, which is the same thing on a monthly retainer and nonsense on
+ * anything else: an annual contract running 2025-10-01 to 2026-09-30, switched
+ * on in August, opened at 2026-09-01 - not an anniversary of anything, four
+ * weeks before the term ended, and a full year's fee ready to raise against
+ * the twenty-nine days that were left. The cadence was not even passed in.
+ *
+ * On the corrected walk that contract opens at 2026-10-01, which is past its
+ * end date, so nothing is due and the card says so. That is the honest answer:
+ * the annual fee for the term fell due last October, and a bill for a period
+ * already served is a decision somebody makes on purpose, not one a checkbox
+ * makes for them.
+ */
+export const openingCursor = (
+  a: Pick<RecurringTerms, "startsOn" | "billDayOfMonth" | "billEveryMonths">,
+  today: string,
+): string => {
   const first = firstCycle(a.startsOn || today, a.billDayOfMonth);
-  // A contract that started long ago does not get eleven months raised the
-  // moment somebody ticks the box - history is backfilled deliberately, not
-  // by a checkbox. The cursor opens at the next cycle from today.
   if (!first || first >= today) return first;
-  return firstCycle(today, a.billDayOfMonth);
+  const every = Math.max(1, Math.round(a.billEveryMonths));
+  let cursor = first;
+  // Bounded: sixty years of monthly cycles is far past any real contract, and
+  // an unbounded walk on a corrupt start date is a hung request.
+  for (let i = 0; i < 720 && cursor < today; i++) {
+    const next = addMonths(cursor, every, a.billDayOfMonth);
+    if (!next || next <= cursor) break;
+    cursor = next;
+  }
+  // A walk that ran out without catching up has not found a cursor - it has a
+  // date decades in the past. Blank is what "no schedule" looks like
+  // everywhere else here, and dueCycles reads it as nothing to raise; a stale
+  // date would read as a cycle that is due, which is the opposite.
+  return cursor >= today ? cursor : "";
 };
 
 /**

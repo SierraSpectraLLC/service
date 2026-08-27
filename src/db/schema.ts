@@ -2539,6 +2539,21 @@ export const expenseReports = pgTable("expense_reports", {
   tenantOrgId: tenantStamp(),
   /** Whose money is owed - a directory name, same convention as expenses.person. */
   person: text("person").notNull(),
+  /**
+   * What this claim IS, in the filer's own words, and why it happened.
+   *
+   * A report used to be identified by its person and the span of its rows -
+   * "Steve Jones, Jul 12 - Aug 3" - which is enough to tell two apart on a
+   * list and nothing like enough to approve one. The owner paying it wants to
+   * know it was the Reno install, not "some days in July"; the engineer
+   * filing it wants to keep the airport trip separate from the parts run.
+   *
+   * Both optional. A report with no name still reads as it always did, so
+   * nothing that exists becomes wrong, and the empty-handed flow - open a
+   * draft, scan receipts into it, submit - still takes no typing at all.
+   */
+  title: text("title").notNull().default(""),
+  purpose: text("purpose").notNull().default(""),
   status: text("status").notNull().default("submitted"),
   submittedBy: text("submitted_by").notNull().default(""),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),

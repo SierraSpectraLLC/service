@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  attachPoolExpenses, deleteExpenseReport, logMyExpense, payExpenseReport,
+  attachPoolExpenses, deleteExpenseReport, logMyExpense, nameExpenseReport, payExpenseReport,
   removeReportExpense, returnExpenseReport, submitDraftReport, withdrawExpenseReport,
 } from "@/app/actions";
 import {
@@ -32,7 +32,12 @@ export type ReportExpense = {
  * the same blob store the app's other files use.
  */
 export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwner, today, categories, workOrders, pool }: {
-  report: { id: number; person: string; status: string; submittedAt: string; paidOn: string; paidRef: string; returnedReason: string };
+  report: {
+    id: number; person: string; status: string; submittedAt: string;
+    paidOn: string; paidRef: string; returnedReason: string;
+    /** The filer's own words. Both optional - see expense_reports. */
+    title: string; purpose: string;
+  };
   rows: ReportExpense[];
   /**
    * May this reader FILL this claim - their own, or anybody's if they are HR.
@@ -69,6 +74,8 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
      pool it went back to. */
   const whose = mine ? "my" : `${report.person.split(" ")[0]}'s`;
   const theirs = mine ? "your" : `${report.person.split(" ")[0]}'s`;
+
+  const [name, setName] = useState({ title: report.title, purpose: report.purpose });
 
   const total = reportTotalCents(rows);
 
@@ -114,6 +121,41 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
 
   return (
     <>
+      {/* What this claim is and why it happened. Editable while the report is,
+          because creation-time naming with no way back makes a typo permanent -
+          and what a trip was for is often clearer on the way home than it was
+          on the way out. Absent entirely once the claim is fixed. */}
+      {(editable || report.title || report.purpose) && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          {editable ? (
+            <>
+              <label>Name</label>
+              <input value={name.title} aria-label="Report name"
+                placeholder={`${report.person}'s expenses`} disabled={pending}
+                onChange={(e) => setName({ ...name, title: e.target.value })} />
+              <label style={{ marginTop: 8 }}>What it was for</label>
+              <input value={name.purpose} aria-label="Purpose" disabled={pending}
+                placeholder="The sentence whoever pays this will read first"
+                onChange={(e) => setName({ ...name, purpose: e.target.value })} />
+              {(name.title !== report.title || name.purpose !== report.purpose) && (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button className="btn sm accent" disabled={pending}
+                    onClick={() => act(() => nameExpenseReport(report.id, name), "Saved")}>
+                    Save
+                  </button>
+                  <button className="btn sm" disabled={pending}
+                    onClick={() => setName({ title: report.title, purpose: report.purpose })}>
+                    Discard
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="t-body">{report.purpose || report.title}</div>
+          )}
+        </div>
+      )}
+
       {report.status === "returned" && (
         <div className="card" style={{ borderLeft: "3px solid var(--t-bad-fg)", marginBottom: 12 }}>
           <div className="t-small" style={{ color: "var(--t-bad-fg)" }}>
