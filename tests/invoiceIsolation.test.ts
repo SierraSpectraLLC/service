@@ -82,3 +82,31 @@ describe("the share viewer only ever calls the org-scoped doors", () => {
     expect(src).not.toContain("allInvoices(");
   });
 });
+
+describe("no client-facing surface reaches a workspace-wide money reader", () => {
+  /*
+   * allInvoices(tenantOrgId) and invoicesForOrg(orgId) have the same shape and
+   * the same return type, and exactly one of them is safe to render to a
+   * client. Nothing in the type system tells them apart, so the separation is
+   * which file calls which - and that is only enforced if somebody checks.
+   *
+   * These are the files that render to a client. The dashboard is on the list
+   * because its client fork is the client's own landing page; the share and
+   * drop viewers because they take a token and no session at all.
+   */
+  const CLIENT_FACING = [
+    "src/app/share/[token]/page.tsx",
+    "src/app/(dashboard)/page.tsx",
+    "src/lib/clientView.ts",
+  ];
+  const WORKSPACE_WIDE = ["allInvoices(", "allQuotes(", "collectionsBoard(", "costingBoard(", "unbilledJobs("];
+
+  for (const file of CLIENT_FACING) {
+    it(`${file} calls no workspace-wide reader`, () => {
+      const src = readFileSync(file, "utf8");
+      for (const reader of WORKSPACE_WIDE) {
+        expect(`${file}: ${src.includes(reader) ? reader : "clean"}`).toBe(`${file}: clean`);
+      }
+    });
+  }
+});

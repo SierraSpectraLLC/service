@@ -257,11 +257,17 @@ export async function invoiceForOrg(id: number, orgId: number): Promise<FullInvo
   return (await hydrate(rows))[0] ?? null;
 }
 
-/** Every invoice belonging to one client. The same door, for the statement. */
-export async function invoicesForOrg(orgId: number): Promise<FullInvoice[]> {
+/**
+ * Every invoice belonging to one client. The same door, for the statement.
+ *
+ * cache()d because hydrate() is seven queries and a client's own page asks
+ * this twice - once for what is waiting on them, once for the account figures -
+ * and they are the same rows both times.
+ */
+export const invoicesForOrg = cache(async (orgId: number): Promise<FullInvoice[]> => {
   const rows = await db.select().from(invoices).where(eq(invoices.orgId, orgId));
   return (await hydrate(rows)).sort((a, b) => b.row.id - a.row.id);
-}
+});
 
 /** The due date this client's terms give an invoice issued today. */
 /**

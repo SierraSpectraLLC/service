@@ -20,6 +20,7 @@ import { mayChooseView, resellerView } from "@/lib/viewMode";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import { viewAsPeople } from "@/app/actions";
+import { seesBooksFor } from "@/lib/financeData";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { visibleOrgs } from "@/lib/tenancy";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -155,7 +156,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
      work that requires knowing what the company took in this quarter. See
      lib/books, where the rule lives, and lib/finance for the two rooms that
      stay open. */
-  const seesBooks = user?.role === "owner";
+  /* seesBooksFor, not `role === "owner"`. lib/financeData says in its own
+     comment that "the dashboard's money card and the Financial nav word both
+     need it" - the money card calls it, this did not, so the word and the page
+     behind it could disagree about who may read the books. */
+  const seesBooks = !!user && await seesBooksFor(user);
   /* The client half of the same rule: the quotes their organization has been
      sent and the invoices it owes. Their org has no owner role to fall back
      on, so this is a per-person flag that defaults ON - the switch exists to
