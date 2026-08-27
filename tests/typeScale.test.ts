@@ -23,8 +23,16 @@ const STEPS = [10, 11, 12, 13, 14, 16, 19, 22, 26];
  * physical page, where 10.5px is a real answer to "fit this column" rather
  * than a shrug. They are exempt on purpose, and the exemption is a list so
  * that adding to it is a decision somebody makes on the record.
+ *
+ * opengraph-image is here on that same reasoning and is the decision on the
+ * record: it is not a page. It is one 1200x630 canvas rendered by Satori and
+ * then looked at as a thumbnail in somebody's Slack, so its type is sized
+ * against that frame - an 82px headline is a third of the card's height, not
+ * a heading three steps above body. Nothing it declares reaches the app, and
+ * the scale it would otherwise have to use tops out at 26px, which on a card
+ * this size is a caption.
  */
-const PRINT = ["binder/", "signoff/", "PrintHeader", "LabelCard", "SignatureBlock", "PdfStudio", "/pdf/"];
+const PRINT = ["binder/", "signoff/", "PrintHeader", "LabelCard", "SignatureBlock", "PdfStudio", "/pdf/", "opengraph-image"];
 
 const tsxFiles = (dir: string): string[] =>
   readdirSync(dir).flatMap((n) => {
