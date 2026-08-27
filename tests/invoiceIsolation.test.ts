@@ -98,14 +98,28 @@ describe("no client-facing surface reaches a workspace-wide money reader", () =>
     "src/app/share/[token]/page.tsx",
     "src/app/(dashboard)/page.tsx",
     "src/lib/clientView.ts",
+    "src/app/owner/ClientOwnerView.tsx",
   ];
-  const WORKSPACE_WIDE = ["allInvoices(", "allQuotes(", "collectionsBoard(", "costingBoard(", "unbilledJobs("];
+  const WORKSPACE_WIDE = ["allInvoices", "allQuotes", "collectionsBoard", "costingBoard", "unbilledJobs"];
 
   for (const file of CLIENT_FACING) {
-    it(`${file} calls no workspace-wide reader`, () => {
-      const src = readFileSync(file, "utf8");
+    it(`${file} names no workspace-wide reader`, () => {
+      /*
+       * Comments stripped first. Every one of these files explains in prose
+       * WHICH readers it may not use - naming them is how the next person
+       * learns the rule - and a check over raw text flags that explanation as
+       * the violation it is warning about.
+       */
+      const src = readFileSync(file, "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
       for (const reader of WORKSPACE_WIDE) {
-        expect(`${file}: ${src.includes(reader) ? reader : "clean"}`).toBe(`${file}: clean`);
+        // The bare identifier, not `reader(` - an IMPORT has no paren after it,
+        // and a file that imports one of these is one edit from calling it.
+        // Checking the call site let `import { allInvoices }` through, which is
+        // exactly how it would arrive: added for a card, used the next day.
+        const named = new RegExp(`\\b${reader}\\b`).test(src);
+        expect(`${file}: ${named ? reader : "clean"}`).toBe(`${file}: clean`);
       }
     });
   }

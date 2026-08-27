@@ -216,12 +216,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        the moment purchasing, reimbursements, overhead and payroll joined it -
        see lib/finance. */
     ...(seesBooks ? [{ href: "/money", label: "Financial" }] : []),
+    /* The owner view is a summary of the rooms above it, so it sits beside
+       them rather than replacing one. Gated on the books for the same reason
+       Financial is: every band on the operator's half is money. */
+    ...(seesBooks ? [{ href: "/owner", label: "Owner view" }] : []),
   ] : [
     { href: "/", label: resells ? "Your pipeline" : "Your lab" },
     { href: "/work", label: "Requests" },
     /* Quotes and invoices, named for what the client does with them rather
        than for what the shop filed. */
     ...(isClientOrg && seesOwnMoney ? [{ href: "/orders", label: "Approvals" }] : []),
+    /* What this is costing and whether they are covered - the question the
+       person who signs the cheque asks, which is not the one "Your lab"
+       answers. Offered only to a client org: a reseller's page is a pipeline
+       and this would be a second, emptier version of it. */
+    ...(isClientOrg ? [{ href: "/owner", label: "Your account" }] : []),
     ...(resells
       ? [{ href: "/listings", label: "Listings" }]
       : isClientOrg ? [{ href: "/store", label: "Parts" }] : []),
