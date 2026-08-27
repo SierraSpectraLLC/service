@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/authz";
 import { brandForTenant } from "@/lib/brand";
 import { shopDay } from "@/lib/shopday";
 import { storeQuota } from "@/lib/storeUsage";
+import { listHouseMembers } from "@/app/actions";
 import OrgSettingsForm from "@/components/OrgSettingsForm";
 import SitesCard from "@/components/SitesCard";
 import AgreementsPanel from "@/components/AgreementsPanel";
@@ -18,7 +19,7 @@ import { shopToday } from "@/lib/shopday";
 import { isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
-import { RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
+import { DataTable, Pill, RecordHero, Tabs, type HeroStat, type TabItem } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,19 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   ]);
   if (!org) notFound();
   const quota = await storeQuota(orgId, tenant);
+  /*
+   * An operator org has STAFF, which live in house_members rather than in the
+   * allowlist below - so before this there was nowhere on this page that
+   * answered "who works here". They showed up instead on whoever's "Our
+   * people" panel had the widest reach, which after the platform split meant
+   * the platform's roster claiming another company's engineers.
+   *
+   * Read-only here on purpose: the add/revoke actions write to the CALLER's
+   * workspace, so editing from another company's page would quietly create
+   * members in the wrong one. A workspace's own owner manages its people from
+   * their own Settings, which is where the panel with the buttons lives.
+   */
+  const staffRows = org.isOperator ? await listHouseMembers(org.id).catch(() => []) : [];
 
   // What each person's account already has on it: the profile they will be
   // called by, and whether a password is standing in for the codes. Read here
@@ -144,6 +158,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     { key: "settings", label: "Settings", href: base },
     ...(seesAgreements ? [{ key: "agreements", label: "Agreements", count: agreementRows.length, href: `${base}?tab=agreements` }] : []),
     { key: "sites", label: "Sites", count: siteRows.length, href: `${base}?tab=sites` },
+    ...(org.isOperator ? [{ key: "staff", label: "Staff", count: staffRows.length, href: `${base}?tab=staff` }] : []),
     ...(isOwner ? [{ key: "billing", label: "Billing", href: `${base}?tab=billing` }] : []),
   ];
 
@@ -248,6 +263,34 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           systems: siteSystems.filter((i) => i.siteId === r.id).length,
         }))}
       />}
+
+      {tab === "staff" && (
+        <div className="card">
+          <div className="card-title">{org.name}&apos;s people</div>
+          <div className="mut t-small" style={{ marginBottom: 10 }}>
+            Staff of this service company. They see and work every system in its
+            workspace, and owners additionally get its Settings. Managed from
+            their own Settings &rsaquo; People - shown here so this page can
+            answer who works here.
+          </div>
+          <DataTable
+            empty="Nobody yet"
+            cols={[
+              { key: "name", label: "Name", width: "minmax(140px, 1.2fr)" },
+              { key: "email", label: "Email", width: "minmax(200px, 2fr)" },
+              { key: "role", label: "Role", width: "90px" },
+            ]}
+            rows={staffRows.map((m) => ({
+              key: m.email,
+              cells: {
+                name: m.name || <span className="mut">&mdash;</span>,
+                email: <span className="mono t-small">{m.email}</span>,
+                role: <Pill tone={m.role === "owner" ? "info" : undefined}>{m.role}</Pill>,
+              },
+            }))}
+          />
+        </div>
+      )}
     </div>
   );
 }

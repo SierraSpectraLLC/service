@@ -9131,7 +9131,12 @@ export async function viewAsPeople(): Promise<{
   const [userRows, houseRows, allowRows] = await Promise.all([
     db.select({ email: users.email, name: users.name }).from(users)
       .orderBy(asc(users.email)).catch(() => []),
-    listHouseMembers().catch(() => []),
+    // Read directly, not through listHouseMembers: that returns ONE workspace's
+    // roster now, and this picker is platform-only (see layout.tsx) and wants
+    // every staff account on the instance. The per-address filter below still
+    // decides who this viewer may actually stand in for.
+    db.select({ email: houseMembers.email, name: houseMembers.name })
+      .from(houseMembers).catch(() => []),
     db.select({ entry: clientAllowlist.entry, orgId: clientAllowlist.orgId, orgName: orgs.name })
       .from(clientAllowlist).leftJoin(orgs, eq(orgs.id, clientAllowlist.orgId)).catch(() => []),
   ]);
@@ -9922,7 +9927,7 @@ const revHouse = () => {
  * may claim one, because there is nothing on the row that says whose it is.
  */
 async function guardFor(
-  actor: { email: string; operatorOrgId: number | null; rootOperatorOrgId: number | null },
+  actor: SessionUser,
   subjectEmail: string,
   next: "owner" | "staff" | "revoke",
 ) {
@@ -9932,7 +9937,12 @@ async function guardFor(
     envStaff: parseList(process.env.STAFF_EMAILS), members,
   });
   if (!base.ok) return { members, guard: base };
-  const mine = actor.operatorOrgId ?? actor.rootOperatorOrgId; // = lib/authz.myTenantOrgId
+  // Platform staff administer every workspace - the same support path
+  // listHouseMembers already takes, and the reason readTenant returns null for
+  // them. Without this the tenant test below caught them too: myTenantOrgId is
+  // never null on a configured instance, so the platform's own administrator
+  // could not touch a tenant's staff at all.
+  const mine = isPlatformStaff(tenantViewer(actor as SessionUser)) ? null : actor.operatorOrgId;
   if (mine !== null) {
     // Only an EXISTING row can belong to somebody else. No row means this is a
     // new hire, and the insert below stamps them with myTenantOrgId(u) - the
@@ -10389,7 +10399,22 @@ export async function revokeHouseMember(email: string, reason: string): Promise<
 }
 
 /** The list for Settings, with each row's provenance and what may be done to it. */
-export async function listHouseMembers(): Promise<{
+export async function listHouseMembers(
+  /**
+   * Whose roster. Omitted means the caller's own workspace, which is what
+   * "Our people" means on anybody's Settings page - INCLUDING the platform's
+   * administrator, whose own people are the platform's, not the instance's.
+   * Reading the whole instance into that panel put one company's engineers on
+   * another company's roster under the heading "Our people" and the copy
+   * "Staff see and work every system in the shop", which is a claim about
+   * them that is not true.
+   *
+   * Platform staff may name another workspace to administer it - that is the
+   * support path, and it is how a tenant's staff are reached from that
+   * tenant's own organization page rather than from the platform's roster.
+   */
+  orgId?: number | null,
+): Promise<{
   email: string; role: string; name: string; fromEnv: boolean; isRoot: boolean; locked: boolean;
 }[]> {
   const u = await requireOwner();
@@ -10412,10 +10437,15 @@ export async function listHouseMembers(): Promise<{
    * that is the support path, and the whole reason readTenant returns null.
    */
   const platform = isPlatformStaff(tenantViewer(u));
-  const mine = myTenantOrgId(u);
-  const visible = platform ? rows : rows.filter((r) => (r.orgId ?? null) === mine);
+  // A workspace other than my own is platform-staff-only; anyone else asking
+  // for one gets their own, which is all they could ever see anyway.
+  const want = platform && orgId !== undefined ? orgId : myTenantOrgId(u);
+  const visible = rows.filter((r) => (r.orgId ?? null) === want);
+  // STAFF_EMAILS is the ROOT operator's break-glass access, so those entries
+  // belong on the root workspace's roster and nowhere else.
+  const isRootRoster = want === u.rootOperatorOrgId;
   const emails = [...new Set([
-    ...(platform ? env : []),
+    ...(isRootRoster ? env : []),
     ...visible.map((r) => r.email.toLowerCase()),
   ])];
   return emails
