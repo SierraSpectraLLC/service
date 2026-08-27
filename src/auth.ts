@@ -287,6 +287,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         (session.user as { orgId?: number | null; orgName?: string }).orgId = org?.id ?? null;
         (session.user as { orgName?: string }).orgName = org?.name ?? "";
         (session.user as { orgKind?: string }).orgKind = org?.kind ?? "";
+        /*
+         * A client belongs to the operator that services them, and that is what
+         * every scoped read asks for. `house?.orgId ?? null` above answers only
+         * for STAFF; for a client it left this null, and null is the one value
+         * that means "no restriction" - readTenant returns it, forTenant emits
+         * no predicate, and visibleOrgs returns the whole table. So every
+         * client session read unscoped: their organization directory was every
+         * login on the instance, other operators' engineers and other
+         * operators' clients included, and lib/messages promises the exact
+         * opposite ("a client can reach the engineer on their system and never
+         * a stranger on another client's").
+         *
+         * signInIdentity twenty lines up already had it right - `org
+         * ?.parentOrgId ?? null` - so the two halves of this file answered the
+         * same question differently, and the half that fed the session lost.
+         * It also made myTenantOrgId resolve to the ROOT operator for clients,
+         * which is what stamped their uploads into a workspace that is not
+         * theirs.
+         */
+        (session.user as { operatorOrgId?: number | null }).operatorOrgId = org?.parentOrgId ?? null;
       }
       (session.user as { role?: string }).role = role;
       return session;
