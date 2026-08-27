@@ -18,6 +18,7 @@ import { coverageForOrg, fleetCategories } from "@/lib/pmPlanData";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
+import { getAppearance } from "@/lib/appearanceData";
 import { isHouse, maySeeAgreements, readTenant, tenantOfOrg } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
 import { tempState } from "@/lib/tempPassword";
@@ -134,6 +135,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   }).from(instruments).where(eq(instruments.ownerOrgId, orgId)).orderBy(asc(instruments.externalId)))
     .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
   const today = shopToday();
+  const platformLook = await getAppearance();
 
   /*
    * The maintenance plan and what has been delivered against it. Only for a
@@ -209,6 +211,7 @@ export default async function OrgSettingsPage({ params, searchParams }: {
       {tab === "settings" && <OrgSettingsForm
         org={{
           id: org.id, name: org.name, kind: org.kind, themeColor: org.themeColor, logoUrl: org.logoUrl,
+          spectrumStops: org.spectrumStops, spectrumHeight: org.spectrumHeight,
           eodRecipients: org.eodRecipients, digestRecipients: org.digestRecipients,
           digestHour: org.digestHour, digestDays: org.digestDays, systems: shareRows.length,
           storageLimitMb: org.storageLimitMb, quota,
@@ -234,6 +237,10 @@ export default async function OrgSettingsPage({ params, searchParams }: {
         sites={siteRows.filter((x) => !x.archived).map((x) => ({ id: x.id, name: siteLabel(x) }))}
         isStaff={user.role === "owner" || user.role === "staff"}
         platformName={brand.name}
+        /* What this workspace inherits when it has chosen nothing of its own -
+           so the "follow the platform" preview shows the real bar rather than
+           the stock one. */
+        platformSpectrum={{ stops: platformLook.spectrumStops, height: platformLook.spectrumHeight }}
         isOwner={isOwner}
         showRecipients={s?.eodEnabled ?? false}
         showSheetSync={s?.sheetSyncEnabled ?? false}

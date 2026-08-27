@@ -216,6 +216,22 @@ export const orgs = pgTable("orgs", {
   // and a logo shown beside the wordmark. Blank = the platform default look.
   themeColor: text("theme_color").notNull().default(""),
   logoUrl: text("logo_url").notNull().default(""),
+  /**
+   * This workspace's own spectrum - the thin gradient above the header, which
+   * is the one piece of the design that is purely identity.
+   *
+   * Blank stops and a null height both mean INHERIT, and they inherit
+   * independently: an organization that wants the platform's colours a little
+   * thicker sets the height and leaves the stops alone. One nullable column
+   * and one blank-means-default column rather than a single JSON blob, because
+   * "they never chose" and "they chose the default" are different states and
+   * only one of them should follow the platform when the platform changes.
+   *
+   * Same shape and same validation as app_settings' pair - lib/appearance owns
+   * both, and nothing reaches a style attribute without passing through it.
+   */
+  spectrumStops: text("spectrum_stops").notNull().default(""),
+  spectrumHeight: integer("spectrum_height"),
   // Who at this organization receives its daily report. Each client gets its
   // own list and its own send button - one report per client, never a merged
   // one that would show them each other's systems.

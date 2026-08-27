@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SPECTRUM_HEIGHT, DEFAULT_STOPS, MAX_SPECTRUM_HEIGHT, MAX_STOPS,
-  clampHeight, cleanStops, gradientCss, headerColor, parseStops, serializeStops,
+  DEFAULT_HEADER,
+  clampHeight, cleanStops, gradientCss, headerColor, parseStops, resolveLook,
+  serializeStops, type Stop,
 } from "@/lib/appearance";
 
 // These values are written into a style attribute on every page, so the tests
@@ -79,5 +81,89 @@ describe("thickness", () => {
     expect(clampHeight(9999)).toBe(MAX_SPECTRUM_HEIGHT);
     expect(clampHeight("thick")).toBe(DEFAULT_SPECTRUM_HEIGHT);
     expect(clampHeight(undefined)).toBe(DEFAULT_SPECTRUM_HEIGHT);
+  });
+});
+
+describe("whose look a viewer actually gets", () => {
+  /*
+   * The rule is FIELD BY FIELD, and the reason is what happens when the
+   * platform later changes its gradient: a workspace that once picked a header
+   * colour must not be frozen wearing the palette that was current the day
+   * they picked it.
+   */
+  const PLATFORM = {
+    headerColor: "#172A4A",
+    spectrumStops: [{ c: "#111111", at: 0 }, { c: "#222222", at: 100 }] as Stop[],
+    spectrumHeight: 3,
+  };
+  const org = (over: Partial<{ themeColor: string; spectrumStops: string; spectrumHeight: number | null }> = {}) =>
+    ({ themeColor: "", spectrumStops: "", spectrumHeight: null, ...over });
+
+  it("gives a workspace that has chosen nothing the platform's look entirely", () => {
+    const got = resolveLook(org(), PLATFORM);
+    expect(got.headerColor).toBe("#172A4A");
+    expect(got.spectrumHeight).toBe(3);
+    expect(got.spectrumStops).toEqual(PLATFORM.spectrumStops);
+  });
+
+  it("gives a viewer with no workspace at all the platform's look", () => {
+    // Platform staff. Not a fallback - the platform IS their workspace.
+    expect(resolveLook(null, PLATFORM).headerColor).toBe("#172A4A");
+  });
+
+  it("keeps following the platform's gradient for a workspace that only picked a colour", () => {
+    const got = resolveLook(org({ themeColor: "#8A1C1C" }), PLATFORM);
+    expect(got.headerColor).toBe("#8A1C1C");
+    // The half they did not choose still moves when the platform moves.
+    expect(got.spectrumStops).toEqual(PLATFORM.spectrumStops);
+    expect(got.spectrumHeight).toBe(3);
+  });
+
+  it("lets a workspace take the platform's colours at its own thickness", () => {
+    // The reason stops and height are two columns rather than one blob.
+    const got = resolveLook(org({ spectrumHeight: 10 }), PLATFORM);
+    expect(got.spectrumHeight).toBe(10);
+    expect(got.spectrumStops).toEqual(PLATFORM.spectrumStops);
+  });
+
+  it("treats a height of zero as a choice, not as absence", () => {
+    /*
+     * Zero means "no bar at all" and somebody meant it. This is why the column
+     * is nullable: a not-null zero could not be told from unset, and the bar
+     * would come back the next time the platform's height changed.
+     */
+    const got = resolveLook(org({ spectrumHeight: 0 }), PLATFORM);
+    expect(got.spectrumHeight).toBe(0);
+  });
+
+  it("takes a workspace's own stops when it has them", () => {
+    const own: Stop[] = [{ c: "#AA0000", at: 0 }, { c: "#00AA00", at: 100 }];
+    const got = resolveLook(org({ spectrumStops: serializeStops(own) }), PLATFORM);
+    expect(got.spectrumStops).toEqual(own);
+    expect(got.spectrumCss).toBe(gradientCss(own));
+  });
+
+  it("falls back rather than painting rubbish stored by any path", () => {
+    // The whole reason this file exists: these values go into a style
+    // attribute, so a broken one must degrade rather than reach the page.
+    expect(resolveLook(org({ themeColor: "red; } body { display:none } .x {" }), PLATFORM).headerColor)
+      .toBe("#172A4A");
+    expect(resolveLook(org({ spectrumStops: "not json" }), PLATFORM).spectrumStops)
+      .toEqual(DEFAULT_STOPS);
+    expect(resolveLook(org({ spectrumHeight: 9999 }), PLATFORM).spectrumHeight)
+      .toBe(MAX_SPECTRUM_HEIGHT);
+  });
+
+  it("never emits a gradient with anything but validated hex in it", () => {
+    const css = resolveLook(org({ spectrumStops: JSON.stringify([{ c: "url(javascript:alert(1))", at: 0 }]) }), PLATFORM).spectrumCss;
+    expect(css).not.toContain("javascript");
+    expect(css.startsWith("linear-gradient(90deg,")).toBe(true);
+  });
+
+  it("still resolves when the platform itself is the stock look", () => {
+    const got = resolveLook(org(), {
+      headerColor: DEFAULT_HEADER, spectrumStops: DEFAULT_STOPS, spectrumHeight: DEFAULT_SPECTRUM_HEIGHT,
+    });
+    expect(got.spectrumCss).toBe(gradientCss(DEFAULT_STOPS));
   });
 });

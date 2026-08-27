@@ -3409,3 +3409,9 @@ DO $$ BEGIN
       UNIQUE ("tenant_org_id", "org_id", "category");
   END IF;
 END $$;
+
+-- A workspace's own spectrum: the thin gradient above the header. Blank stops
+-- and a null height each mean "inherit the platform's", independently - see
+-- src/db/schema.ts and lib/appearance.resolveLook.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "spectrum_stops" text NOT NULL DEFAULT '';
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "spectrum_height" integer;

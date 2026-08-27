@@ -9662,7 +9662,16 @@ export async function createSystemFromSerial(data: {
  * into every page header.
  */
 export async function setOrgAppearance(
-  data: { themeColor: string; logoUrl: string },
+  data: {
+    themeColor: string;
+    logoUrl: string;
+    /**
+     * The workspace's own gradient. Undefined leaves it untouched; null is the
+     * choice to FOLLOW the platform, which is a different state from having
+     * picked the platform's current values - see lib/appearance.resolveLook.
+     */
+    spectrum?: { stops: Stop[]; height: number } | null;
+  },
   orgId?: number,
 ): Promise<{ error?: string }> {
   const u = await requireEditor();
@@ -9682,10 +9691,34 @@ export async function setOrgAppearance(
   }
   const [org] = await db.select().from(orgs).where(eq(orgs.id, target));
   if (!org) return { error: "Not found" };
-  await db.update(orgs).set({ themeColor: color, logoUrl: logo }).where(eq(orgs.id, target));
+  /*
+   * WHOSE organization. requireEditor plus `role === "owner"` above is "an
+   * owner of some service company", which is not a scope: without this an
+   * owner of any workspace could repaint another workspace's header and swap
+   * its logo, on every page that workspace's people open. mayAdminOrg is the
+   * same rule the organization page itself uses to decide whether to render
+   * these controls at all.
+   */
+  if (!mayAdminOrg(tenantViewer(u), org) && !(u.role === "client_editor" && u.orgId === target)) {
+    return { error: "Not found" };
+  }
+  /*
+   * Stops and height move together or not at all. They are two columns for a
+   * reason - a workspace can follow the platform's colours at its own
+   * thickness - but a form that saved one without the other would let a half
+   * change through, and the caller either has a spectrum to save or does not.
+   */
+  const spectrum = data.spectrum === undefined ? {} : {
+    spectrumStops: data.spectrum === null ? "" : serializeStops(data.spectrum.stops),
+    spectrumHeight: data.spectrum === null ? null : clampHeight(data.spectrum.height),
+  };
+  await db.update(orgs).set({ themeColor: color, logoUrl: logo, ...spectrum }).where(eq(orgs.id, target));
   await audit({
-    actor: u.email, entityType: "org", entityId: target,
-    action: `updated ${org.name}'s workspace appearance${color ? ` (${color})` : " (default look)"}${logo ? " with a logo" : ""}`,
+    actor: u.email, entityType: "org", entityId: target, tenantOrgId: orgTenant(org),
+    action: `updated ${org.name}'s workspace appearance${color ? ` (${color})` : " (default look)"}${logo ? " with a logo" : ""}`
+      + (data.spectrum === undefined ? ""
+        : data.spectrum === null ? " - spectrum follows the platform"
+          : ` - own spectrum at ${clampHeight(data.spectrum.height)}px`),
   });
   revalidatePath("/", "layout");
   revalidatePath("/settings");
@@ -10572,16 +10605,29 @@ export async function listHouseMembers(
   // for one gets their own, which is all they could ever see anyway.
   const want = platform && orgId !== undefined ? orgId : myTenantOrgId(u);
   const visible = rows.filter((r) => (r.orgId ?? null) === want);
-  // STAFF_EMAILS is the ROOT operator's break-glass access, so those entries
-  // belong on the root workspace's roster and nowhere else.
+  /*
+   * STAFF_EMAILS is the ROOT operator's break-glass access, so those entries
+   * belong on the root workspace's roster and nowhere else - EXCEPT when the
+   * address has a managed row, in which case the row decides.
+   *
+   * That exception is the whole point. The env list is a fallback for an
+   * address nothing else accounts for; lib/houseRole.houseIdentityFor already
+   * says so, handing an address with a row the org its row names and only a
+   * rowless one the root. This did not, so after the platform operator was
+   * split out of the service company, the service company's owner and engineer
+   * - still listed in the environment from when there was only one house -
+   * appeared on the PLATFORM's roster, under "Our people", beside a revoke
+   * link. Their rows said Sierra Spectra the whole time.
+   */
   const isRootRoster = want === u.rootOperatorOrgId;
+  const rowFor = (e: string) => rows.find((r) => r.email.toLowerCase() === e);
   const emails = [...new Set([
-    ...(isRootRoster ? env : []),
+    ...(isRootRoster ? env.filter((e) => !rowFor(e)) : []),
     ...visible.map((r) => r.email.toLowerCase()),
   ])];
   return emails
     .map((email) => {
-      const row = rows.find((r) => r.email.toLowerCase() === email);
+      const row = rowFor(email);
       const isRoot = email === root;
       const role = isRoot ? "owner" : row ? row.role : "staff";
       return {
