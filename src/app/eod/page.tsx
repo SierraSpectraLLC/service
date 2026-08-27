@@ -57,7 +57,7 @@ export default async function EodPage({ searchParams }: { searchParams: Promise<
     : [];
 
   const built = await Promise.all(groups.map(async (g) => {
-    const entries = await collectEodEntries(date, g.orgId, !isToday);
+    const entries = await collectEodEntries(date, g.orgId, !isToday, readTenant(user));
     const sysIds = entries.filter((e) => e.kind === "system").map((e) => e.id);
     const [taskRows, partRows, gasRows] = isToday && sysIds.length
       ? await Promise.all([

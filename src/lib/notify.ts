@@ -3,9 +3,9 @@
 // triggered it. Magic links deliberately don't come through here - sign-in
 // mail is auth infrastructure (src/auth.ts), not a notification anyone may
 // opt out of or needs a record of.
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { users, notifications, notificationPrefs } from "@/db/schema";
+import { instruments, users, notifications, notificationPrefs } from "@/db/schema";
 import { houseEmails } from "@/lib/house";
 import { sendEmail } from "@/lib/email";
 import { emailAllowed, holdFor, type NotifyKind } from "@/lib/inbox";
@@ -562,9 +562,13 @@ export async function notifyInvite(opts: {
  */
 export async function notifyModelProposed(opts: {
   actorEmail: string; actorName: string; kind: string; model: string; where: string;
+  /** The workspace whose catalog gained the term. Null only pre-tenancy. */
+  tenantOrgId?: number | null;
 }) {
   try {
-    const to = (await houseEmails()).filter((e) => e !== opts.actorEmail.toLowerCase());
+    // Same rule as notifyGasEmpty: one workspace's catalog, one workspace's
+    // engineers.
+    const to = (await houseEmails(opts.tenantOrgId ?? null)).filter((e) => e !== opts.actorEmail.toLowerCase());
     if (!to.length) return;
     const url = appUrl();
     await deliver({
@@ -583,7 +587,14 @@ export async function notifyModelProposed(opts: {
 
 export async function notifyGasEmpty(opts: { actorEmail: string; actorName: string; gas: string; instrumentId: number; externalId: string }) {
   try {
-    const to = (await houseEmails()).filter((e) => e !== opts.actorEmail.toLowerCase());
+    // The engineers of the workspace whose instrument it is. houseEmails() with
+    // no argument is EVERY staff member on the instance - lib/house says so:
+    // "only ever right for a platform-level message: a fault reported on one
+    // operator's system must not email another operator's engineers, who cannot
+    // even open the link."
+    const [inst] = await db.select({ tenantOrgId: instruments.tenantOrgId })
+      .from(instruments).where(eq(instruments.id, opts.instrumentId));
+    const to = (await houseEmails(inst?.tenantOrgId ?? null)).filter((e) => e !== opts.actorEmail.toLowerCase());
     if (!to.length) return;
     const url = appUrl();
     await deliver({

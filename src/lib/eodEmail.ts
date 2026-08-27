@@ -9,6 +9,7 @@ import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { instruments, eodUpdates, assets, orgs } from "@/db/schema";
 import { namedLogins } from "@/lib/directory";
+import { forTenant } from "@/lib/tenancy";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { appUrl } from "@/lib/appUrl";
@@ -99,12 +100,25 @@ export const isOffSystem = (s: { instrumentId: number | null; assetId: number | 
  * handed to a client lead has left the active set, and reading history through
  * today's filters would silently erase its entry.
  */
-export async function collectEodEntries(date: string, orgId: number | null, historical = false): Promise<EodEntry[]> {
+export async function collectEodEntries(
+  date: string, orgId: number | null, historical = false,
+  /**
+   * The workspace this report is for. Load-bearing on the HOUSE edition:
+   * includesSystem keeps a system when `(i.ownerOrgId ?? null) === orgId`, and
+   * on that edition orgId is null - which matches every unowned system in
+   * EVERY workspace, not just this one's. Null here keeps the old unrestricted
+   * behaviour for platform-level callers and pre-tenancy instances.
+   */
+  tenantOrgId: number | null = null,
+): Promise<EodEntry[]> {
   const [rows, saved, directory, orgRow] = await Promise.all([
-    // All systems: includesSystem decides, so an archived-but-recorded one is
-    // still reachable in history.
-    db.select().from(instruments).orderBy(asc(instruments.priority), asc(instruments.externalId)),
-    db.select().from(eodUpdates).where(eq(eodUpdates.date, date)),
+    // This workspace's systems: includesSystem then decides, so an
+    // archived-but-recorded one is still reachable in history.
+    db.select().from(instruments)
+      .where(forTenant(instruments.tenantOrgId, tenantOrgId))
+      .orderBy(asc(instruments.priority), asc(instruments.externalId)),
+    db.select().from(eodUpdates).where(and(
+      eq(eodUpdates.date, date), forTenant(eodUpdates.tenantOrgId, tenantOrgId))),
     namedLogins(),
     orgId === null ? Promise.resolve(undefined) : db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, orgId)).then((r) => r[0]),
   ]);
@@ -243,7 +257,7 @@ export async function composeEodEmail(
   subject: string; html: string; filled: number; total: number;
 }> {
   const brand = await brandForTenant(tenantOrgId);
-  const entries = await collectEodEntries(date, orgId, false);
+  const entries = await collectEodEntries(date, orgId, false, tenantOrgId);
   // Skipped is "not today"; internal is "not for them". Both leave the client's
   // report, and only the internal one stays on our own screen.
   const included = entries.filter((e) => !e.skipped && !e.internal);

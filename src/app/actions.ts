@@ -951,6 +951,7 @@ export async function createAsset(instrumentId: number | null, data: AssetInput)
   // flagged to the house so the review queue on the catalog page picks it up.
   if (row.model && !(await modelInCatalog(row.kind, row.model, row.tenantOrgId))) {
     await notifyModelProposed({
+      tenantOrgId: myTenantOrgId(u),
       actorEmail: u.email, actorName: u.name || u.email,
       kind: row.kind, model: row.model, where: externalId,
     });
@@ -1023,6 +1024,7 @@ export async function updateAsset(assetId: number, data: AssetInput): Promise<{ 
   if (a.model && a.model.toLowerCase() !== before.model.trim().toLowerCase()
       && !(await modelInCatalog(a.kind, a.model, before.tenantOrgId))) {
     await notifyModelProposed({
+      tenantOrgId: myTenantOrgId(u),
       actorEmail: u.email, actorName: u.name || u.email,
       kind: a.kind, model: a.model, where: a.serial ? `SN ${a.serial}` : "",
     });

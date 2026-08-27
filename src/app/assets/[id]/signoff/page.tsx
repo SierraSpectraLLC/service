@@ -3,7 +3,7 @@ import Link from "next/link";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, tasks, checklistItems, parts, attachments, instruments, procedures, signoffs, taskResults} from "@/db/schema";
-import { requireUser } from "@/lib/authz";
+import { houseOf, requireUser } from "@/lib/authz";
 import { shopMonthDay, shopTime } from "@/lib/shopday";
 import { parseSpecs } from "@/lib/partSpecs";
 import { brandForTenant } from "@/lib/brand";
@@ -42,6 +42,11 @@ export default async function AssetSignoffPage({ params }: { params: Promise<{ i
     db.select().from(attachments).where(eq(attachments.assetId, assetId)).orderBy(asc(attachments.createdAt)),
   ]);
   if (!asset) notFound();
+  // A sign-off packet is the whole record - tasks, parts, files, the
+  // signatures and who gave them. The role test above is true for EVERY
+  // operator's staff, so the id was the only thing standing between one
+  // service company and another's completed job.
+  if (!houseOf(user, asset.tenantOrgId)) notFound();
   // Signed by the workspace whose unit it is - see brandForTenant.
   const brand = await brandForTenant(asset.tenantOrgId);
   const [home] = asset.instrumentId !== null

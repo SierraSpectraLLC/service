@@ -118,7 +118,13 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
     // that leads to an error message.
     db.select().from(assets).where(and(isNull(assets.instrumentId),
       ne(assets.status, "Decommissioned"),
-      user.orgId === null ? undefined : eq(assets.ownerOrgId, user.orgId))).orderBy(asc(assets.kind), asc(assets.model)),
+      // Staff carry orgId null, so the org test alone fell through to no
+      // predicate at all and the picker offered every workspace's shelf stock -
+      // another company's spares, attachable onto this system. The house sees
+      // its OWN house's shelf.
+      user.orgId === null
+        ? forTenant(assets.tenantOrgId, readTenant(user))
+        : eq(assets.ownerOrgId, user.orgId))).orderBy(asc(assets.kind), asc(assets.model)),
     db.select().from(discussionReads).where(and(eq(discussionReads.userEmail, user.email), eq(discussionReads.threadId, instId))),
     // Who this system is shared with, and who it could be shared with.
     db.select({ orgId: systemShares.orgId, access: systemShares.access, name: orgs.name, kind: orgs.kind })
