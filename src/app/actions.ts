@@ -58,6 +58,7 @@ import {
   addMonths, billCadenceLabel, dueCycles, missedCycles, openingCursor, recurring,
 } from "@/lib/recurring";
 import { editableReport, mayWorkReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
+import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
@@ -15294,6 +15295,110 @@ export async function recordHistoricalInvoice(
  * the client; both are wrong for a job that was quoted, won and finished two
  * years ago. This writes the answer and the day it came, and raises nothing.
  */
+/**
+ * A purchase order that was already placed, and probably already received.
+ *
+ * The last of the four documents to get a history door, and the one that most
+ * needed it: a part sitting on a shelf with no order behind it cannot be
+ * traced to what was paid for it, so a shop that migrates its invoices and
+ * quotes but not its purchasing arrives with an inventory it cannot cost.
+ *
+ * Defined by what it refuses, like its siblings: nothing is emailed to the
+ * vendor, no receiving notification fires, and no stock movement is invented.
+ * A received order writes its lines already received, because that is what
+ * happened - not because pressing a button here should move anything today.
+ *
+ * The number is THEIRS. A migration whose PO numbers do not match the vendor's
+ * copies is a migration that makes every future conversation about an old
+ * order harder.
+ */
+export async function recordHistoricalPurchaseOrder(
+  data: {
+    number: string; vendor: string; orderedOn: string; reference: string; note: string;
+    stockroomId: number | null;
+    /** received | sent | cancelled. */
+    outcome: string;
+    lines: { partNumber: string; name: string; qty: number; unitCents: number }[];
+  },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  const vendor = data.vendor.trim().slice(0, 120);
+  const problem = poProblem({
+    vendor, orderedOn: data.orderedOn, outcome: data.outcome, lines: data.lines,
+  });
+  if (problem) return { error: problem };
+
+  // The destination room, when one was named, and only one of ours.
+  let stockroomId: number | null = null;
+  let orgId: number | null = null;
+  if (data.stockroomId !== null) {
+    const [room] = await db.select().from(stockrooms).where(and(
+      eq(stockrooms.id, data.stockroomId),
+      forTenant(stockrooms.tenantOrgId, tenant),
+    ));
+    if (!room) return { error: "That stockroom is not one of ours" };
+    stockroomId = room.id;
+    orgId = room.orgId;
+  }
+
+  const typed = data.number.trim().slice(0, 40);
+  // Instance-wide, because po_number_unique is - see lib/docNumberData.used.
+  const clash = typed
+    ? await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.number, typed))
+    : [];
+  if (clash.length) return { error: `${typed} is already on file` };
+
+  const lines = usablePoLines(data.lines).slice(0, 200);
+  const at = new Date(`${data.orderedOn}T12:00:00Z`);
+  const status = data.outcome === "cancelled" ? "cancelled"
+    : data.outcome === "sent" ? "sent" : "received";
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const number = typed || await nextDocNumber("purchase_order", tenant);
+    try {
+      const [po] = await db.insert(purchaseOrders).values({
+        tenantOrgId: tenant, number, vendor, stockroomId, orgId, status,
+        reference: data.reference.trim().slice(0, 80),
+        note: data.note.trim().slice(0, 500),
+        createdBy: u.email, createdAt: at,
+        // The dates it actually had. Every outcome this door offers was sent
+        // to a vendor - a cancelled order was still sent first - which is why
+        // sentAt is unconditional and only the closing stamp varies.
+        sentAt: at,
+        closedAt: status === "received" || status === "cancelled" ? at : null,
+        cancelReason: status === "cancelled" ? "Recorded as history" : "",
+      }).returning();
+      if (lines.length) {
+        await db.insert(poLines).values(lines.map((l) => ({
+          poId: po.id,
+          partNumber: l.partNumber.trim().slice(0, 80),
+          name: l.name.trim().slice(0, 160),
+          qtyOrdered: Math.max(1, Math.round(l.qty)),
+          // Received orders arrive already received. Nothing moves stock: the
+          // shelf is whatever the shelf says, and this is the paper behind it.
+          qtyReceived: status === "received" ? Math.max(1, Math.round(l.qty)) : 0,
+          unitCents: Number.isFinite(l.unitCents) && l.unitCents > 0 ? Math.round(l.unitCents) : null,
+        })));
+      }
+      await audit({
+        actor: u.email, entityType: "po", entityId: po.id, tenantOrgId: tenant,
+        action: `recorded historical purchase order ${number} to ${vendor}`
+          + ` (${data.orderedOn}, ${status}) - typed in as history, not sent from here`,
+      });
+      revalidatePath("/money/purchasing");
+      return { id: po.id, number };
+    } catch (e) {
+      // A number we generated collided with a concurrent insert; a number the
+      // person typed was checked above and will not get better by retrying.
+      if (typed) return { error: `${typed} is already on file` };
+      last = e;
+    }
+  }
+  throw last;
+}
+
 export async function recordHistoricalQuote(
   orgId: number,
   data: {

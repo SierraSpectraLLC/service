@@ -22,6 +22,16 @@ export type BackfillLine = { kind: string; description: string; qty: number; uni
 
 export const INVOICE_OUTCOMES = ["paid", "open", "void"] as const;
 export const QUOTE_OUTCOMES = ["approved", "declined", "expired"] as const;
+/**
+ * How a past purchase order ended.
+ *
+ * Received is the ordinary one - the parts arrived, which is the whole reason
+ * anybody types an old PO in. Cancelled is kept because a cancelled order is
+ * part of the vendor conversation and its number is spent either way; "sent"
+ * exists for the order that is genuinely still outstanding when the shop
+ * migrates mid-flight.
+ */
+export const PO_OUTCOMES = ["received", "sent", "cancelled"] as const;
 
 /** What the lines come to, in cents. Quantities are whole units here, not thousandths. */
 export const backfillTotal = (lines: BackfillLine[]): number =>
@@ -90,3 +100,35 @@ export function quoteProblem(
  * two disagree is the day somebody stops trusting the ledger.
  */
 export const openingStatus = (outcome: string): string => (outcome === "void" ? "void" : "sent");
+
+export type BackfillPoLine = { partNumber: string; name: string; qty: number; unitCents: number };
+
+/** The lines a past purchase order can actually be written from. */
+export const usablePoLines = (lines: BackfillPoLine[]): BackfillPoLine[] =>
+  lines.filter((l) => l.partNumber.trim() || l.name.trim());
+
+/**
+ * What is wrong with a past purchase order, or null.
+ *
+ * A part NUMBER is the required thing rather than a name, because a PO whose
+ * lines cannot be matched to a part number is a receipt, not an order - the
+ * whole value of typing an old one in is that a part on a shelf can be traced
+ * back to what was paid for it.
+ */
+export function poProblem(input: {
+  vendor: string;
+  orderedOn: string;
+  outcome: string;
+  lines: BackfillPoLine[];
+}): string | null {
+  if (!input.vendor.trim()) return "Say who it was ordered from";
+  if (!isDay(input.orderedOn)) return "Pick the day it was ordered";
+  if (!(PO_OUTCOMES as readonly string[]).includes(input.outcome)) return "Say how it ended";
+  const lines = usablePoLines(input.lines);
+  if (!lines.length) return "Add at least one line with a part number";
+  if (lines.some((l) => !l.partNumber.trim())) {
+    return "Every line needs a part number - a line without one cannot be traced back to a part";
+  }
+  if (lines.some((l) => l.qty <= 0)) return "A line with no quantity is not an order";
+  return null;
+}
