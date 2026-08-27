@@ -13,6 +13,8 @@ import OrgSettingsForm from "@/components/OrgSettingsForm";
 import SitesCard from "@/components/SitesCard";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import BillingPolicyPanel from "@/components/BillingPolicyPanel";
+import PmPlanPanel from "@/components/PmPlanPanel";
+import { coverageForOrg, fleetCategories } from "@/lib/pmPlanData";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
 import { shopToday } from "@/lib/shopday";
@@ -132,6 +134,20 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   }).from(instruments).where(eq(instruments.ownerOrgId, orgId)).orderBy(asc(instruments.externalId)))
     .map((r) => ({ id: r.id, ownerOrgId: r.ownerOrgId, externalId: r.externalId, label: r.model }));
   const today = shopToday();
+
+  /*
+   * The maintenance plan and what has been delivered against it. Only for a
+   * client organization - a plan is what a service company promises somebody,
+   * and another operator is not somebody it promises anything to.
+   *
+   * Read through lib/pmPlanData, which is the same reader /maintenance/coverage
+   * uses, so this page and the shop-wide board cannot disagree about a number
+   * that is about to be said to a client.
+   */
+  const { plans: pmPlanRows, rows: pmCoverageRows } = org.isOperator
+    ? { plans: [], rows: [] }
+    : await coverageForOrg({ orgId: org.id, tenantOrgId: tenant, today });
+  const pmCategories = org.isOperator ? [] : await fleetCategories(org.id, tenant);
   // How many machines this organization has enrolled - the number the remote
   // tier is sold against, and what billing would eventually read.
   const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
@@ -150,14 +166,23 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   const base = `/settings/organizations/${org.id}`;
   // Billing is owner-only, so it is gated here as well as in the tab list -
   // a tab you cannot see is not a tab you can reach by typing the URL.
-  const tab = ["agreements", "sites", "billing"].includes(sp.tab ?? "")
+  // "staff" was missing from this list while the tab was in the one below, so
+  // clicking Staff silently fell back to Settings and the panel it gates was
+  // unreachable. A tab list and a tab guard are two statements of the same
+  // thing; they are next to each other for that reason.
+  const tab = ["agreements", "sites", "billing", "staff", "pm"].includes(sp.tab ?? "")
     && (sp.tab !== "agreements" || seesAgreements)
     && (sp.tab !== "billing" || isOwner)
+    && (sp.tab !== "staff" || org.isOperator)
+    && (sp.tab !== "pm" || !org.isOperator)
     ? sp.tab! : "settings";
   const tabs: TabItem[] = [
     { key: "settings", label: "Settings", href: base },
     ...(seesAgreements ? [{ key: "agreements", label: "Agreements", count: agreementRows.length, href: `${base}?tab=agreements` }] : []),
     { key: "sites", label: "Sites", count: siteRows.length, href: `${base}?tab=sites` },
+    /* A maintenance plan is a thing a SERVICE COMPANY promises a client, so it
+       has no meaning on another operator's organization page. */
+    ...(!org.isOperator ? [{ key: "pm", label: "Maintenance", count: pmPlanRows.length || undefined, href: `${base}?tab=pm` }] : []),
     ...(org.isOperator ? [{ key: "staff", label: "Staff", count: staffRows.length, href: `${base}?tab=staff` }] : []),
     ...(isOwner ? [{ key: "billing", label: "Billing", href: `${base}?tab=billing` }] : []),
   ];
@@ -239,6 +264,23 @@ export default async function OrgSettingsPage({ params, searchParams }: {
         canEdit={isHouse(user.role)}
         papers={agreementPapers}
       />
+      )}
+
+      {tab === "pm" && !org.isOperator && (
+        <PmPlanPanel
+          orgId={org.id}
+          orgName={org.name}
+          plans={pmPlanRows}
+          categories={pmCategories}
+          rows={pmCoverageRows}
+          /* The house writes an entitlement; the client reads it. A client
+             editor configures their own sites and their own billing address
+             because those are facts about them - what they are OWED is not,
+             and a client who could raise their own PM count would be writing
+             the contract from the wrong side. Matched by setPmPlan. */
+          canEdit={isHouse(user.role)}
+          year={Number(today.slice(0, 4))}
+        />
       )}
 
       {tab === "billing" && isOwner && (

@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * top-level record takes myTenantOrgId(u), the writer's own workspace.
  */
 const STAMPED = [
-  "instruments", "assets", "tasks", "pmSchedules", "timeEntries", "attachments",
+  "instruments", "assets", "tasks", "pmSchedules", "pmPlans", "timeEntries", "attachments",
   "procedures", "vocabTerms", "stageDefs", "people", "stockrooms", "discussionPosts",
   "purchaseOrders", "partPrices", "eodUpdates", "remoteDevices", "auditLog",
   "cloudConnections", "serviceVisits", "workOrders", "orgSites", "partCatalog", "agreements",

@@ -32,6 +32,8 @@ import { copyTargetsFor } from "@/lib/copyTargets";
 import { clientOptions } from "@/lib/clientNames";
 import { canOfferResale, resaleFlagFor } from "@/lib/owner";
 import { pmPosture, postureLine } from "@/lib/pmPosture";
+import { coverageForSystem } from "@/lib/pmPlanData";
+import { COVERAGE_LABEL, COVERAGE_TONE, coverageLine, perYearLabel } from "@/lib/pmPlan";
 import { sitesFor } from "@/lib/sites";
 import { directoryNames, visibleDirectory } from "@/lib/directory";
 import {
@@ -72,7 +74,7 @@ import { dayOf } from "@/lib/serviceHistory";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
 import { stateOf } from "@/lib/clientLandingData";
-import { HeroKebab, RecordHero, type HeroStat } from "@/components/ui";
+import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
 import { loadTaskTests, testFieldsFor } from "@/lib/taskTests";
@@ -433,6 +435,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
   const openTasks = fullTasks.filter((t) => t.state !== "Done");
   const overdueTasks = openTasks.filter((t) => t.dueDate && t.dueDate < today).length;
   const pmDue = pmRows.filter((sc) => !sc.paused && sc.nextDue <= today).length;
+  /* Where this system stands against its owner's maintenance plan - the
+     promise, as opposed to the schedules above which are the machine. Read
+     through the same lib/pmPlanData both boards use, so the system page and
+     the coverage board cannot disagree. Named planStanding, not coverage:
+     `coverage` on this page is lib/coverage, which is warranty. */
+  const planStanding = await coverageForSystem({
+    instrumentId: inst.id, ownerOrgId: inst.ownerOrgId, category: inst.category,
+    tenantOrgId: readTenant(user), today,
+  });
   const queueMine = queueView(user, inst) === "mine";
   const queueDays = daysSince(inst.queueSince ?? inst.createdAt, new Date());
   /* Whether holding this is actually a chore, for the standing line's client
@@ -831,6 +842,31 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
               jobs={woRows.filter((w) => woOpen(w.state)).map((w) => ({ id: w.id, number: w.number, title: w.title, state: w.state }))} />
           ) },
           { key: "maintenance", label: "Maintenance", node: (
+            <>
+            {/* What this system's OWNER was promised, and what has landed. The
+                panel below is the machine - schedules, cadences, next due -
+                and says nothing about the promise; a system can be perfectly on
+                cadence and still be a visit short of what was agreed. Absent
+                entirely when nobody has written a plan, because an empty band
+                saying "no plan" on every system in a shop that does not work
+                that way is noise. See lib/pmPlan. */}
+            {planStanding.coverage.state !== "unplanned" && (
+              <div className="card" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span className="t-body" style={{ fontWeight: 700 }}>
+                  {inst.category || "This system"}: {perYearLabel(planStanding.coverage.perYear)}
+                </span>
+                <Pill tone={COVERAGE_TONE[planStanding.coverage.state]}>
+                  {COVERAGE_LABEL[planStanding.coverage.state]}
+                </Pill>
+                <span className="mut t-small">{coverageLine(planStanding.coverage)}</span>
+                {isStaff && inst.ownerOrgId !== null && (
+                  <Link className="btn sm" style={{ marginLeft: "auto" }}
+                    href={`/settings/organizations/${inst.ownerOrgId}?tab=pm`}>
+                    Their plan
+                  </Link>
+                )}
+              </div>
+            )}
             <MaintenancePanel target={{ instrumentId: inst.id, assetId: null }} today={shopToday()} canEdit={canEdit}
               catalogHint={isStaff}
               // Scheduled vs advisory (lib/pmPosture): a reseller's systems
@@ -865,6 +901,7 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
                   openTaskId: taskRows.find((t) => t.pmScheduleId === s.id && t.state !== "Done")?.id ?? null,
                 };
               })} />
+            </>
           ) },
           { key: "parts", label: "Parts", node: (
             <PartsPanel target={{ instrumentId: inst.id, assetId: null }}

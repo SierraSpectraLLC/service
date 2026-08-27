@@ -3382,3 +3382,30 @@ CREATE INDEX IF NOT EXISTS "trail_events_email_idx" ON "trail_events" ("email");
 -- reimbursement claim for a colleague and read their workspace's payroll
 -- register. Not the books: lib/books stays owner-only.
 ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "can_admin_people" boolean NOT NULL DEFAULT false;
+
+-- What a client is owed in preventive maintenance, per class of system:
+-- "two PMs a year on every mass spec, one on every LC". A count per year, not
+-- a cadence - see src/db/schema.ts. category '' is that client's catch-all.
+CREATE TABLE IF NOT EXISTS "pm_plans" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tenant_org_id" integer,
+  "org_id" integer NOT NULL,
+  "category" text NOT NULL DEFAULT '',
+  "per_year" integer NOT NULL DEFAULT 1,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_plans_org_id_orgs_id_fk') THEN
+    ALTER TABLE "pm_plans" ADD CONSTRAINT "pm_plans_org_id_orgs_id_fk"
+      FOREIGN KEY ("org_id") REFERENCES "orgs"("id") ON DELETE cascade;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS "pm_plans_org_idx" ON "pm_plans" ("org_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'pm_plan_org_category_unique') THEN
+    ALTER TABLE "pm_plans" ADD CONSTRAINT "pm_plan_org_category_unique"
+      UNIQUE ("tenant_org_id", "org_id", "category");
+  END IF;
+END $$;

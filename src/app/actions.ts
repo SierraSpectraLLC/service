@@ -10,7 +10,7 @@ import {
   instruments, instrumentGases, tasks, checklistItems, itemNotes, taskNotes, parts, attachments,
   sheetDiffs, appSettings, eodUpdates, clientAllowlist, users, sessions, stageDefs,
   stageEvents, discussionPosts, assets, serviceVisits, assetEvents, discussionReads, vocabTerms, systemShares, orgs, timeEntries, trailEvents,
-  engagementRecords, accessRequests, assetShares, pmSchedules, procedures, signoffs, partPrices,
+  engagementRecords, accessRequests, assetShares, pmPlans, pmSchedules, procedures, signoffs, partPrices,
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
@@ -137,6 +137,7 @@ import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
 import { isHouseHr, mayAdminPeople, payrollViewerFor, reportSubjectFor } from "@/lib/hr";
+import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -11938,6 +11939,107 @@ export async function setOrgBillingAddress(orgId: number, address: string): Prom
     field: "billingAddress", oldValue: org.billingAddress, newValue: next,
   });
   revalidatePath(`/settings/organizations/${orgId}`);
+  return {};
+}
+
+// ── PM plans ────────────────────────────────────────────────────────────────
+// What a client is owed in preventive maintenance, per class of system. The
+// promise, not the machine: nothing here generates work, and pm_schedules is
+// untouched by any of it. lib/pmPlan owns the arithmetic and
+// /maintenance/coverage draws the gap between the two.
+
+/**
+ * The house writes a plan; the client reads one.
+ *
+ * assertOrgConfigurable would let a client_editor configure their own
+ * organization, which is right for a site or a billing address - those are
+ * facts about them that they know best. An entitlement is not: it is what the
+ * service company has committed to, and a client who could raise their own PM
+ * count from one to four would be writing the contract from the wrong side of
+ * it.
+ */
+async function assertPlanWritable(u: SessionUser, org: typeof orgs.$inferSelect) {
+  if (!isHouse(u.role)) throw new Error("Not found");
+  await assertOrgConfigurable(u, org);
+}
+
+/**
+ * Set what a class of this client's systems is owed a year, or change it.
+ *
+ * One row per (client, category) - upserted rather than appended, because two
+ * rows answering "how many PMs does an MS get" is the state this table exists
+ * to make impossible, and a form that quietly added a second would produce it
+ * on the first typo-and-retry.
+ *
+ * Zero is a real, keepable answer. "We do not PM those" is a decision somebody
+ * made and should be able to write down; it reads differently from silence on
+ * every surface, which is why it is stored rather than treated as a delete.
+ */
+export async function setPmPlan(
+  orgId: number,
+  data: { category: string; perYear: number; note?: string },
+): Promise<{ error?: string; id?: number }> {
+  const u = await requireUser();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org) return { error: "Not found" };
+  try { await assertPlanWritable(u, org); } catch { return { error: "Not found" }; }
+  const category = data.category.trim().slice(0, 60);
+  const perYear = Math.floor(Number(data.perYear));
+  if (!Number.isInteger(perYear) || perYear < 0 || perYear > PLAN_MAX_PER_YEAR) {
+    return { error: `A plan is between 0 and ${PLAN_MAX_PER_YEAR} visits a year` };
+  }
+  const note = (data.note ?? "").trim().slice(0, 300);
+  const tenantOrgId = orgTenant(org);
+  const [existing] = await db.select().from(pmPlans).where(and(
+    eq(pmPlans.orgId, orgId),
+    eq(pmPlans.category, category),
+    forTenant(pmPlans.tenantOrgId, tenantOrgId),
+  ));
+  const what = category || "every system";
+  if (existing) {
+    if (existing.perYear === perYear && existing.note === note) return { id: existing.id };
+    await db.update(pmPlans).set({ perYear, note }).where(eq(pmPlans.id, existing.id));
+    await audit({
+      actor: u.email, entityType: "pm_plan", entityId: existing.id, tenantOrgId,
+      action: `changed ${org.name}'s plan for ${what} to ${perYearLabel(perYear)}`,
+      field: "perYear", oldValue: String(existing.perYear), newValue: String(perYear),
+    });
+    revalidatePath(`/settings/organizations/${orgId}`);
+    revalidatePath("/maintenance/coverage");
+    return { id: existing.id };
+  }
+  const [row] = await db.insert(pmPlans).values({
+    tenantOrgId, orgId, category, perYear, note, createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "pm_plan", entityId: row.id, tenantOrgId,
+    action: `${org.name}: ${what} is on ${perYearLabel(perYear)}`,
+    field: "perYear", newValue: String(perYear),
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  revalidatePath("/maintenance/coverage");
+  return { id: row.id };
+}
+
+/** Take a class back off the plan entirely - which is not the same as zero. */
+export async function removePmPlan(id: number): Promise<{ error?: string }> {
+  const u = await requireUser();
+  const [row] = await db.select().from(pmPlans).where(eq(pmPlans.id, id));
+  if (!row) return {};
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, row.orgId));
+  if (!org) return { error: "Not found" };
+  try { await assertPlanWritable(u, org); } catch { return { error: "Not found" }; }
+  // The org test above is the authorization; this is the tenant one. An org id
+  // on a row is not a scope - the row carries its own stamp and it is the stamp
+  // that says whose plan this is.
+  if (!houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  await db.delete(pmPlans).where(eq(pmPlans.id, id));
+  await audit({
+    actor: u.email, entityType: "pm_plan", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `took ${row.category || "every system"} off ${org.name}'s maintenance plan`,
+  });
+  revalidatePath(`/settings/organizations/${row.orgId}`);
+  revalidatePath("/maintenance/coverage");
   return {};
 }
 
