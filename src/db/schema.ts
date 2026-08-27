@@ -71,7 +71,9 @@ export const users = pgTable("users", {
    */
   onboardedAt: timestamp("onboarded_at"),
   /**
-   * The newest "What's new" card this person has dismissed (lib/whatsNew).
+   * Vestigial: the "What's new" changelog was removed from the product. The
+    * column stays because dropping one is a migration and an unused text
+    * column costs nothing; nothing reads or writes it any more.
    * Blank = never dismissed any, which for a new account simply means the
    * current batch shows once. On the user rather than in localStorage so a
    * dismissal on the desk PC holds on the phone in the lab.

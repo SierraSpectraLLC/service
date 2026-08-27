@@ -9,7 +9,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { assetAccess, assertSystemVisible, canEditSystem, forTenant, isHouse, readTenant } from "@/lib/tenancy";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { visitFlag } from "@/lib/entitlementFlags";
 import { canSeeCosts, redactParts } from "@/lib/redact";
 import { systemPartiesFor } from "@/lib/partyData";
@@ -128,7 +128,9 @@ export default async function WorkOrderPage({ params }: { params: Promise<{ id: 
       .orderBy(desc(attachments.createdAt)),
     visibleDirectory(user),
     wo.orgId === null ? Promise.resolve([]) : db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, wo.orgId)),
-    getBrand(),
+    // The JOB's workspace - it is what "asked by" names on a house job, and it
+    // is the same record the rate card below is drawn from.
+    brandForTenant(wo.tenantOrgId),
     wo.instrumentId === null ? Promise.resolve([]) : db.select().from(assets)
       .where(eq(assets.instrumentId, wo.instrumentId)).orderBy(asc(assets.sortOrder), asc(assets.id)),
     db.select().from(workOrderNotes).where(eq(workOrderNotes.workOrderId, woId))

@@ -4,7 +4,7 @@ import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { attachments, dropLinks, folders as foldersTable, instruments, orgs, shareLinks, shareLinkFiles } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { shopTime, shopToday } from "@/lib/shopday";
 import { storeFiles, storeQuota, storeTenantFor, visibleNotOwnedFiles } from "@/lib/storeUsage";
 import { groupStoredFiles, totalBytes } from "@/lib/storeGroup";
@@ -74,7 +74,10 @@ export default async function DocumentsPage(
     storeFiles(viewing, storeTenant, CAP).catch(() => []),
     storeQuota(viewing, storeTenant),
     reachable,
-    getBrand(),
+    // The viewer's own workspace names its own shelf. getBrand() names the
+    // company that RUNS the instance, so every workspace's "own work" tab
+    // carried the landlord's name over the tenant's own documents.
+    storeTenantFor(null, user).then(brandForTenant),
     // Readable, but somebody else's - a system shared with them, or one they
     // sold and stayed on as a viewer. These are why the PDF studio can offer
     // PDFs this page used to omit without explaining itself.

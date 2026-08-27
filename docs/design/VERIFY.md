@@ -110,7 +110,6 @@ How each column is measured:
 | `/stock` | L | yes | yes | yes | yes | yes | yes | yes | - |
 | `/stock/1` | R | yes | yes | 0 fontSize / 4 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/welcome` | F | yes | yes | yes | yes | yes | yes | yes | - |
-| `/whats-new` | U | yes | yes | 2 fontSize / 0 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 | `/work` | L | yes | yes | yes | yes | yes | yes | yes | - |
 | `/work/2` | R | yes | yes | 1 fontSize / 3 hex | yes | yes | yes | yes | off-scale or runtime-only residue (see notes) |
 
@@ -154,7 +153,7 @@ focus-return of the shared Dialog every dialog in the app renders through):
    `node_modules/.cache/ridgeline-pglite` to recover). Dev-harness-only;
    production uses Neon.
 2. **Not capturable in dev:local**: CloudBrowser/CloudLibraryCard (need a
-   Microsoft app), WhatsNew overlay (needs an undismissed changelog), toast
+   Microsoft app), toast
    popups from NotificationCenter (need a fresh notification mid-session).
 3. **Class-size conflicts left in place**: a handful of `.btn.link` /
    `.btn.sm` / `.card-title` elements carry an inline fontSize that

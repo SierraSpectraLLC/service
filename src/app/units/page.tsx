@@ -7,7 +7,7 @@ import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, viewTenant, visibleSystemIds } from "@/lib/tenancy";
 import { systemLabel } from "@/lib/systemLabel";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { ageDays, getStageSince } from "@/lib/stageAges";
 import { BLOCKED_STAGE } from "@/lib/stages";
 import { blockHolderName, blockLabel } from "@/lib/blocks";
@@ -58,7 +58,10 @@ export default async function UnitsPage({ searchParams }: {
 
   const ids = rows.map((r) => r.id);
   const [brand, org, assetRows, since] = await Promise.all([
-    getBrand(),
+    // The workspace this page speaks for, not the one that runs the instance.
+    // getBrand().operatorName is the landlord's company name, and these render
+    // it as "who has your equipment" / "who asked for this job".
+    viewTenant(user).then(brandForTenant),
     db.select({ name: orgs.name, resale: orgs.resaleEnabled }).from(orgs)
       .where(eq(orgs.id, user.orgId)).then((r) => r[0] ?? null),
     ids.length

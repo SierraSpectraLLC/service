@@ -130,7 +130,6 @@ import { pmHandoff } from "@/lib/pmQueue";
 import { isPmPosture } from "@/lib/pmPosture";
 import { canDeleteNote, canEditNote, isAuthor } from "@/lib/notes";
 import { readersOf } from "@/lib/mentionAudience";
-import { WHATS_NEW, latestKey } from "@/lib/whatsNew";
 import { clearPasswordFor, setPasswordFor } from "@/lib/passwordAuth";
 import { makeTempPassword, tempExpiry, TEMP_DAYS_DEFAULT } from "@/lib/tempPassword";
 import { isPanelMode, type PanelMode } from "@/lib/panelMode";
@@ -9970,18 +9969,6 @@ export async function clearMyPassword(): Promise<{ error?: string }> {
   return {};
 }
 
-/**
- * "Got it" on the What's new cards. Records the newest key that existed at
- * dismissal, so the next batch shows and this one never does again. No audit
- * line: closing a changelog is not an event anybody will ever ask about.
- */
-export async function dismissWhatsNew(): Promise<{ error?: string }> {
-  const u = await requireUser();
-  await db.update(users).set({ whatsNewSeen: latestKey(WHATS_NEW) })
-    .where(eq(users.email, u.email.toLowerCase()));
-  revalidatePath("/");
-  return {};
-}
 
 /** Where to text my codes. Blank removes it. */
 export async function setMyPhone(raw: string): Promise<{ error?: string }> {

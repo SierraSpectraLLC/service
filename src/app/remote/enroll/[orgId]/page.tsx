@@ -5,7 +5,8 @@ import { db } from "@/db";
 import { orgs } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/authz";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
+import { tenantOf } from "@/lib/tenants";
 import { getModules } from "@/lib/flags";
 import { mayEnroll } from "@/lib/remoteAccess";
 import { agentBranding, agentDownloads, ensureOrgGroup, NOT_CONFIGURED, remoteConfigured } from "@/lib/remote";
@@ -38,7 +39,8 @@ export default async function RemoteEnrollPage({ params }: { params: Promise<{ o
   if (isNaN(id)) notFound();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, id));
   if (!org) notFound();
-  const brand = await getBrand();
+  // Named for the workspace whose machines these are.
+  const brand = await brandForTenant(tenantOf(org));
 
   if (!remoteConfigured()) {
     return (

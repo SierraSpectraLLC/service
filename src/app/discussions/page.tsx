@@ -3,9 +3,9 @@ import { and, asc, desc, eq, isNull, isNotNull, inArray, lte, sql } from "drizzl
 import { db } from "@/db";
 import { discussionPosts, instruments, discussionReads, orgs } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { forTenant, readTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { forTenant, readTenant, viewTenant, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
 import { canSeePost, roomThreadId, type Audience } from "@/lib/discussionScope";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
 import { fmtWhen } from "@/lib/when";
 import DiscussionPanel from "@/components/DiscussionPanel";
@@ -52,7 +52,11 @@ export default async function DiscussionsPage({ searchParams }: { searchParams: 
     db.select().from(discussionReads)
       .where(and(eq(discussionReads.userEmail, user.email), lte(discussionReads.threadId, 0))),
     visibleOrgs(user),
-    getBrand(),
+    // The room belongs to the viewer's workspace, so it is named by that one.
+    // getBrand() names the company that runs the instance, so a second
+    // workspace's internal room - and every party name in it - read out the
+    // landlord's company name.
+    viewTenant(user).then(brandForTenant),
   ]);
 
   const readable = general.filter((p) => canSeePost(viewer, { ...p, audience: p.audience as Audience }));

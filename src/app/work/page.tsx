@@ -3,8 +3,8 @@ import { and, asc, desc, eq, inArray, isNull, or, sql, type AnyColumn, type SQL 
 import { db } from "@/db";
 import { assets, instruments, orgs, tasks, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { forTenant, isHouse, readTenant, visibleAssetIds, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
-import { getBrand } from "@/lib/brand";
+import { forTenant, isHouse, readTenant, viewTenant, visibleAssetIds, visibleOrgs, visibleSystemIds } from "@/lib/tenancy";
+import { brandForTenant } from "@/lib/brand";
 import { getSystemLabels } from "@/lib/systemLabel";
 import { shopToday } from "@/lib/shopday";
 import { creditForMany } from "@/lib/invoiceData";
@@ -74,7 +74,10 @@ export default async function WorkPage({ searchParams }: { searchParams: Promise
       ? db.select({ workOrderId: tasks.workOrderId, state: tasks.state }).from(tasks)
           .where(inArray(tasks.workOrderId, rows.map((w) => w.id)))
       : [],
-    getBrand(),
+    // The workspace this page speaks for, not the one that runs the instance.
+    // getBrand().operatorName is the landlord's company name, and these render
+    // it as "who has your equipment" / "who asked for this job".
+    viewTenant(user).then(brandForTenant),
   ]);
   const sysLabels = await getSystemLabels(instRows);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));

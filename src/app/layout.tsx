@@ -20,6 +20,8 @@ import { mayChooseView, resellerView } from "@/lib/viewMode";
 import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIcons";
 import ViewAsBar from "@/components/ViewAsBar";
 import { viewAsPeople } from "@/app/actions";
+import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
+import { visibleOrgs } from "@/lib/tenancy";
 import NotificationCenter from "@/components/NotificationCenter";
 import { ConfirmHost } from "@/components/ui/ConfirmDialog";
 import { ToastHost } from "@/components/ui/Toast";
@@ -64,10 +66,19 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     if (to) redirect(to);
   }
   const isStaff = user && (user.role === "owner" || user.role === "staff");
-  // Only the real owner is offered the switch, and only once signed in.
-  const mayViewAs = view.real?.role === "owner";
-  const orgOptions = mayViewAs
-    ? await db.select({ id: orgs.id, name: orgs.name, kind: orgs.kind }).from(orgs).orderBy(asc(orgs.name)).catch(() => [])
+  /* Only the real owner is offered the switch, and only once signed in - and
+     only the PLATFORM's owner. "View as" is a support tool for whoever runs
+     the instance: standing in somebody's shoes is how you reproduce a screen
+     you cannot otherwise see, and that is the landlord's job, not a tenant's.
+     `role === "owner"` is true for every workspace's owner, so a second
+     operator was offered the picker at all - and the org list below was the
+     whole orgs table with no predicate, so it named every company on the
+     instance before anybody clicked anything. */
+  const mayViewAs = !!view.real && isPlatformStaff(tenantViewer(view.real));
+  const orgOptions = mayViewAs && view.real
+    ? await visibleOrgs(view.real)
+        .then((rows) => rows.map((o) => ({ id: o.id, name: o.name, kind: o.kind })))
+        .catch(() => [])
     : [];
   /* And the people, for standing in one named person's shoes rather than a
      role's - the only way to reach somebody's saved layout, their assigned

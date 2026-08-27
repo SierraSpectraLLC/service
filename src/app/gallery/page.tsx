@@ -4,7 +4,7 @@ import { inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
 import { assets, instruments } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
-import { getBrand } from "@/lib/brand";
+import { brandForTenant } from "@/lib/brand";
 import { shopTime } from "@/lib/shopday";
 import { storeFiles, storeTenantFor } from "@/lib/storeUsage";
 import { groupStoredFiles } from "@/lib/storeGroup";
@@ -53,7 +53,10 @@ export default async function GalleryPage({ searchParams }: { searchParams: Prom
   const [rows, orgRows, brand] = await Promise.all([
     storeFiles(viewing, storeTenant, CAP).catch(() => []),
     reachable,
-    getBrand(),
+    // The viewer's own workspace names its own shelf. getBrand() names the
+    // company that RUNS the instance, so every workspace's "own work" tab
+    // carried the landlord's name over the tenant's own documents.
+    storeTenantFor(null, user).then(brandForTenant),
   ]);
 
   const photos = groupStoredFiles(rows.filter(isPhotoFile));

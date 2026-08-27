@@ -264,7 +264,7 @@ export default function PayrollPanel({
           <div className="pf3" style={{ marginBottom: 8 }}>
             <div>
               <label>Name *</label>
-              <input value={draft.name} autoFocus placeholder="Bill Harner"
+              <input value={draft.name} autoFocus placeholder="Steve Jones"
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
             </div>
             <div>

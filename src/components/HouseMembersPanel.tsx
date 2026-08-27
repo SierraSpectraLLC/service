@@ -122,7 +122,7 @@ export default function HouseMembersPanel({ members, myEmail, sites = [] }: {
             <div>
               <label>Email *</label>
               <input value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })}
-                placeholder="wjharner@example.com" inputMode="email" />
+                placeholder="sjones@example.com" inputMode="email" />
             </div>
           </div>
           <div className="dialog-section">What they may do</div>
