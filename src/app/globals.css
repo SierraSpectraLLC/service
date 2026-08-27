@@ -40,6 +40,13 @@
   --fs-hero:   19px;
   --fs-page:   22px;
   --fs-metric: 26px;
+  /* The tenth step, and the argument for it: a dashboard's HERO figure - the
+     one number a page leads with, and exactly one per page. lib/dataviz puts
+     the floor at 48px, which is nearly twice --fs-metric, and the gap is the
+     point: a metric tile and the figure the page is ABOUT should not be the
+     same size. Same sans as everything else - a display face here reads as
+     decoration rather than as the number. */
+  --fs-figure: 48px;
 
   /* ── Tones ──────────────────────────────────────────────────────────────
      The status vocabulary. Seven meanings, each a bg/fg pair, distilled from
@@ -85,6 +92,12 @@
     --fs-body:  14px;
     --fs-lead:  15px;
   }
+}
+/* The hero figure is the one step that SHRINKS on a narrow screen: 48px of
+   number is most of a phone's width, and the tiles beside it would wrap to one
+   per row. The body steps grow (above); this one gives way. */
+@media (max-width: 640px) {
+  :root { --fs-figure: 38px; }
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -1572,3 +1585,113 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
 .stage-col .age { font-size: var(--fs-meta); color: var(--mut); }
 .stage-col.hot { border-color: #EFC9C9; background: var(--t-bad-bg); }
 .stage-col.hot .c, .stage-col.hot .lab, .stage-col.hot .age { color: var(--t-bad-fg); }
+
+/* ── Charts ────────────────────────────────────────────────────────────────
+   The furniture a chart is made of. The COLOURS are not here - they live in
+   lib/chartPalette, where each set records what it was validated against, and
+   they arrive as inline styles because a series colour is data and data does
+   not belong in a stylesheet. What is here is the geometry: mark thickness,
+   the two spacers, and the tooltip.
+
+   Two spacers do all the separating, both painted in the surface colour: a 2px
+   GAP between touching marks, and a 2px RING on a dot that crosses a line.
+   Nothing here draws a border around a mark - a stroke is ink that is not data,
+   and at these sizes a row of them reads as a grid nobody asked for. */
+
+.chart-wrap { position: relative; width: 100%; }
+.chart-wrap svg { display: block; }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 10px; }
+.chart-key {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-small); color: var(--mut);
+}
+/* Identity rides in the swatch, never in the text. A light series colour is
+   illegible as type on white, so labels keep their text token and the colour
+   sits beside them. */
+.chart-swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+
+.chart-tip {
+  position: absolute; top: 8px; z-index: 5; pointer-events: none;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow-md); padding: 8px 10px; min-width: 132px;
+}
+.chart-tip-head {
+  font-size: var(--fs-meta); font-weight: 700; color: var(--navy);
+  margin-bottom: 4px;
+}
+.chart-tip-row { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); }
+.chart-tip-name { color: var(--mut); }
+.chart-tip-val {
+  margin-left: auto; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One bar, split into ordered bands. The gap is the separator. */
+.split-bar {
+  display: flex; gap: 2px; height: 34px; border-radius: 6px; overflow: visible;
+}
+.split-seg {
+  position: relative; min-width: 3px; display: flex; align-items: center;
+  justify-content: center; overflow: visible; cursor: default;
+}
+.split-seg:first-child { border-radius: 6px 0 0 6px; }
+.split-seg:last-child  { border-radius: 0 6px 6px 0; }
+.split-seg:only-child  { border-radius: 6px; }
+.split-seg-label {
+  font-size: var(--fs-meta); font-weight: 700; white-space: nowrap;
+  padding: 0 8px; pointer-events: none;
+}
+.split-tip { top: 40px; left: 0; }
+
+/* Ranked horizontal bars. One series, one colour - see RankBars. */
+.rank-bars { display: grid; gap: 2px; }
+.rank-row {
+  display: grid; grid-template-columns: minmax(110px, 1.3fr) minmax(70px, 2fr) auto;
+  align-items: center; gap: 10px; padding: 5px 6px; border-radius: 8px;
+  font-size: var(--fs-body); color: inherit; text-decoration: none;
+}
+.rank-link:hover { background: var(--t-faint-bg); }
+.rank-name { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.rank-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-detail { font-size: var(--fs-meta); color: var(--mut); white-space: nowrap; }
+.rank-track { height: 14px; background: var(--t-faint-bg); border-radius: 4px; overflow: hidden; }
+/* <= 24px thick, 4px rounded at the data end, square at the baseline. */
+.rank-fill { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.rank-val { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Figures - when the form is a number. */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; }
+.stat-tile {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; box-shadow: var(--shadow-sm);
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.stat-link { text-decoration: none; color: inherit; transition: box-shadow .12s ease; }
+.stat-link:hover { box-shadow: var(--shadow-md); }
+.stat-label { font-size: var(--fs-small); color: var(--mut); }
+/* Proportional figures, not tabular: at display sizes tabular-nums gives every
+   digit the width of a zero and a number like 121 reads loose. Tabular is for
+   columns that must align - axis ticks and table rows. */
+.stat-value { font-size: var(--fs-metric); font-weight: 700; color: var(--navy); line-height: 1.1; }
+.stat-hero { font-size: var(--fs-figure); font-weight: 800; color: var(--navy); line-height: 1.05; letter-spacing: -1px; }
+.stat-sub { font-size: var(--fs-meta); color: var(--mut); }
+.stat-spark { width: 100%; height: 26px; margin-top: 6px; overflow: visible; }
+
+.meter { display: flex; flex-direction: column; gap: 6px; }
+.meter-head { display: flex; align-items: baseline; gap: 8px; }
+.meter-figure {
+  margin-left: auto; font-weight: 700; font-size: var(--fs-lead); color: var(--navy);
+}
+.meter-track { height: 10px; border-radius: 999px; background: var(--t-faint-bg); overflow: hidden; }
+.meter-fill { height: 100%; border-radius: 999px; }
+
+/* Two charts side by side on a wide screen, stacked on a narrow one. Never
+   three: a money chart squeezed under 300px stops being readable. */
+.chart-pair { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1000px) {
+  .chart-pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .rank-row { grid-template-columns: minmax(70px, 1fr) minmax(50px, 1.6fr) auto; }
+}
