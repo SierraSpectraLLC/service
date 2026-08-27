@@ -597,6 +597,24 @@ export const houseMembers = pgTable("house_members", {
   role: text("role").notNull().default("staff"), // owner | staff | none
   name: text("name").notNull().default(""),      // display only
   /**
+   * HR. Whether this person administers their COLLEAGUES: files a
+   * reimbursement claim on somebody else's behalf, and reads the workspace's
+   * payroll register.
+   *
+   * A flag rather than a third role word, for three reasons. The office
+   * manager who does HR is also staff and sometimes also the owner, so it has
+   * to compose with a role rather than replace one. A new word in `role`
+   * would have to be audited into every `=== "staff"` and `=== "owner"` test
+   * in the app, and the failure mode of missing one is silent
+   * over-permission. And clientAllowlist already carries its privileges this
+   * way - canSeeMoney, canSeePayroll, canSeeAgreements - so this is the
+   * house's half of a convention that already exists.
+   *
+   * It is NOT the books. lib/books stays owner-only: HR reads what the
+   * company pays its people, not what it invoiced LabZen.
+   */
+  canAdminPeople: boolean("can_admin_people").notNull().default(false),
+  /**
    * The engineer's own point zero - where the stipend radius is measured
    * from, and where a routed trip starts. Set by the engineer themselves on
    * their own settings page, because it is their home: nobody else should be
@@ -836,6 +854,51 @@ export const pmSchedules = pgTable("pm_schedules", {
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("pm_instrument_idx").on(t.instrumentId), index("pm_asset_idx").on(t.assetId)]);
+
+/**
+ * What a client is OWED in preventive maintenance, per class of system.
+ *
+ * "UCSF gets two PMs a year on every mass spec and one on every LC." That is a
+ * sentence about a relationship, and there was nowhere to write it down. The
+ * app had two neighbouring things and neither says it: pm_schedules is one
+ * recurring job on one unit ("flush the lines every 90 days"), which is how the
+ * work gets generated and says nothing about what was promised; and
+ * agreements.visits_included is a flat count for a whole contract, which cannot
+ * tell an MS from an LC.
+ *
+ * A COUNT PER YEAR, not a cadence in days. Two a year and every 182 days are
+ * different promises - the first is satisfied by two visits in any weeks the
+ * client will have us, the second is a clock - and the contractual language is
+ * always the count. lib/pmPlan turns the count into deadlines when it needs
+ * them, and lib/pm keeps owning the cadence arithmetic for schedules.
+ *
+ * `category` is instruments.category, the shop's own grouping vocabulary
+ * ("LC-MS", "GC", "N2 generator"), typed on the fly and never a fixed list -
+ * so the plan is written in whatever words that shop already uses for its
+ * fleet. The empty string is the catch-all: what every system of theirs gets
+ * that no more specific row names. One row per (client, category), because two
+ * answers to "how many PMs does an MS get" is the bug this table exists to
+ * prevent.
+ *
+ * Nothing here generates work. A plan is the promise; pm_schedules is the
+ * machine; the gap between them is exactly the thing worth seeing, and it is
+ * what /maintenance/coverage draws.
+ */
+export const pmPlans = pgTable("pm_plans", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** instruments.category, or '' for every system this client owns. */
+  category: text("category").notNull().default(""),
+  /** How many preventive visits a year. Zero is a real answer: "we do not PM those." */
+  perYear: integer("per_year").notNull().default(1),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("pm_plans_org_idx").on(t.orgId),
+  unique("pm_plan_org_category_unique").on(t.tenantOrgId, t.orgId, t.category),
+]);
 
 // A task belongs to a system, to an asset on its own (a spare on the bench), or
 // to both (system work tagged to the unit it happened on). At least one is set.

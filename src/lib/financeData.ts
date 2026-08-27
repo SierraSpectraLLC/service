@@ -13,7 +13,8 @@ import { quoteStanding } from "@/lib/quotes";
 import { poTotals } from "@/lib/po";
 import { shopToday } from "@/lib/shopday";
 import { formatCents } from "@/lib/money";
-import { maySeePayroll, payrollForMonth, type PayRow, type PayrollViewer } from "@/lib/payroll";
+import { maySeePayroll, payrollForMonth, type PayRow } from "@/lib/payroll";
+import { payrollViewerFor } from "@/lib/hr";
 import { maySeeBooks, type BooksViewer } from "@/lib/books";
 import {
   CHASE_DAYS, RENEWAL_DAYS, STALE_QUOTE_DAYS,
@@ -120,7 +121,7 @@ export async function financeFigures(
   user: SessionUser,
   today: string,
   period: Period,
-  opts: { operatorOrgId: number | null },
+  opts: { operatorOrgId: number | null; seesPayroll: boolean },
 ): Promise<FinanceFigures> {
   const t = readTenant(user);
   const from = periodStart(today, period);
@@ -128,12 +129,13 @@ export async function financeFigures(
   // Payroll is read only for a reader who may read one, and only for their own
   // company - see lib/payroll. It is fetched conditionally rather than fetched
   // and filtered, so a figure they may not have never enters this process.
+  //
+  // The answer arrives as a parameter rather than being recomputed here. It
+  // used to be recomputed, from a viewer with canSeePayroll hardcoded false -
+  // harmless while the only caller was an owner, and a trap the moment anybody
+  // else earned the register. Both callers already asked moneyViewer.
   const mine = opts.operatorOrgId;
-  const viewer: PayrollViewer = {
-    email: user.email, role: user.role, orgId: user.orgId,
-    operatorOrgId: mine, canSeePayroll: false,
-  };
-  const mayReadPay = mine !== null && maySeePayroll(viewer, mine);
+  const mayReadPay = mine !== null && opts.seesPayroll;
 
   const [invoiceRows, quoteRows, unbilled, paidRows, spend, overheadRows, contractRows, orgRows, payRows] =
     await Promise.all([
@@ -294,8 +296,10 @@ async function moneyViewer(user: SessionUser): Promise<{
     mine,
     seesBooks: mine !== null && maySeeBooks(
       { ...shared, canSeeMoney: allowRow?.canSeeMoney ?? true } satisfies BooksViewer, mine),
-    seesPayroll: mine !== null && maySeePayroll(
-      { ...shared, canSeePayroll: allowRow?.canSeePayroll ?? false } satisfies PayrollViewer, mine),
+    // Through lib/hr, which is the only place that knows a house member can
+    // earn the register too - the allowlist row above is a client's half of
+    // the answer and would read `false` for every engineer in the shop.
+    seesPayroll: mine !== null && maySeePayroll(await payrollViewerFor(user), mine),
   };
 }
 
@@ -334,7 +338,7 @@ export async function railContext(user: SessionUser, periodParam: unknown): Prom
   const { mine, seesBooks, seesPayroll } = await moneyViewer(user);
 
   if (seesBooks) {
-    const figures = await financeFigures(user, today, period, { operatorOrgId: mine });
+    const figures = await financeFigures(user, today, period, { operatorOrgId: mine, seesPayroll });
     return { period, today, seesBooks, seesPayroll, amounts: figures.amounts };
   }
 
@@ -377,6 +381,6 @@ export async function booksContext(user: SessionUser, periodParam: unknown): Pro
 
   return {
     period, today, seesPayroll,
-    figures: await financeFigures(user, today, period, { operatorOrgId: mine }),
+    figures: await financeFigures(user, today, period, { operatorOrgId: mine, seesPayroll }),
   };
 }

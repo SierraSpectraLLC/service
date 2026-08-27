@@ -107,12 +107,17 @@ const GROUP_ORDER = ["Position", "Money in", "Money out", "Analysis"];
  * The two rooms that are not the books.
  *
  * Raising a purchase order and claiming back a hotel are things an engineer
- * DOES, not facts about how the business is doing - they sit in the Operations
- * nav for exactly that reason, and both were doors of their own before this
- * section existed. Closing them along with the rest would take a tech's own
- * expense report away from the tech, which is not a confidentiality rule, it is
- * a broken app. Everything else here is the shop's position and belongs to
- * whoever owns the shop - see lib/books.
+ * DOES, not facts about how the business is doing, and both were doors of
+ * their own before this section existed. Closing them along with the rest
+ * would take a tech's own expense report away from the tech, which is not a
+ * confidentiality rule, it is a broken app. Everything else here is the shop's
+ * position and belongs to whoever owns the shop - see lib/books.
+ *
+ * So they are in every reader's rail and every reader's Financial menu. A
+ * reader who has NO Financial menu - an ordinary engineer, who has neither the
+ * books nor the register - reaches them from Operations instead, which is the
+ * one place the app names them twice-over and it never names them twice to the
+ * same person. See src/app/layout.tsx, where that fork is drawn.
  */
 export const WORKING_ROOMS: readonly FinanceKey[] = ["purchasing", "reimbursements"] as const;
 
@@ -127,18 +132,40 @@ export const isWorkingRoom = (key: FinanceKey): boolean => WORKING_ROOMS.include
  * reasoning as financeRail below: an entry naming a thing somebody cannot
  * have is worse than no entry.
  *
- * The two WORKING_ROOMS are still here. They are ALSO in the Operations menu,
- * and that duplication is deliberate rather than an oversight: this group is
- * gated on the books, which is owner-only for staff, so an engineer who
- * raises a purchase order or claims back a hotel never sees it. Dropping them
- * from Operations to avoid appearing twice would take a tech's own expense
- * report away from the tech - see WORKING_ROOMS above, where that rule is
- * written down. Two doors, one page, different readers.
+ * The two WORKING_ROOMS are always here, for every reader who gets this menu
+ * at all. They are in Operations for everybody else - see WORKING_ROOMS above.
+ * The split used to run the other way, listing them in both menus on the
+ * reasoning that this one was owner-only and the two readerships never
+ * overlapped. HR broke that: somebody who reads the register but not the books
+ * has this menu too, and would have read the same two rooms twice.
  */
-export function financeNavItems(opts: { seesPayroll: boolean }): { href: string; label: string }[] {
-  return ENTRIES
-    .filter((e) => e.key !== "payroll" || opts.seesPayroll)
-    .map((e) => ({ href: e.href, label: e.label }));
+/** What a reader is allowed to be shown, as the two independent privileges. */
+export type Visibility = {
+  /** Whether this reader may read the shop's position at all - see lib/books. */
+  seesBooks: boolean;
+  /** Whether they may read the payroll register - see lib/payroll. Not implied by the books. */
+  seesPayroll: boolean;
+};
+
+/**
+ * Which rooms exist for this reader. ONE predicate, shared by the menu and the
+ * rail, because the comment on financeNavItems promises they cannot drift and
+ * two copies of a filter is how that promise gets broken.
+ *
+ * Three independent answers, not a ladder:
+ *   - the two WORKING_ROOMS are everybody's, because they are things an
+ *     engineer DOES;
+ *   - Payroll is its own privilege. It used to require the books as well,
+ *     which was true while the owner was the only person who could read a
+ *     register and false the moment an owner could appoint HR - somebody who
+ *     runs the payout without reading what the shop invoiced;
+ *   - everything else is the books.
+ */
+const visible = (key: FinanceKey, opts: Visibility): boolean =>
+  isWorkingRoom(key) ? true : key === "payroll" ? opts.seesPayroll : opts.seesBooks;
+
+export function financeNavItems(opts: Visibility): { href: string; label: string }[] {
+  return ENTRIES.filter((e) => visible(e.key, opts)).map((e) => ({ href: e.href, label: e.label }));
 }
 
 /** What each room is called, wherever it is named - rail, crumb or title. */
@@ -160,21 +187,13 @@ export const FINANCE_LABEL: Record<FinanceKey, string> =
  * would have been the leak this file exists to make impossible - the number is
  * the secret, not the anchor tag.
  */
-export function financeRail(opts: {
-  /** Whether this reader may read the shop's position at all - see lib/books. */
-  seesBooks: boolean;
-  seesPayroll: boolean;
-  period?: Period;
-}): FinanceGroup[] {
+export function financeRail(opts: Visibility & { period?: Period }): FinanceGroup[] {
   const period = opts.period ?? "month";
-  const visible = ENTRIES.filter((e) =>
-    isWorkingRoom(e.key) ? true
-      : e.key === "payroll" ? opts.seesBooks && opts.seesPayroll
-        : opts.seesBooks);
+  const rooms = ENTRIES.filter((e) => visible(e.key, opts));
   return GROUP_ORDER
     .map((label) => ({
       label,
-      entries: visible.filter((e) => e.group === label)
+      entries: rooms.filter((e) => e.group === label)
         .map(({ group: _group, ...e }) => ({ ...e, href: withPeriod(e.href, period) })),
     }))
     .filter((g) => g.entries.length > 0);

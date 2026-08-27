@@ -41,6 +41,34 @@ export function reimbursementPool(
   });
 }
 
+/**
+ * May this person work somebody's claim - fill it, submit it, take it back?
+ *
+ * Their own, always: a report you cannot edit is a claim being processed about
+ * you rather than for you, which is the same principle that gives everybody
+ * their own payroll row.
+ *
+ * Anybody's in the workspace if they administer the people - HR, or the owner.
+ * That is the whole point of the flag: somebody hands the office manager a
+ * shoebox of receipts and the office manager files the claim. Matched on the
+ * NAME because expense_reports.person is a directory name and not a foreign
+ * key, and trimmed and lowercased on both sides so a stray capital does not
+ * lock a person out of their own money.
+ *
+ * The TENANT is not this function's business. It has no way to know one, and
+ * `person` is free text, so two service companies can genuinely both employ a
+ * Steve Jones - the caller checks the report's own stamp first, and this is
+ * the second of the two questions rather than the only one.
+ */
+export function mayWorkReport(
+  me: { name: string; adminsPeople: boolean },
+  report: { person: string },
+): boolean {
+  if (me.adminsPeople) return true;
+  const mine = me.name.trim().toLowerCase();
+  return mine !== "" && report.person.trim().toLowerCase() === mine;
+}
+
 /** What a set of rows comes to. The only total a report ever has. */
 export const reportTotalCents = (rows: { amountCents: number }[]): number =>
   rows.reduce((n, r) => n + r.amountCents, 0);

@@ -12,8 +12,9 @@ import { forTenant } from "@/lib/tenancy";
 import { shopToday } from "@/lib/shopday";
 import {
   loadedHourlyCents, maySeePayroll, mayEditPayroll, payrollForMonth, recentMonths,
-  visibleRows, type PayRow, type PayrollViewer,
+  visibleRows, type PayRow,
 } from "@/lib/payroll";
+import { payrollViewerFor } from "@/lib/hr";
 import PayrollPanel from "@/components/PayrollPanel";
 import { EmptyState, PageHead } from "@/components/ui";
 
@@ -43,13 +44,11 @@ export default async function PayrollPage({ searchParams }: {
   const mine = user.orgId ?? myTenantOrgId(user);
   if (mine === null) redirect("/");
 
-  const [row] = user.orgId === null ? [] : await db
-    .select({ canSeePayroll: clientAllowlist.canSeePayroll }).from(clientAllowlist)
-    .where(eq(clientAllowlist.entry, user.email.trim().toLowerCase()));
-  const viewer: PayrollViewer = {
-    email: user.email, role: user.role, orgId: user.orgId,
-    operatorOrgId: myTenantOrgId(user), canSeePayroll: row?.canSeePayroll ?? false,
-  };
+  // Assembled by lib/hr, which is the only place that reads either roster.
+  // This page used to build the viewer itself from the client allowlist alone,
+  // which meant the shop's own HR read `canSeePayroll: false` here and the
+  // whole register on the rail beside it.
+  const viewer = await payrollViewerFor(user);
 
   const whole = maySeePayroll(viewer, mine);
   /* The rail belongs here only for somebody for whom this page IS the

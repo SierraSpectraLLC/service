@@ -31,19 +31,27 @@ export type ReportExpense = {
  * closed, or none), done. When the pocket is empty, Submit. The photo goes to
  * the same blob store the app's other files use.
  */
-export default function ExpenseReportDetail({ report, rows, mine, isOwner, today, categories, workOrders, pool }: {
+export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwner, today, categories, workOrders, pool }: {
   report: { id: number; person: string; status: string; submittedAt: string; paidOn: string; paidRef: string; returnedReason: string };
   rows: ReportExpense[];
+  /**
+   * May this reader FILL this claim - their own, or anybody's if they are HR.
+   * Every editing affordance hangs off this rather than off `mine`, because
+   * the office manager filing for an engineer is doing exactly the same job
+   * the engineer would be doing.
+   */
+  mayWork: boolean;
+  /** Whether it is the reader's OWN money. Only the wording turns on this. */
   mine: boolean;
   isOwner: boolean;
   today: string;
   categories: string[];
   workOrders: { id: number; label: string }[];
-  /** My unclaimed expenses, offered for pulling onto an open report. */
+  /** The claimant's unclaimed expenses, offered for pulling onto an open report. */
   pool: { id: number; kind: string; description: string; amountCents: number; incurredOn: string }[];
 }) {
   const router = useRouter();
-  const editable = mine && editableReport(report.status);
+  const editable = mayWork && editableReport(report.status);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
   const [receipt, setReceipt] = useState<File | null>(null);
@@ -55,6 +63,12 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
   const [payDraft, setPayDraft] = useState({ paidOn: "", reference: "" });
   const [payErr, setPayErr] = useState("");
   const [pending, startTransition] = useTransition();
+
+  /* Whose money the copy is about. HR filling a colleague's claim reads the
+     same buttons, and "back to your unclaimed pool" would be wrong about whose
+     pool it went back to. */
+  const whose = mine ? "my" : `${report.person.split(" ")[0]}'s`;
+  const theirs = mine ? "your" : `${report.person.split(" ")[0]}'s`;
 
   const total = reportTotalCents(rows);
 
@@ -116,7 +130,7 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
             <button className="btn sm primary" onClick={openAdd}>+ Expense</button>
             {pool.length > 0 && (
               <button className="btn sm" onClick={() => { setPulled(new Set()); setPulling(true); }}>
-                Pull from my unclaimed ({pool.length})
+                Pull from {whose} unclaimed ({pool.length})
               </button>
             )}
           </div>
@@ -143,7 +157,7 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
             <span className="t-body" style={{ fontWeight: 700 }}>{formatCents(r.amountCents)}</span>
             {editable && (
               <button className="btn link" disabled={pending} aria-label={`Remove ${r.description}`}
-                onClick={() => act(() => removeReportExpense(r.id), "Removed - it is back in your unclaimed pool")}>
+                onClick={() => act(() => removeReportExpense(r.id), `Removed - it is back in ${theirs} unclaimed pool`)}>
                 remove
               </button>
             )}
@@ -172,7 +186,7 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
               onClick={async () => {
                 if (!(await confirmDialog({
                   title: "Throw this report away?",
-                  body: rows.length ? "Its expenses go back to your unclaimed pool - nothing is deleted but the folder." : undefined,
+                  body: rows.length ? `Its expenses go back to ${theirs} unclaimed pool - nothing is deleted but the folder.` : undefined,
                   action: "Delete report", tone: "bad",
                 }))) return;
                 const res = await deleteExpenseReport(report.id);
@@ -183,7 +197,7 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
             </button>
           </>
         )}
-        {mine && report.status === "submitted" && (
+        {mayWork && report.status === "submitted" && (
           <button className="btn" disabled={pending}
             onClick={() => act(() => withdrawExpenseReport(report.id), "Back to draft - edit away")}>
             Withdraw to draft
@@ -282,7 +296,7 @@ export default function ExpenseReportDetail({ report, rows, mine, isOwner, today
       )}
 
       {pulling && (
-        <Dialog open onClose={() => setPulling(false)} size="sm" title="Pull from my unclaimed"
+        <Dialog open onClose={() => setPulling(false)} size="sm" title={`Pull from ${whose} unclaimed`}
           context="Expenses logged elsewhere - on a work order, or the quick add - not yet claimed"
           footer={
             <>

@@ -139,6 +139,12 @@ export default async function MaintenancePage({ searchParams }: { searchParams: 
       <PageHead
         crumb={<>Operations › <b>Maintenance</b></>}
         title="Maintenance"
+        /* Two questions, two pages. This one is per schedule and answers "what
+           is due"; coverage is per client and per year and answers "are we
+           keeping the promise". Neither can be derived from the other - a
+           schedule can be perfectly on cadence while a client is owed two
+           visits nobody has booked. */
+        actions={<Link className="btn sm" href="/maintenance/coverage">Coverage by client</Link>}
       />
       <Toolbar
         search={

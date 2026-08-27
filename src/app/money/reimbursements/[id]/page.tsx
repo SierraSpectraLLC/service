@@ -6,7 +6,8 @@ import { expenseCategories, expenseReports, expenses, workOrders } from "@/db/sc
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
-import { REPORT_LABEL, reimbursementPool, reportSpan, reportTotalCents } from "@/lib/expenseReports";
+import { REPORT_LABEL, mayWorkReport, reimbursementPool, reportSpan, reportTotalCents } from "@/lib/expenseReports";
+import { mayAdminPeople, reportSubjectFor } from "@/lib/hr";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { WO_LABEL } from "@/lib/workOrders";
@@ -18,8 +19,10 @@ export const dynamic = "force-dynamic";
 /**
  * One expense report, as a record page: fill it, submit it, watch it land.
  *
- * Visible to its owner-engineer and to the owner; another engineer's claim is
- * not this one's business.
+ * Visible to the person whose claim it is, and to whoever administers the
+ * people - HR or the owner. Another engineer's claim is not anybody else's
+ * business. lib/expenseReports.mayWorkReport is the rule; the tenant test above
+ * it is the other half, because `person` is free text and a name is not a scope.
  */
 export default async function ExpenseReportPage({ params }: { params: Promise<{ id: string }> }) {
   let user;
@@ -33,8 +36,10 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
     .where(eq(expenseReports.id, id));
   if (!report || (t !== null && report.tenantOrgId !== t)) notFound();
   const isOwner = user.role === "owner";
+  const adminsPeople = await mayAdminPeople(user);
+  const mayWork = mayWorkReport({ name: user.name, adminsPeople }, report);
+  if (!mayWork) notFound();
   const mine = report.person === user.name;
-  if (!mine && !isOwner) notFound();
 
   const [rows, categoryRows, allWos, myExpenses] = await Promise.all([
     db.select().from(expenses).where(eq(expenses.reportId, id))
@@ -48,7 +53,14 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
       .orderBy(desc(expenses.incurredOn), desc(expenses.id)),
   ]);
   const woNumber = new Map(allWos.map((w) => [w.id, w.number]));
-  const pool = mine ? reimbursementPool(myExpenses, { name: user.name, email: user.email }) : [];
+  /* WHOSE unclaimed receipts, which is the report's person and not the reader.
+     For an engineer filling their own the two are the same set; for HR filling
+     a colleague's they are not, and computing it from the reader would offer
+     the office manager their own receipts to put on somebody else's claim. */
+  const subject = mine
+    ? { name: user.name, email: user.email }
+    : await reportSubjectFor(report);
+  const pool = reimbursementPool(myExpenses, subject);
 
   const total = reportTotalCents(rows);
   return (
@@ -70,7 +82,7 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
           workOrderNumber: r.workOrderId !== null ? (woNumber.get(r.workOrderId) ?? "") : "",
           receiptUrl: r.receiptUrl, receiptName: r.receiptName,
         }))}
-        mine={mine} isOwner={isOwner} today={shopToday()}
+        mayWork={mayWork} mine={mine} isOwner={isOwner} today={shopToday()}
         categories={categoryRows.map((c) => c.name)}
         workOrders={allWos.map((w) => ({
           id: w.id,
