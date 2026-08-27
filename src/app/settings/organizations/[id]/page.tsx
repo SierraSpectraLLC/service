@@ -14,6 +14,7 @@ import SitesCard from "@/components/SitesCard";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import BillingPolicyPanel from "@/components/BillingPolicyPanel";
 import PmPlanPanel from "@/components/PmPlanPanel";
+import FleetBriefCard from "@/components/FleetBriefCard";
 import { coverageForOrg, fleetCategories } from "@/lib/pmPlanData";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
@@ -172,11 +173,12 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   // clicking Staff silently fell back to Settings and the panel it gates was
   // unreachable. A tab list and a tab guard are two statements of the same
   // thing; they are next to each other for that reason.
-  const tab = ["agreements", "sites", "billing", "staff", "pm"].includes(sp.tab ?? "")
+  const tab = ["agreements", "sites", "billing", "staff", "pm", "fleet"].includes(sp.tab ?? "")
     && (sp.tab !== "agreements" || seesAgreements)
     && (sp.tab !== "billing" || isOwner)
     && (sp.tab !== "staff" || org.isOperator)
     && (sp.tab !== "pm" || !org.isOperator)
+    && (sp.tab !== "fleet" || !org.isOperator)
     ? sp.tab! : "settings";
   const tabs: TabItem[] = [
     { key: "settings", label: "Settings", href: base },
@@ -185,6 +187,9 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     /* A maintenance plan is a thing a SERVICE COMPANY promises a client, so it
        has no meaning on another operator's organization page. */
     ...(!org.isOperator ? [{ key: "pm", label: "Maintenance", count: pmPlanRows.length || undefined, href: `${base}?tab=pm` }] : []),
+    /* Telling a peer what a CLIENT runs. Meaningless on another operator's
+       organization page - that is a company, not an estate. */
+    ...(!org.isOperator ? [{ key: "fleet", label: "Fleet", count: ownedSystems.length || undefined, href: `${base}?tab=fleet` }] : []),
     ...(org.isOperator ? [{ key: "staff", label: "Staff", count: staffRows.length, href: `${base}?tab=staff` }] : []),
     ...(isOwner ? [{ key: "billing", label: "Billing", href: `${base}?tab=billing` }] : []),
   ];
@@ -288,6 +293,11 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           canEdit={isHouse(user.role)}
           year={Number(today.slice(0, 4))}
         />
+      )}
+
+      {tab === "fleet" && !org.isOperator && (
+        <FleetBriefCard orgId={org.id} orgName={org.name}
+          systems={ownedSystems.length} today={shopToday()} />
       )}
 
       {tab === "billing" && isOwner && (

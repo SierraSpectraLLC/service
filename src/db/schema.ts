@@ -1285,7 +1285,9 @@ export const shareLinks = pgTable("share_links", {
   revokedAt: timestamp("revoked_at"),
   /**
    * What is on the other side: files (every share before billing existed),
-   * an invoice, or a quote. The viewer branches on this.
+   * an invoice, a quote, or a client's FLEET - the list of systems a peer
+   * service company is being shown so they can answer "can you cover this".
+   * The viewer branches on this.
    */
   kind: text("kind").notNull().default("files"),
   /** Which org the link speaks to. Money is fetched through THIS, never the URL. */
@@ -1309,6 +1311,22 @@ export const shareLinkFiles = pgTable("share_link_files", {
   shareId: integer("share_id").notNull().references((): AnyPgColumn => shareLinks.id, { onDelete: "cascade" }),
   attachmentId: integer("attachment_id").notNull().references((): AnyPgColumn => attachments.id, { onDelete: "cascade" }),
 }, (t) => [index("share_link_files_share_idx").on(t.shareId)]);
+
+/**
+ * Which systems a fleet share names.
+ *
+ * The exact twin of share_link_files, and for the same reason: membership is
+ * FROZEN at creation so a link can never grow, while the content each row
+ * points at stays live so the peer sees today's serial rather than the one that
+ * was fitted in March. The viewer re-checks every id against the link's own org
+ * and tenant before rendering, so a system handed to another operator since the
+ * link was minted silently drops out instead of riding along.
+ */
+export const shareLinkSystems = pgTable("share_link_systems", {
+  id: serial("id").primaryKey(),
+  shareId: integer("share_id").notNull().references((): AnyPgColumn => shareLinks.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").notNull().references((): AnyPgColumn => instruments.id, { onDelete: "cascade" }),
+}, (t) => [index("share_link_systems_share_idx").on(t.shareId)]);
 
 export const attachments = pgTable("attachments", {
   /**

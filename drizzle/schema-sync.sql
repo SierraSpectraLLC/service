@@ -3456,3 +3456,13 @@ DO $$ BEGIN
       FOREIGN KEY ("award_id") REFERENCES "awards"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Which systems a fleet share names. The twin of share_link_files: membership
+-- frozen at creation, content live, and every id re-checked against the link's
+-- own org and tenant before it renders. See src/lib/fleetBrief.ts.
+CREATE TABLE IF NOT EXISTS "share_link_systems" (
+  "id" serial PRIMARY KEY,
+  "share_id" integer NOT NULL REFERENCES "share_links"("id") ON DELETE CASCADE,
+  "instrument_id" integer NOT NULL REFERENCES "instruments"("id") ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "share_link_systems_share_idx" ON "share_link_systems" ("share_id");

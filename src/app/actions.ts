@@ -14,7 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
-  awards,
+  awards, shareLinkSystems,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -150,6 +150,11 @@ import type { ModelKit } from "@/lib/pmKit";
 import {
   exerciseProblems, periodStanding, PERIOD_LABEL, type PeriodLike,
 } from "@/lib/award";
+import {
+  briefProblems, buildFleetBrief, fleetBriefSubject, parseRecipients,
+  renderFleetBriefHtml, renderFleetBriefText, type FleetBrief,
+} from "@/lib/fleetBrief";
+import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -16192,4 +16197,160 @@ export async function declineOption(agreementId: number, reason: string): Promis
   revalidatePath("/money/contracts");
   revalidatePath("/agreements");
   return {};
+}
+
+
+// ── Telling a peer what a client runs ───────────────────────────────────────
+// Two service companies that share a client have always had to describe each
+// other's equipment down the phone. A fleet brief is that description, composed
+// once (lib/fleetBrief) and delivered three ways - copied, emailed, or opened
+// on a link - so the clipboard and the mail can never drift apart the way the
+// EOD ones did.
+
+/** The gate, the scope and the rows. Every door below comes through here. */
+async function briefFor(orgId: number, note = ""): Promise<
+  { error: string }
+  | { u: SessionUser; brief: FleetBrief; org: typeof orgs.$inferSelect; tenant: number | null; rowCount: number }
+> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  // mayAdminOrg, deliberately: it is the one gate that refuses another
+  // operator's client AND another operator. houseOfRecord degrades to "any
+  // staff is the house", which on this path would let one workspace brief out
+  // another's client.
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+
+  const tenant = readTenant(u);
+  const bad = scopeProblem(tenant, isPlatformStaff(tenantViewer(u)));
+  if (bad) return { error: bad };
+
+  const today = shopToday();
+  const brand = await brandForTenant(tenant);
+  const rows = await fleetRowsFor({
+    orgId, tenantOrgId: tenant, today, operatorName: brand.operatorName,
+  });
+  return {
+    u,
+    brief: buildFleetBrief({
+      client: org.name,
+      // Who is sending it. A list arriving from nobody is a list nobody can act
+      // on, and the operator name is what a peer knows us by.
+      from: `${u.email} at ${brand.operatorName || brand.name}`,
+      today, rows, note,
+    }),
+    org, tenant, rowCount: rows.length,
+  };
+}
+
+/**
+ * The brief as text, for the Copy button.
+ *
+ * Composed on the SERVER from the same function the email uses, rather than
+ * assembled in the browser out of what happens to be on the page. lib/eodEmail
+ * is the cautionary tale: its copy button filtered one thing and its mailer
+ * filtered another, so the clipboard quietly carried internal lines for months.
+ */
+export async function fleetBriefText(orgId: number, note = ""): Promise<
+  { error?: string; text?: string; systems?: number }
+> {
+  const got = await briefFor(orgId, note);
+  if ("error" in got) return { error: got.error };
+  return { text: renderFleetBriefText(got.brief), systems: got.rowCount };
+}
+
+/**
+ * Email it, to an address somebody typed.
+ *
+ * The first hand-typed recipient in the app - every other send reads addresses
+ * already stored on an organization - so the list is parsed, capped at five and
+ * written verbatim into the audit line. Who a client's equipment list was sent
+ * to is exactly the question somebody will ask in a year.
+ */
+export async function emailFleetBrief(orgId: number, data: {
+  to: string; note: string; withLink: boolean; expiresOn: string;
+}): Promise<{ error?: string; sent?: number; token?: string }> {
+  const got = await briefFor(orgId, data.note);
+  if ("error" in got) return { error: got.error };
+  const to = parseRecipients(data.to);
+  const problems = briefProblems(got.brief.groups.flatMap((g) => g.rows), to);
+  if (problems.length) return { error: problems[0] };
+
+  // Mint the link first when one was asked for, so the email carries it. A
+  // failed send leaves a live link, which is recoverable; a sent email naming
+  // a link that was never made is not.
+  let link: { url: string; expiresOn: string } | null = null;
+  let token: string | undefined;
+  if (data.withLink) {
+    const made = await createFleetShare(orgId, { label: "Emailed brief", expiresOn: data.expiresOn });
+    if (made.error) return { error: made.error };
+    const base = appUrl();
+    if (made.token && base) {
+      token = made.token;
+      link = { url: `${base}/share/${made.token}`, expiresOn: made.expiresOn ?? "" };
+    }
+  }
+
+  const brand = await brandForTenant(got.tenant);
+  const brief = { ...got.brief, link };
+  const html = renderFleetBriefHtml(brief, {
+    name: brand.operatorName || brand.name,
+    logoUrl: brand.operatorLogoUrl || undefined,
+  });
+  // Threaded per (client, sender) so a second brief about the same client is
+  // the same conversation in the peer's inbox rather than a new one to file.
+  const root = threadRootId(`fleet-brief-${orgId}`, mailHost(process.env.EMAIL_FROM));
+  await sendEmail(to, fleetBriefSubject(brief), html, {
+    headers: threadHeaders(root),
+    text: renderFleetBriefText(brief),
+  });
+  await audit({
+    actor: got.u.email, entityType: "org", entityId: orgId, tenantOrgId: got.tenant,
+    action: `emailed ${got.org.name}'s fleet (${got.rowCount} system${got.rowCount === 1 ? "" : "s"}) to ${to.join(", ")}`
+      + (token ? ` with a link to ${link?.expiresOn}` : " with no link"),
+  });
+  return { sent: to.length, token };
+}
+
+/**
+ * A link to the live list, for a peer with no login here.
+ *
+ * Deliberately a share_links row rather than anything new: that table already
+ * has expiry, revocation, an open counter and a public viewer that is already
+ * outside the auth gate, and revokeShareLink already works on any kind. The
+ * only new thing is which systems it names.
+ *
+ * Membership is FROZEN and content is LIVE, the same bargain the files share
+ * makes: the peer sees today's serials, and the link can never grow to cover a
+ * system nobody chose to show them.
+ */
+export async function createFleetShare(orgId: number, data: {
+  label: string; expiresOn: string;
+}): Promise<{ error?: string; token?: string; expiresOn?: string; systems?: number }> {
+  const got = await briefFor(orgId);
+  if ("error" in got) return { error: got.error };
+
+  const expiry = cleanExpiry(data.expiresOn, shopToday());
+  if ("error" in expiry) return expiry;
+
+  // Scoped exactly as the brief's own reader is - owner AND tenant - so a link
+  // can never name a system its maker could not see. That is the rule
+  // createShareLink states for files, applied to systems.
+  const ids = (await db.select({ id: instruments.id }).from(instruments)
+    .where(and(eq(instruments.ownerOrgId, orgId), forTenant(instruments.tenantOrgId, got.tenant))))
+    .map((r) => r.id);
+  if (!ids.length) return { error: "There are no systems on file for this client yet" };
+
+  const token = crypto.randomBytes(18).toString("base64url");
+  const [link] = await db.insert(shareLinks).values({
+    token, kind: "fleet", orgId,
+    label: cleanLabel(data.label), expiresOn: expiry.expiresOn,
+    tenantOrgId: got.tenant ?? myTenantOrgId(got.u), createdBy: got.u.email,
+  }).returning();
+  await db.insert(shareLinkSystems).values(ids.map((instrumentId) => ({ shareId: link.id, instrumentId })));
+  await audit({
+    actor: got.u.email, entityType: "share_link", entityId: link.id, tenantOrgId: link.tenantOrgId,
+    action: `shared ${got.org.name}'s fleet (${ids.length} system${ids.length === 1 ? "" : "s"}) by link (to ${expiry.expiresOn})`,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return { token, expiresOn: expiry.expiresOn, systems: ids.length };
 }

@@ -206,7 +206,7 @@ export default function CoverageEstimateBuilder({ quoteId, models, defaultStart 
                   onChange={(e) => setSite(si, { tripHours: e.target.value })} />
               </label>
               <label className="t-small" style={{ display: "flex", gap: 5, alignItems: "center", paddingBottom: 6 }}>
-                <input type="checkbox" checked={site.batched}
+                <input type="checkbox" className="check" checked={site.batched}
                   onChange={(e) => setSite(si, { batched: e.target.checked })} />
                 serviced on one journey
               </label>

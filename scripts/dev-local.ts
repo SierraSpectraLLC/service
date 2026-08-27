@@ -539,6 +539,39 @@ const FIXTURE = `
     (1, 'Rita Alvarez', 'rita@labzen.test', 'Any word on the checkout date? The lab is planning validation runs.'),
     (1, 'Dev Owner', '${OWNER}', 'Tune passed this morning; sign-off packet goes out tomorrow.');
 
+  -- A client shared with a peer service company: twelve systems across two
+  -- buildings, which is the shape the fleet brief exists for (lib/fleetBrief).
+  INSERT INTO orgs (id, name, kind) VALUES (20, 'Emery Pharma', 'client')
+    ON CONFLICT DO NOTHING;
+  INSERT INTO org_sites (id, tenant_org_id, org_id, name, address) VALUES
+    (20, 3, 20, 'Hayward', '2000 Sample Way, Hayward CA'),
+    (21, 3, 20, 'Alameda', '15 Bay Farm Rd, Alameda CA')
+    ON CONFLICT DO NOTHING;
+  INSERT INTO instruments (external_id, client, model, category, owner_org_id, site_id, tenant_org_id, stages)
+  SELECT 'EP-' || lpad(n::text, 3, '0'), 'Emery Pharma',
+         CASE WHEN n % 3 = 0 THEN 'GC-MS' ELSE 'LC-MS' END,
+         CASE WHEN n % 3 = 0 THEN 'GC-MS' ELSE 'LC-MS' END,
+         20, CASE WHEN n <= 7 THEN 20 ELSE 21 END, 3, ARRAY[]::text[]
+  FROM generate_series(1, 12) n;
+  -- One of them stalled, so the brief has something other than "In service" to
+  -- say. Set afterwards rather than in the CASE above, which silently produced
+  -- an empty array for every row.
+  UPDATE instruments SET stages = ARRAY['Waiting / blocked']
+    WHERE owner_org_id = 20 AND external_id = 'EP-004';
+  INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, tenant_org_id, sort_order)
+  SELECT i.id, 'Mass Spec',
+         CASE WHEN i.category = 'GC-MS' THEN 'ISQ 7000' ELSE '6495C' END,
+         'SN' || (7000 + i.id), CASE WHEN i.category = 'GC-MS' THEN 'Thermo' ELSE 'Agilent' END, 3, 0
+  FROM instruments i WHERE i.owner_org_id = 20;
+  INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, tenant_org_id, sort_order)
+  SELECT i.id, 'Pump', 'nXDS15i', 'P' || (400 + i.id), 'Edwards', 3, 1
+  FROM instruments i WHERE i.owner_org_id = 20;
+  -- Half of them under contract with us, one with the maker, the rest unknown.
+  INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, instrument_ids, tenant_org_id)
+  SELECT 20, 'contract', 'AGR-EP-1', 'MS coverage', 'active', '2026-01-01', '2027-01-01',
+         array_agg(i.id), 3
+  FROM (SELECT id FROM instruments WHERE owner_org_id = 20 ORDER BY id LIMIT 5) i;
+
   INSERT INTO vocab_terms (kind, asset_type, name, categories) VALUES
     ('category', '', 'LC-MS', '{}'),
     ('category', '', 'GC-MS', '{}'),
