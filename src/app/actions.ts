@@ -10572,16 +10572,29 @@ export async function listHouseMembers(
   // for one gets their own, which is all they could ever see anyway.
   const want = platform && orgId !== undefined ? orgId : myTenantOrgId(u);
   const visible = rows.filter((r) => (r.orgId ?? null) === want);
-  // STAFF_EMAILS is the ROOT operator's break-glass access, so those entries
-  // belong on the root workspace's roster and nowhere else.
+  /*
+   * STAFF_EMAILS is the ROOT operator's break-glass access, so those entries
+   * belong on the root workspace's roster and nowhere else - EXCEPT when the
+   * address has a managed row, in which case the row decides.
+   *
+   * That exception is the whole point. The env list is a fallback for an
+   * address nothing else accounts for; lib/houseRole.houseIdentityFor already
+   * says so, handing an address with a row the org its row names and only a
+   * rowless one the root. This did not, so after the platform operator was
+   * split out of the service company, the service company's owner and engineer
+   * - still listed in the environment from when there was only one house -
+   * appeared on the PLATFORM's roster, under "Our people", beside a revoke
+   * link. Their rows said Sierra Spectra the whole time.
+   */
   const isRootRoster = want === u.rootOperatorOrgId;
+  const rowFor = (e: string) => rows.find((r) => r.email.toLowerCase() === e);
   const emails = [...new Set([
-    ...(isRootRoster ? env : []),
+    ...(isRootRoster ? env.filter((e) => !rowFor(e)) : []),
     ...visible.map((r) => r.email.toLowerCase()),
   ])];
   return emails
     .map((email) => {
-      const row = rows.find((r) => r.email.toLowerCase() === email);
+      const row = rowFor(email);
       const isRoot = email === root;
       const role = isRoot ? "owner" : row ? row.role : "staff";
       return {

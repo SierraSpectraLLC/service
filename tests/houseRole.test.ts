@@ -40,6 +40,55 @@ describe("houseRoleFor", () => {
   });
 });
 
+describe("a managed row wins over the environment", () => {
+  /*
+   * The env list is lockout insurance for the company that runs the instance,
+   * and it is a FALLBACK: it answers for an address that nothing else accounts
+   * for. houseIdentityFor has always read it that way. The bug this pins is
+   * what happened when the platform operator was split out of the service
+   * company that used to be both - the service company's owner and engineer
+   * were still in STAFF_EMAILS from when there was one house, so every surface
+   * that read the env list without checking for a row filed them under the
+   * platform. Their rows said otherwise the whole time.
+   */
+  const ENV = ["joe@sierra.com", "bill@sierra.com"];
+  const SIERRA = 2, PLATFORM = 26;
+  const members = [
+    { email: "joe@sierra.com", role: "owner", orgId: SIERRA },
+    { email: "bill@sierra.com", role: "staff", orgId: SIERRA },
+    { email: "admin@platform.com", role: "owner", orgId: PLATFORM },
+  ];
+
+  it("keeps an env-listed address with the company its row names", () => {
+    expect(houseIdentityFor("joe@sierra.com", ENV, members, PLATFORM))
+      .toEqual({ role: "owner", orgId: SIERRA });
+  });
+
+  it("mails them as that company's staff, not the platform's", () => {
+    expect(houseEmailsFrom(ENV, members, SIERRA, PLATFORM).sort())
+      .toEqual(["bill@sierra.com", "joe@sierra.com"]);
+    // The one that used to fail: the member loop skips rows belonging to
+    // another workspace, so an address the env put in could never be taken
+    // back out again.
+    expect(houseEmailsFrom(ENV, members, PLATFORM, PLATFORM)).toEqual(["admin@platform.com"]);
+  });
+
+  it("still answers for an env address that has no row at all", () => {
+    // Rowless is what the fallback is FOR - a break-glass address added to the
+    // environment during a lockout, before anybody could add a row.
+    const env = [...ENV, "rescue@platform.com"];
+    expect(houseIdentityFor("rescue@platform.com", env, members, PLATFORM))
+      .toEqual({ role: "staff", orgId: PLATFORM });
+    expect(houseEmailsFrom(env, members, PLATFORM, PLATFORM).sort())
+      .toEqual(["admin@platform.com", "rescue@platform.com"]);
+  });
+
+  it("reaches everybody on the instance for a platform-wide message", () => {
+    expect(houseEmailsFrom(ENV, members).sort())
+      .toEqual(["admin@platform.com", "bill@sierra.com", "joe@sierra.com"]);
+  });
+});
+
 describe("houseEmailsFrom", () => {
   it("unions env and table, minus revocations", () => {
     const list = houseEmailsFrom(ENV, [m("bill@x.com", "staff"), m("legacy@x.com", "none")]);

@@ -87,8 +87,19 @@ export function houseEmailsFrom(
 ): string[] {
   const scoped = orgId !== undefined && orgId !== null;
   const out = new Set<string>();
+  const hasRow = (e: string) => members.some((m) => norm(m.email) === e);
   if (!scoped || orgId === rootOrgId) {
-    for (const e of envStaff.map(norm).filter(Boolean)) out.add(e);
+    /*
+     * A ROW WINS OVER THE ENVIRONMENT. The env list is a fallback for an
+     * address with no managed row - houseIdentityFor says exactly that, giving
+     * such an address the root org and everybody else the org their own row
+     * names. This did not, so an engineer left in STAFF_EMAILS from before the
+     * instance had tenants was copied on the platform operator's mail forever,
+     * whatever their row said. The member loop below cannot correct it either:
+     * it skips rows belonging to another workspace, so the address was added
+     * and never removed.
+     */
+    for (const e of envStaff.map(norm).filter(Boolean)) if (!hasRow(e)) out.add(e);
   }
   for (const m of members) {
     const e = norm(m.email);
