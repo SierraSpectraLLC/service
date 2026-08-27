@@ -1888,6 +1888,46 @@ export const partKitLines = pgTable("part_kit_lines", {
   sortOrder: integer("sort_order").notNull().default(0),
 }, (t) => [index("part_kit_lines_kit_idx").on(t.kitId)]);
 
+/**
+ * A multi-year award: one engagement, several separately-priced 12-month terms.
+ *
+ * The shape every solicitation asks for and nothing here could hold. "CLIN 0001
+ * base year, CLIN 0002 option year 1" is five firm prices of which ONE is
+ * committed - the other four are options the client may exercise or walk away
+ * from, one at a time, each on its own deadline. A shop that models that as
+ * five unrelated contracts finds out it has lost an option year by noticing the
+ * money stopped.
+ *
+ * Each period is still an ordinary `agreements` row, because a period IS a
+ * contract: a term, a price, entitlements, a billing cycle. Everything already
+ * built - drawdown, coverage, the recurring biller, per-agreement rate cards -
+ * goes on working per period with nothing taught about awards. What was missing
+ * was only the thread between them and the facts that belong to none of them:
+ * whose award number it is, and how long before a period starts the client has
+ * to say whether they want it.
+ */
+export const awards = pgTable("awards", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** THEIR number for it - the contract or solicitation number they will quote back. */
+  number: text("number").notNull().default(""),
+  title: text("title").notNull().default(""),
+  /** YYYY-MM-DD. Blank = bid, not yet won: the periods are priced and nothing is in force. */
+  awardedOn: text("awarded_on").notNull().default(""),
+  /**
+   * How long before a period begins the client must exercise it. The deadline
+   * that gets missed, so it is data rather than something in somebody's diary -
+   * 60 days is the common federal shape and is only a default.
+   */
+  optionNoticeDays: integer("option_notice_days").notNull().default(60),
+  /** The quote this was won on, when there was one. Set null so a deleted quote does not take the award. */
+  quoteId: integer("quote_id").references((): AnyPgColumn => quotes.id, { onDelete: "set null" }),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("awards_org_idx").on(t.orgId)]);
+
 // ── Service agreements ──────────────────────────────────────────────────────
 // The contract, and what it entitles somebody to.
 //
@@ -1962,6 +2002,17 @@ export const agreements = pgTable("agreements", {
    */
   providerOrgId: integer("provider_org_id").references(() => orgs.id, { onDelete: "set null" }),
   note: text("note").notNull().default(""),
+  /**
+   * The multi-year award this is one period of. Null = an ordinary standalone
+   * contract, which is nearly all of them.
+   *
+   * Set null on delete rather than cascade: unpicking an award must not delete
+   * the base year's contract along with it, because that term was really in
+   * force and really billed.
+   */
+  awardId: integer("award_id").references((): AnyPgColumn => awards.id, { onDelete: "set null" }),
+  /** Which period: 0 is the base year, 1 is option year 1. Meaningless without awardId. */
+  periodIndex: integer("period_index").notNull().default(0),
   // ── Recurring billing ────────────────────────────────────────────────────
   // A retainer is the agreement, not a work order: nobody drives out, nobody
   // logs an hour, and the same amount falls due every month regardless. These

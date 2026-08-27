@@ -14,6 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
+  awards,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -146,6 +147,9 @@ import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
 import { estimate, estimateProblems, periodWindows, type CoverageInput } from "@/lib/coveragePrice";
 import { kitFrom, kitSourceFor } from "@/lib/pmKitData";
 import type { ModelKit } from "@/lib/pmKit";
+import {
+  exerciseProblems, periodStanding, PERIOD_LABEL, type PeriodLike,
+} from "@/lib/award";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -16016,4 +16020,176 @@ export async function applyCoverageEstimate(
   });
   revQuote(q);
   return { added: out.periods.length };
+}
+
+
+// ── Multi-year awards ───────────────────────────────────────────────────────
+// One engagement, several separately-priced 12-month terms, of which only the
+// base year is committed. Each period is an ordinary agreement; lib/award holds
+// what the thread between them means.
+
+/** The period label a person reads: "Base year", "Option year 2". */
+const clinLabel = (i: number) => (i === 0 ? "Base year" : `Option year ${i}`);
+
+/**
+ * Turn a won quote into an award: one contract per CLIN line.
+ *
+ * The retainer lines the estimate builder wrote ARE the periods, in the order
+ * it wrote them, so nothing has to be retyped and the contract that goes into
+ * force is the one the client actually accepted. Only the base year is made
+ * active - the rest are drafts, which is exactly right, because an option
+ * nobody has exercised must not cover work or bill anybody.
+ */
+export async function awardFromQuote(quoteId: number, data: {
+  number: string; startsOn: string; awardedOn: string;
+  optionNoticeDays: number; visitsIncluded: number;
+}): Promise<{ error?: string; id?: number; periods?: number }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  // A draft has not been anywhere. Awarding one would mean the client accepted
+  // something nobody sent them.
+  if (q.status === "draft") return { error: `${q.number} has not gone out yet.` };
+
+  const existing = await db.select({ id: awards.id }).from(awards).where(eq(awards.quoteId, quoteId));
+  if (existing.length) return { error: `${q.number} has already been awarded.` };
+
+  const lines = await db.select().from(quoteLines)
+    .where(and(eq(quoteLines.quoteId, quoteId), eq(quoteLines.kind, "retainer")))
+    .orderBy(asc(quoteLines.position), asc(quoteLines.id));
+  if (!lines.length) {
+    return { error: "No coverage periods on this quote - build a coverage estimate first." };
+  }
+
+  const start = data.startsOn.trim();
+  if (!isIsoDay(start)) return { error: "Pick the day the base year begins" };
+  const awardedOn = data.awardedOn.trim();
+  if (awardedOn && !isIsoDay(awardedOn)) return { error: "That award date is not a day" };
+  const notice = Math.max(0, Math.min(365, Math.round(data.optionNoticeDays)));
+  const visits = Math.max(0, Math.min(365, Math.round(data.visitsIncluded)));
+  const windows = periodWindows(start, lines.length);
+  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+
+  const [award] = await db.insert(awards).values({
+    tenantOrgId: tenant, orgId: q.orgId, number: data.number.trim(),
+    title: q.title, awardedOn, optionNoticeDays: notice, quoteId, createdBy: u.email,
+  }).returning();
+
+  const day = parseInt(start.slice(8, 10), 10) || 1;
+  await db.insert(agreements).values(lines.map((l, i) => ({
+    tenantOrgId: tenant, orgId: q.orgId, kind: "contract",
+    number: [data.number.trim(), `CLIN ${String(i + 1).padStart(4, "0")}`].filter(Boolean).join(" "),
+    // Just the period. Its `number` already carries the award number and the
+    // CLIN, and the contract list prints number then title - so taking the
+    // line's own description put "CLIN 0001" on the row twice.
+    title: clinLabel(i),
+    // Only the base year. An option is priced and agreed and NOT bought, so it
+    // must not cover work, must not bill, and must not read as coverage on
+    // anybody's system page until somebody exercises it.
+    status: i === 0 ? "active" : "draft",
+    startsOn: windows[i].from, endsOn: windows[i].to,
+    renewNoticeDays: notice,
+    visitsIncluded: visits,
+    // The coverage estimate priced parts INTO the fee - that is what a
+    // firm-fixed price is - so the contract includes them. Saying otherwise
+    // here would have the client's parts drawn from an allowance of zero and
+    // billed a second time.
+    partsUnlimited: true, pmPartsIncluded: true,
+    billEveryMonths: 12,
+    billAmountCents: Math.round((l.qty / 1000) * l.unitCents),
+    billDescription: `${clinLabel(i)} - ${q.title || "coverage"}`,
+    billDayOfMonth: day,
+    // The base year's cursor opens now; an option has no cycle until it is
+    // exercised, which is what stops the biller raising an invoice for a year
+    // nobody has bought.
+    billNextOn: i === 0 ? windows[i].from : "",
+    valueCents: Math.round((l.qty / 1000) * l.unitCents),
+    awardId: award.id, periodIndex: i,
+    createdBy: u.email,
+  })));
+
+  await audit({
+    actor: u.email, entityType: "award", entityId: award.id, tenantOrgId: tenant,
+    action: `awarded ${data.number.trim() || q.number} for ${org.name}: ${lines.length} periods from ${start}, `
+      + `base year in force, ${lines.length - 1} option${lines.length === 2 ? "" : "s"} at ${notice} days' notice`,
+  });
+  revalidatePath("/money/contracts");
+  revalidatePath(`/money/quotes/${quoteId}`);
+  revalidatePath("/agreements");
+  return { id: award.id, periods: lines.length };
+}
+
+/** One agreement, with the award facts the period rules need. */
+async function periodOf(agreementId: number): Promise<
+  { row: typeof agreements.$inferSelect; award: typeof awards.$inferSelect; period: PeriodLike } | null
+> {
+  const [row] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!row?.awardId) return null;
+  const [award] = await db.select().from(awards).where(eq(awards.id, row.awardId));
+  if (!award) return null;
+  return { row, award, period: row as PeriodLike };
+}
+
+/**
+ * The client took an option year. Put it in force and start its billing.
+ *
+ * A late exercise is allowed and back-dates the term, because a client really
+ * can come back after the deadline and a shop that cannot record that has to
+ * lie in its own books. What it must not do is quietly skip the cycles the
+ * back-dated term already owes - which is why the cursor is set to the period's
+ * own start and left for the biller to catch up (lib/recurring missedCycles).
+ */
+export async function exerciseOption(agreementId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const found = await periodOf(agreementId);
+  if (!found) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, found.row.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+
+  const today = shopToday();
+  if (periodStanding(found.period, today) !== "option"
+    && periodStanding(found.period, today) !== "lapsed") {
+    return { error: exerciseProblems(found.period, today)[0] ?? "That period is not an option." };
+  }
+
+  await db.update(agreements)
+    .set({ status: "active", billNextOn: found.row.startsOn })
+    .where(eq(agreements.id, agreementId));
+  const late = periodStanding(found.period, today) === "lapsed";
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: agreementId, tenantOrgId: found.row.tenantOrgId,
+    action: `exercised ${clinLabel(found.row.periodIndex).toLowerCase()} of ${found.award.number || "the award"} `
+      + `for ${org.name}: ${found.row.startsOn} to ${found.row.endsOn}, ${formatCents(found.row.billAmountCents)}`
+      + (late ? " - back-dated, its term had already begun" : ""),
+  });
+  revalidatePath("/money/contracts");
+  revalidatePath("/agreements");
+  return {};
+}
+
+/** They are not taking it. Recorded on purpose, so it never reads as an oversight. */
+export async function declineOption(agreementId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const found = await periodOf(agreementId);
+  if (!found) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, found.row.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const today = shopToday();
+  const was = periodStanding(found.period, today);
+  if (was !== "option" && was !== "lapsed") {
+    return { error: `That period is ${PERIOD_LABEL[was].toLowerCase()}.` };
+  }
+  await db.update(agreements).set({ status: "cancelled" }).where(eq(agreements.id, agreementId));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: agreementId, tenantOrgId: found.row.tenantOrgId,
+    action: `${clinLabel(found.row.periodIndex).toLowerCase()} of ${found.award.number || "the award"} `
+      + `not taken by ${org.name}: ${why}`,
+  });
+  revalidatePath("/money/contracts");
+  revalidatePath("/agreements");
+  return {};
 }

@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { viewTenant } from "@/lib/tenancy";
 import { modelOptions } from "@/lib/pmKitData";
+import { awardOfQuote, quoteHasPeriods } from "@/lib/awardData";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { billingContext, quoteById, quoteTotal } from "@/lib/invoiceData";
@@ -16,6 +17,7 @@ import {
 } from "@/lib/quotes";
 import QuoteActions from "@/components/QuoteActions";
 import CoverageEstimateBuilder from "@/components/CoverageEstimateBuilder";
+import AwardQuoteButton from "@/components/AwardQuoteButton";
 import InvoiceLineList from "@/components/InvoiceLineList";
 import { Id, Panel, Pill, RecordHero } from "@/components/ui";
 import type { HeroStat } from "@/components/ui";
@@ -35,7 +37,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   const { row } = full;
   const today = shopToday();
 
-  const [org, wo, link, history, ctx, models] = await Promise.all([
+  const [org, wo, link, history, ctx, models, award, coveragePeriods] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, row.orgId)).then((r) => r[0] ?? null),
     row.workOrderId === null ? Promise.resolve(null)
       : db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId)).then((r) => r[0] ?? null),
@@ -47,6 +49,8 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
     billingContext(row.orgId),
     // Only a draft can take lines, so only a draft pays for the catalog read.
     row.status === "draft" ? viewTenant(user).then(modelOptions) : Promise.resolve([]),
+    awardOfQuote(id),
+    quoteHasPeriods(id),
   ]);
 
   const standing = quoteStanding(row, today);
@@ -94,6 +98,17 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         {link && (
           <Link className="btn sm" href={`/share/${link.token}`} style={{ textDecoration: "none" }}>
             Open as the client
+          </Link>
+        )}
+        {/* Only once it has gone out, and only once. A draft has not been
+            anywhere, and a quote already awarded links to what it became. */}
+        {row.status !== "draft" && coveragePeriods > 0 && !award && (
+          <AwardQuoteButton quoteId={id} periods={coveragePeriods} today={today}
+            defaultNumber="" />
+        )}
+        {award && (
+          <Link className="btn sm" href="/money/contracts" style={{ textDecoration: "none" }}>
+            Awarded{award.number ? ` as ${award.number}` : ""}
           </Link>
         )}
         {row.depositInvoiceId && (

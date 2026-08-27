@@ -3429,3 +3429,30 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "doc_scheme" text NOT NULL DEFAULT '
 -- How long a catalog procedure takes, in minutes. 0 = never estimated, which
 -- an estimate reports rather than counting as free. See src/lib/pmKit.ts.
 ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "est_minutes" integer NOT NULL DEFAULT 0;
+
+-- A multi-year award: one engagement, several separately-priced 12-month terms,
+-- of which only the base year is committed. Each period stays an ordinary
+-- agreements row - see src/db/schema.ts and src/lib/award.ts.
+CREATE TABLE IF NOT EXISTS "awards" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "number" text NOT NULL DEFAULT '',
+  "title" text NOT NULL DEFAULT '',
+  "awarded_on" text NOT NULL DEFAULT '',
+  "option_notice_days" integer NOT NULL DEFAULT 60,
+  "quote_id" integer REFERENCES "quotes"("id") ON DELETE SET NULL,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "awards_org_idx" ON "awards" ("org_id");
+
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "award_id" integer;
+ALTER TABLE "agreements" ADD COLUMN IF NOT EXISTS "period_index" integer NOT NULL DEFAULT 0;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agreements_award_id_fk') THEN
+    ALTER TABLE "agreements" ADD CONSTRAINT "agreements_award_id_fk"
+      FOREIGN KEY ("award_id") REFERENCES "awards"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

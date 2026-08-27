@@ -11,6 +11,7 @@ import { forTenant, readTenant, visibleOrgs } from "@/lib/tenancy";
 import { formatCents } from "@/lib/money";
 import { shopDay, shopToday } from "@/lib/shopday";
 import { standing } from "@/lib/agreements";
+import { awardsFor } from "@/lib/awardData";
 import { usageForAll } from "@/lib/agreementUsage";
 import { resolveRate } from "@/lib/rates";
 import { contractProposal, paceShortfall, renewalFromBurn, trailingUsage } from "@/lib/quotes";
@@ -18,6 +19,7 @@ import { allInvoices } from "@/lib/invoiceData";
 import FinanceShell from "@/components/FinanceShell";
 import { booksContext } from "@/lib/financeData";
 import AgreementsPanel from "@/components/AgreementsPanel";
+import AwardLadder from "@/components/AwardLadder";
 import RetainerCard from "@/components/RetainerCard";
 import { FacetStrip, PageHead, Panel, Toolbar } from "@/components/ui";
 
@@ -43,7 +45,7 @@ export default async function ContractsPage({ searchParams }: {
   const { period, seesPayroll, figures: fig } = await booksContext(user, periodParam);
 
   const today = shopToday();
-  const [rows, orgRows, cards, billed, systemRows] = await Promise.all([
+  const [rows, orgRows, cards, billed, systemRows, awardRows] = await Promise.all([
     // Tenant-filtered like every other agreements read (settings/agreements
     // does the same). Without it this page lists every workspace's contracts.
     db.select().from(agreements)
@@ -62,6 +64,7 @@ export default async function ContractsPage({ searchParams }: {
     }).from(instruments)
       .where(forTenant(instruments.tenantOrgId, readTenant(user)))
       .orderBy(asc(instruments.externalId)),
+    awardsFor(readTenant(user)),
   ]);
   const orgName = new Map(orgRows.map((o) => [o.id, o.name]));
   const clientOrgs = orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }));
@@ -177,6 +180,11 @@ export default async function ContractsPage({ searchParams }: {
           ]} />
         }
       />
+
+      {/* Above the contract list on purpose: an option year with a deadline on
+          it is the most time-critical thing on this page, and every one of its
+          periods also appears below as the ordinary contract it is. */}
+      <AwardLadder awards={awardRows} today={today} canEdit />
 
       <RetainerCard rows={retainers} today={today} canEdit />
 

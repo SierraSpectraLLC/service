@@ -641,6 +641,43 @@ export async function notifyRenewalDue(opts: {
 }
 
 /**
+ * An option year has to be decided.
+ *
+ * Its own notice rather than a renewal one, because it is not a renewal and
+ * saying so would be wrong in the way that matters: nobody is deciding whether
+ * to carry on with something already running. A priced, agreed year is sitting
+ * there and the client has a DEADLINE to take it, after which it is simply
+ * gone. The subject line is the difference between somebody opening this in
+ * October and somebody filing it with the renewal reminders.
+ */
+export async function notifyOptionDue(opts: {
+  to: string[]; orgId: number; orgName: string; label: string;
+  deadline: string; days: number | null; amount: string; lapsed: boolean;
+}) {
+  try {
+    const url = appUrl();
+    const when = opts.lapsed
+      ? `The deadline was ${opts.deadline}.`
+      : `They must tell us by ${opts.deadline}${opts.days !== null ? ` - ${opts.days} days` : ""}.`;
+    await deliver({
+      to: opts.to, kind: "renewal", href: "/money/contracts",
+      title: `${opts.orgName}: ${opts.label} ${opts.lapsed ? "lapsed" : "must be exercised"} - ${opts.amount}`,
+      subject: opts.lapsed
+        ? `Option year LAPSED - ${opts.orgName} ${opts.label}`
+        : `Option year to be exercised - ${opts.orgName} ${opts.label}`,
+      body: `<b>${esc(opts.orgName)}</b> - ${esc(opts.label)}, ${esc(opts.amount)}.
+        <div style="margin-top:8px;">${esc(when)}</div>
+        ${mutedLine(opts.lapsed
+          ? "It is not in force and is not billing. Exercising it now back-dates the term."
+          : "Nothing bills for this period until it is exercised.")}
+        ${url ? btn(`${url}/money/contracts`, "Open contracts") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] option email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody got in for the first time.
  *
  * Only the first: an alert per sign-in becomes a filter rule inside a week, and
