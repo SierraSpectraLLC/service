@@ -12,10 +12,11 @@ import Panel from "@/components/ui/Panel";
 import Field from "@/components/ui/Field";
 import SaveBar from "@/components/ui/SaveBar";
 import {
-  DEFAULT_HEADER, DEFAULT_SPECTRUM_HEIGHT, DEFAULT_STOPS, MAX_SPECTRUM_HEIGHT, MAX_STOPS,
+  DEFAULT_HEADER, DEFAULT_SPECTRUM_HEIGHT, DEFAULT_STOPS,
   gradientCss, type Stop,
 } from "@/lib/appearance";
 import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
+import SpectrumEditor from "@/components/SpectrumEditor";
 import { isValidHex, readableTextOn, tint } from "@/lib/theme";
 
 /** "7:00 AM" - an hour of the day as somebody would say it out loud. */
@@ -121,26 +122,6 @@ export default function ConfigurationForm(props: {
   const effectiveHeader = headerDefault ? DEFAULT_HEADER : header;
   const headerOk = isValidHex(effectiveHeader);
   const previewFg = headerOk ? readableTextOn(effectiveHeader) : "#fff";
-  const setStop = (i: number, patch: Partial<Stop>) => {
-    clearBar();
-    setStops((list) => list.map((s, n) => (n === i ? { ...s, ...patch } : s)));
-  };
-  const addStop = () => {
-    clearBar();
-    setStops((list) => {
-      if (list.length >= MAX_STOPS) return list;
-      // Drop the new band in the widest gap, which is where a person is
-      // reaching when they press add - not always on the end.
-      const sorted = [...list].sort((a, b) => a.at - b.at);
-      let at = 50, gap = -1;
-      for (let i = 0; i < sorted.length - 1; i++) {
-        const g = sorted[i + 1].at - sorted[i].at;
-        if (g > gap) { gap = g; at = Math.round(sorted[i].at + g / 2); }
-      }
-      return [...list, { c: sorted[Math.floor(sorted.length / 2)]?.c ?? DEFAULT_HEADER, at }]
-        .sort((a, b) => a.at - b.at);
-    });
-  };
   const resetLook = () => {
     clearBar();
     setHeaderDefault(true); setHeader(DEFAULT_HEADER);
@@ -386,35 +367,14 @@ export default function ConfigurationForm(props: {
         </div>
 
         <SubHead>Spectrum</SubHead>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
-          <span className="mut t-small">Thickness</span>
-          <input type="range" min={0} max={MAX_SPECTRUM_HEIGHT} value={bandH} disabled={pending}
-            onChange={(e) => { setBandH(parseInt(e.target.value)); clearBar(); }}
-            style={{ width: 160 }} />
-          <span className="mono t-small" style={{ minWidth: 34 }}>{bandH}px</span>
-          {bandH === 0 && <span className="mut t-small">hidden</span>}
-        </div>
-        {stops.map((st, i) => (
-          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", borderTop: "1px solid var(--line)" }}>
-            <input type="color" value={isValidHex(st.c) ? st.c : DEFAULT_HEADER} disabled={pending}
-              onChange={(e) => setStop(i, { c: e.target.value.toUpperCase() })}
-              style={{ width: 40, height: 26, padding: 2 }} />
-            <input className="mono t-small" value={st.c} disabled={pending}
-              onChange={(e) => setStop(i, { c: e.target.value.toUpperCase() })}
-              style={{ width: 100 }} />
-            <input type="range" min={0} max={100} value={st.at} disabled={pending}
-              onChange={(e) => setStop(i, { at: parseInt(e.target.value) })}
-              style={{ flex: "1 1 90px", minWidth: 80 }} />
-            <span className="mono t-small" style={{ minWidth: 34 }}>{st.at}%</span>
-            <button className="btn link" disabled={pending || stops.length <= 1}
-              onClick={() => { clearBar(); setStops((l) => l.filter((_, n) => n !== i)); }}
-              style={{ fontSize: 12 }}>remove</button>
-          </div>
-        ))}
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
-          <button className="btn sm" onClick={addStop} disabled={pending || stops.length >= MAX_STOPS}>
-            Add color
-          </button>
+        {/* The same editor an organization gets, so the platform's controls and
+            a tenant's cannot drift into two behaviours over one shape. */}
+        <SpectrumEditor
+          stops={stops} height={bandH} disabled={pending}
+          onStops={(next) => { clearBar(); setStops(next); }}
+          onHeight={(next) => { clearBar(); setBandH(next); }}
+        />
+        <div style={{ marginTop: 10 }}>
           <button className="btn link" onClick={resetLook} disabled={pending} style={{ fontSize: 12 }}>
             reset to the default look
           </button>

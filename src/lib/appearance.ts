@@ -101,3 +101,46 @@ export function headerColor(stored: string): string {
   const c = stored.trim();
   return isValidHex(c) ? c.toUpperCase() : DEFAULT_HEADER;
 }
+
+/**
+ * The look a viewer actually gets: their workspace's own choices, falling back
+ * to the platform's for anything they have not made.
+ *
+ * FIELD BY FIELD, not record by record. A workspace that has picked a header
+ * colour and nothing else keeps the platform's spectrum - and keeps it LIVE, so
+ * when the platform's gradient changes theirs follows. An all-or-nothing
+ * fallback would freeze the whole look the moment somebody touched one control,
+ * which is how a tenant ends up wearing last year's palette because they once
+ * tried a colour.
+ *
+ * The two "not chosen" signals are deliberately different types. A blank string
+ * cannot be told from "they chose the empty gradient", so height is nullable
+ * where zero is a real answer meaning "no bar at all" - see clampHeight.
+ *
+ * Pure: the same function decides the live header and the settings preview, so
+ * a workspace cannot be shown one look and served another.
+ */
+export type Look = {
+  headerColor: string;
+  spectrumHeight: number;
+  spectrumStops: Stop[];
+  /** Ready to inline; every part of it has been through cleanStops. */
+  spectrumCss: string;
+};
+
+export function resolveLook(
+  /** The viewer's workspace org, as stored. Null = they have none (platform staff). */
+  org: { themeColor: string; spectrumStops: string; spectrumHeight: number | null } | null,
+  platform: { headerColor: string; spectrumStops: Stop[]; spectrumHeight: number },
+): Look {
+  const ownColor = (org?.themeColor ?? "").trim();
+  const ownStops = (org?.spectrumStops ?? "").trim();
+  const ownHeight = org?.spectrumHeight ?? null;
+  const stops = ownStops ? parseStops(ownStops) : platform.spectrumStops;
+  return {
+    headerColor: isValidHex(ownColor) ? ownColor.toUpperCase() : platform.headerColor,
+    spectrumHeight: ownHeight === null ? platform.spectrumHeight : clampHeight(ownHeight),
+    spectrumStops: stops,
+    spectrumCss: gradientCss(stops),
+  };
+}

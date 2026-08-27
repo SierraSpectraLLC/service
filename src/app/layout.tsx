@@ -8,10 +8,10 @@ import { and, asc, isNull, or } from "drizzle-orm";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { users } from "@/db/schema";
-import { currentUser, viewContext } from "@/lib/authz";
+import { currentUser, myTenantOrgId, viewContext } from "@/lib/authz";
 import { welcomeRedirect } from "@/lib/welcome";
 import { PATH_HEADER } from "@/middleware";
-import { isValidHex, readableTextOn, tint } from "@/lib/theme";
+import { readableTextOn, tint } from "@/lib/theme";
 import HeaderNav from "@/components/HeaderNav";
 import MobileNav, { type TabItem } from "@/components/MobileNav";
 import AccountMenu from "@/components/AccountMenu";
@@ -32,6 +32,7 @@ import TrailReporter from "@/components/TrailReporter";
 import { getBrand } from "@/lib/brand";
 import { getModules } from "@/lib/flags";
 import { getAppearance } from "@/lib/appearanceData";
+import { resolveLook } from "@/lib/appearance";
 import { unreadDiscussions } from "@/lib/discussionUnread";
 import { unreadMessages } from "@/lib/messageUnread";
 import { Analytics } from "@vercel/analytics/next";
@@ -191,22 +192,43 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       .limit(1).catch(() => [])
   ).length > 0);
 
-  // The viewer's organization paints its own workspace; staff and org-less
-  // sessions keep the platform look. Bad hex stored by any path degrades to
-  // the default rather than an unreadable header.
-  const [orgTheme] = user?.orgId != null
-    ? await db.select({ themeColor: orgs.themeColor, logoUrl: orgs.logoUrl }).from(orgs).where(eq(orgs.id, user.orgId))
+  /*
+   * WHOSE WORKSPACE this is - one id, and everything about the chrome follows
+   * it: the colour, the logo, the spectrum, and the name after the ×.
+   *
+   * A client's is their own organization. A tenant's STAFF get the service
+   * company they work for, which they did not before: the whole shell was the
+   * platform's, so an engineer at Sierra Spectra opened the app and read their
+   * vendor's name in the header with no sign of their own company anywhere,
+   * while every client of theirs got a co-brand. Staff have orgId null, which
+   * is what silently excluded them - null is not "no workspace", it is "not a
+   * client", and their workspace is the operator they are staff OF.
+   *
+   * Platform staff land on null and keep the platform's own look, which is
+   * correct rather than a fallback: the platform IS their workspace.
+   */
+  const workspaceOrgId = user
+    ? (user.orgId ?? (isStaff ? myTenantOrgId(user) : null))
+    : null;
+  const [workspace] = workspaceOrgId != null
+    ? await db.select({
+        name: orgs.name, themeColor: orgs.themeColor, logoUrl: orgs.logoUrl,
+        spectrumStops: orgs.spectrumStops, spectrumHeight: orgs.spectrumHeight,
+      }).from(orgs).where(eq(orgs.id, workspaceOrgId))
     : [];
-  const themed = orgTheme && isValidHex(orgTheme.themeColor) ? orgTheme.themeColor : null;
-  // Three layers, narrowest first: an organization paints its own workspace,
-  // the platform paints everyone else's, and lib/appearance holds the look the
-  // app ships with. Every one of these values is validated there before it
-  // reaches a style attribute.
-  const look = await getAppearance();
-  const headerBg = themed ?? look.headerColor;
-  const headerFg = readableTextOn(themed ?? look.headerColor);
-  const pageTint = tint(themed ?? look.headerColor, 0.93);
-  const logoUrl = orgTheme?.logoUrl || "";
+  // Two layers, narrowest first, resolved field by field so a workspace that
+  // picked only a colour still follows the platform's gradient when it moves.
+  // Every value is validated in lib/appearance before it reaches a style
+  // attribute - a colour that is not a colour is a way to write arbitrary CSS
+  // onto every page.
+  const look = resolveLook(workspace ?? null, await getAppearance());
+  const headerBg = look.headerColor;
+  const headerFg = readableTextOn(look.headerColor);
+  const pageTint = tint(look.headerColor, 0.93);
+  const logoUrl = workspace?.logoUrl || "";
+  /* The name after the ×. Suppressed when the workspace IS the platform's own
+     operator, because "RIDGELINE × Ridgeline" is a lockup with itself. */
+  const coBrand = workspace && workspaceOrgId !== brand.operatorOrgId ? workspace.name : "";
 
   /* The nav, as data: the same links and menus feed the desktop header row
      and the phone's drawer, so the two can never disagree about what the app
@@ -410,7 +432,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                   style={{ height: 26, maxWidth: 120, objectFit: "contain", display: "block" }} />
               )}
               <span className="brand-name">{brand.name.toUpperCase()}</span>
-              {user?.orgName && <span className="brand-org">× {user.orgName}</span>}
+              {coBrand && <span className="brand-org">× {coBrand}</span>}
             </Link>
             {user && (
               <nav className="header-nav">

@@ -18,6 +18,10 @@ import { toast } from "@/components/ui/Toast";
 import Panel from "@/components/ui/Panel";
 import SaveBar from "@/components/ui/SaveBar";
 import { isValidHex, readableTextOn } from "@/lib/theme";
+import {
+  clampHeight, gradientCss, parseStops, serializeStops, type Stop,
+} from "@/lib/appearance";
+import SpectrumEditor from "@/components/SpectrumEditor";
 import { STORAGE_TIERS, type Quota } from "@/lib/storage";
 import StorageMeter from "@/components/StorageMeter";
 import { DAY_LABELS, WEEK_ORDER, parseDigestDays } from "@/lib/digestDays";
@@ -52,9 +56,13 @@ const clockLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? "
  * report recipients, sheet sync, removal) rather than hiding them behind a
  * second page that would drift from this one.
  */
-export default function OrgSettingsForm({ org, people, sites = [], isStaff = false, platformName, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
+export default function OrgSettingsForm({ org, people, sites = [], isStaff = false, platformName, platformSpectrum, isOwner, showRecipients, showSheetSync, showRemote = false, showDigest = false }: {
   org: {
     id: number; name: string; kind: string; themeColor: string; logoUrl: string;
+    /** Blank = follow the platform. See lib/appearance.resolveLook. */
+    spectrumStops: string;
+    /** Null = follow the platform. Zero is a real answer: no bar at all. */
+    spectrumHeight: number | null;
     eodRecipients: string; digestRecipients: string; digestHour: number; digestDays: string;
     systems: number; isOperator: boolean; isSheetOrg: boolean;
     storageLimitMb: number; quota: Quota;
@@ -75,6 +83,8 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
    */
   isStaff?: boolean;
   platformName: string;
+  /** What this workspace inherits when it has made no choice of its own. */
+  platformSpectrum: { stops: Stop[]; height: number };
   isOwner: boolean;
   showRecipients: boolean;
   showSheetSync: boolean;
@@ -86,6 +96,7 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
   // toggles, invitations) stay instant - the bar carries only the drafts.
   const [base, setBase] = useState(() => ({
     themeColor: org.themeColor, logoUrl: org.logoUrl,
+    spectrumStops: org.spectrumStops, spectrumHeight: org.spectrumHeight,
     eodRecipients: org.eodRecipients,
     digestTo: splitEmails(org.digestRecipients),
     hour: org.digestHour,
@@ -100,6 +111,14 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
   const [color, setColor] = useState(org.themeColor || "#172A4A");
   const [useDefault, setUseDefault] = useState(!org.themeColor);
   const [logo, setLogo] = useState(org.logoUrl);
+  /* Inheriting is its own state, not a value. Blank stops mean "follow the
+     platform, including when the platform moves", which no set of stops can
+     express - so the checkbox is the control and the editor below it starts
+     from whatever they would inherit. */
+  const [ownBar, setOwnBar] = useState(org.spectrumStops.trim() !== "" || org.spectrumHeight !== null);
+  const [stops, setStops] = useState<Stop[]>(
+    org.spectrumStops.trim() ? parseStops(org.spectrumStops) : platformSpectrum.stops);
+  const [bandH, setBandH] = useState(org.spectrumHeight ?? platformSpectrum.height);
   const [lookError, setLookError] = useState("");
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -193,7 +212,10 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     });
   };
 
-  const lookDirty = (useDefault ? "" : color) !== base.themeColor || logo !== base.logoUrl;
+  const barStops = ownBar ? serializeStops(stops) : "";
+  const barHeight = ownBar ? clampHeight(bandH) : null;
+  const lookDirty = (useDefault ? "" : color) !== base.themeColor || logo !== base.logoUrl
+    || barStops !== base.spectrumStops || barHeight !== base.spectrumHeight;
   const recipientsDirty = recipients !== base.eodRecipients;
   const limitDirty = limitMb !== base.limitMb;
   const dirty = lookDirty || recipientsDirty || digestDirty || limitDirty;
@@ -202,7 +224,10 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     clearBar();
     startTransition(async () => {
       if (lookDirty) {
-        const res = await setOrgAppearance({ themeColor: useDefault ? "" : color, logoUrl: logo }, org.id);
+        const res = await setOrgAppearance({
+          themeColor: useDefault ? "" : color, logoUrl: logo,
+          spectrum: ownBar ? { stops, height: bandH } : null,
+        }, org.id);
         if (res?.error) { setBarErr(res.error); return; }
       }
       if (recipientsDirty) {
@@ -221,6 +246,7 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
       }
       setBase({
         themeColor: useDefault ? "" : color, logoUrl: logo,
+        spectrumStops: barStops, spectrumHeight: barHeight,
         eodRecipients: recipients,
         digestTo: [...digestTo], hour, days: [...sendDays],
         limitMb,
@@ -233,6 +259,9 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
     setColor(base.themeColor || "#172A4A");
     setUseDefault(!base.themeColor);
     setLogo(base.logoUrl);
+    setOwnBar(base.spectrumStops !== "" || base.spectrumHeight !== null);
+    setStops(base.spectrumStops ? parseStops(base.spectrumStops) : platformSpectrum.stops);
+    setBandH(base.spectrumHeight ?? platformSpectrum.height);
     setRecipients(base.eodRecipients);
     setDigestTo([...base.digestTo]);
     setHour(base.hour);
@@ -629,15 +658,25 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
       <Panel title="Workspace appearance"
         hint={<>Applies to everyone signing in as {org.name}. Nobody else&apos;s workspace changes.</>}>
 
-        {/* Live preview using the same color math as the real header. */}
+        {/* Live preview using the same color math AND the same gradient function
+            as the real header, so what this shows is what the layout will
+            paint - see lib/appearance.resolveLook, which both go through. */}
         <div style={{ borderRadius: 8, overflow: "hidden", border: "1px solid var(--line)", marginBottom: 10 }}>
+          <div style={{
+            height: ownBar ? bandH : platformSpectrum.height,
+            background: gradientCss(ownBar ? stops : platformSpectrum.stops),
+          }} />
           <div style={{ background: effective, color: fg, display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
             {logo && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logo} alt={`${org.name} logo`} style={{ height: 22, maxWidth: 100, objectFit: "contain" }} />
             )}
+            {/* Exactly what the header renders - wordmark, then × and the
+                workspace. It used to print the platform name twice, once as the
+                wordmark and again inside the lockup, which is not what anybody
+                sees on the page it is previewing. */}
             <span className="t-lead" style={{ fontWeight: 700, letterSpacing: 0.3 }}>{platformName.toUpperCase()}</span>
-            <span className="t-meta" style={{ opacity: 0.75 }}>{platformName} × {org.name}</span>
+            <span className="t-meta" style={{ opacity: 0.75 }}>× {org.name}</span>
           </div>
         </div>
 
@@ -663,6 +702,31 @@ export default function OrgSettingsForm({ org, people, sites = [], isStaff = fal
           {logo && <button className="btn link" onClick={() => { setLogo(""); clearBar(); }}>remove logo</button>}
         </div>
         {lookError && <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 8 }}>{lookError}</div>}
+
+        {/* The spectrum: the thin gradient above the header, and the one piece
+            of the design that is purely identity. The same editor the platform
+            gets, so the two cannot drift into different behaviours over one
+            validated shape. */}
+        <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+          <div className="t-small" style={{ fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
+            Spectrum
+          </div>
+          <SpectrumEditor
+            stops={stops} height={bandH} disabled={pending}
+            inheriting={!ownBar}
+            inheritLabel={`Follow ${platformName}'s spectrum`}
+            onInheriting={(follow) => {
+              clearBar();
+              setOwnBar(!follow);
+              // Starting from what they were inheriting, so turning the switch
+              // on changes nothing until they move a control - the alternative
+              // is a workspace repainted by a checkbox.
+              if (follow) { setStops(platformSpectrum.stops); setBandH(platformSpectrum.height); }
+            }}
+            onStops={(next) => { clearBar(); setStops(next); }}
+            onHeight={(next) => { clearBar(); setBandH(next); }}
+          />
+        </div>
       </Panel>
 
       {isOwner && showRecipients && (
