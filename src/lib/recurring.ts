@@ -124,6 +124,45 @@ export const openingCursor = (
 };
 
 /**
+ * Cycles the contract SHOULD have billed and never did.
+ *
+ * dueCycles looks forward from the cursor and deliberately refuses to
+ * backfill: switching a schedule on must not raise eight drafts because
+ * somebody ticked a box. That rule is right, and it leaves a hole - a contract
+ * billed annually at its start, entered into the app eleven months later, has
+ * a real invoice nobody can raise. Two of those was forty-eight thousand
+ * dollars of service already delivered and never billed.
+ *
+ * So this is the other direction: from the contract's own first cycle up to
+ * today, every cycle inside the term that has not been raised. It cannot
+ * invent a date - each one is a cycle the contract's own terms produce - and
+ * it is bounded by the cursor, so the two lists are disjoint by construction
+ * and no cycle is ever offered twice.
+ *
+ * Raising one is a deliberate act, which is the whole reason it is separate
+ * from the cron's list rather than folded into it.
+ */
+export function missedCycles(a: RecurringTerms, today: string, cap = 24): string[] {
+  if (!recurring(a) || !isDay(today) || !isDay(a.startsOn)) return [];
+  const out: string[] = [];
+  let cursor = firstCycle(a.startsOn, a.billDayOfMonth);
+  if (!cursor) return [];
+  for (let i = 0; i < cap * 4 + 48 && out.length < cap; i++) {
+    if (cursor > today) break;
+    if (isDay(a.endsOn) && cursor > a.endsOn) break;
+    // Anything from the cursor onward is dueCycles' business. Offering it here
+    // too would be the same invoice on two buttons.
+    if (isDay(a.billNextOn) && cursor >= a.billNextOn) break;
+    // Already raised. billLastOn is the marker raiseRetainerCycle writes.
+    if (!(isDay(a.billLastOn) && cursor <= a.billLastOn)) out.push(cursor);
+    const next = addMonths(cursor, a.billEveryMonths, a.billDayOfMonth);
+    if (!next || next <= cursor) break;
+    cursor = next;
+  }
+  return out;
+}
+
+/**
  * Which cycles are ready to raise as of `today`, oldest first.
  *
  * Ready means the cycle is within its lead time - a 7-day lead on a cycle

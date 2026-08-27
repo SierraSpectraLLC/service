@@ -55,7 +55,7 @@ import {
   invoicesForOrg, quoteForOrg,
 } from "@/lib/invoiceData";
 import {
-  addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
+  addMonths, billCadenceLabel, dueCycles, missedCycles, openingCursor, recurring,
 } from "@/lib/recurring";
 import { editableReport, mayWorkReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
@@ -15267,6 +15267,33 @@ export async function recordHistoricalQuote(
  * checked, and the cycle still has to be one dueCycles agrees is due, so this
  * cannot be used to run a contract forward past its own schedule.
  */
+/**
+ * Raise a cycle the contract should have billed and never did.
+ *
+ * Its own verb, not a widened raiseRetainerCycleNow. That one raises what the
+ * calendar says is due and is the same thing the cron does unattended; this
+ * bills a period that has already been served, which is a decision somebody
+ * makes on purpose and signs their name to. Keeping them apart is what lets
+ * the automatic one stay strict.
+ *
+ * The date is still not free. It has to be one of the contract's own missed
+ * cycles - lib/recurring.missedCycles - so this cannot invoice an arbitrary
+ * day, only a period the terms already produce.
+ */
+export async function raiseMissedCycle(
+  agreementId: number, cycleOn: string,
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const [ag] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!ag) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  if (!missedCycles(ag, shopToday()).includes(cycleOn)) {
+    return { error: `The ${cycleOn} cycle is not one this contract missed` };
+  }
+  return raiseRetainerCycle(agreementId, cycleOn, u.email);
+}
+
 export async function raiseRetainerCycleNow(
   agreementId: number, cycleOn: string,
 ): Promise<{ error?: string; id?: number; number?: string }> {
