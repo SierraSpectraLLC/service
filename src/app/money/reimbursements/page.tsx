@@ -7,6 +7,8 @@ import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { reimbursementPool } from "@/lib/expenseReports";
+import { mayAdminPeople } from "@/lib/hr";
+import { listReportSubjects } from "@/app/actions";
 import { shopToday } from "@/lib/shopday";
 import { WO_LABEL } from "@/lib/workOrders";
 import ExpenseReportsPanel, { type ReportRow } from "@/components/ExpenseReportsPanel";
@@ -35,6 +37,10 @@ export default async function ExpensesPage({ searchParams }: {
   const { period, seesBooks, seesPayroll, amounts } =
     await railContext(user, (await searchParams).period);
   const isOwner = user.role === "owner";
+  /* HR reads the queue too - somebody has to chase the claims that are sitting
+     there - and may open one in a colleague's name. Paying stays the owner's,
+     which is why this is a second flag and not a widened `isOwner`. */
+  const adminsPeople = await mayAdminPeople(user);
   const t = readTenant(user);
 
   const [expenseRows, reportRows, categoryRows, allWos] = await Promise.all([
@@ -55,6 +61,10 @@ export default async function ExpensesPage({ searchParams }: {
     ? await db.select({ id: workOrders.id, number: workOrders.number }).from(workOrders).where(inArray(workOrders.id, woIds))
     : [];
   const woNumber = new Map(wos.map((w) => [w.id, w.number]));
+
+  // Empty for anybody who is not HR - the action refuses on the same rule, so
+  // this only decides whether the control is drawn.
+  const subjects = await listReportSubjects();
 
   const pool = reimbursementPool(expenseRows, { name: user.name, email: user.email })
     .map((e) => ({
@@ -87,8 +97,10 @@ export default async function ExpensesPage({ searchParams }: {
       <ExpenseReportsPanel
         pool={pool}
         mine={reportRows.filter((r) => r.person === user.name).map(shape)}
-        queue={isOwner ? reportRows.map(shape) : []}
+        queue={adminsPeople ? reportRows.map(shape) : []}
+        adminsPeople={adminsPeople}
         isOwner={isOwner}
+        subjects={subjects}
         today={shopToday()}
         categories={categoryRows.map((c) => c.name)}
         workOrders={allWos.map((w) => ({

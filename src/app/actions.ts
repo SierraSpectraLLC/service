@@ -57,7 +57,7 @@ import {
 import {
   addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
 } from "@/lib/recurring";
-import { editableReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
+import { editableReport, mayWorkReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
@@ -136,6 +136,7 @@ import { isPanelMode, type PanelMode } from "@/lib/panelMode";
 import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
+import { isHouseHr, mayAdminPeople, payrollViewerFor, reportSubjectFor } from "@/lib/hr";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -7597,21 +7598,10 @@ export async function setClientSeesMoney(id: number, canSee: boolean): Promise<{
 // read everything in their workspace EXCEPT this.
 
 /**
- * The four facts lib/payroll needs about whoever is asking, assembled from the
- * session and the person's own allowlist row.
+ * The facts lib/payroll needs about whoever is asking. One line, because the
+ * assembly is lib/hr's job and there used to be five copies of it.
  */
-async function payrollViewer(u: SessionUser): Promise<PayrollViewer> {
-  let canSeePayroll = false;
-  if (u.orgId !== null) {
-    const [row] = await db.select({ canSeePayroll: clientAllowlist.canSeePayroll })
-      .from(clientAllowlist).where(eq(clientAllowlist.entry, u.email.trim().toLowerCase()));
-    canSeePayroll = row?.canSeePayroll ?? false;
-  }
-  return {
-    email: u.email, role: u.role, orgId: u.orgId,
-    operatorOrgId: myTenantOrgId(u), canSeePayroll,
-  };
-}
+const payrollViewer = (u: SessionUser): Promise<PayrollViewer> => payrollViewerFor(u);
 
 /**
  * The register as this person may read it: their organization's whole payroll
@@ -8200,25 +8190,38 @@ export async function logMyExpense(
   }
   const kind = await cleanKind(data.kind, t);
   let reportId: number | null = null;
+  /*
+   * Whose money this is. Mine by default - that is the difference between this
+   * desk and logExpense on the work order, which leaves person blank because
+   * it is recording job cost rather than a personal claim.
+   *
+   * Filed straight onto somebody else's report it becomes THEIRS. HR typing in
+   * a receipt an engineer handed over is recording what that engineer is owed,
+   * and a row stamped with the filer's name would sit on the engineer's claim
+   * paying the office manager back.
+   */
+  let person = u.name;
   if (data.reportId != null) {
-    const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, data.reportId));
-    if (!report || report.person !== u.name) return { error: "Not your report" };
+    const report = await workableReport(u, data.reportId);
+    if (!report) return { error: "Not your report" };
     if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
     reportId = report.id;
+    person = report.person;
   }
   const [row] = await db.insert(expenses).values({
     tenantOrgId: t, workOrderId, kind, description, amountCents: cents, incurredOn: date,
     // On a job it defaults to rebillable, same as the work order form; with no
     // job there is nobody to rebill - it is overhead, like the internet bill.
     billable: workOrderId !== null,
-    person: u.name, loggedBy: u.email, reportId,
+    person, loggedBy: u.email, reportId,
     receiptUrl: (data.receiptUrl ?? "").trim().slice(0, 500),
     receiptName: (data.receiptName ?? "").trim().slice(0, 200),
   }).returning();
   await audit({
     actor: u.email, entityType: "expense", entityId: row.id, tenantOrgId: row.tenantOrgId,
     action: `logged ${formatCents(cents)} - ${description}`
-      + (workOrderId !== null ? ` on a work order` : " (no job - overhead)"),
+      + (workOrderId !== null ? ` on a work order` : " (no job - overhead)")
+      + (person === u.name ? "" : ` for ${person}`),
   });
   revalidatePath("/money/reimbursements");
   if (reportId !== null) revalidatePath(`/money/reimbursements/${reportId}`);
@@ -8227,35 +8230,98 @@ export async function logMyExpense(
   return {};
 }
 
-/** Open a fresh draft report to fill - the container the receipts land in. */
-export async function createExpenseReport(): Promise<{ error?: string; id?: number }> {
+/**
+ * One of these reports, if this person may work it - and null for every other
+ * answer, including "it is not in your company".
+ *
+ * TWO questions, asked in one place because either one alone is a hole.
+ * expense_reports is a single instance-wide table and `person` is free text,
+ * so a name match is not a scope: without the tenant test, an owner of any
+ * service company could submit, withdraw or delete a report belonging to a
+ * different company's engineer, and two companies can genuinely both employ a
+ * Steve Jones. Then whose claim it is - lib/expenseReports.mayWorkReport.
+ *
+ * Every refusal built on this returns the same words, because whether a report
+ * exists in somebody else's company is not a fact to confirm by the shape of
+ * an error.
+ */
+async function workableReport(u: SessionUser, id: number) {
+  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
+  if (!report || !houseOf(u, report.tenantOrgId)) return null;
+  const me = { name: u.name, adminsPeople: await mayAdminPeople(u) };
+  return mayWorkReport(me, report) ? report : null;
+}
+
+/**
+ * Open a fresh draft report to fill - the container the receipts land in.
+ *
+ * `onBehalfOf` is the HR half: the office manager opens the claim in the
+ * engineer's name, pulls their unclaimed receipts onto it and sends it for
+ * payout, because the engineer handed over a shoebox rather than filing
+ * anything. The name is checked against the ROSTER rather than trusted, so a
+ * report cannot be opened in the name of somebody who does not work here - and
+ * the row it writes carries their name, not the filer's, because the money is
+ * owed to them.
+ */
+export async function createExpenseReport(onBehalfOf?: string): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
+  let person = u.name;
+  const want = (onBehalfOf ?? "").trim();
+  if (want && want !== u.name) {
+    if (!(await mayAdminPeople(u))) return { error: "Only HR can open a report in somebody else's name" };
+    // forTenant, so the platform's own administrator can open a report while
+    // supporting a tenant - readTenant is null for them and the predicate
+    // drops out. For everybody else it is their own workspace's roster and
+    // nobody else's.
+    const [member] = await db.select().from(houseMembers).where(and(
+      eq(houseMembers.name, want),
+      forTenant(houseMembers.orgId, readTenant(u)),
+      ne(houseMembers.role, "none"),
+    ));
+    if (!member) return { error: "That is not somebody on your roster" };
+    person = member.name;
+  }
   const [report] = await db.insert(expenseReports).values({
-    tenantOrgId: readTenant(u), person: u.name, status: "draft", submittedBy: u.email,
+    tenantOrgId: readTenant(u), person, status: "draft", submittedBy: u.email,
   }).returning();
   await audit({
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
-    action: "opened a draft expense report",
+    action: person === u.name
+      ? "opened a draft expense report"
+      : `opened a draft expense report for ${person}`,
   });
   revalidatePath("/money/reimbursements");
+  revalidatePath("/people");
   return { id: report.id };
 }
 
-/** Pull rows from my unclaimed pool onto one of my open reports. */
+/**
+ * Pull rows from the unclaimed pool onto an open report.
+ *
+ * WHOSE pool is the report's, not the caller's. For an engineer filling their
+ * own report those are the same set; for HR filling a colleague's they are
+ * not, and computing it from the caller would hand the office manager an empty
+ * list and their own receipts on somebody else's claim.
+ */
 export async function attachPoolExpenses(
   reportId: number, expenseIds: number[],
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, reportId));
-  if (!report || report.person !== u.name) return { error: "Not your report" };
+  const report = await workableReport(u, reportId);
+  if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
   const ids = [...new Set(expenseIds)].filter((n) => Number.isInteger(n));
   if (!ids.length) return { error: "Pick at least one expense" };
   const rows = await db.select().from(expenses)
     .where(and(inArray(expenses.id, ids), forTenant(expenses.tenantOrgId, readTenant(u))));
-  const mine = reimbursementPool(rows, { name: u.name, email: u.email });
+  const subject = await reportSubjectFor(report);
+  const mine = reimbursementPool(rows, subject);
   if (mine.length !== ids.length) {
-    return { error: "Some of those are not yours to claim, or are already on a report" };
+    return {
+      error: report.person === u.name
+        ? "Some of those are not yours to claim, or are already on a report"
+        : `Some of those are not ${report.person}'s to claim, or are already on a report`,
+    };
   }
   await db.update(expenses).set({ reportId }).where(inArray(expenses.id, ids));
   revalidatePath("/money/reimbursements");
@@ -8268,8 +8334,8 @@ export async function removeReportExpense(expenseId: number): Promise<{ error?: 
   const u = await requireStaff();
   const [row] = await db.select().from(expenses).where(eq(expenses.id, expenseId));
   if (!row || row.reportId === null) return {};
-  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, row.reportId));
-  if (!report || (report.person !== u.name && u.role !== "owner")) return { error: "Not your report" };
+  const report = await workableReport(u, row.reportId);
+  if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - its rows are fixed` };
   await db.update(expenses).set({ reportId: null }).where(eq(expenses.id, expenseId));
   revalidatePath("/money/reimbursements");
@@ -8285,8 +8351,8 @@ export async function removeReportExpense(expenseId: number): Promise<{ error?: 
  */
 export async function submitDraftReport(reportId: number): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, reportId));
-  if (!report || report.person !== u.name) return { error: "Not your report" };
+  const report = await workableReport(u, reportId);
+  if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `It is already ${report.status}` };
   const rows = await db.select().from(expenses).where(eq(expenses.reportId, reportId));
   if (!rows.length) return { error: "There is nothing on this report to submit" };
@@ -8305,9 +8371,8 @@ export async function submitDraftReport(reportId: number): Promise<{ error?: str
 /** Throw away one of my empty-handed drafts. Its rows return to the pool first. */
 export async function deleteExpenseReport(id: number): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
-  if (!report) return {};
-  if (report.person !== u.name && u.role !== "owner") return { error: "Not yours to delete" };
+  const report = await workableReport(u, id);
+  if (!report) return { error: "Not yours to delete" };
   if (!editableReport(report.status)) return { error: `It is ${report.status} - withdraw it first` };
   await db.update(expenses).set({ reportId: null }).where(eq(expenses.reportId, id));
   await db.delete(expenseReports).where(eq(expenseReports.id, id));
@@ -8358,9 +8423,8 @@ export async function submitExpenseReport(
 /** Take my own unpaid report back to draft - rows stay on it, editable again. */
 export async function withdrawExpenseReport(id: number): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
-  if (!report) return { error: "Not found" };
-  if (report.person !== u.name && u.role !== "owner") return { error: "Not yours to withdraw" };
+  const report = await workableReport(u, id);
+  if (!report) return { error: "Not yours to withdraw" };
   if (report.status !== "submitted") return { error: `It is ${report.status} - there is nothing to take back` };
   await db.update(expenseReports).set({ status: "draft" }).where(eq(expenseReports.id, id));
   await audit({
@@ -8420,6 +8484,11 @@ export async function returnExpenseReport(id: number, reason: string): Promise<{
   if (typeof why !== "string") return why;
   const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
   if (!report) return { error: "Not found" };
+  // The same wall payExpenseReport has, and for the same reason: requireOwner
+  // is "an owner of some service company", so without it an owner could bounce
+  // another workspace's claim back at their engineer with a reason of their
+  // choosing. Sending a report back is the other half of deciding it.
+  if (!houseOf(u, report.tenantOrgId)) return { error: "Not found" };
   if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
   await db.update(expenseReports).set({ status: "returned", returnedReason: why }).where(eq(expenseReports.id, id));
   await audit({
@@ -10374,6 +10443,62 @@ export async function clearHouseTempPassword(email: string): Promise<{ error?: s
  * environment still lists gets a 'none' row instead, because deleting nothing
  * would leave STAFF_EMAILS granting them staff on the next sign-in.
  */
+/**
+ * Make somebody HR, or stop them being it.
+ *
+ * The owner's to give, and only over their own workspace's roster - the same
+ * wall guardFor puts around every other write to house_members, restated here
+ * because this is not a role change and memberGuard's three refusals (the root
+ * owner, yourself, the last owner) are all about roles. None of them applies
+ * to a capability: an owner marking THEMSELVES HR changes nothing they could
+ * not already do, and the last owner staying the last owner is not at stake.
+ *
+ * What it grants is written down in one place - lib/hr.mayAdminPeople and
+ * lib/payroll.maySeePayroll - and it is deliberately not the books.
+ */
+export async function setHouseHr(email: string, on: boolean): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const e = email.trim().toLowerCase();
+  const [member] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  // Same words for "no such person" and "somebody else's person". Whether
+  // another company employs this address is not a fact to confirm by the shape
+  // of a refusal - see guardFor, which says the same thing about roles.
+  const mine = isPlatformStaff(tenantViewer(u)) ? null : u.operatorOrgId;
+  if (!member || member.role === "none") return { error: "Not found" };
+  if (mine !== null && (member.orgId ?? null) !== mine) return { error: "Not found" };
+  if (member.canAdminPeople === on) return {};
+  await db.update(houseMembers).set({ canAdminPeople: on }).where(eq(houseMembers.id, member.id));
+  await audit({
+    actor: u.email, entityType: "house", entityId: e, tenantOrgId: member.orgId,
+    action: on
+      ? `made ${e} HR - they may now file a claim for a colleague and read the payroll register`
+      : `took HR away from ${e}`,
+    field: "can_admin_people", oldValue: String(member.canAdminPeople), newValue: String(on),
+  });
+  revHouse();
+  revalidatePath("/people");
+  return {};
+}
+
+/**
+ * The people a claim can be filed for: this workspace's roster, by the name a
+ * report carries.
+ *
+ * Names rather than addresses because expense_reports.person is a directory
+ * name - see the column - so the name IS the identifier here, and a member
+ * with no name set cannot be a subject at all. The address rides along for the
+ * form to disambiguate two Steves.
+ */
+export async function listReportSubjects(): Promise<{ name: string; email: string }[]> {
+  const u = await requireStaff();
+  if (!(await mayAdminPeople(u))) return [];
+  const rows = await db.select({ name: houseMembers.name, email: houseMembers.email })
+    .from(houseMembers)
+    .where(and(forTenant(houseMembers.orgId, readTenant(u)), ne(houseMembers.role, "none")))
+    .orderBy(asc(houseMembers.name));
+  return rows.filter((r) => r.name.trim() !== "");
+}
+
 export async function revokeHouseMember(email: string, reason: string): Promise<{ error?: string }> {
   const u = await requireOwner();
   const why = requireReason(reason);

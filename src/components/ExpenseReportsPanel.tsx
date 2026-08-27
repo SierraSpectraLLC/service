@@ -37,12 +37,20 @@ export type ReportRow = {
  * total - never a stored one - and two honest buttons. Mark paid records
  * that a check went out; it does not move money.
  */
-export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today, categories, workOrders }: {
+export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, isOwner, subjects, today, categories, workOrders }: {
   pool: PoolRow[];
   mine: ReportRow[];
-  /** Everyone's submitted reports - owner only, [] otherwise. */
+  /** Everyone's reports - for HR and the owner, [] for anybody else. */
   queue: ReportRow[];
+  /**
+   * Whether this reader administers the people. They see the queue and may
+   * open a claim in somebody else's name; PAYING one is separate below,
+   * because assembling a claim and writing the check are different jobs.
+   */
+  adminsPeople: boolean;
   isOwner: boolean;
+  /** The roster a claim can be opened for. Empty for anyone who is not HR. */
+  subjects: { name: string; email: string }[];
   today: string;
   /** The tenant's expense categories, for the new-expense picker. */
   categories: string[];
@@ -51,6 +59,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
 }) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [paying, setPaying] = useState<ReportRow | null>(null);
+  const [forWhom, setForWhom] = useState("");
   const [adding, setAdding] = useState(false);
   const [addDraft, setAddDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
   const [addErr, setAddErr] = useState("");
@@ -118,7 +127,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
               toast({ message: "Back to draft - open it to edit" });
             })}>withdraw</button>
         )}
-        {side === "queue" && r.status === "submitted" && (
+        {side === "queue" && isOwner && r.status === "submitted" && (
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
             <button className="btn sm accent" disabled={pending}
               onClick={() => { setPayDraft({ paidOn: today, reference: "" }); setPayErr(""); setPaying(r); }}>
@@ -148,9 +157,11 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
 
   return (
     <>
-      {isOwner && (
+      {adminsPeople && (
         <Panel title="Awaiting payout" count={queue.filter((r) => r.status === "submitted").length || undefined}
-          hint="Submitted reimbursement claims. Marking one paid records the payout - the check or payroll run happens where it happens.">
+          hint={isOwner
+            ? "Submitted reimbursement claims. Marking one paid records the payout - the check or payroll run happens where it happens."
+            : "Submitted reimbursement claims. Open one to check it; the owner marks it paid."}>
           {queue.filter((r) => r.status === "submitted").map((r) => reportCard(r, "queue"))}
           {queue.filter((r) => r.status === "submitted").length === 0 && (
             <div className="mut t-small">Nothing waiting. Engineers submit from this same page.</div>
@@ -175,6 +186,27 @@ export default function ExpenseReportsPanel({ pool, mine, queue, isOwner, today,
           })}>
           {pending ? "Opening..." : "+ New expense report"}
         </button>
+        {/* The HR half. Somebody hands over a shoebox of receipts and never
+            files anything; this opens the claim in THEIR name, so the payout
+            is owed to them and the pool it fills from is theirs. */}
+        {subjects.length > 0 && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
+            <label className="mut t-small" htmlFor="claim-for">or open one for</label>
+            <select id="claim-for" className="input sm" value={forWhom}
+              onChange={(e) => setForWhom(e.target.value)} style={{ maxWidth: 220 }}>
+              <option value="">someone else...</option>
+              {subjects.map((p) => <option key={p.email} value={p.name}>{p.name}</option>)}
+            </select>
+            <button className="btn sm" disabled={pending || !forWhom}
+              onClick={() => startTransition(async () => {
+                const res = await createExpenseReport(forWhom);
+                if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
+                router.push(`/money/reimbursements/${res.id}`);
+              })}>
+              Open it
+            </button>
+          </div>
+        )}
       </Panel>
 
       <Panel title="My unclaimed expenses" count={pool.length || undefined}

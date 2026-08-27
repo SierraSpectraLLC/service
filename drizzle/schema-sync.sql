@@ -3377,3 +3377,8 @@ CREATE TABLE IF NOT EXISTS "trail_events" (
 CREATE INDEX IF NOT EXISTS "trail_events_at_idx" ON "trail_events" ("at");
 CREATE INDEX IF NOT EXISTS "trail_events_kind_idx" ON "trail_events" ("kind");
 CREATE INDEX IF NOT EXISTS "trail_events_email_idx" ON "trail_events" ("email");
+
+-- HR, as a capability rather than a role. Whether this house member may file a
+-- reimbursement claim for a colleague and read their workspace's payroll
+-- register. Not the books: lib/books stays owner-only.
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "can_admin_people" boolean NOT NULL DEFAULT false;

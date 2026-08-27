@@ -597,6 +597,24 @@ export const houseMembers = pgTable("house_members", {
   role: text("role").notNull().default("staff"), // owner | staff | none
   name: text("name").notNull().default(""),      // display only
   /**
+   * HR. Whether this person administers their COLLEAGUES: files a
+   * reimbursement claim on somebody else's behalf, and reads the workspace's
+   * payroll register.
+   *
+   * A flag rather than a third role word, for three reasons. The office
+   * manager who does HR is also staff and sometimes also the owner, so it has
+   * to compose with a role rather than replace one. A new word in `role`
+   * would have to be audited into every `=== "staff"` and `=== "owner"` test
+   * in the app, and the failure mode of missing one is silent
+   * over-permission. And clientAllowlist already carries its privileges this
+   * way - canSeeMoney, canSeePayroll, canSeeAgreements - so this is the
+   * house's half of a convention that already exists.
+   *
+   * It is NOT the books. lib/books stays owner-only: HR reads what the
+   * company pays its people, not what it invoiced LabZen.
+   */
+  canAdminPeople: boolean("can_admin_people").notNull().default(false),
+  /**
    * The engineer's own point zero - where the stipend radius is measured
    * from, and where a routed trip starts. Set by the engineer themselves on
    * their own settings page, because it is their home: nobody else should be

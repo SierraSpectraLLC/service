@@ -21,6 +21,7 @@ import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIc
 import ViewAsBar from "@/components/ViewAsBar";
 import { viewAsPeople } from "@/app/actions";
 import { seesBooksFor } from "@/lib/financeData";
+import { mayAdminPeople, seesPayrollFor } from "@/lib/hr";
 import { financeNavItems } from "@/lib/finance";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { visibleOrgs } from "@/lib/tenancy";
@@ -140,7 +141,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // here it would also be an entry that names a thing they cannot have.
   const [allowRow] = user?.orgId != null
     ? await db.select({
-        payroll: clientAllowlist.canSeePayroll, money: clientAllowlist.canSeeMoney,
+        money: clientAllowlist.canSeeMoney,
         startView: clientAllowlist.startView,
       })
         .from(clientAllowlist).where(eq(clientAllowlist.entry, user.email.toLowerCase())).catch(() => [])
@@ -150,7 +151,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
      would put it in every token in the app), where the operator started them,
      and what their company is. See lib/viewMode. */
   const resells = !isStaff && resellerView(me?.viewMode ?? "", allowRow?.startView ?? "", orgResells);
-  const seesPayroll = user?.role === "owner" || allowRow?.payroll === true;
+  /* Through lib/hr, not `role === "owner" || allowRow`. This word in the menu
+     and the room behind it have to agree about who may read a register, and
+     this line was the fifth place in the app assembling that answer from its
+     own set of facts - it knew about the client allowlist and about owners,
+     and would have known nothing about the shop's own HR. */
+  const seesPayroll = !!user && await seesPayrollFor(user);
   /* The shop's own books - what it has invoiced, collected, committed and is
      owed. The owner's, and nobody else's on the staff side: an engineer needs
      Purchasing and Reimbursements, which are their own doors below, and has no
@@ -162,6 +168,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
      need it" - the money card calls it, this did not, so the word and the page
      behind it could disagree about who may read the books. */
   const seesBooks = !!user && await seesBooksFor(user);
+  /* Whether this reader gets a Financial menu at all - the books, or the
+     payroll register on its own. It decides Operations as well as Financial:
+     the two working rooms appear in exactly one of the two menus, and this is
+     which. */
+  const hasFinanceMenu = seesBooks || seesPayroll;
+  /* The HR room. The owner, and whoever they have made HR - see lib/hr. It is
+     not a Settings link: Settings is who has a login, this is what the people
+     on the roster are owed. */
+  const adminsPeople = !!user && await mayAdminPeople(user);
   /* The client half of the same rule: the quotes their organization has been
      sent and the invoices it owes. Their org has no owner role to fall back
      on, so this is a per-person flag that defaults ON - the switch exists to
@@ -242,9 +257,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        like a destination. The items come from lib/finance so this menu and the
        rail inside the section cannot drift apart; Payroll leaves the list
        entirely for a reader who may not read one. */
-    ...(seesBooks ? [{
+    ...(hasFinanceMenu ? [{
       label: "Financial",
-      items: financeNavItems({ seesPayroll }),
+      items: financeNavItems({ seesBooks, seesPayroll }),
     }] : []),
     {
       label: "Operations",
@@ -254,14 +269,27 @@ export default async function RootLayout({ children }: { children: React.ReactNo
            morning question, so it leads the group. */
         { href: "/calendar", label: "Calendar" },
         { href: "/maintenance", label: "Maintenance" },
-        { href: "/money/purchasing", label: "Purchasing" },
-        /* Money an engineer fronted, and where the payout stands. It keeps
-           its place in Operations because the person it serves is the
-           engineer, and it carries the financial rail as well - the two
-           doors reach the same page. "Reimbursements", not "Expenses":
-           Overhead is also expenses, and two things by one name in one
-           section is the confusion this merge exists to remove. */
-        { href: "/money/reimbursements", label: "Reimbursements" },
+        ...(adminsPeople ? [{ href: "/people", label: "People" }] : []),
+        /* Purchasing and Reimbursements, for the readers who have no Financial
+           menu to find them in.
+           They are things an engineer DOES rather than facts about how the
+           business is doing, and both were doors of their own before the
+           financial section existed - so an engineer must be able to raise a
+           purchase order and claim back a hotel without the books. That used
+           to mean listing them in BOTH menus, on the reasoning that the
+           Financial menu was owner-only and so the two readerships never
+           overlapped. They do now: HR gets that menu for the payroll register,
+           and would have seen the same two rooms twice.
+           So: one door each, and which menu it is in depends on which menus
+           this reader has. lib/finance.WORKING_ROOMS keeps them in the
+           Financial menu for everybody who has one. */
+        ...(hasFinanceMenu ? [] : [
+          { href: "/money/purchasing", label: "Purchasing" },
+          /* "Reimbursements", not "Expenses": Overhead is also expenses, and
+             two things by one name in one section is the confusion this merge
+             exists to remove. */
+          { href: "/money/reimbursements", label: "Reimbursements" },
+        ]),
         /* Payroll moved to the Financial menu. It is not something an engineer
            DOES - unlike the two rooms above it, which stay here precisely
            because they are - and its gate is the books gate, so anybody who

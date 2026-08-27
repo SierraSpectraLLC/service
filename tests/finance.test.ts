@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import {
   FINANCE_KEYS, FINANCE_LABEL, PAST_DUE_SERIOUS, PERIODS,
-  daysBetween, financeRail, isPeriod, periodDays, periodFor, periodSpan, periodStart,
+  daysBetween, financeNavItems, financeRail, isPeriod, periodDays, periodFor, periodSpan, periodStart,
   monthlyContractCents, monthsIn,
   positionTone, rankDecisions, withPeriod, type Decision,
 } from "@/lib/finance";
@@ -117,11 +117,38 @@ describe("the rail", () => {
     }
   });
 
-  it("never lets the payroll flag alone open the register", () => {
-    // Belt and braces: the two rules are asked separately and could in
-    // principle disagree, and the answer when they do is the stricter one.
+  it("gives HR the register and none of the books", () => {
+    /*
+     * seesBooks false with seesPayroll true used to be unreachable, and this
+     * test asserted the stricter answer for a pair that could only arrive by
+     * mistake. It is now a person: the office manager an owner has made HR,
+     * who runs the payout and has no business reading what the shop invoiced.
+     *
+     * So the pair is honoured rather than collapsed - and the interesting half
+     * of the assertion is the second one. Payroll arriving must not drag a
+     * single room of the position in behind it.
+     */
     const groups = financeRail({ seesBooks: false, seesPayroll: true });
-    expect(keysOf(groups)).not.toContain("payroll");
+    expect(keysOf(groups)).toEqual(["purchasing", "reimbursements", "payroll"]);
+    const rendered = JSON.stringify(groups);
+    for (const gone of ["overview", "quotes", "invoices", "collections", "contracts", "overhead", "costing"]) {
+      expect(rendered).not.toMatch(new RegExp(gone, "i"));
+    }
+  });
+
+  it("draws the menu and the rail from one predicate", () => {
+    // financeNavItems promises in its own comment that the menu cannot drift
+    // from the rail. It is one filter now; this is what stops it becoming two
+    // again.
+    for (const seesBooks of [true, false]) {
+      for (const seesPayroll of [true, false]) {
+        const rail = financeRail({ seesBooks, seesPayroll })
+          .flatMap((g) => g.entries).map((e) => e.href.split("?")[0]);
+        const menu = financeNavItems({ seesBooks, seesPayroll }).map((i) => i.href);
+        expect(`${seesBooks}/${seesPayroll}: ${menu.join(",")}`)
+          .toBe(`${seesBooks}/${seesPayroll}: ${rail.join(",")}`);
+      }
+    }
   });
 
   it("carries the window across every link", () => {

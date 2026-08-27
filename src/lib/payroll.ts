@@ -59,25 +59,41 @@ export type PayrollViewer = {
   orgId: number | null;
   /** The operator whose workspace this person is staff OF. Null for a client. */
   operatorOrgId: number | null;
-  /** Their allowlist flag - whether they may read their org's payroll at all. */
+  /**
+   * The flag somebody turned on for them by hand: a client's
+   * clientAllowlist.canSeePayroll, or a house member's
+   * houseMembers.canAdminPeople. One field because it answers one question on
+   * both sides - may this person read a register that is not their own row -
+   * and because two fields would be two chances for a caller to fill in the
+   * wrong one and get a `false` that looks like a rule rather than a bug.
+   * lib/hr assembles it; nothing else should.
+   */
   canSeePayroll: boolean;
 };
 
 /**
  * May this viewer read `orgId`'s payroll - everybody's pay, not just theirs?
  *
- * The house side: an operator's OWNER reads their own company's payroll. Staff
- * do not, and no operator reads a client's, however the id arrives. There is
+ * The house side: an operator's OWNER reads their own company's payroll, and
+ * so does whoever that owner has made HR - somebody has to run the payout, and
+ * in most companies of this size it is not the owner. Ordinary staff do not,
+ * and no operator reads a client's, however the id arrives. There is
  * deliberately no platform-staff bypass: the one account that can see
  * everything else on the instance cannot see this, because "everything else"
  * was never meant to include what somebody's colleague earns.
  *
- * The client side: their own organization's, and only with the flag somebody
- * turned on for them by hand.
+ * The client side: their own organization's, and only with the flag.
+ *
+ * Note what this does NOT grant, in either direction. lib/books is a separate
+ * rule and stays owner-only on the house side, so HR reads what the company
+ * pays its people without reading what it invoiced its clients. The
+ * implication runs one way and tests/payroll pins it: anyone who may read the
+ * books may read the payroll, never the reverse.
  */
 export function maySeePayroll(v: PayrollViewer, orgId: number): boolean {
   if (v.role === "owner" || v.role === "staff") {
-    return v.role === "owner" && v.operatorOrgId !== null && v.operatorOrgId === orgId;
+    if (v.operatorOrgId === null || v.operatorOrgId !== orgId) return false;
+    return v.role === "owner" || v.canSeePayroll;
   }
   return v.canSeePayroll && v.orgId !== null && v.orgId === orgId;
 }
@@ -88,6 +104,9 @@ export function maySeePayroll(v: PayrollViewer, orgId: number): boolean {
  */
 export function mayEditPayroll(v: PayrollViewer, orgId: number): boolean {
   if (!maySeePayroll(v, orgId)) return false;
+  // HR is deliberately not here. Reading the register is how they run a
+  // payout; deciding what somebody is paid is the owner's, and the two are
+  // different jobs even when one person happens to hold both.
   return v.role === "owner" || v.role === "client_editor";
 }
 
