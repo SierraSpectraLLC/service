@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { forTenant } from "@/lib/tenancy";
+import { forTenant, tenantOfOrg } from "@/lib/tenancy";
 import { instruments, sheetDiffs, appSettings, systemShares } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { STAGES, SHEET_STAGES } from "@/lib/stages";
@@ -257,11 +257,16 @@ export async function runSheetSync(): Promise<{ checked: number; diffs: number; 
     (await db.select({ instrumentId: systemShares.instrumentId }).from(systemShares)
       .where(eq(systemShares.orgId, sheetOrgId))).map((r) => r.instrumentId)
   );
-  // The instance operator's fleet. One sheet, one operator: comparing another
-  // workspace's systems against it reports them all as "missing from the sheet"
-  // and prints their external ids into a diff list that is not theirs.
+  // The workspace that owns the SHEET. app_settings already records which
+  // organization it belongs to (sheetOrgId, read above), so its tenant is the
+  // right scope - and unlike operator_org_id it keeps meaning the same thing
+  // once the company running the instance is not also the one servicing these
+  // systems. Comparing another workspace's fleet against this sheet reports
+  // every one of their systems as "missing from the sheet" and prints their
+  // external ids into a diff list that is not theirs.
+  const sheetTenant = await tenantOfOrg(sheetOrgId);
   const allRows = await db.select().from(instruments)
-    .where(forTenant(instruments.tenantOrgId, settings?.operatorOrgId ?? null));
+    .where(forTenant(instruments.tenantOrgId, sheetTenant));
   const dbRows = sharedIds === null ? allRows : allRows.filter((r) => sharedIds.has(r.id));
   const byId = new Map(dbRows.map((r) => [r.externalId, r]));
 

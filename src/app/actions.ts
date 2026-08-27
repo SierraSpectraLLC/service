@@ -736,13 +736,15 @@ export async function createInstrument(
       await db.update(instruments).set({ ownerOrgId: owner }).where(eq(instruments.id, row.id));
     }
   } else {
-    // Created by the operator: share it with the service organization running
-    // this instance, so its engineers - who sign in as that org, not as
-    // platform staff - can work the system.
-    const [s] = await db.select({ operatorOrgId: appSettings.operatorOrgId }).from(appSettings).where(eq(appSettings.id, 1));
-    if (s?.operatorOrgId != null) {
+    // Created by staff: share it with THEIR service organization, so its
+    // engineers - who sign in as that org, not as platform staff - can work
+    // the system. app_settings.operator_org_id is the company that runs the
+    // INSTANCE, which stops being the right answer the moment a second
+    // operator creates a system: theirs would be shared with the landlord.
+    const mine = myTenantOrgId(u);
+    if (mine != null) {
       await db.insert(systemShares)
-        .values({ instrumentId: row.id, orgId: s.operatorOrgId, access: "edit", addedBy: u.email })
+        .values({ instrumentId: row.id, orgId: mine, access: "edit", addedBy: u.email })
         .onConflictDoNothing();
     }
   }
@@ -4339,10 +4341,12 @@ export async function sendEodEmail(orgId: number | null): Promise<{ error?: stri
   let recipients = "";
   let who = "";
   if (orgId === null) {
-    const brand = await getBrand();
-    const [op] = brand.operatorOrgId === null ? [] : await db.select().from(orgs).where(eq(orgs.id, brand.operatorOrgId));
+    // "Our own work" means the sender's own workspace. Read off the instance's
+    // operator this sent one company's day to another company's recipients.
+    const mine = myTenantOrgId(u);
+    const [op] = mine === null ? [] : await db.select().from(orgs).where(eq(orgs.id, mine));
     recipients = op?.eodRecipients ?? "";
-    who = op?.name ?? brand.name;
+    who = op?.name ?? (await getBrand()).name;
   } else {
     const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
     if (!org) return { error: "Not found" };
@@ -9766,6 +9770,11 @@ export async function setModule(
  * The URL is the credential, so this is owner work: minting hands out a key
  * to every dated fact in the shop, and rotating revokes every copy at once.
  *
+ * NOTE: with a platform operator that is not itself a service company, the feed
+ * this mints is that platform workspace's - which has no systems. See the route
+ * for why, and what the per-operator fix looks like. Leave the module off until
+ * then.
+ *
  * PLATFORM owner, specifically. The token is a single column on app_settings,
  * so there is one feed for the instance and it is the instance operator's.
  * Under requireOwner() a second operator's owner could mint it - handing
@@ -12113,11 +12122,13 @@ export async function setModelPublished(termId: number, published: boolean): Pro
   });
   if (blockers.length) return { error: blockers[0] };
 
-  // Only the operator's own library is published: one canonical page per model,
-  // rather than a race between two tenants' versions of the same pump.
-  const brand = await getBrand();
-  if (brand.operatorOrgId !== null && term.tenantOrgId !== null && term.tenantOrgId !== brand.operatorOrgId) {
-    return { error: "Only the operator's own catalog is published publicly" };
+  // Your own workspace's library, not the instance operator's - the slug is
+  // unique across the instance, so two tenants still cannot race for the same
+  // page, but each may publish its own models. Keyed off the instance operator
+  // this refused every workspace but the landlord's.
+  const mine = myTenantOrgId(u);
+  if (mine !== null && term.tenantOrgId !== null && term.tenantOrgId !== mine) {
+    return { error: "You can only publish your own workspace's catalog" };
   }
 
   let slug = term.publicSlug;

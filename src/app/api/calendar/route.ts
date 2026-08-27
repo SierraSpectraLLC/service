@@ -43,6 +43,15 @@ export async function GET(req: Request) {
   //
   // Null (an instance that has never named an operator) keeps the old
   // unrestricted behavior, which is correct there: one operator, one calendar.
+  //
+  // KNOWN LIMIT, once the platform operator is not also a service company: this
+  // resolves to the PLATFORM's workspace, which has no systems, so the feed is
+  // empty. The token is a single column on app_settings and there is nothing on
+  // it recording whose calendar it is. Making the feed per-operator - a
+  // calendar_token on orgs, minted by each owner for their own workspace - is
+  // the fix, and it is a feature change rather than a migration step, so it is
+  // deliberately not done here. The feature ships off; turn it on only after
+  // that change, or the subscriber gets an empty calendar.
   const feedTenant = settings?.operatorOrgId ?? null;
 
   const [schedRows, taskRows, quoteRows, invoiceRows, agreementRows, orgRows, instRows, assetRows, brand] =
