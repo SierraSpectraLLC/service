@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cronAuthorized } from "@/lib/cronAuth";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { agreements, orgs, quoteLines, quotes, rateCards } from "@/db/schema";
@@ -28,8 +29,7 @@ import { renewalFromBurn } from "@/lib/quotes";
  * firing once. See notifyRenewalDue.
  */
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cronAuthorized } from "@/lib/cronAuth";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { houseEmails } from "@/lib/house";
@@ -19,8 +20,7 @@ import { notifyUsageReport } from "@/lib/notify";
  * told about its own people, never about another company's.
  */
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {

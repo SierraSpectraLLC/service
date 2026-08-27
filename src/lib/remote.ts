@@ -460,7 +460,22 @@ export async function orphanDevices() {
 }
 
 /** One device with its org's group, for the connect path. */
-export async function deviceWithOrg(deviceId: number) {
+/**
+ * One enrolled machine, or null when it is gone OR belongs to another
+ * workspace.
+ *
+ * The tenant is a parameter rather than a caller's afterthought because every
+ * mutation on this table reaches the row through here, and the single-clause
+ * `and()` this used to end on was the vestige of a predicate that was expected
+ * and never written. Without it, `setRemoteConsent` over sequential ids turns
+ * off the prompt on somebody else's instrument PC - the person sitting at that
+ * machine stops being asked, and the audit line reads as though their own
+ * company chose it.
+ *
+ * Undefined or null = no restriction: platform staff, and the pre-tenancy
+ * instance.
+ */
+export async function deviceWithOrg(deviceId: number, tenantOrgId?: number | null) {
   const [row] = await db.select({
     device: remoteDevices,
     orgName: orgs.name,
@@ -468,7 +483,12 @@ export async function deviceWithOrg(deviceId: number) {
     groupId: orgs.remoteGroupId,
   }).from(remoteDevices)
     .leftJoin(orgs, eq(orgs.id, remoteDevices.orgId))
-    .where(and(eq(remoteDevices.id, deviceId)));
+    .where(and(
+      eq(remoteDevices.id, deviceId),
+      tenantOrgId === undefined || tenantOrgId === null
+        ? undefined
+        : eq(remoteDevices.tenantOrgId, tenantOrgId),
+    ));
   return row ?? null;
 }
 

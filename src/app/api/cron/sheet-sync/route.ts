@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { cronAuthorized } from "@/lib/cronAuth";
 import { getModules } from "@/lib/flags";
 import { runSheetSync } from "@/lib/sheetSync";
 
 export async function GET(req: Request) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!cronAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!(await getModules()).sheetSync) {

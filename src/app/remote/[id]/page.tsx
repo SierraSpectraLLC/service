@@ -41,15 +41,14 @@ export default async function RemoteSessionPage({ params }: { params: Promise<{ 
   const deviceId = parseInt(id);
   if (isNaN(deviceId)) notFound();
 
-  const row = await deviceWithOrg(deviceId);
+  // Scoped in the lookup itself - see deviceWithOrg. The refusal further down
+  // stops the CONNECTION, not the page: the machine's nickname, hostname,
+  // client and system render either way, and device ids are sequential, so a
+  // signed-in user of any workspace could otherwise walk them and read another
+  // company's lab estate off the headings.
+  const row = await deviceWithOrg(deviceId, readTenant(user));
   if (!row) notFound();
   const { device } = row;
-  // The refusal below stops the CONNECTION, not the page: the machine's
-  // nickname, hostname, client and system are rendered either way. Device ids
-  // are sequential, so without this a signed-in user of any workspace could
-  // walk them and read another company's lab estate off the headings.
-  const tenant = readTenant(user);
-  if (tenant !== null && device.tenantOrgId !== tenant) notFound();
 
   const [system] = device.instrumentId === null ? [] : await db
     .select({ externalId: instruments.externalId }).from(instruments)

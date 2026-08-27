@@ -1359,6 +1359,9 @@ export async function decommissionAsset(assetId: number) {
   const u = await requireStaff();
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a || a.status === "Decommissioned") return;
+  // Taking a unit out of service is house work, and the house is the RECORD's
+  // workspace. requireStaff() admits every operator's people.
+  if (!houseOf(u, a.tenantOrgId)) return;
   const fromId = a.instrumentId;
   // Nothing follows a unit out of service, in either direction.
   await cutServeLinks(assetId, fromId, []);
@@ -1380,6 +1383,9 @@ export async function removeAsset(assetId: number, reason: string): Promise<{ er
   if (typeof why !== "string") return why;
   const [a] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!a) return {};
+  // Same words a missing row gets: this is a hard delete and the id came from
+  // the caller, so whose it is has to be settled before anything cascades.
+  if (!houseOf(u, a.tenantOrgId)) return {};
   await db.delete(assets).where(eq(assets.id, assetId)); // events cascade; tags null out
   await audit({
     actor: u.email, instrumentId: a.instrumentId ?? undefined, entityType: "asset", entityId: assetId,
@@ -1408,8 +1414,20 @@ export async function removeAssets(
   const ids = [...new Set(assetIds.filter((n) => Number.isInteger(n) && n > 0))];
   if (!ids.length) return { error: "Nothing selected" };
   if (ids.length > 200) return { error: "Delete 200 at a time" };
-  const rows = await db.select().from(assets).where(inArray(assets.id, ids));
+  // Scoped at the fetch, so the loop below can only ever see this workspace.
+  // Asset ids are one sequence across the instance, so unscoped this walked
+  // another operator's inventory 200 rows at a time - rows deleted, events
+  // cascaded, tags nulled on their systems. Ids that fall out are reported
+  // rather than silently skipped, by the failures pass just below.
+  const rows = await db.select().from(assets)
+    .where(and(inArray(assets.id, ids), forTenant(assets.tenantOrgId, readTenant(u))));
   const failures: { id: number; error: string }[] = [];
+  // An id the fetch did not return is gone or is not this workspace's, and the
+  // caller is told the same thing either way. Reported rather than dropped: a
+  // batch that silently deletes fewer rows than it was given is how somebody
+  // concludes the job is done.
+  const found = new Set(rows.map((r) => r.id));
+  for (const id of ids) if (!found.has(id)) failures.push({ id, error: "Not found" });
   let deleted = 0;
   for (const a of rows) {
     try {
@@ -3337,8 +3355,17 @@ export async function setPhotoFraming(attachmentId: number, framing: string): Pr
  * The house may work in any store it administers; everybody else works in
  * their own and nowhere else.
  */
-async function folderStoreGate(u: Awaited<ReturnType<typeof requireEditor>>, orgId: number | null) {
+async function folderStoreGate(
+  u: Awaited<ReturnType<typeof requireEditor>>, orgId: number | null,
+  // The row's own workspace, where the caller holds one. The org test below
+  // cannot separate two house shelves - org_id is NULL on every workspace's -
+  // so a caller that arrived with a row (revokeDropLink, the folder mutations)
+  // passes its stamp and the answer stops being "is this person staff".
+  rowTenant?: number | null,
+) {
   if (orgId === null) {
+    const mine = readTenant(u);
+    if (rowTenant !== undefined && mine !== null && rowTenant !== mine) return { error: "Not found" };
     // The operator's own store. House staff only.
     return isStaffRole(u.role) ? {} : { error: "Not found" };
   }
@@ -3557,7 +3584,12 @@ export async function revokeDropLink(id: number): Promise<{ error?: string }> {
   const u = await requireEditor();
   const [row] = await db.select().from(dropLinks).where(eq(dropLinks.id, id));
   if (!row) return { error: "Not found" };
-  const gate = await folderStoreGate(u, row.orgId);
+  // A link into a workspace's own shelf carries orgId NULL in EVERY workspace,
+  // so the gate's org test matched all of them: this walked ids and revoked
+  // other operators' links, killing uploads from technicians at air-gapped
+  // instruments - and the audit line landed with a null tenant, so the company
+  // it happened to got no trail naming anybody.
+  const gate = await folderStoreGate(u, row.orgId, row.tenantOrgId);
   if ("error" in gate) return gate;
   if (row.revokedAt !== null) return {};
   await db.update(dropLinks).set({ revokedAt: new Date() }).where(eq(dropLinks.id, id));
@@ -6017,7 +6049,7 @@ export async function connectRemoteDevice(
 ): Promise<{ error?: string; url?: string }> {
   const u = await requireUser();
   const { remote: moduleOn } = await getModules();
-  const row = await deviceWithOrg(deviceId);
+  const row = await deviceWithOrg(deviceId, readTenant(u));
   if (!row) return { error: "Not found" };
   const { device } = row;
 
@@ -6952,7 +6984,7 @@ Promise<{ error?: string; taskId?: number; already?: boolean; number?: string; w
 /** Point a device at the system it drives, or clear the link. Staff only. */
 export async function linkRemoteDevice(deviceId: number, instrumentId: number | null): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const row = await deviceWithOrg(deviceId);
+  const row = await deviceWithOrg(deviceId, readTenant(u));
   if (!row) return { error: "Not found" };
   let label = "nothing";
   if (instrumentId !== null) {
@@ -6980,7 +7012,7 @@ export async function linkRemoteDevice(deviceId: number, instrumentId: number | 
  */
 export async function renameRemoteDevice(deviceId: number, nickname: string): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const row = await deviceWithOrg(deviceId);
+  const row = await deviceWithOrg(deviceId, readTenant(u));
   if (!row) return { error: "Not found" };
   const next = cleanNickname(nickname);
   if (next === row.device.nickname) return {};
@@ -7004,7 +7036,7 @@ export async function renameRemoteDevice(deviceId: number, nickname: string): Pr
  */
 export async function setRemoteConsent(deviceId: number, mode: "derive" | "always" | "never"): Promise<{ error?: string }> {
   const u = await requireStaff();
-  const row = await deviceWithOrg(deviceId);
+  const row = await deviceWithOrg(deviceId, readTenant(u));
   if (!row) return { error: "Not found" };
   const consentOverride = mode === "derive" ? null : mode === "always";
   await db.update(remoteDevices).set({ consentOverride }).where(eq(remoteDevices.id, deviceId));
@@ -7027,7 +7059,7 @@ export async function removeRemoteDevice(deviceId: number, reason: string): Prom
   const u = await requireStaff();
   const why = requireReason(reason);
   if (typeof why !== "string") return why;
-  const row = await deviceWithOrg(deviceId);
+  const row = await deviceWithOrg(deviceId, readTenant(u));
   if (!row) return {};
   await db.delete(remoteDevices).where(eq(remoteDevices.id, deviceId));
   await audit({
@@ -8662,6 +8694,11 @@ export async function handOffSystem(instrumentId: number, toOrgId: number, opts?
   const u = await requireStaff();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
+  // Whose record it is decides who may move it. requireStaff() admits every
+  // operator's people, so without this the id was the whole authorization -
+  // and a handoff deletes the outgoing owner's share, so the lab that owns
+  // the instrument opens the portal and the record is simply gone.
+  if (!houseOf(u, inst.tenantOrgId)) return { error: "Not found" };
   const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
   if (!to) return { error: "Unknown organization" };
   if (inst.ownerOrgId === toOrgId) return { error: `${to.name} already owns ${inst.externalId}` };
@@ -8761,6 +8798,8 @@ export async function setSystemOwner(
   const u = await requireStaff();
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
   if (!inst) return { error: "Not found" };
+  // Same rule as handOffSystem: the record's workspace, not the actor's role.
+  if (!houseOf(u, inst.tenantOrgId)) return { error: "Not found" };
   let org: typeof orgs.$inferSelect | undefined;
   if (orgId !== null) {
     [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -9199,6 +9238,10 @@ export async function setAssetOwnerOrg(
   const u = await requireStaff();
   const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
   if (!asset) return { error: "Not found" };
+  // The TARGET org was validated against visibleOrgs below and the asset never
+  // was, so this repointed any workspace's shelf unit at one of the caller's
+  // own client orgs - which then gains see, and edit for a client_editor.
+  if (!houseOf(u, asset.tenantOrgId)) return { error: "Not found" };
   const visible = await visibleOrgs(u);
   if (orgId !== null && !visible.some((o) => o.id === orgId)) return { error: "Not found" };
   const next = ownerFields(orgId, typed, visible.map((o) => ({ id: o.id, name: o.name })));
@@ -9224,8 +9267,16 @@ export async function setAssetOwnerOrg(
 // redacted page (app/listing) - history and opted-in reports, never location,
 // client identity, internal notes, or pricing.
 
-function canSell(u: SessionUser, inst: { ownerOrgId: number | null }): boolean {
-  if (isHouse(u.role)) return true;
+/**
+ * The record's tenant was not even in this signature. `isHouse(u.role)` is
+ * true for every operator's people, and setForSale RETURNS the listing token -
+ * so any operator's owner could list another workspace's client's instrument
+ * and be handed the public URL. /listing/<token> takes no session, and
+ * lib/fileAccess makes any showOnListing attachment anonymously downloadable
+ * the moment forSale is true.
+ */
+function canSell(u: SessionUser, inst: { ownerOrgId: number | null; tenantOrgId: number | null }): boolean {
+  if (houseOf(u, inst.tenantOrgId)) return true;
   return inst.ownerOrgId !== null && inst.ownerOrgId === u.orgId && u.role === "client_editor";
 }
 
@@ -9374,10 +9425,24 @@ export async function requestAccess(serial: string, message: string, kind = "acc
  * granted claim fixable.
  */
 async function assertRequestDecider(u: SessionUser, instrumentId: number, kind = "access") {
-  if (isHouse(u.role)) return;
-  if (kind === "claim") throw new Error("Not found");
+  // The record first. `isHouse(u.role)` used to open this function, and it is
+  // role === "owner" || role === "staff" - true for EVERY operator's people,
+  // so an engineer at one workspace could approve or deny a request against
+  // another's system by id. The read side of this was scoped in 5369210; the
+  // decision was left behind.
   const [inst] = await db.select().from(instruments).where(eq(instruments.id, instrumentId));
-  if (!inst || inst.ownerOrgId === null || inst.ownerOrgId !== u.orgId || u.role !== "client_editor") {
+  if (!inst) throw new Error("Not found");
+  if (kind === "claim") {
+    // A claim asserts "this instrument is ours", so the servicing workspace is
+    // not neutral about it either - schema.ts says only the platform operator
+    // may grant one, "since approving one moves ownership", and that is also
+    // what makes a wrongly granted claim fixable by somebody.
+    if (!isPlatformStaff(tenantViewer(u))) throw new Error("Not found");
+    return;
+  }
+  // The house of the record's OWN workspace, not of any workspace.
+  if (houseOf(u, inst.tenantOrgId)) return;
+  if (inst.ownerOrgId === null || inst.ownerOrgId !== u.orgId || u.role !== "client_editor") {
     throw new Error("Not found");
   }
 }
@@ -9421,6 +9486,11 @@ export async function approveClaim(requestId: number): Promise<{ error?: string 
   const u = await requireStaff();
   const [req] = await db.select().from(accessRequests).where(eq(accessRequests.id, requestId));
   if (!req || req.status !== "pending") return { error: "Not found" };
+  // This moves ownership and mints an edit share, and it never went through the
+  // decider at all - requireStaff was the whole test, so any operator's staff
+  // could grant a claim against any workspace's system. SystemPanel paints the
+  // button from a plain isOperator boolean, so it was on screen for them too.
+  try { await assertRequestDecider(u, req.instrumentId, "claim"); } catch { return { error: "Not found" }; }
   const [[org], [inst]] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, req.orgId)),
     db.select().from(instruments).where(eq(instruments.id, req.instrumentId)),
