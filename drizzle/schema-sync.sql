@@ -3421,3 +3421,7 @@ ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "spectrum_height" integer;
 -- its rows). See src/db/schema.ts.
 ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "title" text NOT NULL DEFAULT '';
 ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "purpose" text NOT NULL DEFAULT '';
+
+-- How a service company numbers its paper, as JSON. Blank = the stock shape
+-- (PO-1042, INV-1043). See src/lib/docNumber.ts.
+ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "doc_scheme" text NOT NULL DEFAULT '';

@@ -40,12 +40,13 @@ const ALLOWED: Record<string, string> = {
   "src/app/settings/tenants/page.tsx::remoteDevices":
     "Same page, same meter: machines per workspace is one of the numbers a price " +
     "is built from.",
-  "src/app/actions.ts::purchaseOrders":
+  "src/lib/docNumberData.ts::purchaseOrders":
     "PO numbers are globally unique - po_number_unique is UNIQUE(number), not " +
     "UNIQUE(tenant, number) - so the scan that picks the next one has to see the " +
     "whole table or two workspaces climb into each other. It returns numbers, " +
     "never rows. Making the constraint per-tenant is the real fix and is a " +
-    "migration; until then this read is load-bearing.",
+    "migration; until then this read is load-bearing. It moved here from " +
+    "app/actions when every document number came under one door.",
   "src/lib/eodEmail.ts::instruments":
     "Selects tenant_org_id explicitly and filters in JS: see mine() a few lines " +
     "down, applied to all three row sets before anything is grouped or sent.",

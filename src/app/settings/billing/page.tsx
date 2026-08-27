@@ -8,6 +8,8 @@ import { resolvePolicy } from "@/lib/billingPolicy";
 import { monthsWithActivity } from "@/lib/accountingExport";
 import { stripeMode } from "@/lib/stripe";
 import BillingDefaultsForm from "@/components/BillingDefaultsForm";
+import DocSchemeForm from "@/components/DocSchemeForm";
+import { schemeFor } from "@/lib/docNumberData";
 import ExpenseRulesForm from "@/components/ExpenseRulesForm";
 import ExpenseCategoriesCard from "@/components/ExpenseCategoriesCard";
 import { forTenant, readTenant } from "@/lib/tenancy";
@@ -52,15 +54,22 @@ export default async function BillingSettingsPage() {
     ...feeRows.map((r) => r.postedOn),
   ]);
 
+  const docScheme = await schemeFor(myTenantOrgId(user));
+
   return (
     <>
       <PageHead
         title="Billing & payments"
         sub="Defaults. Override per client on the organization page."
       />
+      {/* How this shop's paper is named, beside the rest of its billing
+          defaults. It replaces the single "Invoice prefix" box, which was one
+          setting for one document type and instance-wide besides - every
+          tenant on the instance shared it. */}
+      <DocSchemeForm scheme={docScheme} />
+
       <BillingDefaultsForm
         policy={policy}
-        invoicePrefix={settings?.invoicePrefix ?? "INV-"}
         loadedLaborCents={settings?.loadedLaborCents ?? 0}
         platformFeeBps={settings?.platformFeeBps ?? 0}
         stripe={{

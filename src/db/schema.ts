@@ -232,6 +232,19 @@ export const orgs = pgTable("orgs", {
    */
   spectrumStops: text("spectrum_stops").notNull().default(""),
   spectrumHeight: integer("spectrum_height"),
+  /**
+   * How this service company numbers its paper, as JSON - see lib/docNumber.
+   *
+   * On the OPERATOR org, because a numbering scheme is a house convention:
+   * Sierra Spectra threads a job number through every document (030120_INV1)
+   * and the shop next door counts each type on its own (PO-1042), and both are
+   * right. A client organization has no paper of its own to number, so the
+   * column is simply unused on one.
+   *
+   * Blank means the stock shape, which is what every workspace had before this
+   * existed - so nothing that has already been issued changes its name.
+   */
+  docScheme: text("doc_scheme").notNull().default(""),
   // Who at this organization receives its daily report. Each client gets its
   // own list and its own send button - one report per client, never a merged
   // one that would show them each other's systems.
@@ -3055,6 +3068,12 @@ export const appSettings = pgTable("app_settings", {
   // Billing. The prefix is what invoice numbers are built on; the number
   // itself is allocated by scanning the highest one in use, the same
   // read-max-and-retry the work order numbers have always used.
+  /**
+   * RETIRED: numbering moved to orgs.doc_scheme, which is per service company
+   * rather than one setting shared by every tenant on the instance and covers
+   * all four document kinds rather than invoices alone. Nothing reads this;
+   * the column stays because the sync pipeline is additive-only.
+   */
   invoicePrefix: text("invoice_prefix").notNull().default("INV-"),
   /**
    * The platform's cut of ACH volume, in basis points, taken as Stripe's

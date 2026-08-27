@@ -33,7 +33,7 @@ import {
   serializeKits, type IncludedKit,
 } from "@/lib/agreements";
 import {
-  closeLine, moverOf, nextWoNumber, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
+  closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
   type Mover,
 } from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
@@ -122,7 +122,7 @@ import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice, normalizePn } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind, mayReceiveKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
-import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
+import { PO_LABEL, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
@@ -137,6 +137,10 @@ import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
 import { isHouseHr, mayAdminPeople, payrollViewerFor, reportSubjectFor } from "@/lib/hr";
+import { jobFrom, nextDocNumber } from "@/lib/docNumberData";
+import {
+  DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
+} from "@/lib/docNumber";
 import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
@@ -6174,9 +6178,10 @@ async function fileWorkOrder(opts: {
 }): Promise<typeof workOrders.$inferSelect> {
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: workOrders.number }).from(workOrders)
-      .where(forTenant(workOrders.tenantOrgId, opts.tenantOrgId));
-    const number = nextWoNumber(used.map((r) => r.number));
+    // A work order STARTS a thread: no job is passed, so a job-numbered
+    // workspace allocates the next one and everything raised against this job
+    // inherits it. See lib/docNumber.
+    const number = await nextDocNumber("work_order", opts.tenantOrgId);
     try {
       const [wo] = await db.insert(workOrders).values({
         tenantOrgId: opts.tenantOrgId, number,
@@ -6337,7 +6342,7 @@ export async function logPastWorkOrder(
   if (reference && used.some((r) => r.number.toLowerCase() === reference.toLowerCase())) {
     return { error: `${reference} is already a work order here` };
   }
-  const number = reference || nextWoNumber(used.map((r) => r.number));
+  const number = reference || await nextDocNumber("work_order", t0.tenantOrgId);
 
   const orgId = t0.instrumentId !== null
     ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
@@ -11084,10 +11089,13 @@ export async function createPurchaseOrder(data: {
   // unhandled constraint violation on somebody's screen. The scan reveals only
   // the highest number in use, never a row; making the constraint per-tenant is
   // the real fix and is a migration, not a predicate.
-  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
+  // Raised from a stockroom rather than from a job, so there is no thread to
+  // join - a job-numbered workspace opens a new one. The scan behind this
+  // stays instance-wide; the reason is on lib/docNumberData.used.
+  const poNumber = await nextDocNumber("purchase_order", acc.room.tenantOrgId ?? myTenantOrgId(u));
   const [po] = await db.insert(purchaseOrders).values({
     tenantOrgId: acc.room.tenantOrgId ?? myTenantOrgId(u),
-    number: nextPoNumber(existing.map((r) => r.number)),
+    number: poNumber,
     vendor, stockroomId: data.stockroomId, orgId: acc.room.orgId,
     urgent: !!data.urgent,
     reference: (data.reference ?? "").trim().slice(0, 80),
@@ -12126,6 +12134,107 @@ export async function removePmPlan(id: number): Promise<{ error?: string }> {
   });
   revalidatePath(`/settings/organizations/${row.orgId}`);
   revalidatePath("/maintenance/coverage");
+  return {};
+}
+
+// ── Document numbering ──────────────────────────────────────────────────────
+
+/**
+ * How this service company numbers its paper.
+ *
+ * The operator's own call, not the platform's and not a client's - it is a
+ * house convention, and the shop next door numbering PO-1042 while this one
+ * threads 030120_PO1 is two right answers rather than one wrong one.
+ */
+export async function setDocScheme(scheme: Scheme): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "No workspace to configure" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, tenant));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  for (const kind of DOC_KINDS) {
+    const problems = templateProblems(scheme.templates[kind] ?? "");
+    if (problems.length) return { error: `${DOC_LABEL[kind]}: ${problems[0]}` };
+  }
+  await db.update(orgs).set({ docScheme: serializeScheme(scheme) }).where(eq(orgs.id, tenant));
+  await audit({
+    actor: u.email, entityType: "org", entityId: tenant, tenantOrgId: tenant,
+    action: `set how ${org.name} numbers its documents`
+      + DOC_KINDS.map((k) => ` · ${DOC_LABEL[k]} ${scheme.templates[k]}`).join(""),
+  });
+  revalidatePath("/settings/billing");
+  return {};
+}
+
+/**
+ * Type over the number the scheme proposed.
+ *
+ * A number is the one thing on a document that has to match somebody else's
+ * filing cabinet, so a scheme proposes and a person may overrule. Only while
+ * the document is still a draft: a number that has been sent to a client is
+ * their reference too, and changing it afterwards makes every conversation
+ * about that document harder rather than easier.
+ *
+ * Uniqueness is checked per workspace, which is where a number has to be
+ * unambiguous - except purchase orders, whose constraint is instance-wide
+ * (see lib/docNumberData.used).
+ */
+export async function setDocumentNumber(
+  kind: "invoice" | "quote" | "purchase_order", id: number, next: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const number = next.trim().slice(0, 40);
+  if (!number) return { error: "A document needs a number" };
+  if (/\s/.test(number)) return { error: "No spaces - a number gets pasted into emails and file names" };
+
+  if (kind === "invoice") {
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, id));
+    if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+    if (row.status !== "draft") return { error: `${row.number} has been sent - its number is the client's reference now` };
+    const clash = await db.select({ id: invoices.id }).from(invoices)
+      .where(and(eq(invoices.number, number), forTenant(invoices.tenantOrgId, row.tenantOrgId)));
+    if (clash.some((c) => c.id !== id)) return { error: `${number} is already on file` };
+    await db.update(invoices).set({ number, updatedAt: new Date() }).where(eq(invoices.id, id));
+    await audit({
+      actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: row.tenantOrgId,
+      action: `renumbered ${row.number} to ${number}`, field: "number", oldValue: row.number, newValue: number,
+    });
+    revalidatePath(`/money/invoices/${id}`);
+    revalidatePath("/money/invoices");
+    return {};
+  }
+
+  if (kind === "quote") {
+    const [row] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+    if (row.status !== "draft") return { error: `${row.number} has been sent - its number is the client's reference now` };
+    const clash = await db.select({ id: quotes.id }).from(quotes)
+      .where(and(eq(quotes.number, number), forTenant(quotes.tenantOrgId, row.tenantOrgId)));
+    if (clash.some((c) => c.id !== id)) return { error: `${number} is already on file` };
+    await db.update(quotes).set({ number, updatedAt: new Date() }).where(eq(quotes.id, id));
+    await audit({
+      actor: u.email, entityType: "quote", entityId: id, tenantOrgId: row.tenantOrgId,
+      action: `renumbered ${row.number} to ${number}`, field: "number", oldValue: row.number, newValue: number,
+    });
+    revalidatePath(`/money/quotes/${id}`);
+    revalidatePath("/money/quotes");
+    return {};
+  }
+
+  const [row] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  if (!poEditable(row.status)) return { error: `${row.number} has been sent to the vendor - its number is their reference now` };
+  // Instance-wide, because po_number_unique is.
+  const clash = await db.select({ id: purchaseOrders.id }).from(purchaseOrders)
+    .where(eq(purchaseOrders.number, number));
+  if (clash.some((c) => c.id !== id)) return { error: `${number} is already on file` };
+  await db.update(purchaseOrders).set({ number }).where(eq(purchaseOrders.id, id));
+  await audit({
+    actor: u.email, entityType: "po", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `renumbered ${row.number} to ${number}`, field: "number", oldValue: row.number, newValue: number,
+  });
+  revalidatePath(`/money/purchasing/${id}`);
+  revalidatePath("/money/purchasing");
   return {};
 }
 
@@ -13455,9 +13564,11 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, wo.tenantOrgId));
-    const number = nextWoNumber(used.map((r) => r.number), src.context.invoicePrefix);
+    // The job's own thread, read off the work order's number: job 030212's
+    // invoices are 030212_INV1, 030212_INV2.
+    const number = await nextDocNumber("invoice", wo.tenantOrgId, {
+      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+    });
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId,
@@ -14173,9 +14284,9 @@ export async function draftQuote(
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, wo.tenantOrgId));
-    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", wo.tenantOrgId, {
+      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+    });
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId,
@@ -14337,9 +14448,11 @@ async function applyQuoteApproval(
     const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
     const ctx = await billingContext(q.orgId);
     for (let attempt = 0; attempt < 4; attempt++) {
-      const used = await db.select({ number: invoices.number }).from(invoices)
-        .where(forTenant(invoices.tenantOrgId, q.tenantOrgId));
-      const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+      // The quote's thread, so the deposit and the final invoice sit in the
+      // same folder as the offer they came from.
+      const number = await nextDocNumber("invoice", q.tenantOrgId, {
+        job: await jobFrom("quote", q.number, q.tenantOrgId),
+      });
       try {
         const [inv] = await db.insert(invoices).values({
           tenantOrgId: q.tenantOrgId, orgId: q.orgId, workOrderId: q.workOrderId,
@@ -14580,7 +14693,6 @@ export async function saveExpensePolicy(data: Record<string, unknown>): Promise<
 
 export async function saveBillingDefaults(data: {
   policy: Record<string, unknown>;
-  invoicePrefix?: string;
   loadedLabor?: string;
   platformFeeBps?: number;
 }): Promise<{ error?: string }> {
@@ -14593,10 +14705,6 @@ export async function saveBillingDefaults(data: {
   const changes: string[] = [];
   for (const key of Object.keys(after) as (keyof typeof after)[]) {
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes.push(String(key));
-  }
-  if (data.invoicePrefix !== undefined) {
-    const prefix = data.invoicePrefix.trim().slice(0, 12);
-    if (prefix && prefix !== row?.invoicePrefix) { patch.invoicePrefix = prefix; changes.push("invoice prefix"); }
   }
   if (data.loadedLabor !== undefined) {
     const cents = parseMoney(data.loadedLabor) ?? 0;
@@ -14860,9 +14968,7 @@ export async function requestDeposit(orgId: number, note: string): Promise<{ err
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, myTenantOrgId(u)));
-    const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+    const number = await nextDocNumber("invoice", myTenantOrgId(u));
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: myTenantOrgId(u), orgId, number, status: "sent",
@@ -14961,13 +15067,9 @@ export async function createBlankInvoice(orgId: number): Promise<{ error?: strin
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
   const tenant = orgTenant(org) ?? myTenantOrgId(u);
-  const { invoicePrefix } = await billingContext(orgId);
-
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    const number = await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId, number, status: "draft",
@@ -15020,13 +15122,9 @@ export async function raiseRetainerCycle(
   const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
   if (!org) return { error: "Not found" };
   const tenant = orgTenant(org) ?? ag.tenantOrgId;
-  const { invoicePrefix } = await billingContext(ag.orgId);
-
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    const number = await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId: ag.orgId, agreementId: ag.id, number,
@@ -15145,8 +15243,7 @@ export async function recordHistoricalInvoice(
     if (typed && used.some((r) => r.number.toLowerCase() === typed.toLowerCase())) {
       return { error: `${typed} is already on file` };
     }
-    const { invoicePrefix } = await billingContext(orgId);
-    const number = typed || nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    const number = typed || await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId, number,
@@ -15230,7 +15327,7 @@ export async function recordHistoricalQuote(
     if (typed && used.some((r) => r.number.toLowerCase() === typed.toLowerCase())) {
       return { error: `${typed} is already on file` };
     }
-    const number = typed || nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = typed || await nextDocNumber("quote", tenant);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: tenant, orgId, number, status: outcome, title,
@@ -15373,9 +15470,7 @@ export async function createBlankQuote(
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", tenant);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: tenant, orgId, number, status: "draft",
@@ -15674,9 +15769,7 @@ export async function placePartsOrder(
   const today = shopToday();
   let last: unknown;
   for (let attempt = 0; attempt < 4 && nowLines.length && !invoiceNumber; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+    const number = await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId: org.id, number, status: "draft",
@@ -15699,9 +15792,7 @@ export async function placePartsOrder(
   if (nowLines.length && !invoiceNumber) throw last;
 
   for (let attempt = 0; attempt < 4 && quoteLinesWanted.length && !quoteNumber; attempt++) {
-    const used = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", tenant);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: tenant, orgId: org.id, number, status: "draft",

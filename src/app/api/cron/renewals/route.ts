@@ -12,7 +12,7 @@ import { shopToday } from "@/lib/shopday";
 import { addDays } from "@/lib/pm";
 import { audit } from "@/lib/audit";
 import { forTenant } from "@/lib/tenancy";
-import { nextWoNumber } from "@/lib/workOrders";
+import { nextDocNumber } from "@/lib/docNumberData";
 import { resolveRate } from "@/lib/rates";
 import { renewalFromBurn } from "@/lib/quotes";
 
@@ -127,9 +127,7 @@ async function draftRenewalQuote(
 
   const today = shopToday();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const inUse = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, a.tenantOrgId));
-    const number = nextWoNumber(inUse.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", a.tenantOrgId);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: a.tenantOrgId, orgId: a.orgId, agreementId: a.id,
