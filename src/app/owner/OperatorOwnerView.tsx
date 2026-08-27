@@ -56,6 +56,10 @@ export default async function OperatorOwnerView({ user, periodParam }: {
       <PageHead
         title="Owner view"
         sub={`${brand.operatorName} · what is owed, what is owed out, and what needs you · ${periodSpan(today, period)}`}
+        /* The way back. These two pages are one person's two questions - what
+           is the shop doing today, and how is the business doing - so each
+           carries the door to the other and neither needs a nav word. */
+        actions={<Link className="btn sm" href="/">Switch to dashboard</Link>}
       />
 
       <PositionLine

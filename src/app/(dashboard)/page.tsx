@@ -643,6 +643,10 @@ export default async function Home({ searchParams }: {
         categories={[...allSystems.map((c) => c.category), ...vocabCats.map((v) => v.name)].filter(Boolean)}
         canEdit={user.role !== "client_viewer"}
         isStaff={isStaff}
+        /* The way to the owner view lives beside the dashboard's own title
+           rather than in the nav. Same gate as the page it points at - see
+           lib/books - so it is never a link to a redirect. */
+        ownerView={seesBooks}
         myQueueHref={user.name ? `/work?who=${encodeURIComponent(user.name)}` : "/work"}
         initial={{ q: initial.q, f: initial.f, sort: initial.sort }}
         // The ship pipeline is the shop's own axis, and a reseller client's.

@@ -231,10 +231,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        rather than "Billing" because the section stopped being about billing
        the moment purchasing, reimbursements, overhead and payroll joined it -
        see lib/finance. */
-    /* The owner view is a summary of the rooms in the Financial menu, so it
-       sits out here rather than inside it. Gated on the books for the same
-       reason that menu is: every band on the operator's half is money. */
-    ...(seesBooks ? [{ href: "/owner", label: "Owner view" }] : []),
+    /* The owner view is NOT here. It is the same person's other question about
+       the same shop - what is the business doing, rather than what is the shop
+       doing today - so the two pages carry the door to each other in their own
+       headers and this row stays the five places work actually happens. A
+       permanent nav word for a page most of the staff cannot open is a word
+       everybody reads and almost nobody uses. */
   ] : [
     { href: "/", label: resells ? "Your pipeline" : "Your lab" },
     { href: "/work", label: "Requests" },
