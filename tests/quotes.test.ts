@@ -3,7 +3,8 @@
 import { describe, expect, it } from "vitest";
 import {
   answerable, approvalConsequence, contractProposal, daysToExpiry, declineConsequence,
-  depositCents, quoteStanding, renewalFromBurn, stale,
+  depositCents, hasPace, paceShortfall, PACE_MIN_INVOICES, PACE_MIN_MONTHS,
+  quoteStanding, renewalFromBurn, stale, trailingUsage,
 } from "@/lib/quotes";
 
 const q = (over: Partial<{ status: string; expiresOn: string }> = {}) =>
@@ -115,27 +116,132 @@ describe("renewalFromBurn", () => {
   });
 });
 
-describe("contractProposal", () => {
-  it("annualises the trailing spend and shows both numbers", () => {
-    // $13,760 over 11 months.
-    const p = contractProposal({
-      trailingCents: 1376000, months: 11, visitsPerYear: 4, partsAllowanceCents: 200000,
+const line = (over: Partial<{ kind: string; qty: number; unitCents: number; covered: boolean }> = {}) =>
+  ({ kind: "labor", qty: 1000, unitCents: 18500, covered: false, ...over });
+
+describe("trailingUsage", () => {
+  it("reads the visits, the parts and the labor off their own invoices", () => {
+    const u = trailingUsage({
+      today: "2026-08-27",
+      invoices: [
+        { issuedOn: "2026-02-01", workOrderId: 7, lines: [
+          line({ kind: "labor", qty: 4500 }),                       // 4.5 h at $185
+          line({ kind: "part", qty: 1000, unitCents: 39000 }),      // $390
+        ] },
+        { issuedOn: "2026-05-01", workOrderId: 7, lines: [          // the SAME job again
+          line({ kind: "labor", qty: 2000 }),
+        ] },
+        { issuedOn: "2026-08-01", workOrderId: 9, lines: [
+          line({ kind: "travel", qty: 1000, unitCents: 12000 }),
+        ] },
+      ],
     });
-    expect(p?.trailingAnnualCents).toBe(1501091);
-    expect(p?.annualCents).toBe(1275927);
-    expect(p?.savingCents).toBe(225164);
-    expect(p?.line).toContain("4 visits plus $2,000 of parts");
+    // Two distinct jobs, not three invoices: a job re-invoiced is one visit.
+    expect(u.visits).toBe(2);
+    expect(u.invoices).toBe(3);
+    expect(u.partsCents).toBe(39000);
+    expect(u.laborMinutes).toBe(390);          // 6.5 h
+    expect(u.trailingCents).toBe(83250 + 37000 + 39000 + 12000);
+    expect(u.months).toBe(7);                  // Feb 1 to Aug 27
+  });
+
+  it("counts nothing a contract already paid for", () => {
+    // The one card whose job is comparing contract against T&M must not put
+    // contract-covered work on the T&M side of it.
+    const u = trailingUsage({
+      today: "2026-08-27",
+      invoices: [{ issuedOn: "2026-01-01", workOrderId: 1, lines: [
+        line({ kind: "labor", qty: 4000, covered: true }),
+        line({ kind: "part", qty: 1000, unitCents: 5000 }),
+      ] }],
+    });
+    expect(u.trailingCents).toBe(5000);
+    expect(u.partsCents).toBe(5000);
+    expect(u.laborMinutes).toBe(0);
+  });
+
+  it("has no months and no visits for a client never invoiced", () => {
+    const u = trailingUsage({ today: "2026-08-27", invoices: [] });
+    expect(u).toEqual({ months: 0, invoices: 0, visits: 0, partsCents: 0, laborMinutes: 0, trailingCents: 0 });
+  });
+});
+
+describe("contractProposal", () => {
+  const usage = (over: Partial<ReturnType<typeof trailingUsage>> = {}) => ({
+    months: 11, invoices: 6, visits: 3, partsCents: 108000, laborMinutes: 2400,
+    trailingCents: 1376000, ...over,
+  });
+
+  it("offers the client's own pace back to them, not a house template", () => {
+    // $13,760 over 11 months, 3 visits, $1,080 of parts.
+    const p = contractProposal({ usage: usage() });
+    // To the dollar: these are projections, not money that moved.
+    expect(p?.trailingAnnualCents).toBe(1501100);
+    expect(p?.annualCents).toBe(1275900);
+    expect(p?.savingCents).toBe(225200);
+    // Annualised from THEIR numbers: 3 visits over 11 months is 3/yr, and
+    // $1,080 of parts is $1,178.
+    expect(p?.visitsPerYear).toBe(3);
+    expect(p?.partsAllowanceCents).toBe(117800);
+    expect(p?.line).toBe(
+      "Their own pace over 11 months: 3 visits plus $1,178 of parts a year, "
+      + "against $15,011 of time and materials. A contract covering that at $12,759 - 15% off.",
+    );
+    // The one number that is a policy rather than an observation is named.
+    expect(p?.line).toContain("15% off");
+  });
+
+  it("offers no parts allowance to a client who has bought no parts", () => {
+    /*
+     * The whole bug, in one assertion. The card used to promise every client
+     * "$2,000 of parts" whether or not they had ever bought a part, because
+     * the figure was a literal on the page rather than anything about them.
+     */
+    const p = contractProposal({ usage: usage({ partsCents: 0 }) });
+    expect(p?.partsAllowanceCents).toBe(0);
+    expect(p?.line).not.toContain("parts");
+  });
+
+  it("still quotes a visit for a client who has only ever bought parts", () => {
+    // A contract with zero visits in it is a contract nobody signs. Parts get
+    // no such floor - see the function.
+    const p = contractProposal({ usage: usage({ visits: 0 }) });
+    expect(p?.visitsPerYear).toBe(1);
+  });
+
+  it("will not read a pace off one invoice", () => {
+    /*
+     * The number that was on screen: a single $20,000 invoice, one month of
+     * history, annualised to $240,000 a year and then priced against. Twelve
+     * times one invoice is not a pace, and a proposal built on it is one
+     * nobody can defend in the room.
+     */
+    const thin = usage({ months: 1, invoices: 1, trailingCents: 2000000 });
+    expect(contractProposal({ usage: thin })).toBeNull();
+    expect(paceShortfall(thin)).toBe("Too little to price a contract off - 1 invoice, 1 month of history.");
+  });
+
+  it("will not read a pace off a fortnight either", () => {
+    const thin = usage({ months: 0, invoices: 4 });
+    expect(contractProposal({ usage: thin })).toBeNull();
+    expect(paceShortfall(thin)).toContain("under a month of history");
+  });
+
+  it("says nothing is short once there is enough of both", () => {
+    expect(paceShortfall(usage())).toBeNull();
+    expect(hasPace(usage())).toBe(true);
+    // Exactly at the threshold, which is where an off-by-one would live.
+    expect(hasPace(usage({ months: PACE_MIN_MONTHS, invoices: PACE_MIN_INVOICES }))).toBe(true);
+    expect(hasPace(usage({ months: PACE_MIN_MONTHS - 1, invoices: PACE_MIN_INVOICES }))).toBe(false);
   });
 
   it("has nothing to propose without a history", () => {
-    expect(contractProposal({ trailingCents: 0, months: 11, visitsPerYear: 4, partsAllowanceCents: 0 })).toBeNull();
-    expect(contractProposal({ trailingCents: 100, months: 0, visitsPerYear: 4, partsAllowanceCents: 0 })).toBeNull();
+    expect(contractProposal({ usage: usage({ trailingCents: 0 }) })).toBeNull();
   });
 
   it("refuses to discount the price away to nothing", () => {
     const p = contractProposal({
-      trailingCents: 1200000, months: 12, visitsPerYear: 4,
-      partsAllowanceCents: 0, discountBps: 20000,
+      usage: usage({ months: 12, trailingCents: 1200000 }), discountBps: 20000,
     });
     expect(p?.annualCents).toBe(120000);
   });

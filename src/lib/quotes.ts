@@ -168,31 +168,166 @@ export function renewalFromBurn(input: {
 }
 
 /**
- * The proposal for a client who has never had a contract: what their trailing
- * time-and-materials actually cost them, turned into a price.
+ * What a client without a contract has actually been buying, read off their
+ * own invoices.
  *
- * The pitch writes itself out of the numbers - cheaper for them, predictable
- * for you - and it is only honest if the discount is real, so the function
- * returns both figures and lets the caller show the comparison.
+ * Pure, and it takes invoice lines rather than work orders and parts rows on
+ * purpose: an invoice is what the client was CHARGED, which is the only side
+ * of this a proposal may quote at them. It is also the one source already
+ * scoped to the workspace by the time a page has it - see the note on usageFor
+ * in lib/agreementUsage, which reads parts by owner org and would have been
+ * the wrong door here.
+ *
+ * `covered` lines are skipped throughout. A line a contract paid for is not
+ * time-and-materials, and counting it would inflate both the pace and the
+ * price on the one card whose whole job is comparing the two.
+ */
+export type TrailingLine = { kind: string; qty: number; unitCents: number; covered: boolean };
+export type TrailingInvoice = {
+  issuedOn: string;
+  /** The job it billed, if any. Distinct jobs are the honest count of visits. */
+  workOrderId: number | null;
+  lines: TrailingLine[];
+};
+
+export type TrailingUsage = {
+  /** Whole months from their first issued invoice to today. Never negative. */
+  months: number;
+  invoices: number;
+  /** Distinct jobs invoiced - how many times somebody went out. */
+  visits: number;
+  partsCents: number;
+  laborMinutes: number;
+  /** Everything they were charged that a contract did not cover. */
+  trailingCents: number;
+};
+
+export function trailingUsage(input: {
+  invoices: TrailingInvoice[];
+  today: string;
+}): TrailingUsage {
+  const dated = input.invoices.map((i) => i.issuedOn).filter(Boolean).sort();
+  const first = dated[0] ?? "";
+  const months = first
+    ? Math.max(0, Math.round(
+        (Date.parse(`${input.today}T00:00:00Z`) - Date.parse(`${first}T00:00:00Z`)) / (86400000 * 30),
+      ))
+    : 0;
+  const jobs = new Set<number>();
+  let partsCents = 0, laborMinutes = 0, trailingCents = 0;
+  for (const inv of input.invoices) {
+    if (inv.workOrderId !== null) jobs.add(inv.workOrderId);
+    for (const l of inv.lines) {
+      if (l.covered) continue;
+      const qty = l.qty / 1000;
+      const cents = Math.round(qty * l.unitCents);
+      trailingCents += cents;
+      if (l.kind === "part") partsCents += cents;
+      // Labor qty is thousandths of an HOUR - see invoice_lines.qty, where 4.5 h
+      // is 4500 - so the minutes are the hours times sixty and not the qty.
+      if (l.kind === "labor") laborMinutes += Math.round(qty * 60);
+    }
+  }
+  return {
+    months, invoices: input.invoices.length,
+    visits: jobs.size, partsCents, laborMinutes, trailingCents,
+  };
+}
+
+/**
+ * The least history a "pace" can honestly be read off.
+ *
+ * One invoice is a point, not a rate, and the arithmetic below multiplies by
+ * twelve. A single $20,000 invoice issued this month annualised to "$240,000 a
+ * year at the current pace" and then offered a contract priced against it -
+ * which is a number nobody could defend in the room, on a card whose only job
+ * is to be defensible in the room.
+ */
+export const PACE_MIN_MONTHS = 3;
+export const PACE_MIN_INVOICES = 2;
+
+export const hasPace = (u: TrailingUsage): boolean =>
+  u.months >= PACE_MIN_MONTHS && u.invoices >= PACE_MIN_INVOICES;
+
+/**
+ * The proposal for a client who has never had a contract: their own trailing
+ * time-and-materials, turned into a price and an entitlement.
+ *
+ * EVERY FIGURE IN THE SENTENCE IS THEIRS. The visits and the parts allowance
+ * are their own annualised usage, not a house template - this card used to say
+ * "4 visits plus $2,000 of parts" to every client on the list, which is an
+ * offer nobody had entered and which happened to be wrong for both of the
+ * clients it was shown for. The one number that is a policy rather than an
+ * observation is the discount, and it is named in the line for that reason.
+ *
+ * Returns null when there is not enough history to read a pace off - see
+ * hasPace. The caller shows the trailing figure alone in that case, which is a
+ * fact, instead of a projection that is twelve times a single invoice.
  */
 export function contractProposal(input: {
-  trailingCents: number;
-  months: number;
+  usage: TrailingUsage;
+  /** How much of the annualised T&M is given back as the reason to sign. */
+  discountBps?: number;
+}): {
+  annualCents: number;
+  trailingAnnualCents: number;
+  savingCents: number;
   visitsPerYear: number;
   partsAllowanceCents: number;
-  /** How much of the T&M spend is given back as the reason to sign. */
-  discountBps?: number;
-}): { annualCents: number; trailingAnnualCents: number; savingCents: number; line: string } | null {
-  if (input.months <= 0 || input.trailingCents <= 0) return null;
-  const annualised = Math.round((input.trailingCents * 12) / input.months);
-  const discount = Math.max(0, input.discountBps ?? 1500);
-  const annual = Math.round((annualised * (10000 - Math.min(9000, discount))) / 10000);
+  line: string;
+} | null {
+  const u = input.usage;
+  if (!hasPace(u) || u.trailingCents <= 0) return null;
+  const perYear = (n: number) => (n * 12) / u.months;
+  /*
+   * To the dollar, not the cent. Every figure below is a PROJECTION - a
+   * trailing sum multiplied by twelve over however many months - and printing
+   * one to the cent claims a precision the arithmetic does not have. It also
+   * read as a bug: "$19,596.75 a year" beside "$7,685" and "$23,055" looks
+   * like a spreadsheet artefact rather than a price somebody would say out
+   * loud. Ledger figures elsewhere keep their cents, because those are money
+   * that actually moved.
+   */
+  const toDollar = (cents: number) => Math.round(cents / 100) * 100;
+  const annualised = toDollar(perYear(u.trailingCents));
+  const discount = Math.min(9000, Math.max(0, input.discountBps ?? 1500));
+  const annual = toDollar((annualised * (10000 - discount)) / 10000);
+  // At least one visit: a contract quoting zero visits because the trailing
+  // work was all parts is a contract nobody signs. Parts are NOT floored the
+  // same way - a client who has bought no parts should be offered no allowance
+  // rather than a made-up one, which is the whole point of this change.
+  const visitsPerYear = Math.max(1, Math.round(perYear(u.visits)));
+  const partsAllowanceCents = toDollar(perYear(u.partsCents));
+  const parts = partsAllowanceCents > 0
+    ? ` plus ${formatCents(partsAllowanceCents)} of parts`
+    : "";
   return {
     annualCents: annual,
     trailingAnnualCents: annualised,
     savingCents: annualised - annual,
-    line: `${input.visitsPerYear} visit${input.visitsPerYear === 1 ? "" : "s"} plus `
-      + `${formatCents(input.partsAllowanceCents)} of parts at ${formatCents(annual)} a year, `
-      + `against ${formatCents(annualised)} of time and materials at the current pace.`,
+    visitsPerYear,
+    partsAllowanceCents,
+    line: `Their own pace over ${u.months} months: ${visitsPerYear} visit${visitsPerYear === 1 ? "" : "s"}`
+      + `${parts} a year, against ${formatCents(annualised)} of time and materials. `
+      + `A contract covering that at ${formatCents(annual)} - ${(discount / 100).toFixed(0)}% off.`,
   };
+}
+
+/**
+ * Why there is no proposal, said to the person looking at the card.
+ *
+ * "Not enough history" with nothing after it reads as a bug. Which of the two
+ * thresholds is short, and by how much, is the difference between "wait" and
+ * "this client is not really a client".
+ */
+export function paceShortfall(u: TrailingUsage): string | null {
+  if (hasPace(u)) return null;
+  const short: string[] = [];
+  if (u.invoices < PACE_MIN_INVOICES) {
+    short.push(`${u.invoices} invoice${u.invoices === 1 ? "" : "s"}`);
+  }
+  if (u.months < PACE_MIN_MONTHS) {
+    short.push(u.months === 0 ? "under a month of history" : `${u.months} month${u.months === 1 ? "" : "s"} of history`);
+  }
+  return `Too little to price a contract off - ${short.join(", ")}.`;
 }

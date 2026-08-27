@@ -13,7 +13,7 @@ import { shopDay, shopToday } from "@/lib/shopday";
 import { standing } from "@/lib/agreements";
 import { usageForAll } from "@/lib/agreementUsage";
 import { resolveRate } from "@/lib/rates";
-import { contractProposal, renewalFromBurn } from "@/lib/quotes";
+import { contractProposal, paceShortfall, renewalFromBurn, trailingUsage } from "@/lib/quotes";
 import { allInvoices } from "@/lib/invoiceData";
 import FinanceShell from "@/components/FinanceShell";
 import { booksContext } from "@/lib/financeData";
@@ -131,31 +131,34 @@ export default async function ContractsPage({ searchParams }: {
     }
   }
 
-  // Clients with no contract in force, and what their trailing
-  // time-and-materials has actually come to. The proposal is only honest if
-  // both numbers show.
+  /*
+   * Clients with no contract in force, and what their trailing
+   * time-and-materials has actually come to.
+   *
+   * Everything the card says is read off THEIR invoices - the visits, the
+   * parts, the pace - by lib/quotes.trailingUsage. It used to offer every one
+   * of them "4 visits plus $2,000 of parts", which were literals on this line
+   * that nobody had entered, beside a price annualised from however little
+   * history existed: one invoice in one month became "$240,000 a year at the
+   * current pace". A client with too little history now gets the fact and no
+   * projection, which is what paceShortfall says instead.
+   */
   const contracted = new Set(inForce.map((a) => a.orgId));
   const uncontracted = orgRows
     .filter((o) => o.kind === "client" && !contracted.has(o.id))
     .map((o) => {
       const theirs = billed.filter((x) => x.row.orgId === o.id && x.row.status !== "void" && x.row.status !== "draft");
-      const trailing = theirs.reduce(
-        (n, x) => n + x.lines.reduce((m, l) => m + (l.covered ? 0 : Math.round((l.qty / 1000) * l.unitCents)), 0),
-        0,
-      );
-      const first = theirs.map((x) => x.row.issuedOn).filter(Boolean).sort()[0] ?? "";
-      const months = first
-        ? Math.max(1, Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${first}T00:00:00Z`)) / (86400000 * 30)))
-        : 0;
-      return {
-        org: o, trailing, months, invoices: theirs.length,
-        proposal: contractProposal({
-          trailingCents: trailing, months,
-          visitsPerYear: 4, partsAllowanceCents: 200000,
-        }),
-      };
+      const usage = trailingUsage({
+        today,
+        invoices: theirs.map((x) => ({
+          issuedOn: x.row.issuedOn, workOrderId: x.row.workOrderId, lines: x.lines,
+        })),
+      });
+      return { org: o, usage, proposal: contractProposal({ usage }), shortfall: paceShortfall(usage) };
     })
-    .filter((x) => x.proposal !== null);
+    // A client who has never been invoiced is not somebody to sell a contract
+    // to, they are somebody with no history at all.
+    .filter((x) => x.usage.trailingCents > 0);
 
   return (
     <FinanceShell
@@ -190,17 +193,21 @@ export default async function ContractsPage({ searchParams }: {
           count={uncontracted.length}
           hint="Trailing time-and-materials"
         >
-          {uncontracted.map(({ org, trailing, months, invoices: n, proposal }) => (
+          {uncontracted.map(({ org, usage, proposal, shortfall }) => (
             <div key={org.id} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
               <div className="row-2" style={{ alignItems: "baseline" }}>
                 <span className="t-body" style={{ fontWeight: 600, flex: 1, minWidth: 0 }}>{org.name}</span>
                 <span className="mut t-small">
-                  {`${formatCents(trailing)} over ${months} month${months === 1 ? "" : "s"}, `
-                    + `${n} invoice${n === 1 ? "" : "s"}`}
+                  {`${formatCents(usage.trailingCents)} over `
+                    + (usage.months === 0 ? "under a month" : `${usage.months} month${usage.months === 1 ? "" : "s"}`)
+                    + `, ${usage.invoices} invoice${usage.invoices === 1 ? "" : "s"}`}
                 </span>
               </div>
               {proposal && (
                 <div className="mut t-small" style={{ marginTop: 4 }}>{proposal.line}</div>
+              )}
+              {shortfall && (
+                <div className="mut t-small" style={{ marginTop: 4 }}>{shortfall}</div>
               )}
             </div>
           ))}
