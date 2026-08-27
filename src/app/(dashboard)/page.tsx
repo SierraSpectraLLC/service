@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { and, asc, eq, desc, inArray, isNull, lte, ne, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import Link from "next/link";
@@ -22,6 +23,9 @@ import { severityOf, woOpen } from "@/lib/workOrders";
 import { redirect } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 import Landing from "@/components/Landing";
+import { EMPTY_LIBRARY, landingLibrary } from "@/lib/landingData";
+import { getAppearance } from "@/lib/appearanceData";
+import { appUrl } from "@/lib/appUrl";
 import ClientLanding, { type ClientSystem } from "@/components/ClientLanding";
 import { clientTodos, pipelineFor, readyToMove, stateOf, whySentence } from "@/lib/clientLandingData";
 import { rankTodos } from "@/lib/clientView";
@@ -35,6 +39,44 @@ import ViewTour from "@/components/ViewTour";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Two pages, one address, and so two sets of metadata.
+ *
+ * Signed in this route is the board, and the layout's generic title is right
+ * for it - a tab among twenty other tabs of the same app. Signed out it is
+ * the ONE page on this instance a crawler is allowed to index (see robots.ts,
+ * where `/$` is the whole allowlist besides the library), and it was
+ * inheriting "Instrument management" / "Instrument refurbishment tracking"
+ * from the layout: a description written for a browser tab, serving as the
+ * search result for the site's front door.
+ *
+ * currentUser() and getBrand() are both cache()d and the page calls them
+ * again a few lines down, so this costs no extra round trip.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const [visitor, brand] = await Promise.all([currentUser(), getBrand()]);
+  if (visitor) return {};        // inherit the layout's app title
+  const url = appUrl();
+  const title = `${brand.name} - instrument service, on the record`;
+  const description =
+    "One record per machine - its modules, its serials, the work done on it and the "
+    + "parts that went in - shared with the people who own it. Instrument service "
+    + "management for laboratories and the companies that keep them running.";
+  return {
+    title,
+    description,
+    alternates: url ? { canonical: url } : undefined,
+    robots: { index: true, follow: true },
+    // A link to this page gets pasted into Slack and email far more often than
+    // it gets typed, and an unfurl with no card is a link nobody clicks.
+    openGraph: {
+      title, description, siteName: brand.name, type: "website",
+      ...(url ? { url } : {}),
+    },
+    twitter: { card: "summary_large_image", title, description },
+  };
+}
+
 export default async function Home({ searchParams }: {
   searchParams: Promise<{ q?: string; f?: string; sort?: string; where?: string }>;
 }) {
@@ -44,9 +86,14 @@ export default async function Home({ searchParams }: {
   // the front door of the site a sign-in form.
   const visitor = await currentUser();
   if (!visitor) {
-    const [brand, modules] = await Promise.all([getBrand(), getModules()]);
+    const [brand, modules, look] = await Promise.all([getBrand(), getModules(), getAppearance()]);
+    // Only read the catalog when the module is on: an instance with the public
+    // library switched off must not pay for a scan of vocab_terms on every
+    // anonymous hit to its front door.
+    const library = modules.publicCatalog ? await landingLibrary() : EMPTY_LIBRARY;
     return <Landing brandName={brand.name} operatorName={brand.operatorName}
-      catalogOn={modules.publicCatalog} contactEmail={brand.contactEmail} />;
+      tagline={brand.tagline} catalogOn={modules.publicCatalog}
+      contactEmail={brand.contactEmail} headerColor={look.headerColor} library={library} />;
   }
   let user;
   try { user = await requireUser(); } catch { redirect("/login"); }

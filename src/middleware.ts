@@ -44,6 +44,16 @@ export const config = {
   // no session, and the request's SIGNATURE is what authenticates it. The
   // route verifies that against the webhook secret on the raw body before
   // parsing a byte, and answers an unverified request with a bare 400.
+  // opengraph-image is the landing page's social card, and it is fetched by
+  // the one visitor guaranteed never to have a cookie: Slack's unfurler, or
+  // Twitter's, or Google's. Behind the gate it answered every one of them with
+  // a redirect to /login, so a pasted link rendered as a bare URL and the card
+  // was never seen by anybody. Next serves it from a hashed path
+  // (`/opengraph-image-<hash>`), hence the prefix match rather than the exact
+  // name. It reads app_settings for a name and a colour and nothing else - no
+  // session, no tenant, no record - so it is public in the same sense
+  // /equipment is: it renders the same bytes for everyone.
+  //
   // `.+` rather than `.*`, and the difference is the whole home page: the
   // empty path is the root, and `.*` matched it, so a visitor with no cookie
   // was bounced to /login before anything rendered. The apex is the front
@@ -51,5 +61,5 @@ export const config = {
   // through the gate above; `/` decides for itself who it is talking to (see
   // app/(dashboard)/page.tsx), because the dashboard and the landing page are
   // the same address wearing two faces.
-  matcher: ["/((?!api/auth|api/cron|api/stripe|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|equipment|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).+)"],
+  matcher: ["/((?!api/auth|api/cron|api/stripe|api/upload|api/files|api/drop|api/share|api/catalog|login|listing|drop|share|equipment|opengraph-image|sitemap.xml|robots.txt|_next/static|_next/image|favicon.ico).+)"],
 };

@@ -547,6 +547,31 @@ const FIXTURE = `
   UPDATE vocab_terms SET manufacturer = 'Agilent',
     specs = '[{"name":"Mass range","value":"5-1400 m/z"},{"name":"Scan speed","value":"5000 Da/s"},{"name":"Polarity switching","value":"20 ms"}]'
     WHERE kind = 'model' AND name = '6495C';
+  UPDATE vocab_terms SET manufacturer = 'Shimadzu',
+    specs = '[{"name":"Mass range","value":"2-2000 m/z"},{"name":"Scan speed","value":"30000 u/s"},{"name":"Polarity switching","value":"5 ms"}]'
+    WHERE kind = 'model' AND name = 'LCMS-8060';
+  UPDATE vocab_terms SET manufacturer = 'Thermo Fisher',
+    specs = '[{"name":"Mass range","value":"1.2-1100 m/z"},{"name":"Source","value":"ExtractaBrite, removable"},{"name":"Filament","value":"Dual, hot-swap"}]'
+    WHERE kind = 'model' AND name = 'ISQ 7000';
+  UPDATE vocab_terms SET manufacturer = 'Agilent' WHERE kind = 'model' AND name = '1290 Quat Pump';
+  UPDATE vocab_terms SET manufacturer = 'Thermo Fisher' WHERE kind = 'model' AND name = 'TriPlus RSH';
+
+  -- Three of the five go PUBLIC. The harness switches public_catalog_enabled
+  -- on, so before this the library pages it unlocked - /equipment, every
+  -- /equipment/<slug>, and the exhibit on the landing page - rendered their
+  -- empty state and nothing else, which is the one state nobody needs to see
+  -- a screenshot of. Two stay unpublished on purpose: publishing is the
+  -- operator's explicit act (lib/publicCatalog), and Settings > Catalog has
+  -- to have something left to publish for that screen to mean anything.
+  UPDATE vocab_terms SET published = true, public_slug = 'agilent-6495c',
+    public_summary = 'The 6495C is the triple quadrupole most of the LC-MS benches we look after are built around. In service it is a source-cleaning machine: throughput is decided by how the ion funnel is kept, and most sensitivity complaints we are called out for resolve at the source rather than anywhere downstream of it.'
+    WHERE kind = 'model' AND name = '6495C';
+  UPDATE vocab_terms SET published = true, public_slug = 'shimadzu-lcms-8060',
+    public_summary = 'The LCMS-8060 trades some robustness for speed, and the desolvation line is the part that shows it. We swap them on a yearly interval rather than on failure, because a partially blocked line reads as a column problem for a week before anybody looks upstream of the source.'
+    WHERE kind = 'model' AND name = 'LCMS-8060';
+  UPDATE vocab_terms SET published = true, public_slug = 'thermo-fisher-isq-7000',
+    public_summary = 'The ISQ 7000 is the GC-MS single quad we see most often, and the removable source is the reason. A hot-swap filament and a source that comes out without venting turn what used to be a scheduled visit into something a trained lab tech can do between runs.'
+    WHERE kind = 'model' AND name = 'ISQ 7000';
 
   INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope) VALUES
     ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}'),
