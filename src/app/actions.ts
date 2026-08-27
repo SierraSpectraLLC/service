@@ -143,6 +143,9 @@ import {
   DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
 } from "@/lib/docNumber";
 import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
+import { estimate, estimateProblems, periodWindows, type CoverageInput } from "@/lib/coveragePrice";
+import { kitFrom, kitSourceFor } from "@/lib/pmKitData";
+import type { ModelKit } from "@/lib/pmKit";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -15923,4 +15926,94 @@ export async function placePartsOrder(
   revalidatePath("/money/quotes");
   revalidatePath("/store");
   return { number: invoiceNumber, quoteNumber };
+}
+
+
+// ── Coverage estimates ──────────────────────────────────────────────────────
+// Pricing a contract off a PLAN rather than off a client's history: so many
+// systems, at so many addresses, so many visits each. See lib/coveragePrice for
+// the arithmetic and lib/pmKit for what a model brings with it.
+
+/**
+ * What one model takes for one visit - its kit, its consumables, its hours.
+ *
+ * The lookup behind the estimate builder's system picker. Read-only and
+ * catalog-wide: it reveals what the SHOP stocks and charges, never a client's
+ * anything, which is why it needs no more than staff.
+ */
+export async function lookupModelKit(model: string, category: string): Promise<
+  { error?: string; kit?: ModelKit }
+> {
+  const u = await requireStaff();
+  const name = model.trim();
+  if (!name) return { error: "Pick a model" };
+  // viewTenant, not myTenantOrgId: the part catalog and the procedure library
+  // are SHARED VOCABULARY (see lib/tenancy) - platform staff read every
+  // workspace's, and a strict own-tenant predicate would hide the rows an
+  // instance wrote before it named an operator.
+  const source = await kitSourceFor(await viewTenant(u));
+  return { kit: kitFrom(source, name, category.trim()) };
+}
+
+/**
+ * Put a coverage estimate onto a draft quote: one line per 12-month period.
+ *
+ * The INPUT travels, not the prices. The builder shows its own arithmetic while
+ * somebody is typing, but what lands on the quote is priced here by the same
+ * pure function - so a stale tab, a fiddled form field or a rounding difference
+ * between two machines cannot put a number on a client's paper that our own
+ * rules would not produce.
+ */
+export async function applyCoverageEstimate(
+  quoteId: number, input: CoverageInput, startsOn: string,
+): Promise<{ error?: string; added?: number }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  if (q.status !== "draft") return { error: `${q.number} has gone out - it reads as sent.` };
+
+  const problems = estimateProblems(input);
+  if (problems.length) return { error: problems[0] };
+  const out = estimate(input);
+  if (out.periods.length === 0) return { error: "Price at least one 12-month period" };
+
+  const start = startsOn.trim();
+  if (start && !isIsoDay(start)) return { error: "That start date is not a day" };
+  const windows = periodWindows(start, out.periods.length);
+
+  const existing = await db.select({ position: quoteLines.position }).from(quoteLines)
+    .where(eq(quoteLines.quoteId, quoteId));
+  let position = existing.length ? Math.max(...existing.map((l) => l.position)) + 1 : 0;
+
+  await db.insert(quoteLines).values(out.periods.map((p, i) => {
+    const w = windows[i];
+    return {
+      quoteId,
+      /*
+       * A retainer, which is what a coverage period IS: a standing fee for a
+       * span of time. Not labor - a labor line renders its quantity as hours,
+       * so five CLINs came out reading "1 h" apiece, and the parts and travel
+       * inside the fee are not being sold as parts or travel either. The same
+       * kind the recurring biller raises a cycle under (lib/recurring).
+       */
+      kind: "retainer",
+      description: `CLIN ${String(i + 1).padStart(4, "0")} · ${p.label}`,
+      detail: w.from ? `${w.from} through ${w.to}` : "12 months",
+      qty: 1000,
+      unitCents: p.priceCents,
+      position: position++,
+    };
+  }));
+
+  const trips = out.sites.reduce((a, s) => a + s.trips, 0);
+  await audit({
+    actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
+    action: `priced ${out.periods.length} coverage period${out.periods.length === 1 ? "" : "s"} onto ${q.number}: `
+      + `${formatCents(out.totalCents)} total, built from ${trips} planned journey${trips === 1 ? "" : "s"} a year `
+      + `at ${(input.marginBps / 100).toFixed(0)}% margin`,
+  });
+  revQuote(q);
+  return { added: out.periods.length };
 }

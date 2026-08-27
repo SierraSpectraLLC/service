@@ -8,7 +8,7 @@
 // on: a round of PMs is one journey, not one journey per instrument.
 import { describe, expect, it } from "vitest";
 import {
-  allocate, estimate, estimateProblems, periodLabel, siteCost, tripsPerYear,
+  allocate, estimate, estimateProblems, periodLabel, periodWindows, siteCost, tripsPerYear,
   type CoverageInput, type CoverageSite,
 } from "@/lib/coveragePrice";
 
@@ -127,6 +127,18 @@ describe("cost to price", () => {
     expect(e.totalCents).toBe(e.periods.reduce((a, p) => a + p.priceCents, 0));
   });
 
+  it("reports hours as a number a person would write", () => {
+    // 4 visits x 5.8 h is 23.200000000000003 in binary floating point, and a
+    // site strip saying "57.599999999999994h" makes every other figure on the
+    // page look untrustworthy.
+    const odd = siteCost({
+      name: "x", tripCostCents: 100, tripHours: 8, batched: true,
+      systems: [{ name: "a", visitsPerYear: 4, hoursPerVisit: 5.8, partsCentsPerVisit: 0 }],
+    }, 9_000);
+    expect(odd.onsiteHours).toBe(23.2);
+    expect(String(odd.onsiteHours)).not.toContain("0000");
+  });
+
   it("prices in whole dollars", () => {
     for (const p of estimate(BASE).periods) expect(p.priceCents % 100).toBe(0);
   });
@@ -183,7 +195,7 @@ describe("an estimate that cannot be trusted says so", () => {
     expect(problems.some((p) => p.includes("NIST Gaithersburg"))).toBe(true);
   });
 
-  it("refuses free labour and an impossible margin", () => {
+  it("refuses free labor and an impossible margin", () => {
     expect(estimateProblems({ ...BASE, laborCostPerHourCents: 0 })
       .some((p) => p.includes("costs nothing"))).toBe(true);
     expect(estimateProblems({ ...BASE, marginBps: 10000 })
@@ -193,5 +205,28 @@ describe("an estimate that cannot be trusted says so", () => {
   it("is happy with the real one", () => {
     expect(estimateProblems({ ...BASE, sites: [GAITHERSBURG] })).toEqual([]);
     expect(periodLabel(0)).toBe("Base year");
+  });
+});
+
+describe("the window each CLIN covers", () => {
+  it("ends the day before the anniversary", () => {
+    // The solicitation's own words: Sep. 29, 2026 through Sep. 28, 2027.
+    expect(periodWindows("2026-09-29", 3)).toEqual([
+      { from: "2026-09-29", to: "2027-09-28" },
+      { from: "2027-09-29", to: "2028-09-28" },
+      { from: "2028-09-29", to: "2029-09-28" },
+    ]);
+  });
+
+  it("clamps a leap day rather than sliding into March", () => {
+    expect(periodWindows("2028-02-29", 2)).toEqual([
+      { from: "2028-02-29", to: "2029-02-27" },
+      { from: "2029-02-28", to: "2030-02-27" },
+    ]);
+  });
+
+  it("leaves the windows blank rather than inventing a start", () => {
+    expect(periodWindows("", 2)).toEqual([{ from: "", to: "" }, { from: "", to: "" }]);
+    expect(periodWindows("2026-09-29", 0)).toEqual([]);
   });
 });

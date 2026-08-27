@@ -780,6 +780,17 @@ export const procedures = pgTable("procedures", {
    */
   usageEvery: integer("usage_every"),
   usageUnit: text("usage_unit").notNull().default(""),
+  /**
+   * How long this piece of work takes, in minutes. 0 = nobody has said.
+   *
+   * The one fact the catalog did not hold, and the one a fixed-price bid
+   * cannot be built without: a PM on an API 5000 is a day and a PM on a 1260
+   * LC is an afternoon, and pricing a five-year award needs that in hours
+   * before anybody has opened a work order. Zero is an ABSENCE and reads as
+   * one everywhere - an estimate says which procedures it could not time
+   * rather than quietly totalling them as free (see lib/pmKit).
+   */
+  estMinutes: integer("est_minutes").notNull().default(0),
   // Task-only
   requiresNote: boolean("requires_note").notNull().default(false),
   consumesPart: boolean("consumes_part").notNull().default(false),

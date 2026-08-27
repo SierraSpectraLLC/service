@@ -322,7 +322,8 @@ const FIXTURE = `
     ('5188-5365', 'Frit & Ferrule', false, 3900, 3, true,  true,  '', 'dev@local.test'),
     ('WAT271066', 'Waters',         true,  71000, 5, false, false, '', 'dev@local.test'),
     ('WAT271066', 'Frit & Ferrule', false, 64000, 2, true,  true,  '', 'dev@local.test'),
-    ('ED-A72401', 'Edwards',        true,  23500, 10, false, false, '', 'dev@local.test');
+    ('ED-A72401', 'Edwards',        true,  23500, 10, false, false, '', 'dev@local.test'),
+    ('G1960-80039', 'Agilent',      true,  18900, 4, false, true,  '', 'dev@local.test');
   -- One price nobody has confirmed in an age, for the stale pill.
   UPDATE part_prices SET updated_at = now() - interval '120 days' WHERE part_number = 'ED-A72401';
 
@@ -424,6 +425,12 @@ const FIXTURE = `
     (1, 1, 'Q-1001', 'sent', 'Annual PM and checkout',
       to_char(now() - interval '4 days', 'YYYY-MM-DD'),
       to_char(now() + interval '5 days', 'YYYY-MM-DD'), 50, '${OWNER}');
+  -- A blank draft for the coverage estimate builder to fill: multi-year, priced
+  -- off a plan rather than off history, which is the shape a solicitation asks
+  -- for and the one no fixture had (see lib/coveragePrice).
+  INSERT INTO quotes (org_id, work_order_id, number, status, title, sent_on, expires_on, deposit_pct, created_by) VALUES
+    (2, NULL, 'Q-1002', 'draft', 'Multi-year coverage, two sites', '',
+      to_char(now() + interval '30 days', 'YYYY-MM-DD'), 0, '${OWNER}');
   INSERT INTO quote_lines (quote_id, kind, description, detail, qty, unit_cents, position) VALUES
     (1, 'part', 'G7100-60001 Capillary kit', 'price book, 30% markup', 1000, 27300, 0),
     (1, 'labor', 'Labor, on site', 'estimated 6.0 h at the Lab Zen rate card', 6000, 15500, 1),
@@ -548,13 +555,20 @@ const FIXTURE = `
     specs = '[{"name":"Mass range","value":"5-1400 m/z"},{"name":"Scan speed","value":"5000 Da/s"},{"name":"Polarity switching","value":"20 ms"}]'
     WHERE kind = 'model' AND name = '6495C';
 
-  INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope) VALUES
-    ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}'),
-    ('system', 'test', 'Leak check', '', 1, true, NULL, '{}'),
-    ('Mass spec', 'task', 'Quarterly source clean', '', 0, false, 90, '{}'),
-    ('Mass spec', 'task', 'Desolvation line swap', 'LCMS-8060 only.', 1, false, 365, '{"LCMS-8060"}'),
-    ('Pump', 'task', 'Seal replacement', '', 0, false, 180, '{}'),
-    ('Autosampler', 'task', 'Needle and septum check', '', 0, true, NULL, '{}');
+  -- est_minutes and parts on the recurring work: without them the coverage
+  -- estimate builder has nothing to look up, and the point of the lookup is
+  -- that somebody already wrote a model's PM down once (see lib/pmKit).
+  INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope, est_minutes, parts) VALUES
+    ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}', 45, ''),
+    ('system', 'test', 'Leak check', '', 1, true, NULL, '{}', 30, ''),
+    ('Mass spec', 'task', 'Quarterly source clean', '', 0, false, 90, '{}', 180,
+      '[{"name":"ESI capillary","number":"WAT271066"}]'),
+    ('Mass spec', 'task', 'Annual PM', 'Full teardown, pump service, recertify.', 2, false, 365, '{"6495C"}', 480,
+      '[{"name":"nXDS tip seal kit","number":"ED-A72401"},{"name":"Oil mist filter","number":"G1960-80039","qty":2}]'),
+    ('Mass spec', 'task', 'Desolvation line swap', 'LCMS-8060 only.', 1, false, 365, '{"LCMS-8060"}', 240, ''),
+    ('Pump', 'task', 'Seal replacement', '', 0, false, 180, '{}', 90,
+      '[{"name":"LC-30 plunger seal","number":"228-45703-91","qty":2,"models":["LC-30AD"]}]'),
+    ('Autosampler', 'task', 'Needle and septum check', '', 0, true, NULL, '{}', 60, '');
 
   INSERT INTO notifications (email, kind, title, href, created_at, read_at) VALUES
     ('${OWNER}', 'task_assigned', 'Rita assigned you: Replace turbo and recertify', '/work/2', now() - interval '3 hours', NULL),

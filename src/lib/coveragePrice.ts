@@ -228,11 +228,19 @@ export function siteCost(site: CoverageSite, laborCostPerHourCents: number): Sit
 
   const laborCents = labor.reduce((a, b) => a + b, 0);
   const partsCents = parts.reduce((a, b) => a + b, 0);
+  /*
+   * Reported to a tenth. Four visits at 5.8 hours is 23.200000000000003 in
+   * binary floating point, and a site strip reading "57.599999999999994h on
+   * systems" is the kind of thing that makes somebody distrust every other
+   * number on the page. The MONEY is computed from the exact values above -
+   * this rounds what is shown, not what is charged.
+   */
+  const tenth = (n: number) => Math.round(n * 10) / 10;
   return {
     name: site.name,
     trips,
-    onsiteHours,
-    travelHours,
+    onsiteHours: tenth(onsiteHours),
+    travelHours: tenth(travelHours),
     laborCents,
     partsCents,
     travelCents,
@@ -248,7 +256,7 @@ export const periodLabel = (i: number): string => (i === 0 ? "Base year" : `Opti
 export function estimateProblems(input: CoverageInput): string[] {
   const out: string[] = [];
   if (input.sites.every((s) => s.systems.length === 0)) out.push("No systems on the contract yet");
-  if (count(input.laborCostPerHourCents) === 0) out.push("An hour of labour costs nothing - the price will be wrong");
+  if (count(input.laborCostPerHourCents) === 0) out.push("An hour of labor costs nothing - the price will be wrong");
   if (input.marginBps >= 10000) out.push("A margin of 100% or more cannot be priced");
   if (count(input.periods) === 0) out.push("Price at least one 12-month period");
   const untravelled = input.sites.filter((s) => s.systems.length > 0 && Math.max(0, s.tripCostCents) === 0);
@@ -352,4 +360,38 @@ export function estimate(input: CoverageInput): CoverageEstimate {
     sites, directCents, reserveCents, overheadCents, costCents, priceCents,
     periods, totalCents, tmCents, savingBps, line, problems,
   };
+}
+
+/**
+ * The twelve-month window each period covers.
+ *
+ * A CLIN is a date range on a piece of paper - "Sep. 29, 2026 through Sep. 28,
+ * 2027" - and the day before the anniversary is the one everybody gets wrong by
+ * one. Anniversary arithmetic clamps like the retainer cycle does (lib/recurring
+ * cycleDay): a period starting Feb 29 ends Feb 28, because a year that has no
+ * Feb 29 in it still has to end somewhere.
+ *
+ * Blank start means blank windows rather than today's date - a CLIN schedule
+ * invented from the day somebody happened to open the page is worse than none.
+ */
+export function periodWindows(startsOn: string, periods: number): { from: string; to: string }[] {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startsOn.trim());
+  const n = count(periods);
+  if (!m || n === 0) return Array.from({ length: n }, () => ({ from: "", to: "" }));
+  const [y0, mo0, d0] = [Number(m[1]), Number(m[2]), Number(m[3])];
+
+  const on = (yearsOn: number): Date => {
+    const y = y0 + yearsOn;
+    // Clamp into the month, so Feb 29 + 1 year is Feb 28 rather than Mar 1.
+    const last = new Date(Date.UTC(y, mo0, 0)).getUTCDate();
+    return new Date(Date.UTC(y, mo0 - 1, Math.min(d0, last)));
+  };
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+  return Array.from({ length: n }, (_, i) => {
+    const from = on(i);
+    const next = on(i + 1);
+    const to = new Date(next.getTime() - 86_400_000);
+    return { from: iso(from), to: iso(to) };
+  });
 }

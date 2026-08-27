@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { auditLog, orgs, shareLinks, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
+import { viewTenant } from "@/lib/tenancy";
+import { modelOptions } from "@/lib/pmKitData";
 import { formatCents } from "@/lib/money";
 import { shopMonthDay, shopToday } from "@/lib/shopday";
 import { billingContext, quoteById, quoteTotal } from "@/lib/invoiceData";
@@ -13,6 +15,7 @@ import {
   daysToExpiry, depositCents, quoteStanding, STANDING_LABEL, STANDING_TONE,
 } from "@/lib/quotes";
 import QuoteActions from "@/components/QuoteActions";
+import CoverageEstimateBuilder from "@/components/CoverageEstimateBuilder";
 import InvoiceLineList from "@/components/InvoiceLineList";
 import { Id, Panel, Pill, RecordHero } from "@/components/ui";
 import type { HeroStat } from "@/components/ui";
@@ -32,7 +35,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   const { row } = full;
   const today = shopToday();
 
-  const [org, wo, link, history, ctx] = await Promise.all([
+  const [org, wo, link, history, ctx, models] = await Promise.all([
     db.select().from(orgs).where(eq(orgs.id, row.orgId)).then((r) => r[0] ?? null),
     row.workOrderId === null ? Promise.resolve(null)
       : db.select().from(workOrders).where(eq(workOrders.id, row.workOrderId)).then((r) => r[0] ?? null),
@@ -42,6 +45,8 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
       .where(and(eq(auditLog.entityType, "quote"), eq(auditLog.entityId, String(id))))
       .orderBy(desc(auditLog.createdAt)).limit(50),
     billingContext(row.orgId),
+    // Only a draft can take lines, so only a draft pays for the catalog read.
+    row.status === "draft" ? viewTenant(user).then(modelOptions) : Promise.resolve([]),
   ]);
 
   const standing = quoteStanding(row, today);
@@ -107,6 +112,14 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         }))}
         totalCents={total}
       />
+
+      {row.status === "draft" && (
+        /* Priced off a plan rather than off history - lib/coveragePrice. Draft
+           only, for the same reason the line editor is: a quote that has gone
+           out reads as sent, and repricing it behind the client is not an edit
+           anybody should be able to make quietly. */
+        <CoverageEstimateBuilder quoteId={id} models={models} defaultStart={today} />
+      )}
 
       {row.answerNote && (
         <Panel title={standing === "declined" ? "Why they said no" : "What they said"}>

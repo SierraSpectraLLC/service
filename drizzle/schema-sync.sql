@@ -3425,3 +3425,7 @@ ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "purpose" text NOT NULL D
 -- How a service company numbers its paper, as JSON. Blank = the stock shape
 -- (PO-1042, INV-1043). See src/lib/docNumber.ts.
 ALTER TABLE "orgs" ADD COLUMN IF NOT EXISTS "doc_scheme" text NOT NULL DEFAULT '';
+
+-- How long a catalog procedure takes, in minutes. 0 = never estimated, which
+-- an estimate reports rather than counting as free. See src/lib/pmKit.ts.
+ALTER TABLE "procedures" ADD COLUMN IF NOT EXISTS "est_minutes" integer NOT NULL DEFAULT 0;
