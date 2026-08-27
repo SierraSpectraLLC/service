@@ -181,17 +181,27 @@ export const forTenant = (col: AnyColumn, tenantOrgId: number | null): SQL | und
  * whole instance's organization list to the browser and filter it there. With one
  * operator that was untidy; with two it hands a competitor your client list.
  *
- * Operators stay visible to everyone, because that is the directory that makes
- * cross-company work possible - a client bringing in another service company has
- * to be able to name it. Clients are visible only inside their own tenant.
+ * One workspace: your own organization, and the organizations that belong to
+ * it. Nothing else.
  *
- * With one exception: the operator that RUNS the instance. It is the landlord,
- * not a peer on the directory, and it is the one company every other workspace
- * would otherwise see named in its own org list, share pickers and queue
- * badges - which is how a workspace handed to somebody else told them who the
- * seller was. Its own clients still see it through the tenantOf test below,
- * because it IS their provider, and its own staff read `t === null` above and
- * see the whole instance unchanged.
+ * This used to make every OPERATOR visible to everybody, on the reasoning that
+ * a client bringing in a second service company has to be able to name it. That
+ * reasoning is real but it is not worth what it costs: it means every service
+ * company on the instance reads every other one's name out of its own org list,
+ * share pickers and queue badges. A workspace handed to a prospective buyer
+ * listed the seller; the seller's own list named the buyer's workspace back.
+ *
+ * The exception was first written as "everyone except the operator that RUNS
+ * the instance", which held only while that company was also the one servicing
+ * the systems. The moment the platform operator became an organization of its
+ * own, the old landlord went back to being an ordinary operator and reappeared
+ * in everybody's list. So the rule is now the plain one, and it does not depend
+ * on who happens to be root.
+ *
+ * tenantOf() carries the cases that matter: an operator matches itself, a
+ * client matches the operator that serves it. Platform staff read `t === null`
+ * above and still see the whole instance, which is what makes cross-tenant
+ * support possible - and is now the ONLY way one workspace is named to another.
  */
 export async function visibleOrgs(user: SessionUser) {
   const t = readTenant(user);
@@ -199,9 +209,7 @@ export async function visibleOrgs(user: SessionUser) {
   // to change when the rule changes.
   const rows = await db.select().from(orgs).orderBy(asc(orgs.name));
   if (t === null) return rows;
-  const root = user.rootOperatorOrgId;
-  return rows.filter((o) =>
-    (o.isOperator && o.id !== root) || tenantOf(o) === t || o.id === user.orgId);
+  return rows.filter((o) => tenantOf(o) === t || o.id === user.orgId);
 }
 
 // ---- assertions for server actions -----------------------------------------

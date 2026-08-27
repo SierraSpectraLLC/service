@@ -166,18 +166,29 @@ describe("the organization directory", () => {
     expect(seen).not.toContain("Lab Zen");
   });
 
-  it("the company that runs the instance is not in a tenant's directory", async () => {
-    // The landlord is not a peer on the directory. Left in, it was the one
-    // company every workspace saw named in its own org list, its share pickers
-    // and its queue badges - which is how a workspace handed to a prospective
-    // buyer told them who the seller was.
+  it("no other service company is in a tenant's directory", async () => {
+    // Not "everyone except the landlord" - that version held only while the
+    // landlord was also a service company, and evaporated the day the platform
+    // became an organization of its own. One workspace sees its own
+    // organization and the organizations that belong to it. Nothing else.
     const { visibleOrgs } = await import("@/lib/tenancy");
     const seen = (await visibleOrgs(cascadeOwner as never)).map((o) => o.name);
     expect(seen).not.toContain("Sierra Spectra");
     expect(seen).toContain("Cascade Instrument"); // its own workspace still is
   });
 
-  it("but its own clients still see it - it is their provider", async () => {
+  it("and the rule does not depend on which operator is root", async () => {
+    // The regression this replaces: with root pointed at a third, platform-only
+    // organization, "everyone except root" let the two service companies see
+    // each other again.
+    const { visibleOrgs } = await import("@/lib/tenancy");
+    const withThirdPartyRoot = { ...cascadeOwner, rootOperatorOrgId: 99 };
+    const seen = (await visibleOrgs(withThirdPartyRoot as never)).map((o) => o.name);
+    expect(seen).not.toContain("Sierra Spectra");
+    expect(seen).toEqual(["Cascade Instrument", "Ellison BioLabs"]);
+  });
+
+  it("a client still sees its provider - through tenantOf, not through isOperator", async () => {
     const { visibleOrgs } = await import("@/lib/tenancy");
     const labZen = {
       email: "lab@zen.test", role: "client_editor", orgId: 3,
