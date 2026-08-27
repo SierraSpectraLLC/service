@@ -118,6 +118,29 @@ export const WORKING_ROOMS: readonly FinanceKey[] = ["purchasing", "reimbursemen
 
 export const isWorkingRoom = (key: FinanceKey): boolean => WORKING_ROOMS.includes(key);
 
+/**
+ * The section as a NAV group - the same rooms in the same order as the rail,
+ * because a menu that drifts from the rail is two answers to "what is in
+ * here".
+ *
+ * Payroll leaves entirely for a reader who may not read one, on the same
+ * reasoning as financeRail below: an entry naming a thing somebody cannot
+ * have is worse than no entry.
+ *
+ * The two WORKING_ROOMS are still here. They are ALSO in the Operations menu,
+ * and that duplication is deliberate rather than an oversight: this group is
+ * gated on the books, which is owner-only for staff, so an engineer who
+ * raises a purchase order or claims back a hotel never sees it. Dropping them
+ * from Operations to avoid appearing twice would take a tech's own expense
+ * report away from the tech - see WORKING_ROOMS above, where that rule is
+ * written down. Two doors, one page, different readers.
+ */
+export function financeNavItems(opts: { seesPayroll: boolean }): { href: string; label: string }[] {
+  return ENTRIES
+    .filter((e) => e.key !== "payroll" || opts.seesPayroll)
+    .map((e) => ({ href: e.href, label: e.label }));
+}
+
 /** What each room is called, wherever it is named - rail, crumb or title. */
 export const FINANCE_LABEL: Record<FinanceKey, string> =
   Object.fromEntries(ENTRIES.map((e) => [e.key, e.label])) as Record<FinanceKey, string>;

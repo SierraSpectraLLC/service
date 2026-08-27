@@ -45,16 +45,42 @@ export default async function MoneyPage({ searchParams }: {
   ]);
 
   const { moneyIn: mIn, moneyOut: mOut } = fig;
-  // Receivable less payable. Deliberately NOT less payroll and overhead: those
-  // are what it costs to exist rather than what anybody is waiting to be paid,
-  // and leaving them out is also what keeps this figure the same number for
-  // every reader - a total that changed shape by viewer would leak gross pay
-  // by subtraction.
+  /*
+   * TWO different questions, and the page used to subtract across them.
+   *
+   * POSITION is a stock: what is outstanding in each direction, right now.
+   * Receivable less payable, and NOT less payroll or overhead - not because
+   * of who may read them (every reader of this page may; see periodNet) but
+   * because they are not outstanding. Nobody is waiting to be paid them. A
+   * salary already paid belongs in the flow below, not in a figure that
+   * answers "who owes whom".
+   *
+   * PERIOD is a flow: what actually moved. Collected, less what it cost to
+   * exist while collecting it. Open POs and unpaid reimbursements are NOT in
+   * it - those are commitments that have not moved yet, and they are already
+   * counted in the position.
+   *
+   * Both are real and neither is the other. Showing the position under the
+   * heading "what is left", beside a lane headed with money that had already
+   * been collected, is how a company that collected twenty thousand dollars
+   * and owes nobody anything reads as zero.
+   */
   const owed = mIn.currentCents + mIn.pastDueCents;
   const owes = mOut.purchasingCents + mOut.reimbursementsCents;
   const net = owed - owes;
 
   const collected = mIn.paidCents;
+  /*
+   * Never null on this page, and the reason is worth knowing because the old
+   * comment above got it wrong. maySeeBooks and maySeePayroll are
+   * character-for-character identical on their house branch (lib/books:48-50,
+   * lib/payroll:79-81) - `role === "owner" && operatorOrgId === orgId` in
+   * both. They diverge only for a CLIENT, on two different allowlist flags,
+   * and this page redirects every non-staff reader at the top. So anybody who
+   * can see these figures at all can see payroll, and the `?? 0` below is for
+   * the type rather than for a reader who exists.
+   */
+  const periodNet = collected - (mOut.payrollCents ?? 0) - (mOut.overheadCents ?? 0);
   const spread = collected + mIn.currentCents + mIn.pastDueCents;
   const width = (n: number) => (spread > 0 ? `${(n / spread) * 100}%` : "0%");
 
@@ -74,7 +100,12 @@ export default async function MoneyPage({ searchParams }: {
     >
       <div className="lanes">
         <div className="lane in">
-          <h3>Money in <span className="tot money">{formatDollars(collected + owed)}</span></h3>
+          {/* The lane's own footer, not collected + owed: the header used to
+              carry money that had already arrived and therefore contributes
+              nothing to the position beside it. Collected is still the first
+              row, where it is a fact about the period rather than a claim
+              about what is outstanding. */}
+          <h3>Money in <span className="tot money">{formatDollars(owed)}</span></h3>
           <div className="inner">
             <Row label="Paid this period" sub="ACH, card, check" cents={mIn.paidCents} />
             <Row label="Invoiced, current" sub="inside terms" cents={mIn.currentCents} />
@@ -106,17 +137,29 @@ export default async function MoneyPage({ searchParams }: {
             <Row label="Reimbursements" sub={`${mOut.reimbursementReports} report${mOut.reimbursementReports === 1 ? "" : "s"} awaiting payout`}
               cents={mOut.reimbursementsCents} tone={mOut.reimbursementsCents > 0 ? "warn" : undefined} />
             <div className="ledger total">
-              <span className="grow">Owed by you</span>
+              <span className="grow">
+                Owed by you
+                <span className="sub">outstanding only - payroll and overhead are period cost</span>
+              </span>
               <span className="money">{formatCents(owes)}</span>
             </div>
           </div>
         </div>
 
         <div className="lane net">
-          <h3>What is left</h3>
+          <h3>Where you stand</h3>
           <div className="inner">
             <div className={`bignum${net < 0 ? " neg" : ""}`}>{formatCents(net)}</div>
-            <div className="biglab">receivable less payable · {periodSpan(today, period)}</div>
+            <div className="biglab">
+              outstanding position · receivable less payable
+              {owed === 0 && owes === 0 ? " · nobody owes anybody" : ""}
+            </div>
+            <div className="rule" />
+            <div className={`bignum${periodNet < 0 ? " neg" : ""}`}>{formatCents(periodNet)}</div>
+            <div className="biglab">
+              this period · {formatDollars(collected)} collected less payroll and overhead
+              {" · "}{periodSpan(today, period)}
+            </div>
             <div className="rule" />
             <div className="bar" role="img"
               aria-label={`${formatDollars(collected)} collected, ${formatDollars(mIn.currentCents)} inside terms, ${formatDollars(mIn.pastDueCents)} past terms`}>

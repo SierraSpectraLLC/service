@@ -205,6 +205,10 @@ describe("contract value", () => {
 
 describe("the section is a rail, not a permission boundary", () => {
   const read = (p: string) => readFileSync(p, "utf8");
+  /** Source with comments removed, for assertions about what a file DOES. */
+  const code = (src: string) => src
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
 
   it("has no /money/layout.tsx that could gate the section", () => {
     // Deliberate. A staff-only guard here would take payroll away from the
@@ -272,10 +276,16 @@ describe("the section is a rail, not a permission boundary", () => {
     ];
     for (const p of pages) expect(read(p), p).toMatch(/(books|rail)Context\(user,/);
     for (const p of pages.filter((x) => x !== "src/app/money/payroll/page.tsx")) {
-      expect(read(p), p).not.toMatch(/maySeePayroll/);
+      // Comments stripped: the assertion is that these pages do not COMPUTE
+      // the permission, and a page explaining in prose why it defers to
+      // booksContext has to be able to name the function it is not calling.
+      // Matching raw text made the explanation of the rule read as a breach
+      // of it.
+      expect(code(read(p)), p).not.toMatch(/maySeePayroll/);
     }
-    // And nobody asks the books question for themselves on a page.
-    for (const p of pages) expect(read(p), p).not.toMatch(/maySeeBooks/);
+    // And nobody asks the books question for themselves on a page. Comments
+    // stripped for the same reason as above.
+    for (const p of pages) expect(code(read(p)), p).not.toMatch(/maySeeBooks/);
   });
 
   it("READS THE BOOKS ONLY THROUGH THE CALL THAT GATES THEM", () => {

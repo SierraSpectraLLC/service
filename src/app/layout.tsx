@@ -21,6 +21,7 @@ import { NavIcon, SearchIcon, MessagesIcon, InboxIcon } from "@/components/NavIc
 import ViewAsBar from "@/components/ViewAsBar";
 import { viewAsPeople } from "@/app/actions";
 import { seesBooksFor } from "@/lib/financeData";
+import { financeNavItems } from "@/lib/finance";
 import { isPlatformStaff, tenantViewer } from "@/lib/tenants";
 import { visibleOrgs } from "@/lib/tenancy";
 import NotificationCenter from "@/components/NotificationCenter";
@@ -215,10 +216,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
        rather than "Billing" because the section stopped being about billing
        the moment purchasing, reimbursements, overhead and payroll joined it -
        see lib/finance. */
-    ...(seesBooks ? [{ href: "/money", label: "Financial" }] : []),
-    /* The owner view is a summary of the rooms above it, so it sits beside
-       them rather than replacing one. Gated on the books for the same reason
-       Financial is: every band on the operator's half is money. */
+    /* The owner view is a summary of the rooms in the Financial menu, so it
+       sits out here rather than inside it. Gated on the books for the same
+       reason that menu is: every band on the operator's half is money. */
     ...(seesBooks ? [{ href: "/owner", label: "Owner view" }] : []),
   ] : [
     { href: "/", label: resells ? "Your pipeline" : "Your lab" },
@@ -237,6 +237,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     { href: "/documents", label: "Documents" },
   ];
   const navGroups = isStaff ? [
+    /* Financial is a section, not a page - eleven rooms behind one word, which
+       meant every one of them was two clicks away behind a link that looked
+       like a destination. The items come from lib/finance so this menu and the
+       rail inside the section cannot drift apart; Payroll leaves the list
+       entirely for a reader who may not read one. */
+    ...(seesBooks ? [{
+      label: "Financial",
+      items: financeNavItems({ seesPayroll }),
+    }] : []),
     {
       label: "Operations",
       items: [
@@ -253,10 +262,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
            Overhead is also expenses, and two things by one name in one
            section is the confusion this merge exists to remove. */
         { href: "/money/reimbursements", label: "Reimbursements" },
-        /* What the shop pays its own people, and what that makes a month
-           cost. Owners only - see lib/payroll, where the rule that keeps it
-           from the bench (and from every other workspace) lives. */
-        ...(seesPayroll ? [{ href: "/money/payroll", label: "Payroll" }] : []),
+        /* Payroll moved to the Financial menu. It is not something an engineer
+           DOES - unlike the two rooms above it, which stay here precisely
+           because they are - and its gate is the books gate, so anybody who
+           could see it here already has the menu that now holds it. */
         /* Something you DO to a system, so it sits with the other doing - it
            was under Library, which is files and tools, and a remote session
            is neither. */
