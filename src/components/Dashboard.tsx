@@ -40,9 +40,18 @@ const StagePill = ({ bg, fg, children }: { bg: string; fg: string; children: Rea
   <span className="pill" style={{ background: bg, color: fg }}>{children}</span>
 );
 
-export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, myQueueHref = "/work", initial }: {
+export default function Dashboard({ data, stageDefs, people, clients, categories, canEdit, isStaff, showShipping, ownerView = false, myQueueHref = "/work", initial }: {
   data: Row[]; stageDefs: StageDefLite[]; people: string[];
   clients: string[]; categories: string[]; canEdit: boolean; isStaff: boolean;
+  /**
+   * Whether this reader has an owner view to switch to.
+   *
+   * The two pages are the same person's two questions - what is the shop doing
+   * today, and how is the business doing - so the way between them belongs on
+   * the page rather than in the nav. It was a top-level nav word, which put a
+   * permanent link to a page most staff cannot open in a row everybody reads.
+   */
+  ownerView?: boolean;
   /** Ship-pipeline tile: the shop and reseller accounts; clutter for lab clients. */
   showShipping: boolean;
   myQueueHref?: string;
@@ -234,8 +243,15 @@ export default function Dashboard({ data, stageDefs, people, clients, categories
   return (
     <div className="container">
       <PageHead title="Dashboard"
-        actions={canEdit && (
-          <button className="btn sm primary" onClick={() => setShowNew(true)}>+ New instrument</button>
+        actions={(ownerView || canEdit) && (
+          <>
+            {ownerView && (
+              <Link className="btn sm" href="/owner">Switch to owner view</Link>
+            )}
+            {canEdit && (
+              <button className="btn sm primary" onClick={() => setShowNew(true)}>+ New instrument</button>
+            )}
+          </>
         )} />
       <div className="metric-grid" style={{ marginBottom: 14 }}>
         {([
