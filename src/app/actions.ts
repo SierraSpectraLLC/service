@@ -8385,6 +8385,11 @@ export async function payExpenseReport(
   const u = await requireOwner();
   const [report] = await db.select().from(expenseReports).where(eq(expenseReports.id, id));
   if (!report) return { error: "Not found" };
+  // requireOwner is "an owner of some service company", and expense_reports is
+  // one instance-wide table - so without this an owner could mark another
+  // workspace's report paid, closing a claim their engineer is still waiting
+  // on and writing the payout against a company that never paid it.
+  if (!houseOf(u, report.tenantOrgId)) return { error: "Not found" };
   if (report.status !== "submitted") return { error: `This report is ${report.status}, not awaiting payout` };
   const day = data.paidOn.trim();
   if (!isIsoDay(day)) return { error: "Pick the date it was paid" };
