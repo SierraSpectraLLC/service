@@ -562,9 +562,13 @@ export default function PartsPanel({ target, parts, systemAssets, canEdit, isSta
                   <span className={`pill ${PART_TONE[p.status] ?? "neutral"}`}>{p.status}</span>
                 )}
                 {/* A unit on order wears what it becomes; once the box is here,
-                    the pill turns into the door that puts it on the asset list. */}
+                    the pill turns into the door that puts it on the asset list.
+                    Installed counts as here too - fitting the pump and then
+                    marking the row is the normal order of events, and the door
+                    used to vanish for anyone who did it that way round while
+                    intakeModule went on accepting them. */}
                 {p.moduleKind && p.assetId === null && (
-                  p.status === "Received" && canEdit ? (
+                  (p.status === "Received" || p.status === "Installed") && canEdit ? (
                     <button className="btn sm accent" onClick={() => openIntake(p)}>
                       Intake as {p.moduleKind}
                     </button>
