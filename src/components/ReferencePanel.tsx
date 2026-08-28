@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { addCatalogRef, listStoreFilesForRef, removeCatalogRef } from "@/app/actions";
+import { upload } from "@vercel/blob/client";
+import { addCatalogRef, listStoreFilesForRef, recordLibraryFiles, removeCatalogRef } from "@/app/actions";
 import { looksLikeImage, refScopeLabel } from "@/lib/catalogRefs";
 import ProvenanceChip from "./ProvenanceChip";
 import { PROVENANCE_BLURB, PROVENANCE_CHOICES, PROVENANCE_LABEL, tallyLine, tallyProvenance } from "@/lib/provenance";
@@ -47,7 +48,9 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
   // Where the thing being linked lives. "shelf" browses what the shop already
   // has - the manuals somebody uploaded, the photos already on records - which
   // is the normal case; "web" is for a manual still on the manufacturer's site.
-  const [source, setSource] = useState<"shelf" | "web">("shelf");
+  const [source, setSource] = useState<"shelf" | "web" | "upload">("shelf");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState("");
   const [picked, setPicked] = useState<PickFile | null>(null);
   const [files, setFiles] = useState<PickFile[] | "loading" | null>(null);
   const [fileFilter, setFileFilter] = useState("");
@@ -62,6 +65,47 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
       catch { setFiles([]); setError("Couldn't load the file shelf"); }
     });
   };
+  /*
+   * Upload, then point at what was uploaded.
+   *
+   * The manual for the machine in front of somebody is, more often than not, a
+   * PDF on their laptop rather than a file already on the shelf - and telling
+   * them to go to Library, upload it, come back and find it is three screens to
+   * file one reference. So this lands the file on the same shelf the browser
+   * reads (it IS a library file afterwards, findable and reusable) and then
+   * simply arrives at `picked`, which is where browsing already ends up. One
+   * save path, whichever way the file got here.
+   */
+  const sendFile = async (list: FileList | null) => {
+    const file = Array.from(list ?? [])[0];
+    if (!file) return;
+    setError("");
+    setUploading(`${file.name} (${fmtBytes(file.size)})`);
+    try {
+      const blob = await upload(file.name, file, { access: "public", handleUploadUrl: "/api/upload" });
+      const res = await recordLibraryFiles(
+        [{ fileName: file.name, url: blob.url, size: file.size, description: "" }],
+      );
+      if (res.error) throw new Error(res.error);
+      const id = res.ids?.[0];
+      if (id === undefined) throw new Error("The file uploaded but was not filed");
+      setPicked({
+        id, fileName: file.name, kind: "Report", description: "", size: file.size,
+        isPhoto: looksLikeImage(file.name), where: "just uploaded",
+      });
+      // It is on the shelf now, so a second reference in the same sitting finds
+      // it by browsing rather than by uploading it again.
+      setFiles(null);
+      setSource("shelf");
+    } catch (e) {
+      // Named, because a silent stop here looks exactly like it worked.
+      setError(`${file.name}: ${(e as Error).message}`);
+    } finally {
+      setUploading("");
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  };
+
   const reset = () => {
     setDraft({ kind: "link", scope: draft.scope, title: "", url: "", body: "", provenance: "" });
     setPicked(null); setFileFilter("");
@@ -76,8 +120,9 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
         assetType: scope.assetType, model: scope.model,
         kind: draft.kind,
         // A shelf file needs no title typed: its own name is one.
-        title: draft.title || (source === "shelf" ? picked?.fileName ?? "" : ""),
-        url: source === "shelf" ? (picked ? `/api/files/${picked.id}` : "") : draft.url,
+        // A file names itself, however it arrived; a web address does not.
+        title: draft.title || (picked ? picked.fileName : ""),
+        url: picked ? `/api/files/${picked.id}` : source === "web" ? draft.url : "",
         body: draft.body,
         provenance: draft.provenance,
       });
@@ -148,11 +193,25 @@ export default function ReferencePanel({ refs, scopes, canEdit, sub }: {
           <div className="seg" role="group" aria-label="Where the file is" style={{ marginBottom: 8 }}>
             <button type="button" aria-pressed={source === "shelf"}
               onClick={() => { setSource("shelf"); loadFiles(); }}>Our files</button>
+            <button type="button" aria-pressed={source === "upload"}
+              onClick={() => setSource("upload")}>Upload</button>
             <button type="button" aria-pressed={source === "web"}
               onClick={() => setSource("web")}>Web link</button>
           </div>
 
-          {source === "web" ? (
+          {source === "upload" ? (
+            <div style={{ border: "1px solid var(--line)", borderRadius: 8, background: "#fff",
+              padding: 10, marginBottom: 8 }}>
+              <input ref={fileInput} type="file" aria-label="File to upload"
+                disabled={!!uploading || pending}
+                onChange={(e) => { void sendFile(e.target.files); }} />
+              <div className="mut t-meta" style={{ marginTop: 6 }}>
+                {uploading
+                  ? `Uploading ${uploading}…`
+                  : "It lands on the file shelf under Library → Files as well, so the next person can find it there."}
+              </div>
+            </div>
+          ) : source === "web" ? (
             <input className="mono" value={draft.url} placeholder="https://..."
               onChange={(e) => setDraft({ ...draft, url: e.target.value })} style={{ marginBottom: 8 }} />
           ) : picked ? (

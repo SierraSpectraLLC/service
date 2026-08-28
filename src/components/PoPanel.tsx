@@ -4,7 +4,8 @@ import { useState, useTransition } from "react";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import PartNumberField from "./PartNumberField";
 import {
-  addPoLine, cancelPurchaseOrder, deletePoLine, deletePurchaseOrder, receivePoLine, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
+  addPoLine, cancelPurchaseOrder, deletePoLine, deletePurchaseOrder, receivePoLine,
+  receivePoLineAsUnit, sendPurchaseOrder, setPoLine, updatePurchaseOrder,
 } from "@/app/actions";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { formatCents, centsToInput } from "@/lib/money";
@@ -20,12 +21,14 @@ export type PoLineRow = {
   unitCents: number | null; note: string;
 };
 
-export default function PoPanel({ po, lines, canManage, canDelete = false, makers }: {
+export default function PoPanel({ po, lines, canManage, canDelete = false, makers, moduleKinds = [] }: {
   po: PoRow; lines: PoLineRow[]; canManage: boolean;
   /** Owners only: deleting an order is not the same power as running one. */
   canDelete?: boolean;
   /** The maker/vendor book (Settings → Catalog), suggested on the Vendor field. */
   makers?: string[];
+  /** Module types from the catalog, for booking a line in as a machine. */
+  moduleKinds?: string[];
 }) {
   const editable = canManage && poEditable(po.status);
   const receivable = canManage && poReceivable(po.status);
@@ -34,6 +37,16 @@ export default function PoPanel({ po, lines, canManage, canDelete = false, maker
   const [newLine, setNewLine] = useState({ partNumber: "", name: "", qty: "1", price: "" });
   const [adding, setAdding] = useState(false);
   const [receiving, setReceiving] = useState<null | { id: number; qty: string; note: string }>(null);
+  /*
+   * A delivery is a count or it is a machine, and the difference is not a
+   * detail of how it is filed - it decides whether the thing gets a serial, a
+   * service history and an intake. Asked here, where somebody is holding the
+   * box, rather than inferred from the part number.
+   */
+  const [asUnit, setAsUnit] = useState(false);
+  const [unit, setUnit] = useState({
+    kind: "", model: "", serial: "", manufacturer: "", asFound: "", location: "", note: "",
+  });
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
@@ -167,32 +180,119 @@ export default function PoPanel({ po, lines, canManage, canDelete = false, maker
               {isReceiving && (() => {
                 const n = parseInt(receiving.qty, 10);
                 const qtyOk = Number.isInteger(n) && n > 0;
-                const problem = !qtyOk ? "how many arrived? whole numbers above zero"
-                  : n > out ? `only ${out} are outstanding`
-                  : null;
+                const problem = asUnit
+                  ? (!unit.serial.trim() && !unit.model.trim()
+                    ? "a machine needs a serial or a model" : null)
+                  : !qtyOk ? "how many arrived? whole numbers above zero"
+                    : n > out ? `only ${out} are outstanding`
+                      : null;
+                const close = () => { setReceiving(null); setAsUnit(false); };
                 return (
-                  <Dialog open onClose={() => setReceiving(null)} size="sm"
+                  <Dialog open onClose={close} size="sm"
                     title={`Receive ${l.partNumber}`}
                     context={`${po.number} · ${out} outstanding`}
                     footer={
                       <>
                         <DialogStatus error={error} problem={problem} />
-                        <button className="btn" onClick={() => setReceiving(null)} disabled={pending}>Cancel</button>
+                        <button className="btn" onClick={close} disabled={pending}>Cancel</button>
                         <button className="btn accent" disabled={pending || !!problem}
-                          onClick={() => run(() => receivePoLine(l.id, n, receiving.note), () => setReceiving(null))}>
-                          {pending ? "Booking..." : qtyOk ? `Book in ${n}` : "Book in"}
+                          onClick={() => (asUnit
+                            ? run(async () => {
+                              const res = await receivePoLineAsUnit(l.id, { ...unit, owner: "" });
+                              if (!res.error) {
+                                toast({
+                                  message: res.tasks
+                                    ? `Booked in - ${res.tasks} intake item${res.tasks === 1 ? "" : "s"} waiting on it`
+                                    : "Booked in onto the shelf",
+                                });
+                                setUnit({ kind: "", model: "", serial: "", manufacturer: "", asFound: "", location: "", note: "" });
+                              }
+                              return res;
+                            }, close)
+                            : run(() => receivePoLine(l.id, n, receiving.note), close))}>
+                          {pending ? "Booking..."
+                            : asUnit ? "Book in the unit"
+                              : qtyOk ? `Book in ${n}` : "Book in"}
                         </button>
                       </>
                     }>
-                    <div className="dialog-section">How many</div>
-                    <div className="row-2">
-                      <input value={receiving.qty} onChange={(e) => setReceiving({ ...receiving, qty: e.target.value })}
-                        inputMode="numeric" aria-label="How many arrived" style={{ width: 64, minHeight: 34, textAlign: "center" }} />
-                      <span className="mut t-small">of {out}</span>
+                    {/* Said before anything is typed, because the answer changes
+                        what the rest of this dialog even asks for. */}
+                    <div className="seg" role="group" aria-label="What arrived" style={{ marginBottom: 10 }}>
+                      <button type="button" aria-pressed={!asUnit} onClick={() => setAsUnit(false)}>
+                        Stock
+                      </button>
+                      <button type="button" aria-pressed={asUnit} onClick={() => setAsUnit(true)}>
+                        A machine
+                      </button>
                     </div>
-                    <div className="dialog-section">Note</div>
-                    <input value={receiving.note} onChange={(e) => setReceiving({ ...receiving, note: e.target.value })}
-                      placeholder="Packing slip / note" className="t-body" style={{ minHeight: 34 }} aria-label="Note" />
+
+                    {asUnit ? (
+                      <>
+                        <div className="mut t-meta" style={{ marginBottom: 8 }}>
+                          It lands on the asset list as a spare, with its own serial and history -
+                          and whatever intake work its type calls for. Install it on a system later.
+                        </div>
+                        <div className="pf2">
+                          <div>
+                            <label>Type</label>
+                            <input value={unit.kind} aria-label="Unit type" list="po-unit-kinds"
+                              placeholder="Pump" disabled={pending}
+                              onChange={(e) => setUnit({ ...unit, kind: e.target.value })} />
+                            <datalist id="po-unit-kinds">
+                              {moduleKinds.map((k) => <option key={k} value={k} />)}
+                            </datalist>
+                          </div>
+                          <div>
+                            <label>Model</label>
+                            <input value={unit.model} aria-label="Unit model" disabled={pending}
+                              placeholder={l.name || "nXDS15i"}
+                              onChange={(e) => setUnit({ ...unit, model: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className="pf2" style={{ marginTop: 8 }}>
+                          <div>
+                            <label>Serial</label>
+                            <input value={unit.serial} aria-label="Unit serial" className="mono t-small"
+                              disabled={pending}
+                              onChange={(e) => setUnit({ ...unit, serial: e.target.value })} />
+                          </div>
+                          <div>
+                            <label>Maker</label>
+                            <input value={unit.manufacturer} aria-label="Unit maker" disabled={pending}
+                              placeholder={po.vendor}
+                              onChange={(e) => setUnit({ ...unit, manufacturer: e.target.value })} />
+                          </div>
+                        </div>
+                        <div className="pf2" style={{ marginTop: 8 }}>
+                          <div>
+                            <label>Where it lives</label>
+                            <input value={unit.location} aria-label="Unit location" disabled={pending}
+                              placeholder="Shelf B" onChange={(e) => setUnit({ ...unit, location: e.target.value })} />
+                          </div>
+                          <div>
+                            {/* Written once, at the only moment anybody can see
+                                the crate it came out of. */}
+                            <label>As found</label>
+                            <input value={unit.asFound} aria-label="As found" disabled={pending}
+                              placeholder="Crate intact, oil sight glass empty"
+                              onChange={(e) => setUnit({ ...unit, asFound: e.target.value })} />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="dialog-section">How many</div>
+                        <div className="row-2">
+                          <input value={receiving.qty} onChange={(e) => setReceiving({ ...receiving, qty: e.target.value })}
+                            inputMode="numeric" aria-label="How many arrived" style={{ width: 64, minHeight: 34, textAlign: "center" }} />
+                          <span className="mut t-small">of {out}</span>
+                        </div>
+                        <div className="dialog-section">Note</div>
+                        <input value={receiving.note} onChange={(e) => setReceiving({ ...receiving, note: e.target.value })}
+                          placeholder="Packing slip / note" className="t-body" style={{ minHeight: 34 }} aria-label="Note" />
+                      </>
+                    )}
                   </Dialog>
                 );
               })()}

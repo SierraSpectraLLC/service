@@ -3702,7 +3702,10 @@ export async function recordLibraryFiles(
   files: { fileName: string; url: string; size: number; description: string }[],
   /** The folder that was open when they were dropped. Null = the top level. */
   folderId: number | null = null,
-): Promise<{ error?: string }> {
+  // The rows it made, in the order they were handed in. A caller that uploads
+  // in order to point at the result - filing a reference, say - needs the id;
+  // the library, which only wanted them on the shelf, ignores it.
+): Promise<{ error?: string; ids?: number[] }> {
   // Every organization has a shelf of its own, so this is no longer house-only.
   // An org's files land on its shelf; the house's land on the operator's.
   const u = await requireEditor();
@@ -3738,7 +3741,7 @@ export async function recordLibraryFiles(
     });
   }
   revalidatePath("/documents");
-  return {};
+  return { ids: rows.map((a) => a.id) };
 }
 
 export async function updateAttachment(
@@ -11412,6 +11415,94 @@ export async function receivePoLine(lineId: number, qty: number, note?: string):
   });
   revPo(line.poId);
   return {};
+}
+
+/**
+ * Book a delivery that is a MACHINE rather than a quantity.
+ *
+ * Receiving has always had one shape: a count goes up, a shelf gets fuller, a
+ * price becomes a held cost. That is right for seals and oil and wrong for the
+ * roughing pump on the same order - a pump has a serial, a service history,
+ * its own procedures and an intake nobody should be able to skip, and none of
+ * that fits in "on hand: 4".
+ *
+ * There were two ways to get a unit onto the books before this and both had a
+ * hole in them. intakeModule is the bridge from a part row to an asset, but a
+ * part row belongs to a system, so a unit bought for the shelf could not use
+ * it. Adding the asset by hand works, and loses the order: no receipt behind
+ * it, nothing bumped on the line, and - the one that actually bites - no
+ * intake checklist, because a shelf spare has never generated one. So the pump
+ * arrives, somebody writes it down, and "fill it with oil before it goes
+ * anywhere" lives in their head.
+ *
+ * This is the third way and it closes both. One unit per call, because one
+ * serial is one machine: five pumps on a line is five calls and five serials,
+ * which is the honest amount of typing.
+ */
+export async function receivePoLineAsUnit(lineId: number, data: AssetInput & {
+  /** Straight onto a system, or null to land it on the shelf as a spare. */
+  instrumentId?: number | null;
+}): Promise<{ error?: string; assetId?: number; tasks?: number }> {
+  const u = await requireEditor();
+  const [line] = await db.select().from(poLines).where(eq(poLines.id, lineId));
+  if (!line) return { error: "Not found" };
+  const { po, manage, see } = await poAccess(u, line.poId);
+  if (!po) return { error: "Not found" };
+  if (!manage) return { error: see ? "You can't receive against this order" : "Not found" };
+  if (!poReceivable(po.status)) {
+    return { error: po.status === "draft" ? `${po.number} hasn't been sent yet` : `${po.number} is ${PO_LABEL[po.status].toLowerCase()}` };
+  }
+  if (!data.serial.trim() && !data.model.trim()) {
+    return { error: "A unit needs a serial or a model - that is what makes it a machine and not a quantity" };
+  }
+
+  // Onto a system only if this person could have put it there by hand.
+  const dest = data.instrumentId ?? null;
+  if (dest !== null && !(await canEditSystem(u, dest))) {
+    return { error: (await canSeeSystemSafe(u, dest)) ? "Read-only access to that system" : "Not found" };
+  }
+
+  const created = await createAsset(dest, data);
+  if (created.error || !created.id) return { error: created.error ?? "Could not create the unit" };
+
+  await db.update(assets).set({ poId: po.id }).where(eq(assets.id, created.id));
+  await db.update(poLines).set({ qtyReceived: line.qtyReceived + 1 }).where(eq(poLines.id, lineId));
+
+  /*
+   * The intake checklist, for a unit that landed on the shelf.
+   *
+   * createAsset runs this for a unit born on a system and not for a spare, and
+   * that asymmetry is deliberate everywhere else: a CSV import of four hundred
+   * spares must not manufacture four hundred task lists. A unit somebody has
+   * just taken delivery of is the opposite case - the box is open, the person
+   * is standing there, and "fill it with oil" is the whole reason they came to
+   * the software. So it is fired HERE, on the one path that means arrival,
+   * rather than by loosening createAsset for everybody.
+   */
+  const [row] = await db.select().from(assets).where(eq(assets.id, created.id));
+  const made = dest === null && row
+    ? await generateCheckout(null, row, u.email, row.tenantOrgId)
+    : 0;
+
+  await logAssetEvent(created.id, "note", dest,
+    `received on ${po.number} from ${po.vendor}`, u.name);
+  const after = await db.select().from(poLines).where(eq(poLines.poId, line.poId));
+  const next = statusAfterReceipt(after);
+  if (next !== po.status) {
+    await db.update(purchaseOrders)
+      .set({ status: next, closedAt: next === "received" ? new Date() : null })
+      .where(eq(purchaseOrders.id, line.poId));
+  }
+  await audit({
+    actor: u.email, instrumentId: dest, assetId: created.id, entityType: "po", entityId: line.poId,
+    action: `received ${assetLabel({ kind: data.kind, model: data.model, serial: data.serial })}`
+      + ` on ${po.number} as a unit${dest === null ? " onto the shelf" : ""}`
+      + `${next === "received" ? " - order complete" : ""}`,
+  });
+  revPo(line.poId);
+  revalidatePath("/assets");
+  if (dest !== null) rev(dest);
+  return { assetId: created.id, tasks: made };
 }
 
 /**

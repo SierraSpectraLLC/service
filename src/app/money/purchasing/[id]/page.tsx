@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { appSettings, instruments, orgSites, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, workOrders } from "@/db/schema";
+import { appSettings, instruments, orgSites, orgs, poLines, purchaseOrders, stockrooms, stockroomShares, vocabTerms, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { forTenant, isHouse, readTenant, visibleSystemIds } from "@/lib/tenancy";
 import { makerNames } from "@/lib/makersData";
@@ -49,6 +49,13 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
   if (!see) notFound();
 
   const [org] = po.orgId === null ? [] : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, po.orgId));
+
+  // The module types the catalog knows, offered when a line is booked in as a
+  // machine rather than a quantity. Suggestions only - the unit in front of
+  // somebody always gets recorded, catalog or no catalog.
+  const moduleKinds = (await db.select({ name: vocabTerms.name }).from(vocabTerms)
+    .where(and(eq(vocabTerms.kind, "asset_type"), forTenant(vocabTerms.tenantOrgId, po.tenantOrgId))))
+    .map((v) => v.name);
 
   // Drop-ship candidates: every unarchived client site in this tenant, named
   // by whose it is. House-only, like the vendor list - a client issuing their
@@ -138,6 +145,7 @@ export default async function PurchaseOrderPage({ params }: { params: Promise<{ 
       )}
 
       <PoPanel
+        moduleKinds={moduleKinds}
         po={{
           id: po.id, number: po.number, vendor: po.vendor, status: po.status, reference: po.reference,
           note: po.note, expectedAt: po.expectedAt, cancelReason: po.cancelReason,

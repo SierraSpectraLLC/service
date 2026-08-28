@@ -3659,3 +3659,13 @@ DO $$ BEGIN
       FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE CASCADE;
   END IF;
 END $$;
+
+-- Where a received unit came from. Mirrors parts.po_id, which has answered
+-- "where is the receipt for this" for consumables since purchasing existed.
+ALTER TABLE "assets" ADD COLUMN IF NOT EXISTS "po_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'assets_po_id_fk') THEN
+    ALTER TABLE "assets" ADD CONSTRAINT "assets_po_id_fk"
+      FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

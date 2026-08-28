@@ -622,7 +622,17 @@ const FIXTURE = `
     ('Mass spec', 'task', 'Desolvation line swap', 'LCMS-8060 only.', 1, false, 365, '{"LCMS-8060"}', 240, ''),
     ('Pump', 'task', 'Seal replacement', '', 0, false, 180, '{}', 90,
       '[{"name":"LC-30 plunger seal","number":"228-45703-91","qty":2,"models":["LC-30AD"]}]'),
+    -- A pump ships dry. This is what has to happen between the crate and the
+    -- shelf, and it is the reason receiving a unit generates intake work at all
+    -- (see receivePoLineAsUnit).
+    ('Pump', 'task', 'Fill with oil and run up', 'New pumps ship dry - fill before it goes anywhere.',
+      1, true, NULL, '{}', 20, '[{"name":"Oil mist filter","number":"G1960-80039"}]'),
     ('Autosampler', 'task', 'Needle and septum check', '', 0, true, NULL, '{}', 60, '');
+  -- Stamped, like every other row above. Procedures are matched with
+  -- forTenant, so an unstamped one fires for nobody and the fixture quietly
+  -- has no maintenance at all - no intake work on a new system, no recurring
+  -- schedules on a new unit.
+  UPDATE procedures SET tenant_org_id = 3;
 
   INSERT INTO notifications (email, kind, title, href, created_at, read_at) VALUES
     ('${OWNER}', 'task_assigned', 'Rita assigned you: Replace turbo and recertify', '/work/2', now() - interval '3 hours', NULL),
