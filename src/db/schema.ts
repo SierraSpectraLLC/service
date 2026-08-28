@@ -524,6 +524,9 @@ export const clientShares = pgTable("client_shares", {
   /** percent: basis points of what they bill this client inside the window. */
   feeBps: integer("fee_bps").notNull().default(0),
   feeWindowMonths: integer("fee_window_months").notNull().default(12),
+  /** percent only: the fee is never less than this once they bill anything, nor more than that. 0 = unbounded. */
+  feeMinCents: integer("fee_min_cents").notNull().default(0),
+  feeMaxCents: integer("fee_max_cents").notNull().default(0),
   feeNote: text("fee_note").notNull().default(""),
   /**
    * What the RECIPIENT proposed instead, when they countered.
@@ -542,6 +545,8 @@ export const clientShares = pgTable("client_shares", {
   counterCents: integer("counter_cents").notNull().default(0),
   counterBps: integer("counter_bps").notNull().default(0),
   counterWindowMonths: integer("counter_window_months").notNull().default(12),
+  counterMinCents: integer("counter_min_cents").notNull().default(0),
+  counterMaxCents: integer("counter_max_cents").notNull().default(0),
   counterNote: text("counter_note").notNull().default(""),
   counteredBy: text("countered_by").notNull().default(""),
   counteredAt: timestamp("countered_at"),
@@ -582,6 +587,9 @@ export const referralFees = pgTable("referral_fees", {
   kind: text("kind").notNull().default("flat"),
   feeCents: integer("fee_cents").notNull().default(0),
   feeBps: integer("fee_bps").notNull().default(0),
+  /** The bounds agreed. See lib/referral - the floor waits for the first dollar billed. */
+  minCents: integer("min_cents").notNull().default(0),
+  maxCents: integer("max_cents").notNull().default(0),
   startsOn: text("starts_on").notNull().default(""),   // YYYY-MM-DD, the day it was accepted
   endsOn: text("ends_on").notNull().default(""),       // the window's last day
   /** The aggregate the percent is taken of. The ONLY figure that crosses. */

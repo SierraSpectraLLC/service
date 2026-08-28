@@ -106,6 +106,7 @@ export async function feesFor(tenantOrgId: number | null): Promise<{
     clientName: (f.clientOrgId !== null ? names.get(f.clientOrgId) : "") ?? "a client",
     otherName: names.get(other) ?? "another service company",
     kind: f.kind, feeCents: f.feeCents, feeBps: f.feeBps,
+    minCents: f.minCents, maxCents: f.maxCents,
     startsOn: f.startsOn, endsOn: f.endsOn,
     billedCents: f.billedCents, billedFrom: f.billedFrom,
     paidCents: f.paidCents, status: f.status, note: f.note,

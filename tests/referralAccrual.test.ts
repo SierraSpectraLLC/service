@@ -108,7 +108,8 @@ describe("what the percentage is taken of", () => {
   it("turns into the fee by the rule the ledger prints", async () => {
     const billed = await billedForFee(FEE);
     expect(accruedCents({
-      kind: "percent", feeCents: 0, feeBps: 500, startsOn: FEE.startsOn, endsOn: FEE.endsOn,
+      kind: "percent", feeCents: 0, feeBps: 500, minCents: 0, maxCents: 0,
+      startsOn: FEE.startsOn, endsOn: FEE.endsOn,
       billedCents: billed, billedFrom: "invoices", paidCents: 0, status: "open",
     })).toBe(Math.round(billed * 0.05));
   });

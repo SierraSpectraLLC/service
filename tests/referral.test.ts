@@ -6,19 +6,19 @@
 // that a fee which has not started reads differently from one that is over.
 import { describe, expect, it } from "vitest";
 import {
-  accruedCents, choicesFor, feeLine, feeStanding, inWindow, outstandingCents,
+  accruedCents, boundsPhrase, choicesFor, feeLine, feeStanding, inWindow, outstandingCents,
   resolveChoice, termsLine, termsProblems, windowEnd, MAX_FEE_BPS,
   type FeeRow, type FeeTerms,
 } from "@/lib/referral";
 import { formatCents } from "@/lib/money";
 
 const flat = (over: Partial<FeeRow> = {}): FeeRow => ({
-  kind: "flat", feeCents: 200_000, feeBps: 0,
+  kind: "flat", feeCents: 200_000, feeBps: 0, minCents: 0, maxCents: 0,
   startsOn: "2026-08-28", endsOn: "", billedCents: 0, billedFrom: "invoices",
   paidCents: 0, status: "open", ...over,
 });
 const pct = (over: Partial<FeeRow> = {}): FeeRow => ({
-  kind: "percent", feeCents: 0, feeBps: 500,
+  kind: "percent", feeCents: 0, feeBps: 500, minCents: 0, maxCents: 0,
   startsOn: "2026-08-28", endsOn: "2027-08-27", billedCents: 0, billedFrom: "invoices",
   paidCents: 0, status: "open", ...over,
 });
@@ -120,7 +120,7 @@ describe("saying where the number came from", () => {
 
 describe("the terms on an offer", () => {
   const terms = (over: Partial<FeeTerms> = {}): FeeTerms =>
-    ({ kind: "percent", feeCents: 0, feeBps: 500, windowMonths: 12, note: "", ...over });
+    ({ kind: "percent", feeCents: 0, feeBps: 500, windowMonths: 12, minCents: 0, maxCents: 0, note: "", ...over });
 
   it("says what accepting costs, in words", () => {
     expect(termsLine(terms(), formatCents)).toBe("5% of what you bill them in the first 12 months");
@@ -153,7 +153,8 @@ describe("the terms on an offer", () => {
 
 describe("either, and they choose", () => {
   const either: FeeTerms = {
-    kind: "either", feeCents: 200_000, feeBps: 500, windowMonths: 12, note: "",
+    kind: "either", feeCents: 200_000, feeBps: 500, windowMonths: 12,
+    minCents: 0, maxCents: 0, note: "",
   };
 
   it("offers two risks rather than a discount", () => {
@@ -193,5 +194,83 @@ describe("either, and they choose", () => {
     expect(choicesFor("either")).toEqual(["percent", "flat"]);
     expect(choicesFor("percent")).toEqual([]);
     expect(choicesFor("none")).toEqual([]);
+  });
+});
+
+describe("a floor and a cap on a percentage", () => {
+  const bounded = (over: Partial<FeeRow> = {}) =>
+    pct({ minCents: 150_000, maxCents: 1_000_000, ...over });
+
+  it("costs nothing while they have billed nothing", () => {
+    /*
+     * The judgement this whole feature turns on. A minimum that applied from
+     * day one would be a guaranteed payment wearing a percentage's clothes,
+     * and the reason somebody takes the percent side is to avoid paying for a
+     * referral that goes nowhere. Charging a floor on a client who never spent
+     * a dollar is charging for nothing.
+     */
+    expect(accruedCents(bounded())).toBe(0);
+    expect(feeStanding(bounded(), "2026-09-01")).toBe("accruing");
+  });
+
+  it("jumps to the floor on the first dollar billed", () => {
+    // 5% of $100 is $5; the floor says $1,500.
+    expect(accruedCents(bounded({ billedCents: 10_000 }))).toBe(150_000);
+  });
+
+  it("stops at the cap however well the account goes", () => {
+    // 5% of $400,000 is $20,000; the cap says $10,000.
+    expect(accruedCents(bounded({ billedCents: 40_000_000 }))).toBe(1_000_000);
+  });
+
+  it("leaves the plain arithmetic alone in between", () => {
+    // 5% of $48,000 is $2,400 - above the floor, below the cap.
+    expect(accruedCents(bounded({ billedCents: 4_800_000 }))).toBe(240_000);
+  });
+
+  it("treats zero as no bound at all, not as a bound of nothing", () => {
+    expect(accruedCents(pct({ billedCents: 40_000_000 }))).toBe(2_000_000);
+    expect(accruedCents(pct({ billedCents: 10_000, minCents: 150_000 }))).toBe(150_000);
+    expect(accruedCents(pct({ billedCents: 40_000_000, maxCents: 1_000_000 }))).toBe(1_000_000);
+  });
+
+  it("says which bound moved the number", () => {
+    // "5% of $100 = $1,500" reads as an arithmetic error unless the line owns up.
+    expect(feeLine(bounded({ billedCents: 10_000 }), formatCents)).toContain("(the floor)");
+    expect(feeLine(bounded({ billedCents: 40_000_000 }), formatCents)).toContain("(the cap)");
+    expect(feeLine(bounded({ billedCents: 4_800_000 }), formatCents)).not.toContain("(the");
+  });
+
+  it("spells the floor's condition out rather than shortening it", () => {
+    const t: FeeTerms = {
+      kind: "percent", feeCents: 0, feeBps: 500, windowMonths: 12,
+      minCents: 150_000, maxCents: 1_000_000, note: "",
+    };
+    expect(boundsPhrase(t, formatCents))
+      .toBe(" - at least $1,500 once they bill anything, never over $10,000");
+    expect(termsLine(t, formatCents)).toContain("at least $1,500 once they bill anything");
+  });
+
+  it("refuses a floor above its own cap", () => {
+    // Otherwise the cap wins every time and the floor is a number that can
+    // never do anything.
+    expect(termsProblems({
+      kind: "percent", feeCents: 0, feeBps: 500, windowMonths: 12,
+      minCents: 1_000_000, maxCents: 150_000, note: "",
+    })[0]).toContain("floor is above the cap");
+  });
+
+  it("drops both when somebody takes the flat side of an either", () => {
+    // A single number with a "minimum" beside it is two answers to one question.
+    const either: FeeTerms = {
+      kind: "either", feeCents: 200_000, feeBps: 500, windowMonths: 12,
+      minCents: 150_000, maxCents: 1_000_000, note: "",
+    };
+    expect(resolveChoice(either, "flat")).toMatchObject({ kind: "flat", minCents: 0, maxCents: 0 });
+    expect(resolveChoice(either, "percent")).toMatchObject({ minCents: 150_000, maxCents: 1_000_000 });
+  });
+
+  it("keeps a waiver above every bound", () => {
+    expect(accruedCents(bounded({ billedCents: 4_800_000, status: "waived" }))).toBe(0);
   });
 });

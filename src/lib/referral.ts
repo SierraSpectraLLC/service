@@ -53,7 +53,12 @@ export const FEE_LABEL: Record<FeeKind, string> = {
  */
 export function resolveChoice(t: FeeTerms, choice: string): FeeTerms {
   if (t.kind !== "either") return t;
-  return { ...t, kind: choice === "flat" ? "flat" : "percent" };
+  // A floor and a cap belong to the percentage. Taking the flat side means
+  // taking a single number, and carrying a "minimum" alongside it would be two
+  // answers to one question.
+  return choice === "flat"
+    ? { ...t, kind: "flat", minCents: 0, maxCents: 0 }
+    : { ...t, kind: "percent" };
 }
 
 /** Which kinds an offer actually lets somebody pick between. */
@@ -66,6 +71,10 @@ export type FeeTerms = {
   feeCents: number;
   feeBps: number;
   windowMonths: number;
+  /** percent only: never less than this once they have billed anything. 0 = no floor. */
+  minCents: number;
+  /** percent only: never more than this, however well the account goes. 0 = no cap. */
+  maxCents: number;
   note: string;
 };
 
@@ -73,6 +82,8 @@ export type FeeRow = {
   kind: string;
   feeCents: number;
   feeBps: number;
+  minCents: number;
+  maxCents: number;
   startsOn: string;
   endsOn: string;
   billedCents: number;
@@ -98,6 +109,12 @@ export function termsProblems(t: FeeTerms): string[] {
     if (t.feeBps > MAX_FEE_BPS) out.push(`Keep it under ${MAX_FEE_BPS / 100}%`);
     if (t.windowMonths <= 0) out.push("Say how long it runs for");
     if (t.windowMonths > MAX_WINDOW_MONTHS) out.push(`Keep the window under ${MAX_WINDOW_MONTHS} months`);
+    if (t.minCents < 0 || t.maxCents < 0) out.push("A floor and a cap cannot be negative");
+    if (t.minCents > 0 && t.maxCents > 0 && t.minCents > t.maxCents) {
+      // Otherwise the cap silently wins on every single fee and the floor is a
+      // number somebody typed that can never do anything.
+      out.push("The floor is above the cap");
+    }
   }
   return out;
 }
@@ -129,10 +146,26 @@ export function windowEnd(startsOn: string, months: number): string {
 export function accruedCents(f: FeeRow): number {
   if (f.status === "waived") return 0;
   if (f.kind === "flat") return Math.max(0, Math.round(f.feeCents));
-  if (f.kind === "percent") {
-    return Math.round((Math.max(0, f.billedCents) * Math.max(0, f.feeBps)) / 10000);
-  }
-  return 0;
+  if (f.kind !== "percent") return 0;
+
+  const billed = Math.max(0, f.billedCents);
+  const share = Math.round((billed * Math.max(0, f.feeBps)) / 10000);
+  /*
+   * THE FLOOR ONLY APPLIES ONCE THEY HAVE BILLED SOMETHING, and that is the
+   * one judgement in this file worth arguing about.
+   *
+   * A minimum that applied from day one would be a guaranteed payment wearing
+   * a percentage's clothes - and the whole reason somebody takes the percent
+   * side is to avoid paying for a referral that goes nowhere. Charging a floor
+   * on a client who never spent a dollar is charging for nothing, and it is
+   * exactly the case where the recipient would feel cheated and be right.
+   *
+   * So: nothing billed, nothing owed. A dollar billed, and the floor is the
+   * fee. The label says so out loud rather than leaving it to be discovered.
+   */
+  const floored = billed > 0 ? Math.max(share, Math.max(0, f.minCents)) : share;
+  const cap = Math.max(0, f.maxCents);
+  return cap > 0 ? Math.min(floored, cap) : floored;
 }
 
 /** What is still owed. Never negative: an overpayment is a credit, not a debt. */
@@ -188,13 +221,30 @@ export function termsLine(t: FeeTerms, fmt: (c: number) => string): string {
   const tail = t.note ? ` - ${t.note}` : "";
   const pct = (t.feeBps / 100).toFixed(t.feeBps % 100 === 0 ? 0 : 1);
   const months = Math.round(t.windowMonths);
-  const share = `${pct}% of what you bill them in the first ${months} month${months === 1 ? "" : "s"}`;
+  const bounds = boundsPhrase(t, fmt);
+  const share = `${pct}% of what you bill them in the first ${months} month${months === 1 ? "" : "s"}${bounds}`;
   if (t.kind === "flat") return `${fmt(t.feeCents)} to accept${tail}`;
   if (t.kind === "percent") return `${share}${tail}`;
   // The choice leads with the share, because that is the one somebody has to
   // think about; the flat figure is the thing they already understand.
   if (t.kind === "either") return `${share}, or ${fmt(t.feeCents)} to accept - your choice${tail}`;
   return "No fee";
+}
+
+/**
+ * "at least $1,500 once they bill anything, and never over $10,000".
+ *
+ * Spelled out rather than shortened to "min/max" because the floor's condition
+ * is the part people get wrong, and a phrase that hides it would be the wrong
+ * kind of concise.
+ */
+export function boundsPhrase(
+  t: Pick<FeeTerms, "minCents" | "maxCents">, fmt: (c: number) => string,
+): string {
+  const parts: string[] = [];
+  if (t.minCents > 0) parts.push(`at least ${fmt(t.minCents)} once they bill anything`);
+  if (t.maxCents > 0) parts.push(`never over ${fmt(t.maxCents)}`);
+  return parts.length ? ` - ${parts.join(", ")}` : "";
 }
 
 /**
@@ -210,7 +260,14 @@ export function feeLine(f: FeeRow, fmt: (c: number) => string): string {
   }
   const basis = f.billedFrom === "reported" ? "reported" : "billed";
   const pct = (f.feeBps / 100).toFixed(f.feeBps % 100 === 0 ? 0 : 1);
-  return `${pct}% of ${fmt(f.billedCents)} ${basis} = ${fmt(accruedCents(f))}`
+  const raw = Math.round((Math.max(0, f.billedCents) * Math.max(0, f.feeBps)) / 10000);
+  const got = accruedCents(f);
+  // Say WHICH bound moved the number. "5% of $10,000 = $1,500" reads as an
+  // arithmetic error unless the line admits the floor did it.
+  const why = f.status === "waived" || got === raw ? ""
+    : got > raw ? " (the floor)"
+      : " (the cap)";
+  return `${pct}% of ${fmt(f.billedCents)} ${basis} = ${fmt(got)}${why}`
     + (f.paidCents > 0 ? `, ${fmt(f.paidCents)} paid` : "")
     + (outstandingCents(f) > 0 ? `, ${fmt(outstandingCents(f))} due` : "");
 }

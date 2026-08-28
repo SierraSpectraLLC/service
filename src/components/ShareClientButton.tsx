@@ -28,13 +28,17 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const [picked, setPicked] = useState<number[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
-  const [fee, setFee] = useState({ kind: "none" as FeeKind, flat: "", pct: "5", months: "12", note: "" });
+  const [fee, setFee] = useState({
+    kind: "none" as FeeKind, flat: "", pct: "5", months: "12", min: "", max: "", note: "",
+  });
 
   const terms = {
     kind: fee.kind,
     feeCents: parseMoney(fee.flat) ?? 0,
     feeBps: Math.round((parseFloat(fee.pct) || 0) * 100),
     windowMonths: parseInt(fee.months, 10) || 0,
+    minCents: parseMoney(fee.min) ?? 0,
+    maxCents: parseMoney(fee.max) ?? 0,
     note: fee.note,
   };
   const feeProblem = termsProblems(terms)[0] ?? null;
@@ -117,6 +121,21 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
                     aria-label="Window months" disabled={pending}
                     onChange={(e) => setFee({ ...fee, months: e.target.value })} />
                 </label>
+                {/* Both optional, and blank is the common case. The floor is
+                    the one that needs its condition said out loud - see
+                    lib/referral: it waits for the first dollar billed. */}
+                <label style={{ display: "block" }}>
+                  <span className="mut t-meta" style={{ display: "block" }}>Floor</span>
+                  <input className="mono t-small" style={{ width: 84 }} value={fee.min}
+                    aria-label="Floor" placeholder="none" disabled={pending}
+                    onChange={(e) => setFee({ ...fee, min: e.target.value })} />
+                </label>
+                <label style={{ display: "block" }}>
+                  <span className="mut t-meta" style={{ display: "block" }}>Cap</span>
+                  <input className="mono t-small" style={{ width: 84 }} value={fee.max}
+                    aria-label="Cap" placeholder="none" disabled={pending}
+                    onChange={(e) => setFee({ ...fee, max: e.target.value })} />
+                </label>
               </>
             )}
           </div>
@@ -132,7 +151,9 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
               {fee.kind !== "flat" && (
                 <div className="mut t-meta" style={{ marginTop: 2 }}>
                   Worked out from what they invoice this client in Ridgeline. You see the total
-                  and what it comes to - never their invoices.
+                  and what it comes to - never their invoices. A floor costs them nothing until
+                  they have billed something: a minimum charged on a client who never spent a
+                  dollar is a charge for nothing.
                 </div>
               )}
             </>

@@ -12,6 +12,7 @@ import {
   type SharePayload, type SharedSite, type SharedSystem,
 } from "@/lib/clientShare";
 import type { ProviderListing } from "@/lib/providerDirectory";
+import type { FeeTerms } from "@/lib/referral";
 
 /**
  * The snapshot, taken now.
@@ -183,9 +184,9 @@ export type ShareRow = {
   id: number;
   status: string;
   /** What accepting costs. Frozen with the payload - see lib/referral. */
-  terms: { kind: string; feeCents: number; feeBps: number; windowMonths: number; note: string };
+  terms: FeeTerms;
   /** What the recipient proposed instead, when they countered. Null when none. */
-  counter: { kind: string; feeCents: number; feeBps: number; windowMonths: number; note: string } | null;
+  counter: FeeTerms | null;
   counteredBy: string;
   note: string;
   createdBy: string;
@@ -221,11 +222,13 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
     terms: {
       kind: r.feeKind, feeCents: r.feeCents, feeBps: r.feeBps,
       windowMonths: r.feeWindowMonths, note: r.feeNote,
+      minCents: r.feeMinCents, maxCents: r.feeMaxCents,
     },
     counter: r.counterKind
       ? {
         kind: r.counterKind, feeCents: r.counterCents, feeBps: r.counterBps,
         windowMonths: r.counterWindowMonths, note: r.counterNote,
+        minCents: r.counterMinCents, maxCents: r.counterMaxCents,
       }
       : null,
     counteredBy: r.counteredBy,

@@ -7,7 +7,9 @@ import {
   answerCounterOffer, counterClientShare, decideClientShare, withdrawClientShare,
 } from "@/app/actions";
 import { summarize, SHARE_LABEL, SHARE_LABEL_IN, type ShareState } from "@/lib/clientShare";
-import { choicesFor, FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind } from "@/lib/referral";
+import {
+  boundsPhrase, choicesFor, FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind,
+} from "@/lib/referral";
 import { parseMoney } from "@/lib/money";
 import { formatCents } from "@/lib/money";
 import type { ShareRow } from "@/lib/clientShareData";
@@ -41,7 +43,9 @@ export default function ClientShareBoard({ inbox, sent }: {
   /** Which side of an either/or offer the recipient is taking. */
   const [choice, setChoice] = useState<Record<number, string>>({});
   const [countering, setCountering] = useState<number | null>(null);
-  const [ct, setCt] = useState({ kind: "flat" as FeeKind, flat: "", pct: "3", months: "12", note: "" });
+  const [ct, setCt] = useState({
+    kind: "flat" as FeeKind, flat: "", pct: "3", months: "12", min: "", max: "", note: "",
+  });
 
   const waiting = inbox.filter((s) => s.status === "pending");
 
@@ -145,7 +149,7 @@ export default function ClientShareBoard({ inbox, sent }: {
                     <button className="btn" disabled={pending}
                       onClick={() => {
                         setError("");
-                        setCt({ kind: "flat", flat: "", pct: "3", months: "12", note: "" });
+                        setCt({ kind: "flat", flat: "", pct: "3", months: "12", min: "", max: "", note: "" });
                         setCountering(s.id);
                       }}>
                       Counter
@@ -249,6 +253,8 @@ export default function ClientShareBoard({ inbox, sent }: {
           feeCents: parseMoney(ct.flat) ?? 0,
           feeBps: Math.round((parseFloat(ct.pct) || 0) * 100),
           windowMonths: parseInt(ct.months, 10) || 0,
+          minCents: parseMoney(ct.min) ?? 0,
+          maxCents: parseMoney(ct.max) ?? 0,
           note: ct.note,
         };
         const problem = termsProblems(terms)[0] ?? null;
@@ -295,6 +301,18 @@ export default function ClientShareBoard({ inbox, sent }: {
                     <label>For, months</label>
                     <input className="mono t-small" value={ct.months} aria-label="Counter months"
                       disabled={pending} onChange={(e) => setCt({ ...ct, months: e.target.value })} />
+                  </div>
+                  <div>
+                    <label>Floor</label>
+                    <input className="mono t-small" value={ct.min} aria-label="Counter floor"
+                      placeholder="none" disabled={pending}
+                      onChange={(e) => setCt({ ...ct, min: e.target.value })} />
+                  </div>
+                  <div>
+                    <label>Cap</label>
+                    <input className="mono t-small" value={ct.max} aria-label="Counter cap"
+                      placeholder="none" disabled={pending}
+                      onChange={(e) => setCt({ ...ct, max: e.target.value })} />
                   </div>
                 </>
               )}

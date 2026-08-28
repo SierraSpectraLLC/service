@@ -3592,3 +3592,12 @@ DO $$ BEGIN
       FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- A floor and a cap on a percentage referral fee. The floor waits for the
+-- first dollar billed - see src/lib/referral.ts accruedCents.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_min_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_max_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_min_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_max_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "min_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "max_cents" integer NOT NULL DEFAULT 0;

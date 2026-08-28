@@ -16485,6 +16485,8 @@ export async function shareClient(orgId: number, data: {
     feeCents: Math.max(0, Math.round(data.terms?.feeCents ?? 0)),
     feeBps: Math.max(0, Math.round(data.terms?.feeBps ?? 0)),
     windowMonths: Math.max(0, Math.round(data.terms?.windowMonths ?? 12)),
+    minCents: Math.max(0, Math.round(data.terms?.minCents ?? 0)),
+    maxCents: Math.max(0, Math.round(data.terms?.maxCents ?? 0)),
     note: (data.terms?.note ?? "").trim().slice(0, 200),
   };
   const termProblems = termsProblems(terms);
@@ -16504,6 +16506,7 @@ export async function shareClient(orgId: number, data: {
       payload: frozen, status: "pending", note: data.note.trim().slice(0, 500),
       feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
       feeWindowMonths: terms.windowMonths, feeNote: terms.note,
+      feeMinCents: terms.minCents, feeMaxCents: terms.maxCents,
       createdBy: u.email,
     }).returning();
     const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
@@ -16746,10 +16749,12 @@ async function raiseReferralFee(
     ? {
       kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
       windowMonths: row.counterWindowMonths, note: row.counterNote,
+      minCents: row.counterMinCents, maxCents: row.counterMaxCents,
     }
     : {
       kind: row.feeKind, feeCents: row.feeCents, feeBps: row.feeBps,
       windowMonths: row.feeWindowMonths, note: row.feeNote,
+      minCents: row.feeMinCents, maxCents: row.feeMaxCents,
     };
   // "Either" is only ever an OFFER. What lands on the fee is the one they
   // picked, so nothing downstream has to carry a choice that was already made.
@@ -16766,6 +16771,7 @@ async function raiseReferralFee(
     clientOrgId: clientOrgId ?? null,
     kind: t.kind,
     feeCents: t.feeCents, feeBps: t.feeBps,
+    minCents: t.minCents, maxCents: t.maxCents,
     startsOn,
     endsOn: t.kind === "percent" ? windowEnd(startsOn, t.windowMonths) : "",
     note: t.note,
@@ -16801,6 +16807,8 @@ export async function counterClientShare(shareId: number, data: {
     feeCents: Math.max(0, Math.round(data.terms.feeCents)),
     feeBps: Math.max(0, Math.round(data.terms.feeBps)),
     windowMonths: Math.max(0, Math.round(data.terms.windowMonths)),
+    minCents: Math.max(0, Math.round(data.terms.minCents)),
+    maxCents: Math.max(0, Math.round(data.terms.maxCents)),
     note: data.note.trim().slice(0, 200),
   };
   const problems = termsProblems(terms);
@@ -16810,6 +16818,7 @@ export async function counterClientShare(shareId: number, data: {
     status: "countered",
     counterKind: terms.kind, counterCents: terms.feeCents, counterBps: terms.feeBps,
     counterWindowMonths: terms.windowMonths, counterNote: terms.note,
+    counterMinCents: terms.minCents, counterMaxCents: terms.maxCents,
     counteredBy: u.email, counteredAt: new Date(),
   }).where(eq(clientShares.id, shareId));
 
@@ -16820,6 +16829,7 @@ export async function counterClientShare(shareId: number, data: {
       + ` instead of ${termsLine({
         kind: row.feeKind, feeCents: row.feeCents, feeBps: row.feeBps,
         windowMonths: row.feeWindowMonths, note: "",
+        minCents: row.feeMinCents, maxCents: row.feeMaxCents,
       }, formatCents)}`,
   });
   revalidatePath("/network");
@@ -16851,12 +16861,14 @@ export async function answerCounterOffer(
   const countered: FeeTerms = {
     kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
     windowMonths: row.counterWindowMonths, note: row.counterNote,
+    minCents: row.counterMinCents, maxCents: row.counterMaxCents,
   };
 
   if (!agree) {
     await db.update(clientShares).set({
       status: "pending",
       counterKind: "", counterCents: 0, counterBps: 0, counterNote: "",
+      counterMinCents: 0, counterMaxCents: 0,
       counteredBy: "", counteredAt: null,
     }).where(eq(clientShares.id, shareId));
     await audit({
