@@ -19,6 +19,7 @@ import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
 import { Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
+import ReceiptScanner from "@/components/ReceiptScanner";
 
 export type ReportExpense = {
   id: number; kind: string; description: string; amountCents: number; incurredOn: string;
@@ -91,6 +92,10 @@ export default function ExpenseReportDetail({
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
   const [receipt, setReceipt] = useState<File | null>(null);
+  /* A photo waiting to be scanned. Set the moment the camera returns one and
+     cleared when the scanner hands back a result - which may be the original,
+     if that is what they chose. */
+  const [scanning, setScanning] = useState<File | null>(null);
   const [addErr, setAddErr] = useState("");
   const [busy, setBusy] = useState("");
   const [pulling, setPulling] = useState(false);
@@ -480,17 +485,41 @@ export default function ExpenseReportDetail({
               opens the camera itself rather than a picker. */}
           <div className="dialog-section">The receipt</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {/* capture="environment" opens the CAMERA rather than a picker,
+                and what comes back goes through the scanner: found, cropped,
+                flattened and whitened, so the thing stored is a document and
+                not a photograph of paper on a car seat. */}
             <label className="btn sm primary" style={{ marginBottom: 0 }}>
               Scan receipt
               <input type="file" accept="image/*" capture="environment" style={{ display: "none" }}
-                onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  // Reset, or picking the same photo twice fires nothing.
+                  e.target.value = "";
+                  if (f) setScanning(f);
+                }} />
             </label>
+            {/* Attaching goes round the scanner on purpose: a PDF has no
+                corners to find, and an emailed invoice is already flat. An
+                image picked from the roll still gets offered the scan. */}
             <label className="btn sm" style={{ marginBottom: 0 }}>
               Attach a file
               <input type="file" accept="image/*,.pdf" style={{ display: "none" }}
-                onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  e.target.value = "";
+                  if (!f) return;
+                  if (f.type.startsWith("image/")) setScanning(f); else setReceipt(f);
+                }} />
             </label>
-            {receipt && <span className="mut t-small">{receipt.name}</span>}
+            {receipt && (
+              <>
+                <span className="mut t-small">{receipt.name}</span>
+                <button className="btn link" type="button" onClick={() => setReceipt(null)}>
+                  remove
+                </button>
+              </>
+            )}
           </div>
           <div className="dialog-section">What it was</div>
           <div className="pf2" style={{ marginBottom: 8 }}>
@@ -598,6 +627,15 @@ export default function ExpenseReportDetail({
             </div>
           </div>
         </Dialog>
+      )}
+
+      {/* Over the add-expense dialog rather than inside it: the scan is its own
+          decision, with its own way out, and burying a corner-dragging canvas
+          inside a form makes both worse. */}
+      {scanning && (
+        <ReceiptScanner file={scanning}
+          onCancel={() => setScanning(null)}
+          onDone={(f) => { setReceipt(f); setScanning(null); }} />
       )}
 
       {pulling && (

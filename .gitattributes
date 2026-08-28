@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The vendored OpenCV build is a verified artifact, not source: it is checked in
+# byte for byte and never edited. Left out of LF normalization so what ships is
+# exactly what scripts/check-scanner.mjs was run against, and marked vendored so
+# it stays out of diffs and language stats.
+public/scan/opencv.js -text -diff linguist-vendored
