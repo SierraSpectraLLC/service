@@ -508,11 +508,76 @@ export const clientShares = pgTable("client_shares", {
   /** pending | accepted | declined | withdrawn */
   status: text("status").notNull().default("pending"),
   note: text("note").notNull().default(""),
+  /**
+   * What the referrer is asking for, frozen into the offer with everything
+   * else. none | flat | percent.
+   *
+   * On the OFFER rather than agreed afterwards, because a price discovered
+   * after somebody has taken on a client is not a price, it is a bill. The
+   * recipient sees what it costs before they accept, and accepting is the
+   * agreement - which is also what makes the accrual something they consented
+   * to rather than something read out of their books.
+   */
+  feeKind: text("fee_kind").notNull().default("none"),
+  /** flat: what it costs to accept, once. */
+  feeCents: integer("fee_cents").notNull().default(0),
+  /** percent: basis points of what they bill this client inside the window. */
+  feeBps: integer("fee_bps").notNull().default(0),
+  feeWindowMonths: integer("fee_window_months").notNull().default(12),
+  feeNote: text("fee_note").notNull().default(""),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   decidedBy: text("decided_by").notNull().default(""),
   decidedAt: timestamp("decided_at"),
 }, (t) => [index("client_shares_to_idx").on(t.toOrgId)]);
+
+/**
+ * A referral fee, once somebody has accepted the client it hangs off.
+ *
+ * Money between two service companies, and the platform is not in the middle
+ * of it: payment runs through the PAYEE's own Stripe Connect account, the same
+ * arrangement an invoice already uses (lib/stripe). Ridgeline never holds the
+ * funds.
+ *
+ * WHAT THE REFERRER MAY SEE is the whole design of the percent case. The
+ * billing happens in the payer's workspace and stays there - what crosses is
+ * one aggregate, `billed_cents`, and never an invoice, a client name on a
+ * line, or a date. `billed_from` says where even that number came from, and
+ * the two answers are not the same kind of fact: 'invoices' is computed from
+ * rows in the payer's own ledger, 'reported' is a figure a person typed. A
+ * surface that showed them identically would be inviting somebody to read a
+ * self-reported number as an audited one.
+ */
+export const referralFees = pgTable("referral_fees", {
+  id: serial("id").primaryKey(),
+  /** The payee's workspace: their receivable, so their stamp. */
+  tenantOrgId: tenantStamp(),
+  shareId: integer("share_id").notNull().references((): AnyPgColumn => clientShares.id, { onDelete: "cascade" }),
+  /** Who is owed - the referrer. */
+  payeeOrgId: integer("payee_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** Who owes - the shop that accepted. */
+  payerOrgId: integer("payer_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** The payer's own copy of the client, which is what the percent is measured on. */
+  clientOrgId: integer("client_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  kind: text("kind").notNull().default("flat"),
+  feeCents: integer("fee_cents").notNull().default(0),
+  feeBps: integer("fee_bps").notNull().default(0),
+  startsOn: text("starts_on").notNull().default(""),   // YYYY-MM-DD, the day it was accepted
+  endsOn: text("ends_on").notNull().default(""),       // the window's last day
+  /** The aggregate the percent is taken of. The ONLY figure that crosses. */
+  billedCents: integer("billed_cents").notNull().default(0),
+  /** invoices | reported - see the comment above; they are different facts. */
+  billedFrom: text("billed_from").notNull().default("invoices"),
+  billedAt: timestamp("billed_at"),
+  paidCents: integer("paid_cents").notNull().default(0),
+  /** open | settled | waived */
+  status: text("status").notNull().default("open"),
+  note: text("note").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("referral_fees_payer_idx").on(t.payerOrgId),
+  index("referral_fees_payee_idx").on(t.payeeOrgId),
+]);
 
 export const orgSites = pgTable("org_sites", {
   id: serial("id").primaryKey(),

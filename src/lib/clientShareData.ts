@@ -182,6 +182,8 @@ export async function listings(): Promise<ProviderListing[]> {
 export type ShareRow = {
   id: number;
   status: string;
+  /** What accepting costs. Frozen with the payload - see lib/referral. */
+  terms: { kind: string; feeCents: number; feeBps: number; windowMonths: number; note: string };
   note: string;
   createdBy: string;
   createdOn: string;
@@ -213,6 +215,10 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
     : []);
   const shape = (r: typeof clientShares.$inferSelect, otherId: number | null): ShareRow => ({
     id: r.id, status: r.status, note: r.note, createdBy: r.createdBy,
+    terms: {
+      kind: r.feeKind, feeCents: r.feeCents, feeBps: r.feeBps,
+      windowMonths: r.feeWindowMonths, note: r.feeNote,
+    },
     createdOn: r.createdAt.toISOString().slice(0, 10),
     otherName: (otherId !== null ? names.get(otherId) : "") ?? "another service company",
     payload: parsePayload(r.payload),

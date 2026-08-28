@@ -74,10 +74,21 @@ export async function accountReady(accountId: string): Promise<boolean> {
  * needs to know which bill was just paid and a client-supplied field is not a
  * thing to trust with that.
  */
+/**
+ * One checkout, for the two things this app takes money for.
+ *
+ * `ref` is what the webhook matches the payment back to, and it is a key and
+ * an id rather than an invoice id because a referral fee between two service
+ * companies is not an invoice - it moves the same way and settles a different
+ * row. Both go on the SESSION and the PAYMENT INTENT: Stripe hands back
+ * whichever it feels like, and a payment nobody can attribute is worse than a
+ * payment that failed.
+ */
+export type PayRef = { key: "invoiceId" | "referralFeeId"; id: number; label: string };
+
 export async function checkoutSession(input: {
   accountId: string;
-  invoiceId: number;
-  invoiceNumber: string;
+  ref: PayRef;
   amountCents: number;
   method: PayMethod;
   platformFeeBps: number;
@@ -91,12 +102,12 @@ export async function checkoutSession(input: {
     "line_items[0][quantity]": "1",
     "line_items[0][price_data][currency]": "usd",
     "line_items[0][price_data][unit_amount]": String(input.amountCents),
-    "line_items[0][price_data][product_data][name]": `Invoice ${input.invoiceNumber}`,
+    "line_items[0][price_data][product_data][name]": input.ref.label,
     "payment_method_types[0]": input.method === "ach" ? "us_bank_account" : "card",
     "payment_intent_data[on_behalf_of]": input.accountId,
     "payment_intent_data[transfer_data][destination]": input.accountId,
-    "metadata[invoiceId]": String(input.invoiceId),
-    "payment_intent_data[metadata][invoiceId]": String(input.invoiceId),
+    [`metadata[${input.ref.key}]`]: String(input.ref.id),
+    [`payment_intent_data[metadata][${input.ref.key}]`]: String(input.ref.id),
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
   };

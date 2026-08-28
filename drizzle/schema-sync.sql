@@ -3537,3 +3537,36 @@ DO $$ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS "org_name_per_tenant"
   ON "orgs" (COALESCE("parent_org_id", 0), "name");
+
+-- What a referrer asks for, frozen into the offer so the recipient sees the
+-- price before accepting. See src/lib/referral.ts.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_kind" text NOT NULL DEFAULT 'none';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_bps" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_window_months" integer NOT NULL DEFAULT 12;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_note" text NOT NULL DEFAULT '';
+
+-- The fee itself, once somebody has accepted. Money between two service
+-- companies, paid through the payee's own Stripe Connect account.
+CREATE TABLE IF NOT EXISTS "referral_fees" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "share_id" integer NOT NULL REFERENCES "client_shares"("id") ON DELETE CASCADE,
+  "payee_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "payer_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "client_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "kind" text NOT NULL DEFAULT 'flat',
+  "fee_cents" integer NOT NULL DEFAULT 0,
+  "fee_bps" integer NOT NULL DEFAULT 0,
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "billed_cents" integer NOT NULL DEFAULT 0,
+  "billed_from" text NOT NULL DEFAULT 'invoices',
+  "billed_at" timestamp,
+  "paid_cents" integer NOT NULL DEFAULT 0,
+  "status" text NOT NULL DEFAULT 'open',
+  "note" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "referral_fees_payer_idx" ON "referral_fees" ("payer_org_id");
+CREATE INDEX IF NOT EXISTS "referral_fees_payee_idx" ON "referral_fees" ("payee_org_id");

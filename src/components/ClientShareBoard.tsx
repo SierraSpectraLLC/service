@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { decideClientShare, withdrawClientShare } from "@/app/actions";
 import { summarize, SHARE_LABEL, SHARE_LABEL_IN, type ShareState } from "@/lib/clientShare";
+import { termsLine } from "@/lib/referral";
+import { formatCents } from "@/lib/money";
 import type { ShareRow } from "@/lib/clientShareData";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { Panel, Pill } from "@/components/ui";
@@ -82,10 +84,19 @@ export default function ClientShareBoard({ inbox, sent }: {
               </div>
               {s.note && <div className="t-small" style={{ marginTop: 2 }}>{s.note}</div>}
 
+              {/* The price, before the button and not after it. A fee somebody
+                  finds out about once they have taken on a client is a bill,
+                  not a price - see lib/referral. */}
+              {s.terms.kind !== "none" && (
+                <div className="t-small" style={{ marginTop: 4, color: "var(--t-warn-fg)" }}>
+                  Accepting costs: <b>{termsLine(s.terms, formatCents)}</b>
+                </div>
+              )}
+
               {s.status === "pending" && (
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
                   <button className="btn accent" disabled={pending} onClick={() => decide(s.id, true)}>
-                    Accept
+                    {s.terms.kind === "none" ? "Accept" : "Accept and owe the fee"}
                   </button>
                   <button className="btn" disabled={pending}
                     onClick={() => { setError(""); setReason(""); setDeclining(s.id); }}>
@@ -137,6 +148,9 @@ export default function ClientShareBoard({ inbox, sent }: {
               <span className="t-body" style={{ flex: 1, minWidth: 0 }}>
                 {s.payload?.client.name ?? "A client"}
                 <span className="mut t-meta"> to {s.otherName} · {s.createdOn}</span>
+                {s.terms.kind !== "none" && (
+                  <span className="mut t-meta"> · {termsLine(s.terms, formatCents)}</span>
+                )}
               </span>
               <Pill tone={TONE[s.status as ShareState] ?? "faint"}>
                 {SHARE_LABEL[s.status as ShareState] ?? s.status}

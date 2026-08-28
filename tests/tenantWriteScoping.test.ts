@@ -92,6 +92,15 @@ function unguardedWrites(tables: string[]): Site[] {
  */
 const REVIEWED: Record<string, string> = {
   "payExpenseReport": "Guarded as of this commit - houseOf(u, report.tenantOrgId).",
+  "recordReferralPayment":
+    "Not a server action. It lives in lib/stripeSettle precisely so that it is "
+    + "not reachable over the network: its only caller is the webhook route, "
+    + "which verifies the Stripe signature on the raw body before parsing it. "
+    + "The write is additionally scoped to the tenant of the row it just read, "
+    + "which the scanner cannot see because it stops three lines past the "
+    + "update. Moving this OUT of app/actions is what this test caused - "
+    + "recordStripePayment had been sitting in the action surface, where any "
+    + "session could have called it and marked any invoice paid.",
 };
 
 describe("writes to a tenant-stamped table", () => {

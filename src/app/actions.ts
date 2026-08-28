@@ -14,7 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
-  awards, shareLinkSystems, providerProfiles, providerLinks, clientShares,
+  awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -159,6 +159,11 @@ import {
   mayDecide, mayWithdraw, parsePayload, shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
 import { composePayload, materialize } from "@/lib/clientShareData";
+import {
+  accruedCents, feeStanding, outstandingCents, termsLine, termsProblems, windowEnd,
+  type FeeTerms,
+} from "@/lib/referral";
+import { billedForFee, feeWithShare } from "@/lib/referralData";
 import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
@@ -14902,7 +14907,7 @@ export async function startPayment(
   try {
     const url = await checkoutSession({
       accountId: operator.stripeAccountId,
-      invoiceId, invoiceNumber: full.row.number,
+      ref: { key: "invoiceId", id: invoiceId, label: `Invoice ${full.row.number}` },
       amountCents: amount.amountCents, method,
       platformFeeBps: settings?.platformFeeBps ?? 0,
       successUrl: `${base}/share/${token}?paid=1`,
@@ -14925,47 +14930,6 @@ export async function startPayment(
     });
     return { error: "We could not start the payment just now. Please try again, or send a check referencing this invoice." };
   }
-}
-
-/**
- * Stripe says the money arrived. Called only by the webhook, which has already
- * verified the signature - this records the payment, lets the credit hold
- * recompute itself, and writes the audit row.
- */
-export async function recordStripePayment(input: {
-  invoiceId: number; amountCents: number; reference: string; method: string;
-}): Promise<void> {
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId));
-  if (!inv) return;
-  const already = await db.select().from(payments)
-    .where(and(eq(payments.invoiceId, input.invoiceId), eq(payments.reference, input.reference)));
-  if (already.length) return;   // Stripe retries; a payment is not recorded twice.
-
-  await db.insert(payments).values({
-    tenantOrgId: inv.tenantOrgId, invoiceId: input.invoiceId,
-    method: input.method === "card" ? "card" : "ach",
-    amountCents: input.amountCents, reference: input.reference,
-    receivedOn: shopToday(), recordedBy: "stripe",
-  });
-
-  const full = await invoiceById(input.invoiceId);
-  const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
-  if (view && inv.status !== "void" && inv.status !== "referred") {
-    const next = view.balanceCents <= 0 ? "paid" : "partial";
-    if (next !== inv.status) {
-      await db.update(invoices).set({ status: next, updatedAt: new Date() }).where(eq(invoices.id, input.invoiceId));
-    }
-  }
-  // The hold is computed, never stored, so paying the balance lifts it by
-  // arithmetic the next time anybody looks. Nothing to un-set here.
-  const credit = await creditFor(inv.orgId, shopToday()).catch(() => null);
-  await audit({
-    actor: "stripe", entityType: "invoice", entityId: input.invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: `received ${formatCents(input.amountCents)} by ${input.method === "card" ? "card" : "bank transfer"} on ${inv.number}`
-      + (view ? ` - ${view.balanceCents <= 0 ? "paid in full" : `${formatCents(view.balanceCents)} still open`}` : "")
-      + (credit && !credit.onHold ? "; the credit hold has cleared" : ""),
-  });
-  revInvoice(inv);
 }
 
 /**
@@ -16464,7 +16428,7 @@ export async function unlinkProvider(providerOrgId: number): Promise<{ error?: s
  * exactly what they get, however long they take.
  */
 export async function shareClient(orgId: number, data: {
-  toOrgIds: number[]; note: string;
+  toOrgIds: number[]; note: string; terms?: FeeTerms;
 }): Promise<{ error?: string; sent?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -16498,6 +16462,23 @@ export async function shareClient(orgId: number, data: {
   const problems = shareProblems({ payload, toOrgId: picked[0], fromTenantOrgId: tenant });
   if (problems.length) return { error: problems[0] };
 
+  /*
+   * The price is frozen into the offer with everything else. A fee discovered
+   * after somebody has taken on a client is not a price, it is a bill - so the
+   * recipient sees what accepting costs before they accept, and accepting IS
+   * the agreement. That is also what makes reading an aggregate out of their
+   * ledger later something they consented to.
+   */
+  const terms: FeeTerms = {
+    kind: data.terms?.kind ?? "none",
+    feeCents: Math.max(0, Math.round(data.terms?.feeCents ?? 0)),
+    feeBps: Math.max(0, Math.round(data.terms?.feeBps ?? 0)),
+    windowMonths: Math.max(0, Math.round(data.terms?.windowMonths ?? 12)),
+    note: (data.terms?.note ?? "").trim().slice(0, 200),
+  };
+  const termProblems = termsProblems(terms);
+  if (termProblems.length) return { error: termProblems[0] };
+
   const frozen = JSON.stringify(payload);
   for (const toOrgId of picked) {
     // One live offer per pair. A second while the first is open is two answers
@@ -16510,6 +16491,8 @@ export async function shareClient(orgId: number, data: {
     const [row] = await db.insert(clientShares).values({
       tenantOrgId: tenant, toOrgId, sourceOrgId: orgId,
       payload: frozen, status: "pending", note: data.note.trim().slice(0, 500),
+      feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
+      feeWindowMonths: terms.windowMonths, feeNote: terms.note,
       createdBy: u.email,
     }).returning();
     const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
@@ -16520,7 +16503,8 @@ export async function shareClient(orgId: number, data: {
     }).catch(() => {});
     await audit({
       actor: u.email, entityType: "client_share", entityId: row.id, tenantOrgId: tenant,
-      action: `offered ${org.name} (${summarize(payload)}) to ${to?.name ?? "another service company"}`,
+      action: `offered ${org.name} (${summarize(payload)}) to ${to?.name ?? "another service company"}`
+        + (terms.kind === "none" ? "" : ` for ${termsLine(terms, formatCents)}`),
     });
   }
   revalidatePath("/network");
@@ -16553,6 +16537,28 @@ export async function decideClientShare(
     const made = await materialize({ payload, destTenantOrgId: tenant, actor: u.email });
     orgId = made.orgId;
     systems = made.systems;
+
+    /*
+     * The fee comes into being at acceptance, never before: an offer nobody
+     * took carries a price and no debt. A flat fee is owed in full from this
+     * moment; a percent starts at zero and accrues as they bill.
+     */
+    if (row.feeKind === "flat" || row.feeKind === "percent") {
+      const startsOn = shopToday();
+      await db.insert(referralFees).values({
+        // The payee's receivable, so the payee's stamp.
+        tenantOrgId: row.tenantOrgId,
+        shareId: row.id,
+        payeeOrgId: row.tenantOrgId ?? 0,
+        payerOrgId: tenant,
+        clientOrgId: orgId,
+        kind: row.feeKind,
+        feeCents: row.feeCents, feeBps: row.feeBps,
+        startsOn,
+        endsOn: row.feeKind === "percent" ? windowEnd(startsOn, row.feeWindowMonths) : "",
+        note: row.feeNote,
+      });
+    }
   }
   await db.update(clientShares).set({
     status: accept ? "accepted" : "declined",
@@ -16585,6 +16591,142 @@ export async function withdrawClientShare(shareId: number): Promise<{ error?: st
   await audit({
     actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
     action: "withdrew a client offer before it was answered",
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+
+// ── Referral fees ───────────────────────────────────────────────────────────
+// Money between two service companies for a client that changed hands. Paid
+// through the PAYEE's own Stripe Connect account, exactly as an invoice is -
+// this platform never holds the funds. See lib/referral.
+
+/**
+ * Recompute what a percentage fee is worth.
+ *
+ * Runs in the PAYER's workspace and only ever writes back an aggregate. The
+ * referrer never sees an invoice, a line or a date - one number crosses, and
+ * billed_from records that it was computed rather than reported.
+ *
+ * Either side may ask for it: the payer because they want the figure to be
+ * right before they pay, the payee because they want to know what they are
+ * owed. Neither can influence what it comes out as.
+ */
+export async function recomputeReferralFee(feeId: number): Promise<{ error?: string; billed?: number }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const found = await feeWithShare(feeId);
+  if (!found) return { error: "Not found" };
+  const { fee } = found;
+  if (mine !== fee.payerOrgId && mine !== fee.payeeOrgId) return { error: "Not found" };
+  if (fee.kind !== "percent") return { error: "That fee is a flat amount - there is nothing to recompute." };
+
+  const billed = await billedForFee(fee);
+  await db.update(referralFees)
+    .set({ billedCents: billed, billedFrom: "invoices", billedAt: new Date() })
+    .where(eq(referralFees.id, feeId));
+  revalidatePath("/network");
+  return { billed };
+}
+
+/**
+ * The payer says what they billed, when Ridgeline cannot see it.
+ *
+ * A shop that invoices this client outside the app has no computable figure,
+ * and refusing to record one would make the honest ones unable to pay what
+ * they owe. So it is accepted - and marked `reported`, because a number a
+ * person typed and a number summed from a ledger are different claims and
+ * every surface says which this is.
+ */
+export async function reportReferralBilling(
+  feeId: number, amount: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const found = await feeWithShare(feeId);
+  if (!found) return { error: "Not found" };
+  // The payer alone. A referrer typing their own basis is not a report.
+  if (mine === null || mine !== found.fee.payerOrgId) return { error: "Not found" };
+  const cents = parseMoney(amount);
+  if (cents === null || cents < 0) return { error: "That is not an amount" };
+
+  await db.update(referralFees)
+    .set({ billedCents: cents, billedFrom: "reported", billedAt: new Date() })
+    .where(eq(referralFees.id, feeId));
+  await audit({
+    actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+    action: `reported ${formatCents(cents)} billed against a referred client`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/**
+ * Pay what is owed, into the referrer's own Stripe account.
+ *
+ * The same arrangement an invoice uses and for the same reason: Connect
+ * Express, money bank to bank, no card number here and no funds held. If the
+ * referrer has not connected an account there is nothing to pay INTO, and the
+ * honest answer is to say so rather than to offer a button that fails.
+ */
+export async function payReferralFee(
+  feeId: number, method: "card" | "ach" = "card",
+): Promise<{ error?: string; url?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const found = await feeWithShare(feeId);
+  if (!found) return { error: "Not found" };
+  const { fee } = found;
+  if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
+  if (!stripeConfigured()) return { error: "Online payment is not set up on this instance." };
+
+  const owed = outstandingCents(fee);
+  if (owed <= 0) return { error: "There is nothing outstanding on this fee." };
+
+  const [payee] = await db.select().from(orgs).where(eq(orgs.id, fee.payeeOrgId));
+  if (!payee?.stripeAccountId || !payee.stripeReady) {
+    return { error: `${payee?.name ?? "They"} have not connected an account to be paid into yet.` };
+  }
+  const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const base = appUrl() || "";
+  try {
+    const url = await checkoutSession({
+      accountId: payee.stripeAccountId,
+      ref: { key: "referralFeeId", id: feeId, label: `Referral fee - ${payee.name}` },
+      amountCents: owed, method,
+      platformFeeBps: settings?.platformFeeBps ?? 0,
+      successUrl: `${base}/network?paid=1`,
+      cancelUrl: `${base}/network`,
+    });
+    await audit({
+      actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+      action: `opened a ${method === "ach" ? "bank transfer" : "card"} payment of ${formatCents(owed)}`
+        + ` for a referral fee to ${payee.name} (${stripeMode()} mode)`,
+    });
+    return { url };
+  } catch (e) {
+    await audit({
+      actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+      action: `a referral payment could not be started: ${(e as Error).message}`,
+    });
+    return { error: "We could not start the payment just now." };
+  }
+}
+
+/** The referrer lets it go. Theirs alone to forgive, and it stays on the record. */
+export async function waiveReferralFee(feeId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const mine = myTenantOrgId(u);
+  const found = await feeWithShare(feeId);
+  if (!found) return { error: "Not found" };
+  if (mine === null || mine !== found.fee.payeeOrgId) return { error: "Not found" };
+  await db.update(referralFees).set({ status: "waived" }).where(eq(referralFees.id, feeId));
+  await audit({
+    actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+    action: `waived a referral fee: ${why}`,
   });
   revalidatePath("/network");
   return {};

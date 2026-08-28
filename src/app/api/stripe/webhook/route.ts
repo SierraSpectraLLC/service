@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { recordStripePayment } from "@/app/actions";
+// A plain module, not the server-action surface - see lib/stripeSettle.
+import { recordReferralPayment, recordStripePayment } from "@/lib/stripeSettle";
 import { verifyWebhook } from "@/lib/stripeApi";
 
 export const dynamic = "force-dynamic";
@@ -45,17 +46,30 @@ export async function POST(req: Request) {
   const session = event.data?.object ?? {};
   const metadata = (session.metadata ?? {}) as Record<string, string>;
   const invoiceId = parseInt(metadata.invoiceId ?? "", 10);
+  const referralFeeId = parseInt(metadata.referralFeeId ?? "", 10);
   const amount = Number(session.amount_total ?? 0);
   const reference = String(session.payment_intent ?? session.id ?? "");
   const method = Array.isArray(session.payment_method_types)
     ? String((session.payment_method_types as string[])[0] ?? "")
     : "";
 
-  if (!Number.isInteger(invoiceId) || amount <= 0 || !reference) {
-    return NextResponse.json({ ignored: "no invoice on the session" });
+  if (amount <= 0 || !reference) {
+    return NextResponse.json({ ignored: "no amount or reference on the session" });
   }
 
   try {
+    /* Two things this app takes money for, told apart by which key the
+       session carries. A referral fee between two service companies moves the
+       same way an invoice does and settles a different row. */
+    if (Number.isInteger(referralFeeId)) {
+      await recordReferralPayment({
+        feeId: referralFeeId, amountCents: Math.round(amount), reference,
+      });
+      return NextResponse.json({ recorded: `referral ${referralFeeId}` });
+    }
+    if (!Number.isInteger(invoiceId)) {
+      return NextResponse.json({ ignored: "nothing on the session to settle" });
+    }
     await recordStripePayment({
       invoiceId, amountCents: Math.round(amount), reference,
       method: method === "card" ? "card" : "ach",

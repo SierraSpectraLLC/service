@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { shareClient } from "@/app/actions";
+import { FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind } from "@/lib/referral";
+import { formatCents, parseMoney } from "@/lib/money";
 import { Panel } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
 
@@ -26,6 +28,16 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const [picked, setPicked] = useState<number[]>([]);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
+  const [fee, setFee] = useState({ kind: "none" as FeeKind, flat: "", pct: "5", months: "12", note: "" });
+
+  const terms = {
+    kind: fee.kind,
+    feeCents: parseMoney(fee.flat) ?? 0,
+    feeBps: Math.round((parseFloat(fee.pct) || 0) * 100),
+    windowMonths: parseInt(fee.months, 10) || 0,
+    note: fee.note,
+  };
+  const feeProblem = termsProblems(terms)[0] ?? null;
 
   const toggle = (id: number) =>
     setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
@@ -33,7 +45,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const send = () =>
     startTransition(async () => {
       setError("");
-      const res = await shareClient(orgId, { toOrgIds: picked, note });
+      const res = await shareClient(orgId, { toOrgIds: picked, note, terms });
       if (res.error) { setError(res.error); return; }
       toast({ message: `Offered to ${res.sent} ${res.sent === 1 ? "company" : "companies"} - waiting on them` });
       setPicked([]); setNote("");
@@ -70,12 +82,71 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
             placeholder="you take the Alameda site, we keep Hayward"
             onChange={(e) => setNote(e.target.value)} />
 
+          {/* The price goes ON the offer. A fee discovered after somebody has
+              taken on a client is not a price, it is a bill - so they see what
+              accepting costs before they accept, and accepting is the
+              agreement. See lib/referral. */}
+          <div className="dialog-section" style={{ marginTop: 12 }}>What you are asking for</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ display: "block" }}>
+              <span className="mut t-meta" style={{ display: "block" }}>Fee</span>
+              <select value={fee.kind} aria-label="Fee" disabled={pending} style={{ width: "auto" }}
+                onChange={(e) => setFee({ ...fee, kind: e.target.value as FeeKind })}>
+                {FEE_KINDS.map((k) => <option key={k} value={k}>{FEE_LABEL[k]}</option>)}
+              </select>
+            </label>
+            {fee.kind === "flat" && (
+              <label style={{ display: "block" }}>
+                <span className="mut t-meta" style={{ display: "block" }}>To accept</span>
+                <input className="mono t-small" style={{ width: 100 }} value={fee.flat}
+                  aria-label="Fee to accept" placeholder="2000" disabled={pending}
+                  onChange={(e) => setFee({ ...fee, flat: e.target.value })} />
+              </label>
+            )}
+            {fee.kind === "percent" && (
+              <>
+                <label style={{ display: "block" }}>
+                  <span className="mut t-meta" style={{ display: "block" }}>Share, %</span>
+                  <input className="mono t-small" style={{ width: 64 }} value={fee.pct}
+                    aria-label="Share percent" disabled={pending}
+                    onChange={(e) => setFee({ ...fee, pct: e.target.value })} />
+                </label>
+                <label style={{ display: "block" }}>
+                  <span className="mut t-meta" style={{ display: "block" }}>For, months</span>
+                  <input className="mono t-small" style={{ width: 64 }} value={fee.months}
+                    aria-label="Window months" disabled={pending}
+                    onChange={(e) => setFee({ ...fee, months: e.target.value })} />
+                </label>
+              </>
+            )}
+          </div>
+          {fee.kind !== "none" && (
+            <>
+              <label style={{ marginTop: 8 }}>What the fee is for</label>
+              <input value={fee.note} aria-label="Fee note" disabled={pending}
+                placeholder="introduction and handover of the account"
+                onChange={(e) => setFee({ ...fee, note: e.target.value })} />
+              <div className="t-small" style={{ marginTop: 6 }}>
+                They will see: <b>{termsLine(terms, formatCents)}</b>
+              </div>
+              {fee.kind === "percent" && (
+                <div className="mut t-meta" style={{ marginTop: 2 }}>
+                  Worked out from what they invoice this client in Ridgeline. You see the total
+                  and what it comes to - never their invoices.
+                </div>
+              )}
+            </>
+          )}
+
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-            <button className="btn accent" disabled={pending || picked.length === 0 || systems === 0}
+            <button className="btn accent"
+              disabled={pending || picked.length === 0 || systems === 0 || !!feeProblem}
               onClick={send}>
               {pending ? "Offering..." : `Offer to ${picked.length || "..."}`}
             </button>
-            {error && <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{error}</span>}
+            {(error || feeProblem) && (
+              <span className="t-small" style={{ color: "var(--t-bad-fg)" }}>{error || feeProblem}</span>
+            )}
           </div>
           <div className="mut t-meta" style={{ marginTop: 8 }}>
             Nothing is written into their workspace until somebody there accepts. The copy is a
