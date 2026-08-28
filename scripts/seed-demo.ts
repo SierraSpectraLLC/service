@@ -56,7 +56,7 @@ import {
   agreements, appSettings, assetEvents, assets, assetShares, attachments, auditLog,
   catalogRefs, checklistItems, clientAllowlist, cloudConnections, creditOverrides, custodyEvents,
   discussionPosts, disputes, driveCache, dropLinks, dunningEvents, emailOutbox, engagementRecords,
-  eodUpdates, expenseCategories, expenseReports, expenses, folders, houseMembers,
+  eodUpdates, expenseCategories, expenseReports, expenses, folders, houseMembers, stipends,
   instrumentGases, instruments, invoiceFees, invoiceLines, invoices, itemNotes,
   loginEvents, messages, messageThreads, notificationPrefs, notifications, orgSites,
   orgs, partCatalog, partKitLines, partNumbers, partPhotos, partPrices, parts,
@@ -374,7 +374,7 @@ async function wipe(db: Db, orgId: number, emails: string[]): Promise<void> {
   const stamped = [
     auditLog, validationDocs, shareLinks, dropLinks, attachments, folders,
     dunningEvents, disputes, promises, invoiceFees, payments, invoices, quotes,
-    creditOverrides, expenses, expenseReports, rateCards, payroll,
+    creditOverrides, stipends, expenses, expenseReports, rateCards, payroll,
     messageThreads, discussionPosts, eodUpdates, timeEntries, serviceVisits,
     tasks, pmSchedules, workOrders, purchaseOrders, stockrooms,
     partPrices, partCatalog, catalogRefs, procedures, vocabTerms, people,
@@ -2110,6 +2110,25 @@ async function main(): Promise<void> {
     reason: "Their ICP is down and the board is on order. Holding the job would punish the wrong people.",
     untilOn: day(21), grantedBy: OWNER, createdAt: at(-9),
   });
+
+  /*
+   * Standing reimbursements: the internet stipend the owner offers, and a
+   * phone allowance. Deliberately NOT payroll - see the note on the stipends
+   * table. The daily pass turns these into rows on a "General perks" claim
+   * each month; seeded with last_on already set to last month so the demo
+   * shows an arrangement mid-life rather than one about to back-pay a year.
+   */
+  await db.insert(stipends).values([
+    { tenantOrgId: T, person: HOUSE.tess.name, label: "Internet stipend",
+      amountCents: 3500, kind: "Phone & internet", everyMonths: 1, dayOfMonth: 1,
+      startsOn: day(-400).slice(0, 8) + "01", lastOn: `${day(-30).slice(0, 7)}-01`,
+      note: "Agreed when she went full-time remote for the north run.",
+      createdBy: OWNER, createdAt: at(-400) },
+    { tenantOrgId: T, person: HOUSE.owen.name, label: "Phone allowance",
+      amountCents: 2000, kind: "Phone & internet", everyMonths: 1, dayOfMonth: 1,
+      startsOn: day(-200).slice(0, 8) + "01", lastOn: `${day(-30).slice(0, 7)}-01`,
+      createdBy: OWNER, createdAt: at(-200) },
+  ]);
 
   // ── Expenses, reimbursements and payroll ─────────────────────────────────
   // Three different things that all look like "money out": rebillable costs on

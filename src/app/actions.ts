@@ -18,7 +18,7 @@ import {
   leads, leadOffers,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
-  driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
+  driveCache, expenses, expenseReports, expenseCategories, stipends, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
   dunningEvents, creditOverrides, quotes, quoteLines, payroll,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
@@ -62,6 +62,7 @@ import {
 import {
   checkReportTitle, editableReport, mayWorkReport, reimbursementPool, reportTotalCents,
 } from "@/lib/expenseReports";
+import { checkStipend } from "@/lib/stipends";
 import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
@@ -8630,6 +8631,128 @@ export async function attachPoolExpenses(
   await rerulePerDiems(report);
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${reportId}`);
+  return {};
+}
+
+// ---------------- Stipends ----------------
+// Standing reimbursements - the internet stipend, the phone allowance. See the
+// note on the `stipends` table for why these are reimbursements and not
+// payroll, and lib/stipends for when one is owed.
+
+/**
+ * Set up a standing reimbursement for somebody.
+ *
+ * OWNER ONLY, and that is the interesting line. Everything else on the
+ * reimbursement desk is HR's as well - they file claims, they chase them, they
+ * clear flagged rows - because those are all judgements about money that has
+ * already been spent. This is not: it is a standing commitment of company
+ * money into the future, made once and then paid every month without anybody
+ * looking at it again. The person who decides that is the person who signs the
+ * cheques, the same rule payExpenseReport follows.
+ *
+ * The name is checked against the roster rather than trusted, exactly as
+ * createExpenseReport checks onBehalfOf: a stipend cannot be set up for
+ * somebody who does not work here.
+ */
+export async function createStipend(data: {
+  person: string; label: string; amount: string; kind: string;
+  everyMonths: number; dayOfMonth: number; startsOn: string; endsOn: string; note: string;
+}): Promise<{ error?: string; id?: number }> {
+  const u = await requireOwner();
+  const t = readTenant(u);
+  const cents = parseMoney(data.amount) ?? 0;
+  const draft = {
+    person: data.person.trim(), label: data.label.trim(), amountCents: cents,
+    everyMonths: Math.round(data.everyMonths), dayOfMonth: Math.round(data.dayOfMonth),
+    startsOn: data.startsOn.trim(), endsOn: data.endsOn.trim(),
+  };
+  const problem = checkStipend(draft);
+  if (problem) return { error: problem };
+
+  const [member] = await db.select().from(houseMembers).where(and(
+    eq(houseMembers.name, draft.person),
+    forTenant(houseMembers.orgId, t),
+    ne(houseMembers.role, "none"),
+  ));
+  if (!member) return { error: "That is not somebody on your roster" };
+
+  const [row] = await db.insert(stipends).values({
+    tenantOrgId: t, person: member.name, label: draft.label.slice(0, 80),
+    amountCents: cents, kind: await cleanKind(data.kind, t),
+    everyMonths: draft.everyMonths, dayOfMonth: draft.dayOfMonth,
+    startsOn: draft.startsOn, endsOn: draft.endsOn,
+    note: data.note.trim().slice(0, 300), createdBy: u.email,
+  }).returning();
+  await audit({
+    actor: u.email, entityType: "stipend", entityId: row.id, tenantOrgId: t,
+    action: `set up a ${formatCents(cents)} ${draft.label} for ${member.name}`
+      + `, every ${draft.everyMonths === 1 ? "month" : `${draft.everyMonths} months`} from ${draft.startsOn}`
+      + (draft.endsOn ? ` until ${draft.endsOn}` : ""),
+  });
+  revalidatePath("/people");
+  return { id: row.id };
+}
+
+/**
+ * Stop, restart or re-price a standing reimbursement.
+ *
+ * PAUSING is the normal way one of these ends, and deleting is deliberately
+ * not offered: the rows it has already raised are real money that was really
+ * paid, and removing the arrangement would orphan the reason they exist. A
+ * paused stipend keeps its lastOn, so switching it back on months later does
+ * not back-pay the gap - which is the honest reading of "we stopped paying
+ * this for a while".
+ *
+ * The amount changing does NOT re-price what has already been raised. Last
+ * month's $35 was what the shop owed last month.
+ */
+export async function updateStipend(
+  id: number,
+  data: { amount?: string; endsOn?: string; active?: boolean; note?: string; label?: string },
+): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const [row] = await db.select().from(stipends).where(eq(stipends.id, id));
+  // requireOwner is "an owner of some service company" and stipends is one
+  // instance-wide table, so without this an owner could re-price another
+  // company's arrangement. The same wall payExpenseReport has.
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+
+  const set: Partial<typeof stipends.$inferInsert> = {};
+  const said: string[] = [];
+  if (data.amount !== undefined) {
+    const cents = parseMoney(data.amount);
+    if (cents === null || cents <= 0) return { error: "Enter an amount like 35.00" };
+    if (cents !== row.amountCents) {
+      set.amountCents = cents;
+      said.push(`${formatCents(row.amountCents)} to ${formatCents(cents)}`);
+    }
+  }
+  if (data.label !== undefined && data.label.trim() && data.label.trim() !== row.label) {
+    set.label = data.label.trim().slice(0, 80);
+    said.push(`renamed to "${set.label}"`);
+  }
+  if (data.endsOn !== undefined) {
+    const ends = data.endsOn.trim();
+    if (ends && !isIsoDay(ends)) return { error: "That end date is not a date" };
+    if (ends && ends < row.startsOn) return { error: "It cannot end before it starts" };
+    if (ends !== row.endsOn) {
+      set.endsOn = ends;
+      said.push(ends ? `ending ${ends}` : "no longer has an end date");
+    }
+  }
+  if (data.active !== undefined && data.active !== row.active) {
+    set.active = data.active;
+    said.push(data.active ? "restarted" : "paused");
+  }
+  if (data.note !== undefined) set.note = data.note.trim().slice(0, 300);
+  if (!Object.keys(set).length) return {};
+
+  await db.update(stipends).set(set).where(eq(stipends.id, id));
+  await audit({
+    actor: u.email, entityType: "stipend", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `changed ${row.person}'s ${row.label}: ${said.join(", ") || "note"}`,
+  });
+  revalidatePath("/people");
   return {};
 }
 
