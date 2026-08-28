@@ -341,7 +341,24 @@ export const orgs = pgTable("orgs", {
   // the wrong thing on paper.
   billingAddress: text("billing_address").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [unique("org_name_unique").on(t.name)]);
+}, (t) => [
+  /*
+   * A name is unique WITHIN a workspace, not across the instance.
+   *
+   * It was global, which was invisible while one company ran the app and wrong
+   * the moment two did: two service companies servicing the same lab both have
+   * a client called "Emery Pharma", and that is not a collision - it is the
+   * same company, seen from two sides. The old constraint made the second one
+   * impossible to create at all, by hand or by a client share.
+   *
+   * Expressed as a partial index in schema-sync.sql (COALESCE(parent_org_id, 0),
+   * name) so operators, which have no parent, keep their names unique among
+   * themselves - two workspaces called "Sierra Spectra" would be a genuine
+   * ambiguity. Drizzle has no expression-index form, so this stays declared as
+   * the plain thing it is closest to and the SQL carries the real rule.
+   */
+  unique("org_name_unique").on(t.parentOrgId, t.name),
+]);
 
 
 /**
@@ -403,6 +420,100 @@ export const assetShares = pgTable("asset_shares", {
 // garage on Cedar, $30 a day, dock is round the back, ask for Rita. That is a
 // fact about a BUILDING, not about a customer - on the company record it would
 // be noise on the invoice screen and wrong the day they open a second lab.
+/**
+ * A service company's listing in the directory every other one can search.
+ *
+ * The platform's whole reason to have more than one operator on it: two shops
+ * that both service mass specs, four hundred miles apart, each turning down
+ * work the other would take. They cannot refer to each other if they cannot
+ * find each other.
+ *
+ * OPT IN, and deliberately off until somebody fills it in. lib/tenancy's
+ * visibleOrgs hides operators from each other on purpose - "a workspace handed
+ * to a prospective buyer listed the seller; the seller's own list named the
+ * buyer's workspace back" - and a directory that enrolled every workspace
+ * automatically would undo that decision on everybody's behalf. Listing is a
+ * thing a company chooses, the way it chooses to be in a trade directory.
+ *
+ * Not tenant-stamped: the row is ABOUT one operator, keyed by that operator's
+ * org, and it is read across tenants by design. A stamp here would be an
+ * invitation to filter on it, which is exactly what must not happen.
+ */
+export const providerProfiles = pgTable("provider_profiles", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull().unique().references(() => orgs.id, { onDelete: "cascade" }),
+  /** Off until somebody chooses. Nothing lists a company that has not asked to be listed. */
+  listed: boolean("listed").notNull().default(false),
+  /** A sentence about the shop, in their own words. */
+  blurb: text("blurb").notNull().default(""),
+  /** What they work on: "LC-MS", "GC", "Dissolution". Free text, searched. */
+  services: text("services").array().notNull().default([]),
+  /** Where they cover: "Northern California", "Seattle metro", "WA". */
+  regions: text("regions").array().notNull().default([]),
+  contactName: text("contact_name").notNull().default(""),
+  contactEmail: text("contact_email").notNull().default(""),
+  contactPhone: text("contact_phone").notNull().default(""),
+  website: text("website").notNull().default(""),
+  updatedBy: text("updated_by").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * One workspace's address book of the other service companies it works with.
+ *
+ * One-sided on purpose: adding somebody here is not a claim about them and
+ * gives nothing away - it is a shortlist, so the share picker names four
+ * companies rather than every listing on the instance. Consent happens where
+ * it matters, at the share itself, which the other side approves or refuses.
+ */
+export const providerLinks = pgTable("provider_links", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  providerOrgId: integer("provider_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("provider_link_unique").on(t.tenantOrgId, t.providerOrgId)]);
+
+/**
+ * One client, offered to one other service company.
+ *
+ * The payload is a FROZEN SNAPSHOT taken when the offer is made, and that is
+ * the point: what the other shop approves is exactly what they get, and
+ * accepting is deterministic however long they take to answer. Nothing is
+ * written into their workspace until they say yes.
+ *
+ * Stamped with the SENDER, because sending is the sender's act. The recipient
+ * reads by to_org_id, which is a scoped read of somebody else's row - the one
+ * place in the app that is deliberately so, and the reason status lives here
+ * rather than in either workspace's own tables.
+ *
+ * What a duplicate is NOT: a sync. Two records of one client in two workspaces
+ * diverge from the moment either shop edits one, and nothing here pretends
+ * otherwise - source_org_id and dest_org_id record where a copy came from so
+ * the divergence is at least answerable.
+ */
+export const clientShares = pgTable("client_shares", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** The operator being offered the client. */
+  toOrgId: integer("to_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** The client organization in the sender's workspace. */
+  sourceOrgId: integer("source_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** What was created in the recipient's workspace on accept. Null until then. */
+  destOrgId: integer("dest_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** The snapshot, as JSON - see lib/clientShare. */
+  payload: text("payload").notNull().default(""),
+  /** pending | accepted | declined | withdrawn */
+  status: text("status").notNull().default("pending"),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  decidedBy: text("decided_by").notNull().default(""),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [index("client_shares_to_idx").on(t.toOrgId)]);
+
 export const orgSites = pgTable("org_sites", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
@@ -466,6 +577,18 @@ export const instruments = pgTable("instruments", {
   // name is named by its assets (lib/systemLabel). Kept as the fallback for
   // pre-asset records and sheet imports.
   model: text("model").notNull(),
+  /**
+   * The OTHER shop's tag for this machine, when the record arrived by a client
+   * share. Blank for everything entered here.
+   *
+   * A duplicated client is two records of one machine in two workspaces, and
+   * each shop tags its own equipment - their asset label is theirs, ours is
+   * ours, and copying my "EP-001" into their workspace would be putting my
+   * sticker on their shelf. What both shops actually need is to be able to say
+   * "your EP-001 is our NW-114" on the phone, which is this column. See
+   * lib/clientShare.
+   */
+  sourceRef: text("source_ref").notNull().default(""),
   manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
   serial: text("serial").notNull().default(""),             // the instrument's own serial
   location: text("location").notNull().default(""),         // room / bench on the client's floor

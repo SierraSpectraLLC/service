@@ -293,6 +293,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
            morning question, so it leads the group. */
         { href: "/calendar", label: "Calendar" },
         { href: "/maintenance", label: "Maintenance" },
+        /* The other service companies: who is out there, who we work with, and
+           the clients moving between us. Staff, because taking on work that has
+           been offered is a shop decision - see lib/clientShare. */
+        { href: "/network", label: "Service companies" },
         ...(adminsPeople ? [{ href: "/people", label: "People" }] : []),
         /* Purchasing and Reimbursements, for the readers who have no Financial
            menu to find them in.

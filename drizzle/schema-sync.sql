@@ -3466,3 +3466,74 @@ CREATE TABLE IF NOT EXISTS "share_link_systems" (
   "instrument_id" integer NOT NULL REFERENCES "instruments"("id") ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS "share_link_systems_share_idx" ON "share_link_systems" ("share_id");
+
+-- The service-company directory, one workspace's shortlist of peers, and one
+-- client offered to one of them. See src/lib/clientShare.ts.
+CREATE TABLE IF NOT EXISTS "provider_profiles" (
+  "id" serial PRIMARY KEY,
+  "org_id" integer NOT NULL UNIQUE REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "listed" boolean NOT NULL DEFAULT false,
+  "blurb" text NOT NULL DEFAULT '',
+  "services" text[] NOT NULL DEFAULT '{}',
+  "regions" text[] NOT NULL DEFAULT '{}',
+  "contact_name" text NOT NULL DEFAULT '',
+  "contact_email" text NOT NULL DEFAULT '',
+  "contact_phone" text NOT NULL DEFAULT '',
+  "website" text NOT NULL DEFAULT '',
+  "updated_by" text NOT NULL DEFAULT '',
+  "updated_at" timestamp NOT NULL DEFAULT now(),
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "provider_links" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "provider_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'provider_link_unique') THEN
+    ALTER TABLE "provider_links" ADD CONSTRAINT "provider_link_unique"
+      UNIQUE ("tenant_org_id", "provider_org_id");
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "client_shares" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "to_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "source_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "dest_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "payload" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'pending',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now(),
+  "decided_by" text NOT NULL DEFAULT '',
+  "decided_at" timestamp
+);
+CREATE INDEX IF NOT EXISTS "client_shares_to_idx" ON "client_shares" ("to_org_id");
+
+-- The other shop's tag for a machine that arrived by a client share.
+ALTER TABLE "instruments" ADD COLUMN IF NOT EXISTS "source_ref" text NOT NULL DEFAULT '';
+
+-- A client's name is unique WITHIN a workspace, not across the instance.
+--
+-- The old UNIQUE(name) was invisible while one company ran the app and wrong
+-- the moment two did: two service companies servicing the same lab both have a
+-- client called "Emery Pharma", and the second one could not be created at all
+-- - by hand or by a client share. The replacement buckets every operator under
+-- 0, so operator names stay unique among themselves, and scopes client names to
+-- their parent.
+--
+-- Strictly LOOSER than what it replaces (same case sensitivity, fewer rows
+-- compared), so it cannot fail on data the old constraint already accepted.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'org_name_unique') THEN
+    ALTER TABLE "orgs" DROP CONSTRAINT "org_name_unique";
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS "org_name_per_tenant"
+  ON "orgs" (COALESCE("parent_org_id", 0), "name");

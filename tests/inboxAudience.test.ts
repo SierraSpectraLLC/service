@@ -16,6 +16,10 @@ import { NOTIFY_KINDS, mayReceiveKind, notifyKindsFor } from "@/lib/inbox";
 const HOUSE_ONLY = [
   "gas_empty", "issue", "pm_request", "renewal",
   "model_proposal", "sign_in", "usage_report",
+  // Another service company offering us a client. A decision about taking on
+  // work, arriving from outside the workspace - and a client of ours has no
+  // business knowing their record was offered to anybody.
+  "client_share",
 ];
 
 describe("who is offered which switch", () => {

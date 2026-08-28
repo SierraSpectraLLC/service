@@ -678,6 +678,38 @@ export async function notifyOptionDue(opts: {
 }
 
 /**
+ * Another service company has handed us a client.
+ *
+ * Deliberately says what it is worth deciding on and no more - how many
+ * systems, at how many sites, and who sent it. The systems themselves are
+ * behind the link, because the decision is "do we want this work" and a
+ * twelve-machine list in an inbox is not how anybody makes it.
+ *
+ * Nothing has been written into this workspace when this arrives. That is the
+ * sentence people need, because "a client was shared with you" reads like it
+ * already happened.
+ */
+export async function notifyClientShared(opts: {
+  to: string[]; fromName: string; clientName: string; summary: string; note: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "client_share", href: "/network",
+      title: `${opts.fromName} shared ${opts.clientName} with us - ${opts.summary}`,
+      subject: `${opts.fromName} wants to share ${opts.clientName} with you`,
+      body: `<b>${esc(opts.fromName)}</b> has offered to share <b>${esc(opts.clientName)}</b>
+        with your workspace - ${esc(opts.summary)}.
+        ${opts.note ? quote(esc(opts.note)) : ""}
+        ${mutedLine("Nothing has been added to your workspace. It is copied in only if you accept.")}
+        ${url ? btn(`${url}/network`, "Look at it") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] client share email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody got in for the first time.
  *
  * Only the first: an alert per sign-in becomes a filter rule inside a week, and

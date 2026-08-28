@@ -15,6 +15,8 @@ import AgreementsPanel from "@/components/AgreementsPanel";
 import BillingPolicyPanel from "@/components/BillingPolicyPanel";
 import PmPlanPanel from "@/components/PmPlanPanel";
 import FleetBriefCard from "@/components/FleetBriefCard";
+import ShareClientButton from "@/components/ShareClientButton";
+import { providerLinks } from "@/db/schema";
 import { coverageForOrg, fleetCategories } from "@/lib/pmPlanData";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
@@ -156,6 +158,19 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
     .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
+  /* The shops this workspace may hand a client to - its own shortlist, never
+     the whole directory. The picker and the action agree on this set; the
+     action re-checks it, because a picker is not a permission. */
+  // The org's own workspace: itself when it runs one, its operator otherwise -
+  // the same rule actions.orgTenant applies, and the same one shareClient uses
+  // to decide who is doing the sharing.
+  const myTenant = org.isOperator ? org.id : org.parentOrgId;
+  const peerProviders = myTenant === null ? [] : (await db
+    .select({ id: orgs.id, name: orgs.name })
+    .from(providerLinks).innerJoin(orgs, eq(orgs.id, providerLinks.providerOrgId))
+    .where(eq(providerLinks.tenantOrgId, myTenant))
+    .catch(() => []));
+
   const activeAgreements = agreementRows.filter((r) => r.status === "active").length;
   const heroStats: HeroStat[] = [
     { value: ownedSystems.length, label: ownedSystems.length === 1 ? "system" : "systems" },
@@ -296,8 +311,20 @@ export default async function OrgSettingsPage({ params, searchParams }: {
       )}
 
       {tab === "fleet" && !org.isOperator && (
-        <FleetBriefCard orgId={org.id} orgName={org.name}
-          systems={ownedSystems.length} today={shopToday()} />
+        <>
+          <FleetBriefCard orgId={org.id} orgName={org.name}
+            systems={ownedSystems.length} today={shopToday()} />
+          {/* Two doors, deliberately together and deliberately distinct: show
+              them the fleet, or hand the client over. */}
+          {/* Only where there is a workspace to share FROM. An organization
+              with no operator behind it has nobody doing the sharing, and a
+              picker that said "add a company first" would be answering a
+              different question from the one being asked. */}
+          {myTenant !== null && (
+            <ShareClientButton orgId={org.id} orgName={org.name}
+              systems={ownedSystems.length} providers={peerProviders} />
+          )}
+        </>
       )}
 
       {tab === "billing" && isOwner && (

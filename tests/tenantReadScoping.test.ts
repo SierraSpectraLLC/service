@@ -40,6 +40,13 @@ const ALLOWED: Record<string, string> = {
   "src/app/settings/tenants/page.tsx::remoteDevices":
     "Same page, same meter: machines per workspace is one of the numbers a price " +
     "is built from.",
+  "src/lib/clientShareData.ts::instruments":
+    "Materializing an accepted client share mints a tag the RECIPIENT can use, " +
+    "and instruments.external_id is UNIQUE(external_id) - not UNIQUE(tenant, " +
+    "external_id) - so the collision check has to see the whole table or the " +
+    "insert throws on somebody else's row. It reads external_id only, never a " +
+    "row, and the tags it compares are exactly the ones the constraint compares. " +
+    "Making that constraint per-tenant is the real fix and is a migration.",
   "src/lib/docNumberData.ts::purchaseOrders":
     "PO numbers are globally unique - po_number_unique is UNIQUE(number), not " +
     "UNIQUE(tenant, number) - so the scan that picks the next one has to see the " +

@@ -39,6 +39,18 @@ const FIXTURE = `
     -- off-system lines a client like this had no report at all.
     ('Harbor Biotech', 'client');
   UPDATE orgs SET is_operator = true WHERE name = 'Sierra Spectra';
+
+  -- A second service company on the instance, listed in the directory, so the
+  -- network page has somebody to find and a client has somewhere to be handed
+  -- (see lib/clientShare). Its own workspace: is_operator, no parent.
+  INSERT INTO orgs (id, name, kind, is_operator) VALUES
+    (30, 'Northwest Instrument Services', 'provider', true) ON CONFLICT DO NOTHING;
+  INSERT INTO provider_profiles (org_id, listed, blurb, services, regions, contact_name, contact_email, website)
+    VALUES (30, true, 'Sciex and Agilent specialists, 20 years on triple quads.',
+      '{"LC-MS","GC-MS","Dissolution"}', '{"Seattle metro","WA","OR"}',
+      'Dana Whitfield', 'dana@nwinstrument.test', 'nwinstrument.test')
+    ON CONFLICT DO NOTHING;
+
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
   UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
   -- The starter expense vocabulary, exactly as createOperator seeds it - the
@@ -59,18 +71,25 @@ const FIXTURE = `
     -- app run between those two - payroll, the books, who may read what a job
     -- billed - and none of them can be checked from an owner session.
     ('dev-bill', 'Bill Reyes', 'bill@sierraspectra.test', 'staff', now()),
-    ('dev-new', '', 'new@local.test', 'tech', NULL);
+    ('dev-new', '', 'new@local.test', 'tech', NULL),
+    -- The OTHER service company's owner. Half of what the network is for can
+    -- only be checked from a second workspace: a client handed over has to be
+    -- accepted by somebody who is not us.
+    ('dev-dana', 'Dana Whitfield', 'dana@nwinstrument.test', 'owner', now());
   INSERT INTO sessions (session_token, user_id, expires) VALUES
     ('devtoken', 'dev-user', now() + interval '30 days'),
     ('stafftoken', 'dev-bill', now() + interval '30 days'),
-    ('newtoken', 'dev-new', now() + interval '30 days');
+    ('newtoken', 'dev-new', now() + interval '30 days'),
+    ('danatoken', 'dev-dana', now() + interval '30 days');
 
   -- The directory is assembled from these, never typed in: staff are house
   -- members of the operator, clients are allowlist rows on their org.
   INSERT INTO house_members (email, org_id, role, name) VALUES
     ('${OWNER}', 3, 'owner', 'Dev Owner'),
     ('sam@sierraspectra.test', 3, 'staff', 'Sam Ortiz'),
-    ('bill@sierraspectra.test', 3, 'staff', 'Bill Reyes');
+    ('bill@sierraspectra.test', 3, 'staff', 'Bill Reyes'),
+    -- The other shop's owner, so a handed-over client has somebody to accept it.
+    ('dana@nwinstrument.test', 30, 'owner', 'Dana Whitfield');
   INSERT INTO client_allowlist (entry, org_id, can_edit) VALUES
     ('maria@labzen.test', 1, true),
     ('accounts@coastal.test', 2, false);
@@ -541,7 +560,9 @@ const FIXTURE = `
 
   -- A client shared with a peer service company: twelve systems across two
   -- buildings, which is the shape the fleet brief exists for (lib/fleetBrief).
-  INSERT INTO orgs (id, name, kind) VALUES (20, 'Emery Pharma', 'client')
+  -- parent_org_id is what makes it OUR client: every tenancy rule reads it,
+  -- and addOrg sets it for anything created through the app.
+  INSERT INTO orgs (id, name, kind, parent_org_id) VALUES (20, 'Emery Pharma', 'client', 3)
     ON CONFLICT DO NOTHING;
   INSERT INTO org_sites (id, tenant_org_id, org_id, name, address) VALUES
     (20, 3, 20, 'Hayward', '2000 Sample Way, Hayward CA'),

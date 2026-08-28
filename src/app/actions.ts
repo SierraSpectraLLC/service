@@ -14,7 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
-  awards, shareLinkSystems,
+  awards, shareLinkSystems, providerProfiles, providerLinks, clientShares,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -84,7 +84,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyClientShared, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -155,6 +155,11 @@ import {
   renderFleetBriefHtml, renderFleetBriefText, type FleetBrief,
 } from "@/lib/fleetBrief";
 import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
+import {
+  mayDecide, mayWithdraw, parsePayload, shareProblems, summarize, SHARE_LABEL,
+} from "@/lib/clientShare";
+import { composePayload, materialize } from "@/lib/clientShareData";
+import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -9792,16 +9797,26 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
   const n = name.trim();
   if (!n || n.length > 60) return { error: "Name must be 1-60 characters" };
   const k = kind === "provider" ? "provider" : "client";
-  const existing = await db.select().from(orgs);
-  if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
+  /*
+   * Unique within THIS workspace, which is what the constraint now says too.
+   * It used to compare against every organization on the instance, so a shop
+   * could be told its own new client "already exists" because a different
+   * service company had one by that name - a message that named somebody
+   * else's client list by implication.
+   */
+  const tenant = myTenantOrgId(u);
+  const existing = await db.select({ name: orgs.name, parentOrgId: orgs.parentOrgId }).from(orgs);
+  if (existing.some((o) => o.parentOrgId === tenant && o.name.toLowerCase() === n.toLowerCase())) {
+    return { error: `${n} already exists` };
+  }
   const [row] = await db.insert(orgs).values({
     name: n, kind: k,
     // A client belongs to the workspace that created it; that parent is what
     // every tenancy rule reads afterwards.
-    parentOrgId: myTenantOrgId(u),
+    parentOrgId: tenant,
   }).returning();
   await audit({
-    actor: u.email, entityType: "org", entityId: row.id, tenantOrgId: myTenantOrgId(u),
+    actor: u.email, entityType: "org", entityId: row.id, tenantOrgId: tenant,
     action: `created ${k} organization "${n}"`,
   });
   revalidatePath("/settings");
@@ -10347,8 +10362,13 @@ export async function createOperator(
   const e = ownerEmail.trim().toLowerCase();
   if (!validHouseEmail(e)) return { error: "Give one exact email for their first owner - no @domain wildcards" };
 
-  const existing = await db.select().from(orgs);
-  if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
+  // Among OPERATORS only. Client names are per-workspace now, so refusing a new
+  // service company because some shop has a client by that name would be one
+  // workspace's records vetoing another's.
+  const existing = await db.select({ name: orgs.name, isOperator: orgs.isOperator }).from(orgs);
+  if (existing.some((o) => o.isOperator && o.name.toLowerCase() === n.toLowerCase())) {
+    return { error: `${n} already exists` };
+  }
   // One person is staff of one company (house_members is unique on email), so a
   // borrowed address would move them rather than adding them - say so instead.
   const [taken] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
@@ -16353,4 +16373,219 @@ export async function createFleetShare(orgId: number, data: {
   });
   revalidatePath(`/settings/organizations/${orgId}`);
   return { token, expiresOn: expiry.expiresOn, systems: ids.length };
+}
+
+
+// ── The service-company network ─────────────────────────────────────────────
+// A directory shops can find each other in, a shortlist each keeps, and the
+// handover of one client from one workspace to another. See lib/clientShare
+// for what crosses and what deliberately does not.
+
+/** Our own listing. Only a workspace's owner publishes its shopfront. */
+export async function saveProviderProfile(data: {
+  listed: boolean; blurb: string; services: string; regions: string;
+  contactName: string; contactEmail: string; contactPhone: string; website: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (u.role !== "owner") return { error: "Only the owner publishes the listing" };
+  const orgId = myTenantOrgId(u);
+  if (orgId === null) return { error: "Your workspace could not be resolved" };
+
+  const clean = {
+    listed: !!data.listed,
+    blurb: data.blurb.trim().slice(0, MAX_BLURB),
+    services: parseTags(data.services),
+    regions: parseTags(data.regions),
+    contactName: data.contactName.trim().slice(0, 120),
+    contactEmail: data.contactEmail.trim().toLowerCase().slice(0, 200),
+    contactPhone: data.contactPhone.trim().slice(0, 60),
+    website: data.website.trim().slice(0, 200),
+  };
+  const problems = profileProblems(clean);
+  if (problems.length) return { error: problems[0] };
+
+  await db.insert(providerProfiles)
+    .values({ orgId, ...clean, updatedBy: u.email, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: providerProfiles.orgId,
+      set: { ...clean, updatedBy: u.email, updatedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+    action: clean.listed
+      ? `listed the workspace in the service directory: ${clean.services.join(", ") || "no services"} in ${clean.regions.join(", ") || "no regions"}`
+      : "removed the workspace from the service directory",
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/** Add a service company to our shortlist. One-sided and tells them nothing. */
+export async function linkProvider(providerOrgId: number, note = ""): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  if (providerOrgId === tenant) return { error: "That is your own workspace" };
+
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, providerOrgId));
+  if (!org?.isOperator) return { error: "Not found" };
+  // Only a company that asked to be found can be added, so a shortlist can
+  // never become a way to enumerate the instance.
+  const [profile] = await db.select().from(providerProfiles)
+    .where(eq(providerProfiles.orgId, providerOrgId));
+  if (!profile?.listed) return { error: "Not found" };
+
+  await db.insert(providerLinks)
+    .values({ tenantOrgId: tenant, providerOrgId, note: note.trim().slice(0, 200), createdBy: u.email })
+    .onConflictDoNothing();
+  await audit({
+    actor: u.email, entityType: "org", entityId: providerOrgId, tenantOrgId: tenant,
+    action: `added ${org.name} to our service companies`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+export async function unlinkProvider(providerOrgId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  await db.delete(providerLinks).where(and(
+    eq(providerLinks.tenantOrgId, tenant), eq(providerLinks.providerOrgId, providerOrgId)));
+  revalidatePath("/network");
+  return {};
+}
+
+/**
+ * Offer a client to another service company.
+ *
+ * Writes nothing into their workspace. The snapshot is frozen here and sits in
+ * client_shares until somebody over there answers - what they approve is
+ * exactly what they get, however long they take.
+ */
+export async function shareClient(orgId: number, data: {
+  toOrgIds: number[]; note: string;
+}): Promise<{ error?: string; sent?: number }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  /*
+   * The sender is the client's OWN operator, not the caller's workspace. That
+   * is the only unambiguous answer - a platform-staff user supporting somebody
+   * has a null tenant, and "which workspace is offering this client" must not
+   * depend on who happens to be signed in.
+   */
+  const tenant = orgTenant(org);
+  if (tenant === null) return { error: "That organization has no workspace behind it" };
+
+  const targets = [...new Set(data.toOrgIds.filter((n) => Number.isInteger(n)))].slice(0, 10);
+  if (!targets.length) return { error: "Pick who to share it with" };
+  // Only companies on our own shortlist. The picker shows those; this is the
+  // door, and a door that trusted the ids in the request would let anybody
+  // push a client at any workspace on the instance.
+  const allowed = new Set((await db.select({ id: providerLinks.providerOrgId }).from(providerLinks)
+    .where(and(eq(providerLinks.tenantOrgId, tenant), inArray(providerLinks.providerOrgId, targets))))
+    .map((r) => r.id));
+  const picked = targets.filter((t) => allowed.has(t));
+  if (!picked.length) return { error: "Add them to your service companies first" };
+
+  const brand = await brandForTenant(tenant);
+  const payload = await composePayload({
+    orgId, tenantOrgId: tenant, operatorName: brand.operatorName || brand.name,
+    by: u.email, on: shopToday(), note: data.note,
+  });
+  if (!payload) return { error: "Not found" };
+  const problems = shareProblems({ payload, toOrgId: picked[0], fromTenantOrgId: tenant });
+  if (problems.length) return { error: problems[0] };
+
+  const frozen = JSON.stringify(payload);
+  for (const toOrgId of picked) {
+    // One live offer per pair. A second while the first is open is two answers
+    // to one question.
+    const open = await db.select({ id: clientShares.id }).from(clientShares).where(and(
+      eq(clientShares.tenantOrgId, tenant), eq(clientShares.toOrgId, toOrgId),
+      eq(clientShares.sourceOrgId, orgId), eq(clientShares.status, "pending")));
+    if (open.length) continue;
+
+    const [row] = await db.insert(clientShares).values({
+      tenantOrgId: tenant, toOrgId, sourceOrgId: orgId,
+      payload: frozen, status: "pending", note: data.note.trim().slice(0, 500),
+      createdBy: u.email,
+    }).returning();
+    const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
+    await notifyClientShared({
+      to: await houseEmails(toOrgId),
+      fromName: brand.operatorName || brand.name,
+      clientName: org.name, summary: summarize(payload), note: data.note,
+    }).catch(() => {});
+    await audit({
+      actor: u.email, entityType: "client_share", entityId: row.id, tenantOrgId: tenant,
+      action: `offered ${org.name} (${summarize(payload)}) to ${to?.name ?? "another service company"}`,
+    });
+  }
+  revalidatePath("/network");
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return { sent: picked.length };
+}
+
+/**
+ * The recipient answers. Accepting is the one write that crosses a workspace
+ * boundary in the whole application, so the gate is narrow: it is our row only
+ * because it is addressed to us, and only while it is still open.
+ */
+export async function decideClientShare(
+  shareId: number, accept: boolean, reason = "",
+): Promise<{ error?: string; orgId?: number }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  // Addressed to us, or it is not ours to answer.
+  if (!row || row.toOrgId !== tenant) return { error: "Not found" };
+  if (!mayDecide(row.status)) return { error: `That offer is already ${SHARE_LABEL[row.status as "pending"] ?? row.status}.` };
+
+  const payload = parsePayload(row.payload);
+  if (accept && !payload) return { error: "That offer's contents could not be read" };
+
+  let orgId: number | undefined;
+  let systems = 0;
+  if (accept && payload) {
+    const made = await materialize({ payload, destTenantOrgId: tenant, actor: u.email });
+    orgId = made.orgId;
+    systems = made.systems;
+  }
+  await db.update(clientShares).set({
+    status: accept ? "accepted" : "declined",
+    destOrgId: orgId ?? null,
+    decidedBy: u.email, decidedAt: new Date(),
+    note: reason.trim() ? `${row.note}${row.note ? " | " : ""}${reason.trim().slice(0, 300)}` : row.note,
+  }).where(eq(clientShares.id, shareId));
+
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: tenant,
+    action: accept
+      ? `accepted ${payload?.client.name ?? "a client"} from another service company - ${systems} system${systems === 1 ? "" : "s"} copied in`
+      : `declined ${payload?.client.name ?? "a client"}${reason.trim() ? `: ${reason.trim()}` : ""}`,
+  });
+  revalidatePath("/network");
+  revalidatePath("/settings/organizations");
+  return { orgId };
+}
+
+/** The sender changes their mind, while nobody has answered. */
+export async function withdrawClientShare(shareId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = readTenant(u);
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  if (!row || (tenant !== null && row.tenantOrgId !== tenant)) return { error: "Not found" };
+  if (!mayWithdraw(row.status)) return { error: "That offer has already been answered." };
+  await db.update(clientShares).set({
+    status: "withdrawn", decidedBy: u.email, decidedAt: new Date(),
+  }).where(eq(clientShares.id, shareId));
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
+    action: "withdrew a client offer before it was answered",
+  });
+  revalidatePath("/network");
+  return {};
 }
