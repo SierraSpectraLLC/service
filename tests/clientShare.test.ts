@@ -5,8 +5,9 @@
 // is nowhere to put a price - and these hold the composer to it.
 import { describe, expect, it } from "vitest";
 import {
-  freeTag, mayDecide, mayWithdraw, parsePayload, provenanceLine, shareProblems,
-  summarize, SHARE_VERSION, type SharePayload,
+  freeTag, isOpen, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw,
+  parsePayload, provenanceLine, shareProblems, summarize, SHARE_VERSION,
+  type SharePayload,
 } from "@/lib/clientShare";
 
 const PAYLOAD: SharePayload = {
@@ -128,5 +129,34 @@ describe("who may do what, and when", () => {
 
   it("is happy with the ordinary case", () => {
     expect(shareProblems({ payload: PAYLOAD, toOrgId: 4, fromTenantOrgId: 3 })).toEqual([]);
+  });
+});
+
+describe("countering", () => {
+  it("lets a live offer be countered, and a countered one not again", () => {
+    /*
+     * One offer on the table at a time. A recipient who could accept the
+     * original while their own counter sat unanswered could take the client at
+     * whichever price the sender had not yet replied to.
+     */
+    expect(mayCounter("pending")).toBe(true);
+    expect(mayCounter("countered")).toBe(false);
+    expect(mayDecide("countered")).toBe(false);
+  });
+
+  it("leaves a countered offer withdrawable by the sender", () => {
+    // It is still their client and still unresolved.
+    expect(mayWithdraw("countered")).toBe(true);
+  });
+
+  it("puts the answer in the sender's hands, and only while one is outstanding", () => {
+    expect(mayAnswerCounter("countered")).toBe(true);
+    expect(mayAnswerCounter("pending")).toBe(false);
+    expect(mayAnswerCounter("accepted")).toBe(false);
+  });
+
+  it("counts a countered offer as still live", () => {
+    expect(isOpen("countered")).toBe(true);
+    expect(isOpen("declined")).toBe(false);
   });
 });

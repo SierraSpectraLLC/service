@@ -75,11 +75,12 @@ export type SharePayload = {
   note: string;
 };
 
-export const SHARE_STATES = ["pending", "accepted", "declined", "withdrawn"] as const;
+export const SHARE_STATES = ["pending", "countered", "accepted", "declined", "withdrawn"] as const;
 export type ShareState = (typeof SHARE_STATES)[number];
 
 export const SHARE_LABEL: Record<ShareState, string> = {
   pending: "Waiting on them",
+  countered: "They countered",
   accepted: "Accepted",
   declined: "Declined",
   withdrawn: "Withdrawn",
@@ -88,17 +89,33 @@ export const SHARE_LABEL: Record<ShareState, string> = {
 /** The same states, from the receiving end - "waiting on them" is us. */
 export const SHARE_LABEL_IN: Record<ShareState, string> = {
   pending: "Needs a decision",
+  countered: "Waiting on them",
   accepted: "Accepted",
   declined: "Declined",
   withdrawn: "Withdrawn by the sender",
 };
 
-export const isOpen = (status: string): boolean => status === "pending";
+/** Still live - nobody has settled it either way. */
+export const isOpen = (status: string): boolean =>
+  status === "pending" || status === "countered";
 
-/** Only the recipient decides, and only while it is open. */
-export const mayDecide = (status: string): boolean => isOpen(status);
-/** Only the sender withdraws, and only while it is open. */
+/**
+ * Only the recipient decides, and not while their own counter is outstanding.
+ *
+ * A recipient who could accept the original terms while their counter sat
+ * unanswered would be able to take the client at whichever price the sender
+ * had not yet replied to. One offer on the table at a time.
+ */
+export const mayDecide = (status: string): boolean => status === "pending";
+
+/** Only the sender withdraws, and a countered offer is still withdrawable. */
 export const mayWithdraw = (status: string): boolean => isOpen(status);
+
+/** The recipient proposes different terms. Only against a live, unanswered offer. */
+export const mayCounter = (status: string): boolean => status === "pending";
+
+/** The sender answers a counter. Theirs alone, and only while one is outstanding. */
+export const mayAnswerCounter = (status: string): boolean => status === "countered";
 
 /** "12 systems across 2 sites". The line a person decides on. */
 export function summarize(p: SharePayload): string {

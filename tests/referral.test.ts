@@ -6,8 +6,9 @@
 // that a fee which has not started reads differently from one that is over.
 import { describe, expect, it } from "vitest";
 import {
-  accruedCents, feeLine, feeStanding, inWindow, outstandingCents, termsLine,
-  termsProblems, windowEnd, MAX_FEE_BPS, type FeeRow, type FeeTerms,
+  accruedCents, choicesFor, feeLine, feeStanding, inWindow, outstandingCents,
+  resolveChoice, termsLine, termsProblems, windowEnd, MAX_FEE_BPS,
+  type FeeRow, type FeeTerms,
 } from "@/lib/referral";
 import { formatCents } from "@/lib/money";
 
@@ -147,5 +148,50 @@ describe("the terms on an offer", () => {
   it("refuses a window that is not one", () => {
     expect(termsProblems(terms({ windowMonths: 0 }))[0]).toContain("how long");
     expect(termsProblems(terms({ windowMonths: 120 }))[0]).toContain("under 60 months");
+  });
+});
+
+describe("either, and they choose", () => {
+  const either: FeeTerms = {
+    kind: "either", feeCents: 200_000, feeBps: 500, windowMonths: 12, note: "",
+  };
+
+  it("offers two risks rather than a discount", () => {
+    /*
+     * Neither side can know at acceptance which turns out cheaper - that is
+     * what makes the choice worth offering. Flat is certainty, percent is
+     * pay-as-you-earn, and the line has to say both.
+     */
+    const line = termsLine(either, formatCents);
+    expect(line).toContain("5% of what you bill them in the first 12 months");
+    expect(line).toContain("$2,000 to accept");
+    expect(line).toContain("your choice");
+  });
+
+  it("needs both numbers to be a real choice", () => {
+    expect(termsProblems({ ...either, feeCents: 0 })[0]).toContain("what it costs");
+    expect(termsProblems({ ...either, feeBps: 0 })[0]).toContain("what share");
+    expect(termsProblems(either)).toEqual([]);
+  });
+
+  it("resolves to the one they picked, and only ever to one", () => {
+    // "Either" is an OFFER. What lands on the fee is a concrete instrument, so
+    // nothing downstream carries a choice that was already made.
+    expect(resolveChoice(either, "flat").kind).toBe("flat");
+    expect(resolveChoice(either, "percent").kind).toBe("percent");
+    // An unreadable choice falls to the percent, which is the side that costs
+    // nothing until the client actually spends.
+    expect(resolveChoice(either, "").kind).toBe("percent");
+  });
+
+  it("leaves a concrete offer alone", () => {
+    const flatTerms: FeeTerms = { ...either, kind: "flat" };
+    expect(resolveChoice(flatTerms, "percent")).toEqual(flatTerms);
+  });
+
+  it("only offers a choice where there is one", () => {
+    expect(choicesFor("either")).toEqual(["percent", "flat"]);
+    expect(choicesFor("percent")).toEqual([]);
+    expect(choicesFor("none")).toEqual([]);
   });
 });

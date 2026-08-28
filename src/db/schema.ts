@@ -525,6 +525,26 @@ export const clientShares = pgTable("client_shares", {
   feeBps: integer("fee_bps").notNull().default(0),
   feeWindowMonths: integer("fee_window_months").notNull().default(12),
   feeNote: text("fee_note").notNull().default(""),
+  /**
+   * What the RECIPIENT proposed instead, when they countered.
+   *
+   * The same five fields as the offer, so agreeing to a counter is a straight
+   * copy rather than a translation - and the offer's own fields are left
+   * alone, so the record still says what was originally asked for even after
+   * the deal is struck at a different number.
+   *
+   * A counter is a CONDITIONAL ACCEPTANCE, not a rejection: "I will take this
+   * client at $1,500." So the sender agreeing to it completes the deal, and
+   * the client copies across at that moment - there is no second round trip
+   * asking the recipient whether they meant it.
+   */
+  counterKind: text("counter_kind").notNull().default(""),
+  counterCents: integer("counter_cents").notNull().default(0),
+  counterBps: integer("counter_bps").notNull().default(0),
+  counterWindowMonths: integer("counter_window_months").notNull().default(12),
+  counterNote: text("counter_note").notNull().default(""),
+  counteredBy: text("countered_by").notNull().default(""),
+  counteredAt: timestamp("countered_at"),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   decidedBy: text("decided_by").notNull().default(""),

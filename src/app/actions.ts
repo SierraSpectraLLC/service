@@ -156,12 +156,13 @@ import {
 } from "@/lib/fleetBrief";
 import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
 import {
-  mayDecide, mayWithdraw, parsePayload, shareProblems, summarize, SHARE_LABEL,
+  mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, parsePayload,
+  shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
 import { composePayload, materialize } from "@/lib/clientShareData";
 import {
-  accruedCents, feeStanding, outstandingCents, termsLine, termsProblems, windowEnd,
-  type FeeTerms,
+  accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
+  termsProblems, windowEnd, type FeeTerms,
 } from "@/lib/referral";
 import { billedForFee, feeWithShare } from "@/lib/referralData";
 import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
@@ -16518,7 +16519,7 @@ export async function shareClient(orgId: number, data: {
  * because it is addressed to us, and only while it is still open.
  */
 export async function decideClientShare(
-  shareId: number, accept: boolean, reason = "",
+  shareId: number, accept: boolean, reason = "", choice = "",
 ): Promise<{ error?: string; orgId?: number }> {
   const u = await requireStaff();
   const tenant = myTenantOrgId(u);
@@ -16543,22 +16544,7 @@ export async function decideClientShare(
      * took carries a price and no debt. A flat fee is owed in full from this
      * moment; a percent starts at zero and accrues as they bill.
      */
-    if (row.feeKind === "flat" || row.feeKind === "percent") {
-      const startsOn = shopToday();
-      await db.insert(referralFees).values({
-        // The payee's receivable, so the payee's stamp.
-        tenantOrgId: row.tenantOrgId,
-        shareId: row.id,
-        payeeOrgId: row.tenantOrgId ?? 0,
-        payerOrgId: tenant,
-        clientOrgId: orgId,
-        kind: row.feeKind,
-        feeCents: row.feeCents, feeBps: row.feeBps,
-        startsOn,
-        endsOn: row.feeKind === "percent" ? windowEnd(startsOn, row.feeWindowMonths) : "",
-        note: row.feeNote,
-      });
-    }
+    await raiseReferralFee(row, tenant, orgId, choice);
   }
   await db.update(clientShares).set({
     status: accept ? "accepted" : "declined",
@@ -16730,4 +16716,163 @@ export async function waiveReferralFee(feeId: number, reason: string): Promise<{
   });
   revalidatePath("/network");
   return {};
+}
+
+
+/**
+ * Turn an accepted offer's terms into the fee itself.
+ *
+ * One place, because a counter agreed by the sender strikes exactly the same
+ * deal a plain acceptance does and must produce exactly the same row. `terms`
+ * is whichever set was actually agreed - the offer's, or the counter's.
+ */
+async function raiseReferralFee(
+  row: typeof clientShares.$inferSelect,
+  payerTenantOrgId: number,
+  clientOrgId: number | undefined,
+  choice: string,
+): Promise<void> {
+  const agreed: FeeTerms = row.counterKind
+    ? {
+      kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
+      windowMonths: row.counterWindowMonths, note: row.counterNote,
+    }
+    : {
+      kind: row.feeKind, feeCents: row.feeCents, feeBps: row.feeBps,
+      windowMonths: row.feeWindowMonths, note: row.feeNote,
+    };
+  // "Either" is only ever an OFFER. What lands on the fee is the one they
+  // picked, so nothing downstream has to carry a choice that was already made.
+  const t = resolveChoice(agreed, choice);
+  if (t.kind !== "flat" && t.kind !== "percent") return;
+
+  const startsOn = shopToday();
+  await db.insert(referralFees).values({
+    // The payee's receivable, so the payee's stamp.
+    tenantOrgId: row.tenantOrgId,
+    shareId: row.id,
+    payeeOrgId: row.tenantOrgId ?? 0,
+    payerOrgId: payerTenantOrgId,
+    clientOrgId: clientOrgId ?? null,
+    kind: t.kind,
+    feeCents: t.feeCents, feeBps: t.feeBps,
+    startsOn,
+    endsOn: t.kind === "percent" ? windowEnd(startsOn, t.windowMonths) : "",
+    note: t.note,
+  });
+}
+
+/**
+ * The recipient proposes different terms.
+ *
+ * A CONDITIONAL ACCEPTANCE rather than a refusal: "I will take this client, at
+ * this price." Which is why agreeing to it completes the deal on the spot
+ * instead of bouncing back for a second yes - that second yes was already
+ * given here, and asking for it again is how a negotiation dies of round trips.
+ *
+ * The offer's own fee columns are left exactly as they were. The record has to
+ * go on saying what was originally asked for even after the deal is struck at
+ * a different number.
+ */
+export async function counterClientShare(shareId: number, data: {
+  terms: FeeTerms; note: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  // Addressed to us, or it is not ours to answer.
+  if (!row || row.toOrgId !== tenant) return { error: "Not found" };
+  if (!mayCounter(row.status)) {
+    return { error: `That offer is ${SHARE_LABEL[row.status as "pending"] ?? row.status}.` };
+  }
+  const terms: FeeTerms = {
+    kind: data.terms.kind,
+    feeCents: Math.max(0, Math.round(data.terms.feeCents)),
+    feeBps: Math.max(0, Math.round(data.terms.feeBps)),
+    windowMonths: Math.max(0, Math.round(data.terms.windowMonths)),
+    note: data.note.trim().slice(0, 200),
+  };
+  const problems = termsProblems(terms);
+  if (problems.length) return { error: problems[0] };
+
+  await db.update(clientShares).set({
+    status: "countered",
+    counterKind: terms.kind, counterCents: terms.feeCents, counterBps: terms.feeBps,
+    counterWindowMonths: terms.windowMonths, counterNote: terms.note,
+    counteredBy: u.email, counteredAt: new Date(),
+  }).where(eq(clientShares.id, shareId));
+
+  const [from] = await db.select().from(orgs).where(eq(orgs.id, row.tenantOrgId ?? -1));
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: tenant,
+    action: `countered ${from?.name ?? "a"} offer: ${termsLine(terms, formatCents)}`
+      + ` instead of ${termsLine({
+        kind: row.feeKind, feeCents: row.feeCents, feeBps: row.feeBps,
+        windowMonths: row.feeWindowMonths, note: "",
+      }, formatCents)}`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/**
+ * The sender answers a counter.
+ *
+ * Agreeing completes the deal and copies the client across then and there,
+ * because the counter was already the recipient's yes. Refusing puts the
+ * ORIGINAL offer back on the table rather than killing it - the recipient
+ * asked for a better price, was told no, and may still want the client at the
+ * price first asked. Ending the whole thing on a refused counter would make
+ * countering a risk, and a negotiation nobody dares open is not a negotiation.
+ */
+export async function answerCounterOffer(
+  shareId: number, agree: boolean, choice = "",
+): Promise<{ error?: string; orgId?: number }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  if (!row) return { error: "Not found" };
+  const tenant = readTenant(u);
+  // The sender's alone: their money being argued over.
+  if (tenant !== null && row.tenantOrgId !== tenant) return { error: "Not found" };
+  if (!mayAnswerCounter(row.status)) return { error: "There is no counter outstanding on that offer." };
+
+  const [to] = await db.select().from(orgs).where(eq(orgs.id, row.toOrgId));
+  const countered: FeeTerms = {
+    kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
+    windowMonths: row.counterWindowMonths, note: row.counterNote,
+  };
+
+  if (!agree) {
+    await db.update(clientShares).set({
+      status: "pending",
+      counterKind: "", counterCents: 0, counterBps: 0, counterNote: "",
+      counteredBy: "", counteredAt: null,
+    }).where(eq(clientShares.id, shareId));
+    await audit({
+      actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
+      action: `turned down ${to?.name ?? "their"} counter - the original offer stands`,
+    });
+    revalidatePath("/network");
+    return {};
+  }
+
+  const payload = parsePayload(row.payload);
+  if (!payload) return { error: "That offer's contents could not be read" };
+  const made = await materialize({
+    payload, destTenantOrgId: row.toOrgId, actor: u.email,
+  });
+  await raiseReferralFee(row, row.toOrgId, made.orgId, choice);
+  await db.update(clientShares).set({
+    status: "accepted", destOrgId: made.orgId,
+    decidedBy: u.email, decidedAt: new Date(),
+  }).where(eq(clientShares.id, shareId));
+
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
+    action: `agreed ${to?.name ?? "their"} counter of ${termsLine(countered, formatCents)}`
+      + ` - ${payload.client.name} copied to their workspace, ${made.systems} systems`,
+  });
+  revalidatePath("/network");
+  return { orgId: made.orgId };
 }

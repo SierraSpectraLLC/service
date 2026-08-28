@@ -3570,3 +3570,14 @@ CREATE TABLE IF NOT EXISTS "referral_fees" (
 );
 CREATE INDEX IF NOT EXISTS "referral_fees_payer_idx" ON "referral_fees" ("payer_org_id");
 CREATE INDEX IF NOT EXISTS "referral_fees_payee_idx" ON "referral_fees" ("payee_org_id");
+
+-- What the recipient proposed instead. Same five fields as the offer, so
+-- agreeing to a counter is a copy rather than a translation, and the offer's
+-- own fields stay true. See src/lib/clientShare.ts.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_kind" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_bps" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_window_months" integer NOT NULL DEFAULT 12;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_note" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "countered_by" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "countered_at" timestamp;

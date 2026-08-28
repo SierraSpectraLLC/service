@@ -184,6 +184,9 @@ export type ShareRow = {
   status: string;
   /** What accepting costs. Frozen with the payload - see lib/referral. */
   terms: { kind: string; feeCents: number; feeBps: number; windowMonths: number; note: string };
+  /** What the recipient proposed instead, when they countered. Null when none. */
+  counter: { kind: string; feeCents: number; feeBps: number; windowMonths: number; note: string } | null;
+  counteredBy: string;
   note: string;
   createdBy: string;
   createdOn: string;
@@ -219,6 +222,13 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
       kind: r.feeKind, feeCents: r.feeCents, feeBps: r.feeBps,
       windowMonths: r.feeWindowMonths, note: r.feeNote,
     },
+    counter: r.counterKind
+      ? {
+        kind: r.counterKind, feeCents: r.counterCents, feeBps: r.counterBps,
+        windowMonths: r.counterWindowMonths, note: r.counterNote,
+      }
+      : null,
+    counteredBy: r.counteredBy,
     createdOn: r.createdAt.toISOString().slice(0, 10),
     otherName: (otherId !== null ? names.get(otherId) : "") ?? "another service company",
     payload: parsePayload(r.payload),

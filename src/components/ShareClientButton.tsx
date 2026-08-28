@@ -95,7 +95,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
                 {FEE_KINDS.map((k) => <option key={k} value={k}>{FEE_LABEL[k]}</option>)}
               </select>
             </label>
-            {fee.kind === "flat" && (
+            {(fee.kind === "flat" || fee.kind === "either") && (
               <label style={{ display: "block" }}>
                 <span className="mut t-meta" style={{ display: "block" }}>To accept</span>
                 <input className="mono t-small" style={{ width: 100 }} value={fee.flat}
@@ -103,7 +103,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
                   onChange={(e) => setFee({ ...fee, flat: e.target.value })} />
               </label>
             )}
-            {fee.kind === "percent" && (
+            {(fee.kind === "percent" || fee.kind === "either") && (
               <>
                 <label style={{ display: "block" }}>
                   <span className="mut t-meta" style={{ display: "block" }}>Share, %</span>
@@ -129,7 +129,7 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
               <div className="t-small" style={{ marginTop: 6 }}>
                 They will see: <b>{termsLine(terms, formatCents)}</b>
               </div>
-              {fee.kind === "percent" && (
+              {fee.kind !== "flat" && (
                 <div className="mut t-meta" style={{ marginTop: 2 }}>
                   Worked out from what they invoice this client in Ridgeline. You see the total
                   and what it comes to - never their invoices.

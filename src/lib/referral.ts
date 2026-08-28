@@ -28,14 +28,37 @@
 //
 // Pure. Callers hand in the rows.
 
-export const FEE_KINDS = ["none", "flat", "percent"] as const;
+export const FEE_KINDS = ["none", "flat", "percent", "either"] as const;
 export type FeeKind = (typeof FEE_KINDS)[number];
 
 export const FEE_LABEL: Record<FeeKind, string> = {
   none: "No fee",
   flat: "A fee to accept",
   percent: "A share of what they bill",
+  either: "Either - they choose",
 };
+
+/**
+ * "5% of the first year, OR $2,000 up front - your choice."
+ *
+ * Not a discount and not a haggle: it is an offer of two DIFFERENT RISKS, and
+ * whoever takes it is choosing which one they want. Flat is certainty - they
+ * know the cost before they know the client. Percent is pay-as-you-earn - it
+ * costs nothing if the account goes nowhere and more than the flat fee if it
+ * goes well. Neither side can know at acceptance which turns out cheaper,
+ * which is exactly what makes the choice worth offering rather than a trap.
+ *
+ * The choice is recorded on the FEE, not on the share: the share says what was
+ * offered and stays true afterwards, and the fee says what was agreed.
+ */
+export function resolveChoice(t: FeeTerms, choice: string): FeeTerms {
+  if (t.kind !== "either") return t;
+  return { ...t, kind: choice === "flat" ? "flat" : "percent" };
+}
+
+/** Which kinds an offer actually lets somebody pick between. */
+export const choicesFor = (kind: string): FeeKind[] =>
+  (kind === "either" ? ["percent", "flat"] : []);
 
 /** What the referrer is asking, as written on the offer. */
 export type FeeTerms = {
@@ -67,8 +90,10 @@ export function termsProblems(t: FeeTerms): string[] {
   const out: string[] = [];
   if (t.kind === "none") return out;
   if (!FEE_KINDS.includes(t.kind as FeeKind)) return ["Pick a fee, or none"];
-  if (t.kind === "flat" && t.feeCents <= 0) out.push("Say what it costs to accept");
-  if (t.kind === "percent") {
+  if ((t.kind === "flat" || t.kind === "either") && t.feeCents <= 0) {
+    out.push("Say what it costs to accept");
+  }
+  if (t.kind === "percent" || t.kind === "either") {
     if (t.feeBps <= 0) out.push("Say what share you are asking for");
     if (t.feeBps > MAX_FEE_BPS) out.push(`Keep it under ${MAX_FEE_BPS / 100}%`);
     if (t.windowMonths <= 0) out.push("Say how long it runs for");
@@ -145,15 +170,15 @@ export function feeStanding(f: FeeRow, today: string): FeeStanding {
 
 /** The sentence on the offer: what accepting costs. */
 export function termsLine(t: FeeTerms, fmt: (c: number) => string): string {
-  if (t.kind === "flat") {
-    return `${fmt(t.feeCents)} to accept${t.note ? ` - ${t.note}` : ""}`;
-  }
-  if (t.kind === "percent") {
-    const months = Math.round(t.windowMonths);
-    return `${(t.feeBps / 100).toFixed(t.feeBps % 100 === 0 ? 0 : 1)}% of what you bill them`
-      + ` in the first ${months} month${months === 1 ? "" : "s"}`
-      + `${t.note ? ` - ${t.note}` : ""}`;
-  }
+  const tail = t.note ? ` - ${t.note}` : "";
+  const pct = (t.feeBps / 100).toFixed(t.feeBps % 100 === 0 ? 0 : 1);
+  const months = Math.round(t.windowMonths);
+  const share = `${pct}% of what you bill them in the first ${months} month${months === 1 ? "" : "s"}`;
+  if (t.kind === "flat") return `${fmt(t.feeCents)} to accept${tail}`;
+  if (t.kind === "percent") return `${share}${tail}`;
+  // The choice leads with the share, because that is the one somebody has to
+  // think about; the flat figure is the thing they already understand.
+  if (t.kind === "either") return `${share}, or ${fmt(t.feeCents)} to accept - your choice${tail}`;
   return "No fee";
 }
 
