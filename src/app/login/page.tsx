@@ -8,7 +8,7 @@ import { getBrand } from "@/lib/brand";
 import { checkTryAllowed, clearAttempts, recordFailure, takeSendSlot } from "@/lib/loginGate";
 import { checkPassword } from "@/lib/passwordAuth";
 import { startSession } from "@/lib/sessionCookie";
-import { CODE_DIGITS } from "@/lib/loginCode";
+import { CODE_DIGITS, sendCodeFailure } from "@/lib/loginCode";
 import { smsConfigured } from "@/lib/sms";
 import LoginForm from "@/components/LoginForm";
 import { PublicShell } from "@/components/ui";
@@ -43,7 +43,11 @@ export default async function LoginPage({ searchParams }: {
       await signIn("resend", { email, redirect: false });
     } catch (e) {
       if ((e as { digest?: string })?.digest?.startsWith("NEXT_REDIRECT")) throw e;
-      return { error: (e as Error).message || "Could not send the sign-in email." };
+      // An address with no account lands here too, refused before a code was
+      // made or a mail sent. It gets no error and the form goes on to ask for
+      // the code exactly as it would for a real address - see sendCodeFailure.
+      const said = sendCodeFailure(e);
+      return said ? { error: said } : undefined;
     } finally {
       jar.delete(CHANNEL_COOKIE);
     }

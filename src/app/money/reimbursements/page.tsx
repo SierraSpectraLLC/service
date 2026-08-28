@@ -74,7 +74,7 @@ export default async function ExpensesPage({ searchParams }: {
     }));
 
   const shape = (r: typeof reportRows[number]): ReportRow => ({
-    id: r.id, person: r.person, status: r.status,
+    id: r.id, person: r.person, title: r.title, status: r.status,
     submittedAt: r.submittedAt.toISOString().slice(0, 10),
     paidOn: r.paidOn, paidRef: r.paidRef, returnedReason: r.returnedReason, note: r.note,
     expenses: expenseRows.filter((e) => e.reportId === r.id).map((e) => ({

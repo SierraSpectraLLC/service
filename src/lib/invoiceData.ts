@@ -47,7 +47,6 @@ const settingsRow = cache(async () => {
 
 export type BillingContext = {
   policy: BillingPolicy;
-  invoicePrefix: string;
   loadedLaborCents: number;
 };
 
@@ -59,7 +58,6 @@ export async function billingContext(orgId: number | null): Promise<BillingConte
   ]);
   return {
     policy: resolvePolicy(s?.billingPolicy ?? null, org?.billingPolicy ?? null),
-    invoicePrefix: s?.invoicePrefix || "INV-",
     loadedLaborCents: s?.loadedLaborCents ?? 0,
   };
 }

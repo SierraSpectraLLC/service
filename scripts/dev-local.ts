@@ -39,6 +39,18 @@ const FIXTURE = `
     -- off-system lines a client like this had no report at all.
     ('Harbor Biotech', 'client');
   UPDATE orgs SET is_operator = true WHERE name = 'Sierra Spectra';
+
+  -- A second service company on the instance, listed in the directory, so the
+  -- network page has somebody to find and a client has somewhere to be handed
+  -- (see lib/clientShare). Its own workspace: is_operator, no parent.
+  INSERT INTO orgs (id, name, kind, is_operator) VALUES
+    (30, 'Northwest Instrument Services', 'provider', true) ON CONFLICT DO NOTHING;
+  INSERT INTO provider_profiles (org_id, listed, blurb, services, regions, contact_name, contact_email, website)
+    VALUES (30, true, 'Sciex and Agilent specialists, 20 years on triple quads.',
+      '{"LC-MS","GC-MS","Dissolution"}', '{"Seattle metro","WA","OR"}',
+      'Dana Whitfield', 'dana@nwinstrument.test', 'nwinstrument.test')
+    ON CONFLICT DO NOTHING;
+
   UPDATE app_settings SET operator_org_id = (SELECT id FROM orgs WHERE name = 'Sierra Spectra') WHERE id = 1;
   UPDATE app_settings SET public_contact_email = 'hello@ridgelinefield.test' WHERE id = 1;
   -- The starter expense vocabulary, exactly as createOperator seeds it - the
@@ -59,18 +71,25 @@ const FIXTURE = `
     -- app run between those two - payroll, the books, who may read what a job
     -- billed - and none of them can be checked from an owner session.
     ('dev-bill', 'Bill Reyes', 'bill@sierraspectra.test', 'staff', now()),
-    ('dev-new', '', 'new@local.test', 'tech', NULL);
+    ('dev-new', '', 'new@local.test', 'tech', NULL),
+    -- The OTHER service company's owner. Half of what the network is for can
+    -- only be checked from a second workspace: a client handed over has to be
+    -- accepted by somebody who is not us.
+    ('dev-dana', 'Dana Whitfield', 'dana@nwinstrument.test', 'owner', now());
   INSERT INTO sessions (session_token, user_id, expires) VALUES
     ('devtoken', 'dev-user', now() + interval '30 days'),
     ('stafftoken', 'dev-bill', now() + interval '30 days'),
-    ('newtoken', 'dev-new', now() + interval '30 days');
+    ('newtoken', 'dev-new', now() + interval '30 days'),
+    ('danatoken', 'dev-dana', now() + interval '30 days');
 
   -- The directory is assembled from these, never typed in: staff are house
   -- members of the operator, clients are allowlist rows on their org.
   INSERT INTO house_members (email, org_id, role, name) VALUES
     ('${OWNER}', 3, 'owner', 'Dev Owner'),
     ('sam@sierraspectra.test', 3, 'staff', 'Sam Ortiz'),
-    ('bill@sierraspectra.test', 3, 'staff', 'Bill Reyes');
+    ('bill@sierraspectra.test', 3, 'staff', 'Bill Reyes'),
+    -- The other shop's owner, so a handed-over client has somebody to accept it.
+    ('dana@nwinstrument.test', 30, 'owner', 'Dana Whitfield');
   INSERT INTO client_allowlist (entry, org_id, can_edit) VALUES
     ('maria@labzen.test', 1, true),
     ('accounts@coastal.test', 2, false);
@@ -322,7 +341,8 @@ const FIXTURE = `
     ('5188-5365', 'Frit & Ferrule', false, 3900, 3, true,  true,  '', 'dev@local.test'),
     ('WAT271066', 'Waters',         true,  71000, 5, false, false, '', 'dev@local.test'),
     ('WAT271066', 'Frit & Ferrule', false, 64000, 2, true,  true,  '', 'dev@local.test'),
-    ('ED-A72401', 'Edwards',        true,  23500, 10, false, false, '', 'dev@local.test');
+    ('ED-A72401', 'Edwards',        true,  23500, 10, false, false, '', 'dev@local.test'),
+    ('G1960-80039', 'Agilent',      true,  18900, 4, false, true,  '', 'dev@local.test');
   -- One price nobody has confirmed in an age, for the stale pill.
   UPDATE part_prices SET updated_at = now() - interval '120 days' WHERE part_number = 'ED-A72401';
 
@@ -424,6 +444,12 @@ const FIXTURE = `
     (1, 1, 'Q-1001', 'sent', 'Annual PM and checkout',
       to_char(now() - interval '4 days', 'YYYY-MM-DD'),
       to_char(now() + interval '5 days', 'YYYY-MM-DD'), 50, '${OWNER}');
+  -- A blank draft for the coverage estimate builder to fill: multi-year, priced
+  -- off a plan rather than off history, which is the shape a solicitation asks
+  -- for and the one no fixture had (see lib/coveragePrice).
+  INSERT INTO quotes (org_id, work_order_id, number, status, title, sent_on, expires_on, deposit_pct, created_by) VALUES
+    (2, NULL, 'Q-1002', 'draft', 'Multi-year coverage, two sites', '',
+      to_char(now() + interval '30 days', 'YYYY-MM-DD'), 0, '${OWNER}');
   INSERT INTO quote_lines (quote_id, kind, description, detail, qty, unit_cents, position) VALUES
     (1, 'part', 'G7100-60001 Capillary kit', 'price book, 30% markup', 1000, 27300, 0),
     (1, 'labor', 'Labor, on site', 'estimated 6.0 h at the Lab Zen rate card', 6000, 15500, 1),
@@ -532,6 +558,41 @@ const FIXTURE = `
     (1, 'Rita Alvarez', 'rita@labzen.test', 'Any word on the checkout date? The lab is planning validation runs.'),
     (1, 'Dev Owner', '${OWNER}', 'Tune passed this morning; sign-off packet goes out tomorrow.');
 
+  -- A client shared with a peer service company: twelve systems across two
+  -- buildings, which is the shape the fleet brief exists for (lib/fleetBrief).
+  -- parent_org_id is what makes it OUR client: every tenancy rule reads it,
+  -- and addOrg sets it for anything created through the app.
+  INSERT INTO orgs (id, name, kind, parent_org_id) VALUES (20, 'Emery Pharma', 'client', 3)
+    ON CONFLICT DO NOTHING;
+  INSERT INTO org_sites (id, tenant_org_id, org_id, name, address) VALUES
+    (20, 3, 20, 'Hayward', '2000 Sample Way, Hayward CA'),
+    (21, 3, 20, 'Alameda', '15 Bay Farm Rd, Alameda CA')
+    ON CONFLICT DO NOTHING;
+  INSERT INTO instruments (external_id, client, model, category, owner_org_id, site_id, tenant_org_id, stages)
+  SELECT 'EP-' || lpad(n::text, 3, '0'), 'Emery Pharma',
+         CASE WHEN n % 3 = 0 THEN 'GC-MS' ELSE 'LC-MS' END,
+         CASE WHEN n % 3 = 0 THEN 'GC-MS' ELSE 'LC-MS' END,
+         20, CASE WHEN n <= 7 THEN 20 ELSE 21 END, 3, ARRAY[]::text[]
+  FROM generate_series(1, 12) n;
+  -- One of them stalled, so the brief has something other than "In service" to
+  -- say. Set afterwards rather than in the CASE above, which silently produced
+  -- an empty array for every row.
+  UPDATE instruments SET stages = ARRAY['Waiting / blocked']
+    WHERE owner_org_id = 20 AND external_id = 'EP-004';
+  INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, tenant_org_id, sort_order)
+  SELECT i.id, 'Mass Spec',
+         CASE WHEN i.category = 'GC-MS' THEN 'ISQ 7000' ELSE '6495C' END,
+         'SN' || (7000 + i.id), CASE WHEN i.category = 'GC-MS' THEN 'Thermo' ELSE 'Agilent' END, 3, 0
+  FROM instruments i WHERE i.owner_org_id = 20;
+  INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, tenant_org_id, sort_order)
+  SELECT i.id, 'Pump', 'nXDS15i', 'P' || (400 + i.id), 'Edwards', 3, 1
+  FROM instruments i WHERE i.owner_org_id = 20;
+  -- Half of them under contract with us, one with the maker, the rest unknown.
+  INSERT INTO agreements (org_id, kind, number, title, status, starts_on, ends_on, instrument_ids, tenant_org_id)
+  SELECT 20, 'contract', 'AGR-EP-1', 'MS coverage', 'active', '2026-01-01', '2027-01-01',
+         array_agg(i.id), 3
+  FROM (SELECT id FROM instruments WHERE owner_org_id = 20 ORDER BY id LIMIT 5) i;
+
   INSERT INTO vocab_terms (kind, asset_type, name, categories) VALUES
     ('category', '', 'LC-MS', '{}'),
     ('category', '', 'GC-MS', '{}'),
@@ -573,13 +634,20 @@ const FIXTURE = `
     public_summary = 'The ISQ 7000 is the GC-MS single quad we see most often, and the removable source is the reason. A hot-swap filament and a source that comes out without venting turn what used to be a scheduled visit into something a trained lab tech can do between runs.'
     WHERE kind = 'model' AND name = 'ISQ 7000';
 
-  INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope) VALUES
-    ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}'),
-    ('system', 'test', 'Leak check', '', 1, true, NULL, '{}'),
-    ('Mass spec', 'task', 'Quarterly source clean', '', 0, false, 90, '{}'),
-    ('Mass spec', 'task', 'Desolvation line swap', 'LCMS-8060 only.', 1, false, 365, '{"LCMS-8060"}'),
-    ('Pump', 'task', 'Seal replacement', '', 0, false, 180, '{}'),
-    ('Autosampler', 'task', 'Needle and septum check', '', 0, true, NULL, '{}');
+  -- est_minutes and parts on the recurring work: without them the coverage
+  -- estimate builder has nothing to look up, and the point of the lookup is
+  -- that somebody already wrote a model's PM down once (see lib/pmKit).
+  INSERT INTO procedures (asset_type, kind, name, notes, position, runs_at_intake, interval_days, model_scope, est_minutes, parts) VALUES
+    ('system', 'task', 'Incoming inspection and photos', 'Every system, on arrival.', 0, true, NULL, '{}', 45, ''),
+    ('system', 'test', 'Leak check', '', 1, true, NULL, '{}', 30, ''),
+    ('Mass spec', 'task', 'Quarterly source clean', '', 0, false, 90, '{}', 180,
+      '[{"name":"ESI capillary","number":"WAT271066"}]'),
+    ('Mass spec', 'task', 'Annual PM', 'Full teardown, pump service, recertify.', 2, false, 365, '{"6495C"}', 480,
+      '[{"name":"nXDS tip seal kit","number":"ED-A72401"},{"name":"Oil mist filter","number":"G1960-80039","qty":2}]'),
+    ('Mass spec', 'task', 'Desolvation line swap', 'LCMS-8060 only.', 1, false, 365, '{"LCMS-8060"}', 240, ''),
+    ('Pump', 'task', 'Seal replacement', '', 0, false, 180, '{}', 90,
+      '[{"name":"LC-30 plunger seal","number":"228-45703-91","qty":2,"models":["LC-30AD"]}]'),
+    ('Autosampler', 'task', 'Needle and septum check', '', 0, true, NULL, '{}', 60, '');
 
   INSERT INTO notifications (email, kind, title, href, created_at, read_at) VALUES
     ('${OWNER}', 'task_assigned', 'Rita assigned you: Replace turbo and recertify', '/work/2', now() - interval '3 hours', NULL),

@@ -14,6 +14,9 @@ import SitesCard from "@/components/SitesCard";
 import AgreementsPanel from "@/components/AgreementsPanel";
 import BillingPolicyPanel from "@/components/BillingPolicyPanel";
 import PmPlanPanel from "@/components/PmPlanPanel";
+import FleetBriefCard from "@/components/FleetBriefCard";
+import ShareClientButton from "@/components/ShareClientButton";
+import { providerLinks } from "@/db/schema";
 import { coverageForOrg, fleetCategories } from "@/lib/pmPlanData";
 import { resolvePolicy } from "@/lib/billingPolicy";
 import { usageForAll } from "@/lib/agreementUsage";
@@ -155,6 +158,19 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   const deviceCount = (await db.select({ id: remoteDevices.id }).from(remoteDevices)
     .where(eq(remoteDevices.orgId, orgId)).catch(() => [])).length;
 
+  /* The shops this workspace may hand a client to - its own shortlist, never
+     the whole directory. The picker and the action agree on this set; the
+     action re-checks it, because a picker is not a permission. */
+  // The org's own workspace: itself when it runs one, its operator otherwise -
+  // the same rule actions.orgTenant applies, and the same one shareClient uses
+  // to decide who is doing the sharing.
+  const myTenant = org.isOperator ? org.id : org.parentOrgId;
+  const peerProviders = myTenant === null ? [] : (await db
+    .select({ id: orgs.id, name: orgs.name })
+    .from(providerLinks).innerJoin(orgs, eq(orgs.id, providerLinks.providerOrgId))
+    .where(eq(providerLinks.tenantOrgId, myTenant))
+    .catch(() => []));
+
   const activeAgreements = agreementRows.filter((r) => r.status === "active").length;
   const heroStats: HeroStat[] = [
     { value: ownedSystems.length, label: ownedSystems.length === 1 ? "system" : "systems" },
@@ -172,11 +188,12 @@ export default async function OrgSettingsPage({ params, searchParams }: {
   // clicking Staff silently fell back to Settings and the panel it gates was
   // unreachable. A tab list and a tab guard are two statements of the same
   // thing; they are next to each other for that reason.
-  const tab = ["agreements", "sites", "billing", "staff", "pm"].includes(sp.tab ?? "")
+  const tab = ["agreements", "sites", "billing", "staff", "pm", "fleet"].includes(sp.tab ?? "")
     && (sp.tab !== "agreements" || seesAgreements)
     && (sp.tab !== "billing" || isOwner)
     && (sp.tab !== "staff" || org.isOperator)
     && (sp.tab !== "pm" || !org.isOperator)
+    && (sp.tab !== "fleet" || !org.isOperator)
     ? sp.tab! : "settings";
   const tabs: TabItem[] = [
     { key: "settings", label: "Settings", href: base },
@@ -185,6 +202,9 @@ export default async function OrgSettingsPage({ params, searchParams }: {
     /* A maintenance plan is a thing a SERVICE COMPANY promises a client, so it
        has no meaning on another operator's organization page. */
     ...(!org.isOperator ? [{ key: "pm", label: "Maintenance", count: pmPlanRows.length || undefined, href: `${base}?tab=pm` }] : []),
+    /* Telling a peer what a CLIENT runs. Meaningless on another operator's
+       organization page - that is a company, not an estate. */
+    ...(!org.isOperator ? [{ key: "fleet", label: "Fleet", count: ownedSystems.length || undefined, href: `${base}?tab=fleet` }] : []),
     ...(org.isOperator ? [{ key: "staff", label: "Staff", count: staffRows.length, href: `${base}?tab=staff` }] : []),
     ...(isOwner ? [{ key: "billing", label: "Billing", href: `${base}?tab=billing` }] : []),
   ];
@@ -288,6 +308,23 @@ export default async function OrgSettingsPage({ params, searchParams }: {
           canEdit={isHouse(user.role)}
           year={Number(today.slice(0, 4))}
         />
+      )}
+
+      {tab === "fleet" && !org.isOperator && (
+        <>
+          <FleetBriefCard orgId={org.id} orgName={org.name}
+            systems={ownedSystems.length} today={shopToday()} />
+          {/* Two doors, deliberately together and deliberately distinct: show
+              them the fleet, or hand the client over. */}
+          {/* Only where there is a workspace to share FROM. An organization
+              with no operator behind it has nobody doing the sharing, and a
+              picker that said "add a company first" would be answering a
+              different question from the one being asked. */}
+          {myTenant !== null && (
+            <ShareClientButton orgId={org.id} orgName={org.name}
+              systems={ownedSystems.length} providers={peerProviders} />
+          )}
+        </>
       )}
 
       {tab === "billing" && isOwner && (

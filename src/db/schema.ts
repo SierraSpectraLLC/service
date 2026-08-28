@@ -232,6 +232,19 @@ export const orgs = pgTable("orgs", {
    */
   spectrumStops: text("spectrum_stops").notNull().default(""),
   spectrumHeight: integer("spectrum_height"),
+  /**
+   * How this service company numbers its paper, as JSON - see lib/docNumber.
+   *
+   * On the OPERATOR org, because a numbering scheme is a house convention:
+   * Sierra Spectra threads a job number through every document (030120_INV1)
+   * and the shop next door counts each type on its own (PO-1042), and both are
+   * right. A client organization has no paper of its own to number, so the
+   * column is simply unused on one.
+   *
+   * Blank means the stock shape, which is what every workspace had before this
+   * existed - so nothing that has already been issued changes its name.
+   */
+  docScheme: text("doc_scheme").notNull().default(""),
   // Who at this organization receives its daily report. Each client gets its
   // own list and its own send button - one report per client, never a merged
   // one that would show them each other's systems.
@@ -328,7 +341,24 @@ export const orgs = pgTable("orgs", {
   // the wrong thing on paper.
   billingAddress: text("billing_address").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [unique("org_name_unique").on(t.name)]);
+}, (t) => [
+  /*
+   * A name is unique WITHIN a workspace, not across the instance.
+   *
+   * It was global, which was invisible while one company ran the app and wrong
+   * the moment two did: two service companies servicing the same lab both have
+   * a client called "Emery Pharma", and that is not a collision - it is the
+   * same company, seen from two sides. The old constraint made the second one
+   * impossible to create at all, by hand or by a client share.
+   *
+   * Expressed as a partial index in schema-sync.sql (COALESCE(parent_org_id, 0),
+   * name) so operators, which have no parent, keep their names unique among
+   * themselves - two workspaces called "Sierra Spectra" would be a genuine
+   * ambiguity. Drizzle has no expression-index form, so this stays declared as
+   * the plain thing it is closest to and the SQL carries the real rule.
+   */
+  unique("org_name_unique").on(t.parentOrgId, t.name),
+]);
 
 
 /**
@@ -390,6 +420,100 @@ export const assetShares = pgTable("asset_shares", {
 // garage on Cedar, $30 a day, dock is round the back, ask for Rita. That is a
 // fact about a BUILDING, not about a customer - on the company record it would
 // be noise on the invoice screen and wrong the day they open a second lab.
+/**
+ * A service company's listing in the directory every other one can search.
+ *
+ * The platform's whole reason to have more than one operator on it: two shops
+ * that both service mass specs, four hundred miles apart, each turning down
+ * work the other would take. They cannot refer to each other if they cannot
+ * find each other.
+ *
+ * OPT IN, and deliberately off until somebody fills it in. lib/tenancy's
+ * visibleOrgs hides operators from each other on purpose - "a workspace handed
+ * to a prospective buyer listed the seller; the seller's own list named the
+ * buyer's workspace back" - and a directory that enrolled every workspace
+ * automatically would undo that decision on everybody's behalf. Listing is a
+ * thing a company chooses, the way it chooses to be in a trade directory.
+ *
+ * Not tenant-stamped: the row is ABOUT one operator, keyed by that operator's
+ * org, and it is read across tenants by design. A stamp here would be an
+ * invitation to filter on it, which is exactly what must not happen.
+ */
+export const providerProfiles = pgTable("provider_profiles", {
+  id: serial("id").primaryKey(),
+  orgId: integer("org_id").notNull().unique().references(() => orgs.id, { onDelete: "cascade" }),
+  /** Off until somebody chooses. Nothing lists a company that has not asked to be listed. */
+  listed: boolean("listed").notNull().default(false),
+  /** A sentence about the shop, in their own words. */
+  blurb: text("blurb").notNull().default(""),
+  /** What they work on: "LC-MS", "GC", "Dissolution". Free text, searched. */
+  services: text("services").array().notNull().default([]),
+  /** Where they cover: "Northern California", "Seattle metro", "WA". */
+  regions: text("regions").array().notNull().default([]),
+  contactName: text("contact_name").notNull().default(""),
+  contactEmail: text("contact_email").notNull().default(""),
+  contactPhone: text("contact_phone").notNull().default(""),
+  website: text("website").notNull().default(""),
+  updatedBy: text("updated_by").notNull().default(""),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * One workspace's address book of the other service companies it works with.
+ *
+ * One-sided on purpose: adding somebody here is not a claim about them and
+ * gives nothing away - it is a shortlist, so the share picker names four
+ * companies rather than every listing on the instance. Consent happens where
+ * it matters, at the share itself, which the other side approves or refuses.
+ */
+export const providerLinks = pgTable("provider_links", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  providerOrgId: integer("provider_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [unique("provider_link_unique").on(t.tenantOrgId, t.providerOrgId)]);
+
+/**
+ * One client, offered to one other service company.
+ *
+ * The payload is a FROZEN SNAPSHOT taken when the offer is made, and that is
+ * the point: what the other shop approves is exactly what they get, and
+ * accepting is deterministic however long they take to answer. Nothing is
+ * written into their workspace until they say yes.
+ *
+ * Stamped with the SENDER, because sending is the sender's act. The recipient
+ * reads by to_org_id, which is a scoped read of somebody else's row - the one
+ * place in the app that is deliberately so, and the reason status lives here
+ * rather than in either workspace's own tables.
+ *
+ * What a duplicate is NOT: a sync. Two records of one client in two workspaces
+ * diverge from the moment either shop edits one, and nothing here pretends
+ * otherwise - source_org_id and dest_org_id record where a copy came from so
+ * the divergence is at least answerable.
+ */
+export const clientShares = pgTable("client_shares", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** The operator being offered the client. */
+  toOrgId: integer("to_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** The client organization in the sender's workspace. */
+  sourceOrgId: integer("source_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** What was created in the recipient's workspace on accept. Null until then. */
+  destOrgId: integer("dest_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  /** The snapshot, as JSON - see lib/clientShare. */
+  payload: text("payload").notNull().default(""),
+  /** pending | accepted | declined | withdrawn */
+  status: text("status").notNull().default("pending"),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  decidedBy: text("decided_by").notNull().default(""),
+  decidedAt: timestamp("decided_at"),
+}, (t) => [index("client_shares_to_idx").on(t.toOrgId)]);
+
 export const orgSites = pgTable("org_sites", {
   id: serial("id").primaryKey(),
   tenantOrgId: tenantStamp(),
@@ -453,6 +577,18 @@ export const instruments = pgTable("instruments", {
   // name is named by its assets (lib/systemLabel). Kept as the fallback for
   // pre-asset records and sheet imports.
   model: text("model").notNull(),
+  /**
+   * The OTHER shop's tag for this machine, when the record arrived by a client
+   * share. Blank for everything entered here.
+   *
+   * A duplicated client is two records of one machine in two workspaces, and
+   * each shop tags its own equipment - their asset label is theirs, ours is
+   * ours, and copying my "EP-001" into their workspace would be putting my
+   * sticker on their shelf. What both shops actually need is to be able to say
+   * "your EP-001 is our NW-114" on the phone, which is this column. See
+   * lib/clientShare.
+   */
+  sourceRef: text("source_ref").notNull().default(""),
   manufacturer: text("manufacturer").notNull().default(""), // Shimadzu, Agilent, Thermo...
   serial: text("serial").notNull().default(""),             // the instrument's own serial
   location: text("location").notNull().default(""),         // room / bench on the client's floor
@@ -767,6 +903,17 @@ export const procedures = pgTable("procedures", {
    */
   usageEvery: integer("usage_every"),
   usageUnit: text("usage_unit").notNull().default(""),
+  /**
+   * How long this piece of work takes, in minutes. 0 = nobody has said.
+   *
+   * The one fact the catalog did not hold, and the one a fixed-price bid
+   * cannot be built without: a PM on an API 5000 is a day and a PM on a 1260
+   * LC is an afternoon, and pricing a five-year award needs that in hours
+   * before anybody has opened a work order. Zero is an ABSENCE and reads as
+   * one everywhere - an estimate says which procedures it could not time
+   * rather than quietly totalling them as free (see lib/pmKit).
+   */
+  estMinutes: integer("est_minutes").notNull().default(0),
   // Task-only
   requiresNote: boolean("requires_note").notNull().default(false),
   consumesPart: boolean("consumes_part").notNull().default(false),
@@ -1261,7 +1408,9 @@ export const shareLinks = pgTable("share_links", {
   revokedAt: timestamp("revoked_at"),
   /**
    * What is on the other side: files (every share before billing existed),
-   * an invoice, or a quote. The viewer branches on this.
+   * an invoice, a quote, or a client's FLEET - the list of systems a peer
+   * service company is being shown so they can answer "can you cover this".
+   * The viewer branches on this.
    */
   kind: text("kind").notNull().default("files"),
   /** Which org the link speaks to. Money is fetched through THIS, never the URL. */
@@ -1285,6 +1434,22 @@ export const shareLinkFiles = pgTable("share_link_files", {
   shareId: integer("share_id").notNull().references((): AnyPgColumn => shareLinks.id, { onDelete: "cascade" }),
   attachmentId: integer("attachment_id").notNull().references((): AnyPgColumn => attachments.id, { onDelete: "cascade" }),
 }, (t) => [index("share_link_files_share_idx").on(t.shareId)]);
+
+/**
+ * Which systems a fleet share names.
+ *
+ * The exact twin of share_link_files, and for the same reason: membership is
+ * FROZEN at creation so a link can never grow, while the content each row
+ * points at stays live so the peer sees today's serial rather than the one that
+ * was fitted in March. The viewer re-checks every id against the link's own org
+ * and tenant before rendering, so a system handed to another operator since the
+ * link was minted silently drops out instead of riding along.
+ */
+export const shareLinkSystems = pgTable("share_link_systems", {
+  id: serial("id").primaryKey(),
+  shareId: integer("share_id").notNull().references((): AnyPgColumn => shareLinks.id, { onDelete: "cascade" }),
+  instrumentId: integer("instrument_id").notNull().references((): AnyPgColumn => instruments.id, { onDelete: "cascade" }),
+}, (t) => [index("share_link_systems_share_idx").on(t.shareId)]);
 
 export const attachments = pgTable("attachments", {
   /**
@@ -1864,6 +2029,46 @@ export const partKitLines = pgTable("part_kit_lines", {
   sortOrder: integer("sort_order").notNull().default(0),
 }, (t) => [index("part_kit_lines_kit_idx").on(t.kitId)]);
 
+/**
+ * A multi-year award: one engagement, several separately-priced 12-month terms.
+ *
+ * The shape every solicitation asks for and nothing here could hold. "CLIN 0001
+ * base year, CLIN 0002 option year 1" is five firm prices of which ONE is
+ * committed - the other four are options the client may exercise or walk away
+ * from, one at a time, each on its own deadline. A shop that models that as
+ * five unrelated contracts finds out it has lost an option year by noticing the
+ * money stopped.
+ *
+ * Each period is still an ordinary `agreements` row, because a period IS a
+ * contract: a term, a price, entitlements, a billing cycle. Everything already
+ * built - drawdown, coverage, the recurring biller, per-agreement rate cards -
+ * goes on working per period with nothing taught about awards. What was missing
+ * was only the thread between them and the facts that belong to none of them:
+ * whose award number it is, and how long before a period starts the client has
+ * to say whether they want it.
+ */
+export const awards = pgTable("awards", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** THEIR number for it - the contract or solicitation number they will quote back. */
+  number: text("number").notNull().default(""),
+  title: text("title").notNull().default(""),
+  /** YYYY-MM-DD. Blank = bid, not yet won: the periods are priced and nothing is in force. */
+  awardedOn: text("awarded_on").notNull().default(""),
+  /**
+   * How long before a period begins the client must exercise it. The deadline
+   * that gets missed, so it is data rather than something in somebody's diary -
+   * 60 days is the common federal shape and is only a default.
+   */
+  optionNoticeDays: integer("option_notice_days").notNull().default(60),
+  /** The quote this was won on, when there was one. Set null so a deleted quote does not take the award. */
+  quoteId: integer("quote_id").references((): AnyPgColumn => quotes.id, { onDelete: "set null" }),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("awards_org_idx").on(t.orgId)]);
+
 // ── Service agreements ──────────────────────────────────────────────────────
 // The contract, and what it entitles somebody to.
 //
@@ -1938,6 +2143,17 @@ export const agreements = pgTable("agreements", {
    */
   providerOrgId: integer("provider_org_id").references(() => orgs.id, { onDelete: "set null" }),
   note: text("note").notNull().default(""),
+  /**
+   * The multi-year award this is one period of. Null = an ordinary standalone
+   * contract, which is nearly all of them.
+   *
+   * Set null on delete rather than cascade: unpicking an award must not delete
+   * the base year's contract along with it, because that term was really in
+   * force and really billed.
+   */
+  awardId: integer("award_id").references((): AnyPgColumn => awards.id, { onDelete: "set null" }),
+  /** Which period: 0 is the base year, 1 is option year 1. Meaningless without awardId. */
+  periodIndex: integer("period_index").notNull().default(0),
   // ── Recurring billing ────────────────────────────────────────────────────
   // A retainer is the agreement, not a work order: nobody drives out, nobody
   // logs an hour, and the same amount falls due every month regardless. These
@@ -2539,6 +2755,21 @@ export const expenseReports = pgTable("expense_reports", {
   tenantOrgId: tenantStamp(),
   /** Whose money is owed - a directory name, same convention as expenses.person. */
   person: text("person").notNull(),
+  /**
+   * What this claim IS, in the filer's own words, and why it happened.
+   *
+   * A report used to be identified by its person and the span of its rows -
+   * "Steve Jones, Jul 12 - Aug 3" - which is enough to tell two apart on a
+   * list and nothing like enough to approve one. The owner paying it wants to
+   * know it was the Reno install, not "some days in July"; the engineer
+   * filing it wants to keep the airport trip separate from the parts run.
+   *
+   * Both optional. A report with no name still reads as it always did, so
+   * nothing that exists becomes wrong, and the empty-handed flow - open a
+   * draft, scan receipts into it, submit - still takes no typing at all.
+   */
+  title: text("title").notNull().default(""),
+  purpose: text("purpose").notNull().default(""),
   status: text("status").notNull().default("submitted"),
   submittedBy: text("submitted_by").notNull().default(""),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
@@ -3040,6 +3271,12 @@ export const appSettings = pgTable("app_settings", {
   // Billing. The prefix is what invoice numbers are built on; the number
   // itself is allocated by scanning the highest one in use, the same
   // read-max-and-retry the work order numbers have always used.
+  /**
+   * RETIRED: numbering moved to orgs.doc_scheme, which is per service company
+   * rather than one setting shared by every tenant on the instance and covers
+   * all four document kinds rather than invoices alone. Nothing reads this;
+   * the column stays because the sync pipeline is additive-only.
+   */
   invoicePrefix: text("invoice_prefix").notNull().default("INV-"),
   /**
    * The platform's cut of ACH volume, in basis points, taken as Stripe's

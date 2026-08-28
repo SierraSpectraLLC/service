@@ -47,7 +47,7 @@ export default function PeopleDesk({ roster, isOwner }: {
   const openFor = (person: string) =>
     startTransition(async () => {
       setBusy(person);
-      const res = await createExpenseReport(person);
+      const res = await createExpenseReport({ onBehalfOf: person });
       setBusy("");
       if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
       router.push(`/money/reimbursements/${res.id}`);

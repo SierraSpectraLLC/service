@@ -22,10 +22,9 @@ const FEE_LABEL: Record<string, string> = {
  * operator typing 5% and finding out in a dispute.
  */
 export default function BillingDefaultsForm({
-  policy, invoicePrefix, loadedLaborCents, platformFeeBps, stripe, months,
+  policy, loadedLaborCents, platformFeeBps, stripe, months,
 }: {
   policy: BillingPolicy;
-  invoicePrefix: string;
   loadedLaborCents: number;
   platformFeeBps: number;
   stripe: { mode: StripeMode; accountId: string; ready: boolean };
@@ -45,7 +44,6 @@ export default function BillingDefaultsForm({
     cardsEnabled: policy.cardsEnabled,
     cardSurcharge: (policy.cardSurchargeBps / 100).toFixed(2),
     cardFlat: centsToInput(policy.cardSurchargeFlatCents),
-    prefix: invoicePrefix,
     loadedLabor: centsToInput(loadedLaborCents),
     platformFee: (platformFeeBps / 100).toFixed(2),
   };
@@ -82,7 +80,6 @@ export default function BillingDefaultsForm({
         cardSurchargeBps: Math.round(num(form.cardSurcharge) * 100),
         cardSurchargeFlatCents: Math.round(num(form.cardFlat) * 100),
       },
-      invoicePrefix: form.prefix,
       loadedLabor: form.loadedLabor,
       platformFeeBps: Math.round(num(form.platformFee) * 100),
     });
@@ -172,10 +169,6 @@ export default function BillingDefaultsForm({
               onChange={(e) => set("taxParts", e.target.checked)} />
             <span className="t-body">Draw the parts tax line</span>
           </label>
-        </Field>
-        <Field label="Invoice prefix" htmlFor="prefix">
-          <input id="prefix" style={{ width: 110 }} value={form.prefix}
-            onChange={(e) => set("prefix", e.target.value)} />
         </Field>
         <Field label="Loaded labor, per hour" htmlFor="loaded" hint="Wage plus burden - used for margins">
           <input id="loaded" inputMode="decimal" style={{ width: 130 }} value={form.loadedLabor}

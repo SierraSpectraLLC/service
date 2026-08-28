@@ -641,6 +641,75 @@ export async function notifyRenewalDue(opts: {
 }
 
 /**
+ * An option year has to be decided.
+ *
+ * Its own notice rather than a renewal one, because it is not a renewal and
+ * saying so would be wrong in the way that matters: nobody is deciding whether
+ * to carry on with something already running. A priced, agreed year is sitting
+ * there and the client has a DEADLINE to take it, after which it is simply
+ * gone. The subject line is the difference between somebody opening this in
+ * October and somebody filing it with the renewal reminders.
+ */
+export async function notifyOptionDue(opts: {
+  to: string[]; orgId: number; orgName: string; label: string;
+  deadline: string; days: number | null; amount: string; lapsed: boolean;
+}) {
+  try {
+    const url = appUrl();
+    const when = opts.lapsed
+      ? `The deadline was ${opts.deadline}.`
+      : `They must tell us by ${opts.deadline}${opts.days !== null ? ` - ${opts.days} days` : ""}.`;
+    await deliver({
+      to: opts.to, kind: "renewal", href: "/money/contracts",
+      title: `${opts.orgName}: ${opts.label} ${opts.lapsed ? "lapsed" : "must be exercised"} - ${opts.amount}`,
+      subject: opts.lapsed
+        ? `Option year LAPSED - ${opts.orgName} ${opts.label}`
+        : `Option year to be exercised - ${opts.orgName} ${opts.label}`,
+      body: `<b>${esc(opts.orgName)}</b> - ${esc(opts.label)}, ${esc(opts.amount)}.
+        <div style="margin-top:8px;">${esc(when)}</div>
+        ${mutedLine(opts.lapsed
+          ? "It is not in force and is not billing. Exercising it now back-dates the term."
+          : "Nothing bills for this period until it is exercised.")}
+        ${url ? btn(`${url}/money/contracts`, "Open contracts") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] option email failed:", (e as Error).message);
+  }
+}
+
+/**
+ * Another service company has handed us a client.
+ *
+ * Deliberately says what it is worth deciding on and no more - how many
+ * systems, at how many sites, and who sent it. The systems themselves are
+ * behind the link, because the decision is "do we want this work" and a
+ * twelve-machine list in an inbox is not how anybody makes it.
+ *
+ * Nothing has been written into this workspace when this arrives. That is the
+ * sentence people need, because "a client was shared with you" reads like it
+ * already happened.
+ */
+export async function notifyClientShared(opts: {
+  to: string[]; fromName: string; clientName: string; summary: string; note: string;
+}) {
+  try {
+    const url = appUrl();
+    await deliver({
+      to: opts.to, kind: "client_share", href: "/network",
+      title: `${opts.fromName} shared ${opts.clientName} with us - ${opts.summary}`,
+      subject: `${opts.fromName} wants to share ${opts.clientName} with you`,
+      body: `<b>${esc(opts.fromName)}</b> has offered to share <b>${esc(opts.clientName)}</b>
+        with your workspace - ${esc(opts.summary)}.
+        ${opts.note ? quote(esc(opts.note)) : ""}
+        ${mutedLine("Nothing has been added to your workspace. It is copied in only if you accept.")}
+        ${url ? btn(`${url}/network`, "Look at it") : ""}`,
+    });
+  } catch (e) {
+    console.error("[notify] client share email failed:", (e as Error).message);
+  }
+}
+
+/**
  * Somebody got in for the first time.
  *
  * Only the first: an alert per sign-in becomes a filter rule inside a week, and

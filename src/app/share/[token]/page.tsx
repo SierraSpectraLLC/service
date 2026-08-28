@@ -1,6 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { attachments, orgs, shareLinks, shareLinkFiles } from "@/db/schema";
+import { attachments, orgs, shareLinks, shareLinkFiles, shareLinkSystems } from "@/db/schema";
 import { brandForTenant, getBrand } from "@/lib/brand";
 import { linkState } from "@/lib/dropShare";
 import { fmtBytes } from "@/lib/storage";
@@ -15,7 +15,10 @@ import { feeClause } from "@/lib/billingPolicy";
 import { statementFor } from "@/lib/statement";
 import ClientInvoice from "@/components/ClientInvoice";
 import ClientQuote from "@/components/ClientQuote";
-import { EmptyState, PublicShell } from "@/components/ui";
+import { EmptyState, Panel, Pill, PublicShell } from "@/components/ui";
+import { fleetRowsFor } from "@/lib/fleetBriefData";
+import { buildFleetBrief, moduleLine } from "@/lib/fleetBrief";
+import { CLIENT_STATE } from "@/lib/clientView";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +64,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   }
   if (link.kind === "quote" && link.quoteId !== null && link.orgId !== null) {
     return <QuoteShare link={link} />;
+  }
+  if (link.kind === "fleet" && link.orgId !== null) {
+    return <FleetShare link={link} />;
   }
 
   const fileIds = (await db.select({ attachmentId: shareLinkFiles.attachmentId })
@@ -225,6 +231,76 @@ async function QuoteShare({ link }: { link: typeof shareLinks.$inferSelect }) {
           qty: l.qty / 1000, unitCents: l.unitCents, covered: l.covered, coveredBy: l.coveredBy,
         }))}
       />
+    </PublicShell>
+  );
+}
+
+
+/**
+ * A client's fleet, shown to a peer service company with no login here.
+ *
+ * Every id is RE-RESOLVED against the link's own org and tenant before a row
+ * renders, and anything that no longer matches both is silently dropped. The
+ * frozen membership says which systems were chosen; it does not grant them, so
+ * a machine handed to another operator since the link was minted stops
+ * appearing without anybody having to remember to revoke.
+ *
+ * Same discipline as the money shares above: nothing is fetched through the
+ * URL. And nothing here reads a session - like /listing and /equipment, what
+ * this page renders cannot depend on who is asking.
+ */
+async function FleetShare({ link }: { link: typeof shareLinks.$inferSelect }) {
+  const brand = await brandForTenant(link.tenantOrgId);
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, link.orgId!));
+  const only = (await db.select({ instrumentId: shareLinkSystems.instrumentId })
+    .from(shareLinkSystems).where(eq(shareLinkSystems.shareId, link.id)))
+    .map((r) => r.instrumentId);
+  const today = shopToday();
+  const rows = await fleetRowsFor({
+    orgId: link.orgId!, tenantOrgId: link.tenantOrgId, today,
+    operatorName: brand.operatorName, only,
+  }).catch(() => []);
+  const brief = buildFleetBrief({
+    client: org?.name ?? "This client", from: "", today, rows,
+  });
+
+  return (
+    <PublicShell brandName={brand.operatorName || brand.name} tagline={brand.tagline} width={720}>
+      <div className="card">
+        <h2 className="t-h2" style={{ margin: 0 }}>{brief.client}</h2>
+        <div className="mut t-body" style={{ marginTop: 2 }}>{brief.headline}</div>
+        {/* Said plainly, because the recipient is usually a competitor and the
+            first thing they will wonder is what else is on this page. */}
+        <div className="mut t-meta" style={{ marginTop: 8 }}>
+          Equipment only. Nothing here is a price, a quote, or anybody&apos;s notes.
+          This link stops working on {link.expiresOn}.
+        </div>
+      </div>
+
+      {brief.groups.map((g) => (
+        <Panel key={g.site || "all"} title={g.site || "Systems"} count={g.rows.length}>
+          {g.rows.map((r) => (
+            <div key={r.externalId} style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+              <div className="row-2" style={{ alignItems: "baseline" }}>
+                <span className="t-body" style={{ fontWeight: 600, flex: 1, minWidth: 0 }}>
+                  <span className="mono t-small">{r.externalId}</span> {r.label}
+                </span>
+                <Pill tone={CLIENT_STATE[r.state].tone}>{CLIENT_STATE[r.state].label}</Pill>
+                <span className="mut t-meta">{r.coverageBadge}</span>
+              </div>
+              {r.modules.length > 0 && (
+                <div className="mut t-small" style={{ marginTop: 2 }}>
+                  {r.modules.map((m) => <div key={moduleLine(m)}>{moduleLine(m)}</div>)}
+                </div>
+              )}
+            </div>
+          ))}
+        </Panel>
+      ))}
+
+      {rows.length === 0 && (
+        <EmptyState title="Nothing to show" body="The systems on this link are no longer available." />
+      )}
     </PublicShell>
   );
 }

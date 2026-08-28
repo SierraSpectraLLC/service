@@ -67,12 +67,16 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
     <div className="container">
       <PageHead
         crumb={<><Link href="/money">Financial</Link> › <Link href="/money/reimbursements">Reimbursements</Link> › <b>Report</b></>}
-        title={`${report.person} - ${reportSpan(rows) || "expense report"}`}
-        sub={`${REPORT_LABEL[report.status] ?? report.status}${total ? ` · ${formatCents(total)}` : ""}${report.status === "paid" ? ` · paid ${report.paidOn}${report.paidRef ? ` (${report.paidRef})` : ""}` : ""}`}
+        /* The claim's own name leads when it has one; the person and the span
+           of its rows are what it always fell back to, and still do. */
+        title={report.title || `${report.person} - ${reportSpan(rows) || "expense report"}`}
+        sub={(report.title ? `${report.person} · ${reportSpan(rows) || "no dated rows"} · ` : "")
+          + `${REPORT_LABEL[report.status] ?? report.status}${total ? ` · ${formatCents(total)}` : ""}${report.status === "paid" ? ` · paid ${report.paidOn}${report.paidRef ? ` (${report.paidRef})` : ""}` : ""}`}
       />
       <ExpenseReportDetail
         report={{
           id: report.id, person: report.person, status: report.status,
+          title: report.title, purpose: report.purpose,
           submittedAt: report.submittedAt.toISOString().slice(0, 10),
           paidOn: report.paidOn, paidRef: report.paidRef, returnedReason: report.returnedReason,
         }}

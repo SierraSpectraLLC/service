@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { raiseRetainerCycleNow, saveRecurringTerms } from "@/app/actions";
-import { anticipated, billCadenceLabel, dueCycles, type RecurringTerms } from "@/lib/recurring";
+import { raiseMissedCycle, raiseRetainerCycleNow, saveRecurringTerms } from "@/app/actions";
+import { anticipated, billCadenceLabel, dueCycles, missedCycles, type RecurringTerms } from "@/lib/recurring";
 import { centsToInput, formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { Panel, Pill } from "@/components/ui";
@@ -92,6 +92,7 @@ export default function RetainerCard({ rows, today, canEdit }: {
         {rows.map((r) => {
           const on = r.billEveryMonths > 0;
           const due = dueCycles(r, today);
+          const missed = missedCycles(r, today);
           const next = anticipated(r, today, horizon).slice(0, 3);
           const yearCents = anticipated(r, today, horizon).reduce((n, c) => n + c.amountCents, 0);
           return (
@@ -107,6 +108,13 @@ export default function RetainerCard({ rows, today, canEdit }: {
                     an empty row that looks like nothing is happening. */}
                 {due.length > 0 && (
                   <Pill tone="warn">{due.length} cycle{due.length === 1 ? "" : "s"} ready to raise</Pill>
+                )}
+                {/* A different colour for a different fact. "Ready to raise" is
+                    the calendar working; "never raised" is money already
+                    earned that nobody billed - which is the one this card
+                    exists to stop happening quietly. */}
+                {missed.length > 0 && (
+                  <Pill tone="bad">{missed.length} never raised</Pill>
                 )}
                 {canEdit && (
                   <button className="btn link" style={{ marginLeft: "auto" }} onClick={() => open(r)}>
@@ -125,16 +133,38 @@ export default function RetainerCard({ rows, today, canEdit }: {
                   {r.billLeadDays > 0 && <> - drafted {r.billLeadDays} day{r.billLeadDays === 1 ? "" : "s"} ahead</>}
                 </div>
               )}
-              {on && due.length > 0 && canEdit && (
-                <div style={{ marginTop: 6 }}>
-                  <button className="btn sm" disabled={pending}
-                    onClick={() => startTransition(async () => {
-                      const res = await raiseRetainerCycleNow(r.id, due[0]);
-                      if (res?.error) { toast({ message: res.error }); return; }
-                      toast({ message: `Drafted ${res.number} for the ${due[0]} cycle - open it in Money to send it` });
-                    })}>
-                    Raise the {due[0]} cycle now
-                  </button>
+              {on && canEdit && (due.length > 0 || missed.length > 0) && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {due.length > 0 && (
+                    <button className="btn sm" disabled={pending}
+                      onClick={() => startTransition(async () => {
+                        const res = await raiseRetainerCycleNow(r.id, due[0]);
+                        if (res?.error) { toast({ message: res.error }); return; }
+                        toast({ message: `Drafted ${res.number} for the ${due[0]} cycle - open it in Money to send it` });
+                      })}>
+                      Raise the {due[0]} cycle now
+                    </button>
+                  )}
+                  {/* Oldest first, one at a time. A button that raised four
+                      invoices at once would be four decisions on one click. */}
+                  {missed.length > 0 && (
+                    <button className="btn sm accent" disabled={pending}
+                      onClick={() => startTransition(async () => {
+                        const res = await raiseMissedCycle(r.id, missed[0]);
+                        if (res?.error) { toast({ message: res.error }); return; }
+                        toast({ message: `Drafted ${res.number} for the missed ${missed[0]} cycle - open it in Money to send it` });
+                      })}>
+                      Bill the missed {missed[0]} cycle
+                    </button>
+                  )}
+                </div>
+              )}
+              {on && missed.length > 0 && (
+                <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 4 }}>
+                  {missed.length === 1
+                    ? `The ${missed[0]} cycle was never billed.`
+                    : `${missed.length} cycles were never billed, from ${missed[0]}.`}
+                  {" "}That period has been served - billing it is yours to decide, so nothing raises it on its own.
                 </div>
               )}
             </div>

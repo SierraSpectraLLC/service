@@ -15,6 +15,7 @@ import NeededPartsCard from "@/components/NeededPartsCard";
 import NewPoButton from "@/components/NewPoButton";
 import { DataTable, Dot, FacetStrip, Id, Legend, Pill, Toolbar } from "@/components/ui";
 import FinanceShell from "@/components/FinanceShell";
+import BackfillPoButton from "@/components/BackfillPoButton";
 import { railContext } from "@/lib/financeData";
 import { isStaffRole } from "@/lib/tenants";
 import type { DataRow } from "@/components/ui/DataTable";
@@ -147,6 +148,13 @@ export default async function PurchasingPage({ searchParams }: {
       actions={<>
         <NewPoButton rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))}
           vendors={isHouse(user.role) ? await makerNames(readTenant(user)) : []} />
+        {/* The paper an order already has. Its siblings sit on Invoices and
+            Quotes; this is the one a migrating shop needs most, because a part
+            on a shelf with no order behind it cannot be traced to what was
+            paid for it. */}
+        {isHouse(user.role) && (
+          <BackfillPoButton rooms={orderRooms.map((r) => ({ id: r.id, name: r.name }))} />
+        )}
         <Link href="/stock" className="btn sm plain">Inventory →</Link>
       </>}
     >

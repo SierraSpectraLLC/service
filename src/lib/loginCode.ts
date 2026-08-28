@@ -133,3 +133,36 @@ export function afterWrongCode(row: AttemptRow, now: Date): { row: AttemptRow; l
 
 /** Guesses left to show someone who just mistyped. */
 export const guessesLeft = (row: AttemptRow) => Math.max(0, MAX_ATTEMPTS - row.attempts);
+
+/**
+ * What to tell somebody whose code could not be sent - and when to tell them
+ * nothing at all.
+ *
+ * Two different failures arrive here as one exception. An address with no
+ * account is refused by the signIn callback BEFORE a code is made or an email
+ * is sent (auth.ts signInAllowed, and @auth/core's sendToken calls the callback
+ * first), which arrives as Auth.js's AccessDenied. Everything else - the mail
+ * service timing out, a rejected send - is a real failure of ours.
+ *
+ * Null means say nothing and carry on to the code step. Answering "no account
+ * with that address" while a real address gets "check your phone" is an
+ * enumeration oracle: a stranger learns who banks here by typing addresses at
+ * the form. The password door already collapses its two failures for exactly
+ * this reason (app/login's withPassword), and this is the same posture on the
+ * other door - a stranger reaches the code box and has nothing to type into it.
+ *
+ * Anything else gets a sentence a person can act on. What used to reach the
+ * screen was the library's own string, tail and all:
+ *
+ *     AccessDenied. Read more at https://errors.authjs.dev#accessdenied
+ *
+ * so the docs tail is cut off whatever the message turns out to be.
+ */
+export function sendCodeFailure(e: unknown): string | null {
+  const type = (e as { type?: string } | null)?.type ?? "";
+  const raw = ((e as Error | null)?.message ?? "").replace(/\.?\s*Read more at https?:\/\/\S+/i, "").trim();
+  if (type === "AccessDenied" || /^AccessDenied$/i.test(raw)) return null;
+  // A message we wrote ourselves is already plain (see deliverCode); a bare
+  // error type from somewhere else is not, so it does not go on the screen.
+  return raw && /\s/.test(raw) ? raw : "We couldn't send that code just now. Try again in a moment.";
+}

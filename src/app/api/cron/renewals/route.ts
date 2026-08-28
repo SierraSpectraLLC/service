@@ -7,12 +7,14 @@ import { KIND_LABEL, allowance, needsAttention, renewalLine, standing } from "@/
 import { usageFor } from "@/lib/agreementUsage";
 import { houseEmails } from "@/lib/house";
 import { formatCents } from "@/lib/money";
-import { notifyRenewalDue } from "@/lib/notify";
+import { notifyOptionDue, notifyRenewalDue } from "@/lib/notify";
 import { shopToday } from "@/lib/shopday";
 import { addDays } from "@/lib/pm";
 import { audit } from "@/lib/audit";
 import { forTenant } from "@/lib/tenancy";
-import { nextWoNumber } from "@/lib/workOrders";
+import { awardsFor } from "@/lib/awardData";
+import { decisionsDue, optionDeadline } from "@/lib/award";
+import { nextDocNumber } from "@/lib/docNumberData";
 import { resolveRate } from "@/lib/rates";
 import { renewalFromBurn } from "@/lib/quotes";
 
@@ -88,10 +90,50 @@ export async function GET(req: Request) {
          would be an offer to renew a contract we do not hold. */
       if (a.providerOrgId === null && await draftRenewalQuote(a, used).catch(() => false)) drafted++;
     }
-    return NextResponse.json({ sent, drafted, checked: all.length });
+    const options = await sweepOptions(today);
+    return NextResponse.json({ sent, drafted, options, checked: all.length });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
+}
+
+/**
+ * Option years that have to be decided, and the ones already lost.
+ *
+ * The reason awards exist as a concept at all. An option is priced, agreed and
+ * NOT bought, and it stops being available on a day nobody has in their diary -
+ * so a shop finds out it has lost a year of revenue by noticing the money
+ * stopped in October, which is both too late to ask and the worst possible
+ * moment to discover it.
+ *
+ * Lapsed ones are chased too, and deliberately go on being chased: it is the
+ * most urgent conversation on the list and the one nobody is having. Same
+ * posture as an expired contract above.
+ */
+async function sweepOptions(today: string): Promise<number> {
+  // Every workspace's, like the sweep above - each award is chased by its own
+  // operator via houseEmails(tenantOrgId), and nothing here reaches a client.
+  const awardRows = await awardsFor(null).catch(() => []);
+  let sent = 0;
+  for (const award of awardRows) {
+    const due = decisionsDue(award.periods, award, today);
+    if (!due.length) continue;
+    // Whoever services them - the award's own workspace, not the instance's.
+    const to = await houseEmails(award.tenantOrgId);
+    if (!to.length) continue;
+    for (const d of due) {
+      await notifyOptionDue({
+        to, orgId: award.orgId, orgName: award.orgName,
+        label: [award.number, `option year ${d.period.periodIndex}`].filter(Boolean).join(" "),
+        deadline: optionDeadline(d.period, award),
+        days: d.days,
+        amount: formatCents(d.period.billAmountCents || d.period.valueCents || 0),
+        lapsed: d.standing === "lapsed",
+      });
+      sent++;
+    }
+  }
+  return sent;
 }
 
 /**
@@ -127,9 +169,7 @@ async function draftRenewalQuote(
 
   const today = shopToday();
   for (let attempt = 0; attempt < 4; attempt++) {
-    const inUse = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, a.tenantOrgId));
-    const number = nextWoNumber(inUse.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", a.tenantOrgId);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: a.tenantOrgId, orgId: a.orgId, agreementId: a.id,

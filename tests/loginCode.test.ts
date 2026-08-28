@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   afterWrongCode, CODE_DIGITS, freshAttempts, guessesLeft, isCodeShaped, LOCK_MINUTES,
   maySendCode, mayTryCode, MAX_ATTEMPTS, MAX_REQUESTS, newCode, normalizeCode, rolled,
+  sendCodeFailure,
 } from "@/lib/loginCode";
 
 /**
@@ -118,5 +119,39 @@ describe("the window", () => {
     expect(rolled(row, at(14)).requests).toBe(3);
     expect(rolled(row, at(15)).requests).toBe(0);
     expect(rolled(row, at(15)).attempts).toBe(0);
+  });
+});
+
+describe("when a code could not be sent", () => {
+  /** What @auth/core actually throws, tail and all. */
+  const accessDenied = () => {
+    const e = new Error("AccessDenied. Read more at https://errors.authjs.dev#accessdenied");
+    (e as { type?: string }).type = "AccessDenied";
+    return e;
+  };
+
+  it("says nothing at all about an address with no account", () => {
+    // The enumeration rule: a stranger must reach the same code box a real
+    // person reaches, and learn nothing from getting there.
+    expect(sendCodeFailure(accessDenied())).toBeNull();
+    // Even if the tail or the type ever moves.
+    expect(sendCodeFailure(new Error("AccessDenied"))).toBeNull();
+  });
+
+  it("never puts the library's docs link on the screen", () => {
+    const said = sendCodeFailure(new Error("Something broke. Read more at https://errors.authjs.dev#x"));
+    expect(said).toBe("Something broke");
+    expect(said).not.toContain("errors.authjs.dev");
+  });
+
+  it("keeps a sentence we wrote ourselves", () => {
+    expect(sendCodeFailure(new Error("The email service did not respond. Try again in a moment.")))
+      .toBe("The email service did not respond. Try again in a moment.");
+  });
+
+  it("does not show a bare error code to a person", () => {
+    for (const e of [new Error("EAI_AGAIN"), new Error(""), null, undefined]) {
+      expect(sendCodeFailure(e)).toBe("We couldn't send that code just now. Try again in a moment.");
+    }
   });
 });

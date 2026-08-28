@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  backfillTotal, invoiceProblem, openingStatus, quoteProblem, usableLines,
+  PO_OUTCOMES, backfillTotal, invoiceProblem, openingStatus, poProblem,
+  quoteProblem, usableLines, usablePoLines,
 } from "@/lib/backfill";
 
 /**
@@ -97,5 +98,53 @@ describe("the status a recorded invoice opens on", () => {
     expect(openingStatus("paid")).toBe("sent");
     expect(openingStatus("open")).toBe("sent");
     expect(openingStatus("void")).toBe("void");
+  });
+});
+
+describe("a purchase order that was already placed", () => {
+  const line = (over: Partial<{ partNumber: string; name: string; qty: number; unitCents: number }> = {}) =>
+    ({ partNumber: "G1311-60001", name: "Quaternary pump seal kit", qty: 2, unitCents: 18400, ...over });
+  const ok = (over: Record<string, unknown> = {}) => ({
+    vendor: "Agilent", orderedOn: "2025-11-04", outcome: "received", lines: [line()], ...over,
+  });
+
+  it("accepts a plain received order", () => {
+    expect(poProblem(ok())).toBeNull();
+  });
+
+  it("insists on a part number on every line", () => {
+    /*
+     * The whole value of typing an old order in is that a part on a shelf can
+     * be traced back to what was paid for it. A line with a description and no
+     * part number is a receipt, not an order, and it makes the record look
+     * complete while answering nothing.
+     */
+    expect(poProblem(ok({ lines: [line({ partNumber: "" })] })))
+      .toContain("Every line needs a part number");
+    expect(poProblem(ok({ lines: [line(), line({ partNumber: "  " })] })))
+      .toContain("Every line needs a part number");
+  });
+
+  it("insists on a vendor, a date and an outcome", () => {
+    expect(poProblem(ok({ vendor: "  " }))).toBe("Say who it was ordered from");
+    expect(poProblem(ok({ orderedOn: "last November" }))).toBe("Pick the day it was ordered");
+    expect(poProblem(ok({ outcome: "posted" }))).toBe("Say how it ended");
+  });
+
+  it("refuses an order for nothing", () => {
+    expect(poProblem(ok({ lines: [] }))).toContain("at least one line");
+    expect(poProblem(ok({ lines: [line({ qty: 0 })] }))).toBe("A line with no quantity is not an order");
+  });
+
+  it("keeps only the lines somebody actually filled in", () => {
+    // The form ships a blank row to type into; an untouched one is not a line.
+    const rows = [line(), { partNumber: "", name: "", qty: 1, unitCents: 0 }];
+    expect(usablePoLines(rows)).toHaveLength(1);
+  });
+
+  it("offers cancelled as an outcome, because a spent number is still spent", () => {
+    expect([...PO_OUTCOMES]).toEqual(["received", "sent", "cancelled"]);
+    expect(poProblem(ok({ outcome: "cancelled" }))).toBeNull();
+    expect(poProblem(ok({ outcome: "sent" }))).toBeNull();
   });
 });

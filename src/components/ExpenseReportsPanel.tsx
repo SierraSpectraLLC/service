@@ -20,6 +20,8 @@ export type PoolRow = {
 };
 export type ReportRow = {
   id: number; person: string; status: string; submittedAt: string;
+  /** The filer's own name for the claim. Blank reads as it always did. */
+  title: string;
   paidOn: string; paidRef: string; returnedReason: string; note: string;
   expenses: { id: number; kind: string; description: string; amountCents: number; incurredOn: string }[];
 };
@@ -59,7 +61,8 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
 }) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [paying, setPaying] = useState<ReportRow | null>(null);
-  const [forWhom, setForWhom] = useState("");
+  const [opening, setOpening] = useState(false);
+  const [newDraft, setNewDraft] = useState({ title: "", purpose: "", forWhom: "" });
   const [adding, setAdding] = useState(false);
   const [addDraft, setAddDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
   const [addErr, setAddErr] = useState("");
@@ -91,6 +94,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
             open
           </Link>
           {side === "queue" && <span className="t-body" style={{ fontWeight: 700 }}>{r.person}</span>}
+          {r.title && <span className="t-body" style={{ fontWeight: 600 }}>{r.title}</span>}
           {/* A returned report has no rows left - they went back to the pool -
               so a count and a $0 would read as an empty claim, not a bounce. */}
           {r.status === "returned" && r.expenses.length === 0 ? (
@@ -179,34 +183,9 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
 
       <Panel title="Start here" hint="A report is the folder a trip's receipts go into. Open one, scan receipts into it as they happen, submit when the pocket is empty.">
         <button className="btn primary" disabled={pending}
-          onClick={() => startTransition(async () => {
-            const res = await createExpenseReport();
-            if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
-            router.push(`/money/reimbursements/${res.id}`);
-          })}>
-          {pending ? "Opening..." : "+ New expense report"}
+          onClick={() => { setNewDraft({ title: "", purpose: "", forWhom: "" }); setOpening(true); }}>
+          + New expense report
         </button>
-        {/* The HR half. Somebody hands over a shoebox of receipts and never
-            files anything; this opens the claim in THEIR name, so the payout
-            is owed to them and the pool it fills from is theirs. */}
-        {subjects.length > 0 && (
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
-            <label className="mut t-small" htmlFor="claim-for">or open one for</label>
-            <select id="claim-for" className="input sm" value={forWhom}
-              onChange={(e) => setForWhom(e.target.value)} style={{ maxWidth: 220 }}>
-              <option value="">someone else...</option>
-              {subjects.map((p) => <option key={p.email} value={p.name}>{p.name}</option>)}
-            </select>
-            <button className="btn sm" disabled={pending || !forWhom}
-              onClick={() => startTransition(async () => {
-                const res = await createExpenseReport(forWhom);
-                if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
-                router.push(`/money/reimbursements/${res.id}`);
-              })}>
-              Open it
-            </button>
-          </div>
-        )}
       </Panel>
 
       <Panel title="My unclaimed expenses" count={pool.length || undefined}
@@ -250,6 +229,64 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
         {mine.map((r) => reportCard(r, "mine"))}
         {mine.length === 0 && <div className="mut t-small">No claims yet.</div>}
       </Panel>
+
+      {opening && (
+        <Dialog open onClose={() => setOpening(false)} size="sm"
+          title="New expense report"
+          context="A folder for a trip's receipts. Nothing is claimed until you submit it."
+          footer={
+            <>
+              <button className="btn" onClick={() => setOpening(false)} disabled={pending}>Cancel</button>
+              <button className="btn accent" disabled={pending}
+                onClick={() => startTransition(async () => {
+                  const res = await createExpenseReport({
+                    onBehalfOf: newDraft.forWhom || undefined,
+                    title: newDraft.title,
+                    purpose: newDraft.purpose,
+                  });
+                  if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
+                  setOpening(false);
+                  router.push(`/money/reimbursements/${res.id}`);
+                })}>
+                {pending ? "Opening..." : "Open it"}
+              </button>
+            </>
+          }>
+          {/* The HR half, folded into the one flow rather than sitting beside
+              it as a second button. Somebody hands the office manager a shoebox
+              of receipts and never files anything; this opens the claim in
+              THEIR name, so the payout is owed to them and the pool it fills
+              from is theirs. */}
+          {subjects.length > 0 && (
+            <>
+              <label>Whose claim</label>
+              <select value={newDraft.forWhom} aria-label="Whose claim"
+                onChange={(e) => setNewDraft({ ...newDraft, forWhom: e.target.value })}>
+                <option value="">Mine</option>
+                {subjects.map((p) => <option key={p.email} value={p.name}>{p.name}</option>)}
+              </select>
+              <div className="field-hint">
+                Opening one for somebody else fills it from their unclaimed receipts, not yours.
+              </div>
+            </>
+          )}
+          <label style={{ marginTop: subjects.length > 0 ? 8 : 0 }}>Name it</label>
+          <input value={newDraft.title} aria-label="Report name" autoFocus
+            placeholder="Reno install, week of the 12th"
+            onChange={(e) => setNewDraft({ ...newDraft, title: e.target.value })} />
+          <div className="field-hint">
+            Optional. Without one it reads as the person and the dates its receipts cover,
+            which tells two reports apart and not much else.
+          </div>
+          <label style={{ marginTop: 8 }}>What it was for</label>
+          <input value={newDraft.purpose} aria-label="Purpose"
+            placeholder="Commissioning the new LC-MS at the Reno site"
+            onChange={(e) => setNewDraft({ ...newDraft, purpose: e.target.value })} />
+          <div className="field-hint">
+            The sentence whoever pays it will read before they do.
+          </div>
+        </Dialog>
+      )}
 
       {adding && (
         <Dialog open onClose={() => setAdding(false)} size="sm" title="New expense"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addDays, addMonths, anticipated, billCadenceLabel, cycleDay, daysInMonth,
-  dueCycles, firstCycle, openingCursor, recurring, type RecurringTerms,
+  dueCycles, missedCycles, firstCycle, openingCursor, recurring, type RecurringTerms,
 } from "@/lib/recurring";
 
 /**
@@ -70,8 +70,105 @@ describe("the first cycle", () => {
   it("opens the cursor ahead of today, never on a year of back-cycles", () => {
     // Turning the box on for a contract that started in January must not
     // raise eight drafts. History is backfilled deliberately.
-    expect(openingCursor({ startsOn: "2026-01-01", billDayOfMonth: 1 }, "2026-08-24")).toBe("2026-09-01");
-    expect(openingCursor({ startsOn: "2027-01-01", billDayOfMonth: 1 }, "2026-08-24")).toBe("2027-01-01");
+    expect(openingCursor({ startsOn: "2026-01-01", billDayOfMonth: 1, billEveryMonths: 1 }, "2026-08-24"))
+      .toBe("2026-09-01");
+    expect(openingCursor({ startsOn: "2027-01-01", billDayOfMonth: 1, billEveryMonths: 1 }, "2026-08-24"))
+      .toBe("2027-01-01");
+  });
+
+  it("opens on the next CADENCE cycle, not the next day-of-month", () => {
+    /*
+     * The bug this pins, from a real contract. An annual contract running
+     * 2025-10-01 to 2026-09-30, switched on in August 2026, opened at
+     * 2026-09-01 - not an anniversary of anything, four weeks before the term
+     * ended, with a full year's fee ready to raise against the twenty-nine
+     * days that were left. The cadence was not passed in at all, so the walk
+     * could only ever step one month.
+     *
+     * The anniversary is 2026-10-01, which is past the end date - so nothing
+     * is due and the card says the contract ends first. That is the honest
+     * answer: the fee for that term fell due last October, and billing a
+     * period already served is a decision somebody makes on purpose.
+     */
+    expect(openingCursor({ startsOn: "2025-10-01", billDayOfMonth: 1, billEveryMonths: 12 }, "2026-08-27"))
+      .toBe("2026-10-01");
+    // Mid-term on a year that has not turned over yet: the next anniversary,
+    // not "the first of next month".
+    expect(openingCursor({ startsOn: "2026-03-01", billDayOfMonth: 1, billEveryMonths: 12 }, "2026-08-27"))
+      .toBe("2027-03-01");
+  });
+
+  it("walks a quarterly contract a quarter at a time", () => {
+    expect(openingCursor({ startsOn: "2026-01-01", billDayOfMonth: 1, billEveryMonths: 3 }, "2026-08-27"))
+      .toBe("2026-10-01");
+    expect(openingCursor({ startsOn: "2026-01-15", billDayOfMonth: 15, billEveryMonths: 6 }, "2026-08-27"))
+      .toBe("2027-01-15");
+  });
+
+  it("still lands on the first cycle for a contract that has not started", () => {
+    expect(openingCursor({ startsOn: "2027-04-01", billDayOfMonth: 1, billEveryMonths: 12 }, "2026-08-27"))
+      .toBe("2027-04-01");
+  });
+
+  it("terminates on a nonsense start date rather than walking forever", () => {
+    // A corrupt row must not hang the request that reads it.
+    expect(openingCursor({ startsOn: "1900-01-01", billDayOfMonth: 1, billEveryMonths: 1 }, "2026-08-27"))
+      .toBe("");
+  });
+});
+
+describe("cycles the contract never billed", () => {
+  /*
+   * The hole dueCycles leaves on purpose. A contract billed annually at its
+   * start, entered into the app eleven months later, has a real invoice that
+   * the forward-only cursor can never reach - and two of those was $48,000 of
+   * service delivered and never billed.
+   */
+  const annual = (over: Partial<RecurringTerms> = {}): RecurringTerms => on({
+    billEveryMonths: 12, billAmountCents: 2_400_000, billDayOfMonth: 1,
+    startsOn: "2025-10-01", endsOn: "2026-09-30", billNextOn: "", billLastOn: "",
+    ...over,
+  });
+
+  it("finds the annual cycle nobody raised", () => {
+    expect(missedCycles(annual(), "2026-08-27")).toEqual(["2025-10-01"]);
+  });
+
+  it("finds every missed month, oldest first", () => {
+    expect(missedCycles(annual({
+      billEveryMonths: 1, startsOn: "2026-05-01", endsOn: "2027-04-30",
+    }), "2026-08-27")).toEqual(["2026-05-01", "2026-06-01", "2026-07-01", "2026-08-01"]);
+  });
+
+  it("stops at what has already been raised", () => {
+    expect(missedCycles(annual({
+      billEveryMonths: 1, startsOn: "2026-05-01", endsOn: "2027-04-30", billLastOn: "2026-06-01",
+    }), "2026-08-27")).toEqual(["2026-07-01", "2026-08-01"]);
+  });
+
+  it("never offers a cycle the cursor is already offering", () => {
+    // The two lists have to be disjoint: the same invoice on two buttons is
+    // the same invoice raised twice.
+    const a = annual({ billEveryMonths: 1, startsOn: "2026-05-01", endsOn: "2027-04-30", billNextOn: "2026-07-01" });
+    expect(missedCycles(a, "2026-08-27")).toEqual(["2026-05-01", "2026-06-01"]);
+    for (const c of missedCycles(a, "2026-08-27")) {
+      expect(dueCycles(a, "2026-08-27")).not.toContain(c);
+    }
+  });
+
+  it("stops at the end of the term, not at today", () => {
+    expect(missedCycles(annual({
+      billEveryMonths: 1, startsOn: "2026-01-01", endsOn: "2026-03-31",
+    }), "2026-08-27")).toEqual(["2026-01-01", "2026-02-01", "2026-03-01"]);
+  });
+
+  it("has nothing to offer a contract that has not started", () => {
+    expect(missedCycles(annual({ startsOn: "2027-01-01", endsOn: "2027-12-31" }), "2026-08-27")).toEqual([]);
+  });
+
+  it("has nothing to offer an agreement that does not bill on its own", () => {
+    expect(missedCycles(annual({ billEveryMonths: 0 }), "2026-08-27")).toEqual([]);
+    expect(missedCycles(annual({ status: "expired" }), "2026-08-27")).toEqual([]);
   });
 });
 

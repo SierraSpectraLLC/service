@@ -14,6 +14,7 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
+  awards, shareLinkSystems, providerProfiles, providerLinks, clientShares,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -33,7 +34,7 @@ import {
   serializeKits, type IncludedKit,
 } from "@/lib/agreements";
 import {
-  closeLine, moverOf, nextWoNumber, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
+  closeLine, moverOf, severityOf, woAcceptsWork, woMove, woOpen, WO_LABEL,
   type Mover,
 } from "@/lib/workOrders";
 import { addDays, advance as advancePm, cadenceLabel, isIsoDay, parseCadence } from "@/lib/pm";
@@ -55,9 +56,10 @@ import {
   invoicesForOrg, quoteForOrg,
 } from "@/lib/invoiceData";
 import {
-  addMonths, billCadenceLabel, dueCycles, openingCursor, recurring,
+  addMonths, billCadenceLabel, dueCycles, missedCycles, openingCursor, recurring,
 } from "@/lib/recurring";
 import { editableReport, mayWorkReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
+import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
 import { answerable, depositCents, quoteStanding } from "@/lib/quotes";
@@ -82,7 +84,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyClientShared, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -122,7 +124,7 @@ import { parseMoney, centsToInput, formatCents } from "@/lib/money";
 import { bestPrice, normalizePn } from "@/lib/priceBook";
 import { NOTIFY_KINDS, isNotifyKind, mayReceiveKind } from "@/lib/inbox";
 import { KIND_LABEL, STOCK_KINDS, canIssue, stockAccess } from "@/lib/stock";
-import { PO_LABEL, nextPoNumber, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
+import { PO_LABEL, poEditable, poReceivable, poTotals, statusAfterReceipt } from "@/lib/po";
 import { canKick } from "@/lib/queue";
 import { assetDupeKey, duplicateIds, importPlanner } from "@/lib/assetDupe";
 import { houseEmails, houseMemberRows } from "@/lib/house";
@@ -137,7 +139,27 @@ import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
 import { isHouseHr, mayAdminPeople, payrollViewerFor, reportSubjectFor } from "@/lib/hr";
+import { jobFrom, nextDocNumber } from "@/lib/docNumberData";
+import {
+  DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
+} from "@/lib/docNumber";
 import { PLAN_MAX_PER_YEAR, perYearLabel } from "@/lib/pmPlan";
+import { estimate, estimateProblems, periodWindows, type CoverageInput } from "@/lib/coveragePrice";
+import { kitFrom, kitSourceFor } from "@/lib/pmKitData";
+import type { ModelKit } from "@/lib/pmKit";
+import {
+  exerciseProblems, periodStanding, PERIOD_LABEL, type PeriodLike,
+} from "@/lib/award";
+import {
+  briefProblems, buildFleetBrief, fleetBriefSubject, parseRecipients,
+  renderFleetBriefHtml, renderFleetBriefText, type FleetBrief,
+} from "@/lib/fleetBrief";
+import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
+import {
+  mayDecide, mayWithdraw, parsePayload, shareProblems, summarize, SHARE_LABEL,
+} from "@/lib/clientShare";
+import { composePayload, materialize } from "@/lib/clientShareData";
+import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
 import { normalizePhone } from "@/lib/sms";
 import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
@@ -6174,9 +6196,10 @@ async function fileWorkOrder(opts: {
 }): Promise<typeof workOrders.$inferSelect> {
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: workOrders.number }).from(workOrders)
-      .where(forTenant(workOrders.tenantOrgId, opts.tenantOrgId));
-    const number = nextWoNumber(used.map((r) => r.number));
+    // A work order STARTS a thread: no job is passed, so a job-numbered
+    // workspace allocates the next one and everything raised against this job
+    // inherits it. See lib/docNumber.
+    const number = await nextDocNumber("work_order", opts.tenantOrgId);
     try {
       const [wo] = await db.insert(workOrders).values({
         tenantOrgId: opts.tenantOrgId, number,
@@ -6337,7 +6360,7 @@ export async function logPastWorkOrder(
   if (reference && used.some((r) => r.number.toLowerCase() === reference.toLowerCase())) {
     return { error: `${reference} is already a work order here` };
   }
-  const number = reference || nextWoNumber(used.map((r) => r.number));
+  const number = reference || await nextDocNumber("work_order", t0.tenantOrgId);
 
   const orgId = t0.instrumentId !== null
     ? (await db.select({ o: instruments.ownerOrgId }).from(instruments)
@@ -8264,10 +8287,17 @@ async function workableReport(u: SessionUser, id: number) {
  * the row it writes carries their name, not the filer's, because the money is
  * owed to them.
  */
-export async function createExpenseReport(onBehalfOf?: string): Promise<{ error?: string; id?: number }> {
+export async function createExpenseReport(
+  opts: {
+    onBehalfOf?: string;
+    /** What this claim is, in the filer's words. Optional - see the column. */
+    title?: string;
+    purpose?: string;
+  } = {},
+): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   let person = u.name;
-  const want = (onBehalfOf ?? "").trim();
+  const want = (opts.onBehalfOf ?? "").trim();
   if (want && want !== u.name) {
     if (!(await mayAdminPeople(u))) return { error: "Only HR can open a report in somebody else's name" };
     // forTenant, so the platform's own administrator can open a report while
@@ -8282,18 +8312,51 @@ export async function createExpenseReport(onBehalfOf?: string): Promise<{ error?
     if (!member) return { error: "That is not somebody on your roster" };
     person = member.name;
   }
+  const title = (opts.title ?? "").trim().slice(0, 120);
+  const purpose = (opts.purpose ?? "").trim().slice(0, 500);
   const [report] = await db.insert(expenseReports).values({
-    tenantOrgId: readTenant(u), person, status: "draft", submittedBy: u.email,
+    tenantOrgId: readTenant(u), person, status: "draft", submittedBy: u.email, title, purpose,
   }).returning();
   await audit({
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
-    action: person === u.name
+    action: (person === u.name
       ? "opened a draft expense report"
-      : `opened a draft expense report for ${person}`,
+      : `opened a draft expense report for ${person}`)
+      + (title ? ` - "${title}"` : ""),
   });
   revalidatePath("/money/reimbursements");
   revalidatePath("/people");
   return { id: report.id };
+}
+
+/**
+ * Rename a claim, or say again what it was for.
+ *
+ * Creation-time naming without an edit path makes a typo permanent, and a
+ * report is open for as long as the trip takes - what it was for is often
+ * clearer on the way back than on the way out. Same gate as every other edit
+ * to a report: whose claim it is, inside the tenant, and only while it is
+ * still editable.
+ */
+export async function nameExpenseReport(
+  reportId: number, data: { title: string; purpose: string },
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const report = await workableReport(u, reportId);
+  if (!report) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `That report is ${report.status} - it is fixed now` };
+  const title = data.title.trim().slice(0, 120);
+  const purpose = data.purpose.trim().slice(0, 500);
+  if (title === report.title && purpose === report.purpose) return {};
+  await db.update(expenseReports).set({ title, purpose }).where(eq(expenseReports.id, reportId));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
+    action: title ? `named ${report.person}'s expense report "${title}"` : `cleared the name on ${report.person}'s expense report`,
+    field: "title", oldValue: report.title, newValue: title,
+  });
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${reportId}`);
+  return {};
 }
 
 /**
@@ -9734,16 +9797,26 @@ export async function addOrg(name: string, kind: string): Promise<{ error?: stri
   const n = name.trim();
   if (!n || n.length > 60) return { error: "Name must be 1-60 characters" };
   const k = kind === "provider" ? "provider" : "client";
-  const existing = await db.select().from(orgs);
-  if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
+  /*
+   * Unique within THIS workspace, which is what the constraint now says too.
+   * It used to compare against every organization on the instance, so a shop
+   * could be told its own new client "already exists" because a different
+   * service company had one by that name - a message that named somebody
+   * else's client list by implication.
+   */
+  const tenant = myTenantOrgId(u);
+  const existing = await db.select({ name: orgs.name, parentOrgId: orgs.parentOrgId }).from(orgs);
+  if (existing.some((o) => o.parentOrgId === tenant && o.name.toLowerCase() === n.toLowerCase())) {
+    return { error: `${n} already exists` };
+  }
   const [row] = await db.insert(orgs).values({
     name: n, kind: k,
     // A client belongs to the workspace that created it; that parent is what
     // every tenancy rule reads afterwards.
-    parentOrgId: myTenantOrgId(u),
+    parentOrgId: tenant,
   }).returning();
   await audit({
-    actor: u.email, entityType: "org", entityId: row.id, tenantOrgId: myTenantOrgId(u),
+    actor: u.email, entityType: "org", entityId: row.id, tenantOrgId: tenant,
     action: `created ${k} organization "${n}"`,
   });
   revalidatePath("/settings");
@@ -10289,8 +10362,13 @@ export async function createOperator(
   const e = ownerEmail.trim().toLowerCase();
   if (!validHouseEmail(e)) return { error: "Give one exact email for their first owner - no @domain wildcards" };
 
-  const existing = await db.select().from(orgs);
-  if (existing.some((o) => o.name.toLowerCase() === n.toLowerCase())) return { error: `${n} already exists` };
+  // Among OPERATORS only. Client names are per-workspace now, so refusing a new
+  // service company because some shop has a client by that name would be one
+  // workspace's records vetoing another's.
+  const existing = await db.select({ name: orgs.name, isOperator: orgs.isOperator }).from(orgs);
+  if (existing.some((o) => o.isOperator && o.name.toLowerCase() === n.toLowerCase())) {
+    return { error: `${n} already exists` };
+  }
   // One person is staff of one company (house_members is unique on email), so a
   // borrowed address would move them rather than adding them - say so instead.
   const [taken] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
@@ -11044,10 +11122,13 @@ export async function createPurchaseOrder(data: {
   // unhandled constraint violation on somebody's screen. The scan reveals only
   // the highest number in use, never a row; making the constraint per-tenant is
   // the real fix and is a migration, not a predicate.
-  const existing = await db.select({ number: purchaseOrders.number }).from(purchaseOrders);
+  // Raised from a stockroom rather than from a job, so there is no thread to
+  // join - a job-numbered workspace opens a new one. The scan behind this
+  // stays instance-wide; the reason is on lib/docNumberData.used.
+  const poNumber = await nextDocNumber("purchase_order", acc.room.tenantOrgId ?? myTenantOrgId(u));
   const [po] = await db.insert(purchaseOrders).values({
     tenantOrgId: acc.room.tenantOrgId ?? myTenantOrgId(u),
-    number: nextPoNumber(existing.map((r) => r.number)),
+    number: poNumber,
     vendor, stockroomId: data.stockroomId, orgId: acc.room.orgId,
     urgent: !!data.urgent,
     reference: (data.reference ?? "").trim().slice(0, 80),
@@ -12086,6 +12167,107 @@ export async function removePmPlan(id: number): Promise<{ error?: string }> {
   });
   revalidatePath(`/settings/organizations/${row.orgId}`);
   revalidatePath("/maintenance/coverage");
+  return {};
+}
+
+// ── Document numbering ──────────────────────────────────────────────────────
+
+/**
+ * How this service company numbers its paper.
+ *
+ * The operator's own call, not the platform's and not a client's - it is a
+ * house convention, and the shop next door numbering PO-1042 while this one
+ * threads 030120_PO1 is two right answers rather than one wrong one.
+ */
+export async function setDocScheme(scheme: Scheme): Promise<{ error?: string }> {
+  const u = await requireOwner();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "No workspace to configure" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, tenant));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  for (const kind of DOC_KINDS) {
+    const problems = templateProblems(scheme.templates[kind] ?? "");
+    if (problems.length) return { error: `${DOC_LABEL[kind]}: ${problems[0]}` };
+  }
+  await db.update(orgs).set({ docScheme: serializeScheme(scheme) }).where(eq(orgs.id, tenant));
+  await audit({
+    actor: u.email, entityType: "org", entityId: tenant, tenantOrgId: tenant,
+    action: `set how ${org.name} numbers its documents`
+      + DOC_KINDS.map((k) => ` · ${DOC_LABEL[k]} ${scheme.templates[k]}`).join(""),
+  });
+  revalidatePath("/settings/billing");
+  return {};
+}
+
+/**
+ * Type over the number the scheme proposed.
+ *
+ * A number is the one thing on a document that has to match somebody else's
+ * filing cabinet, so a scheme proposes and a person may overrule. Only while
+ * the document is still a draft: a number that has been sent to a client is
+ * their reference too, and changing it afterwards makes every conversation
+ * about that document harder rather than easier.
+ *
+ * Uniqueness is checked per workspace, which is where a number has to be
+ * unambiguous - except purchase orders, whose constraint is instance-wide
+ * (see lib/docNumberData.used).
+ */
+export async function setDocumentNumber(
+  kind: "invoice" | "quote" | "purchase_order", id: number, next: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const number = next.trim().slice(0, 40);
+  if (!number) return { error: "A document needs a number" };
+  if (/\s/.test(number)) return { error: "No spaces - a number gets pasted into emails and file names" };
+
+  if (kind === "invoice") {
+    const [row] = await db.select().from(invoices).where(eq(invoices.id, id));
+    if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+    if (row.status !== "draft") return { error: `${row.number} has been sent - its number is the client's reference now` };
+    const clash = await db.select({ id: invoices.id }).from(invoices)
+      .where(and(eq(invoices.number, number), forTenant(invoices.tenantOrgId, row.tenantOrgId)));
+    if (clash.some((c) => c.id !== id)) return { error: `${number} is already on file` };
+    await db.update(invoices).set({ number, updatedAt: new Date() }).where(eq(invoices.id, id));
+    await audit({
+      actor: u.email, entityType: "invoice", entityId: id, tenantOrgId: row.tenantOrgId,
+      action: `renumbered ${row.number} to ${number}`, field: "number", oldValue: row.number, newValue: number,
+    });
+    revalidatePath(`/money/invoices/${id}`);
+    revalidatePath("/money/invoices");
+    return {};
+  }
+
+  if (kind === "quote") {
+    const [row] = await db.select().from(quotes).where(eq(quotes.id, id));
+    if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+    if (row.status !== "draft") return { error: `${row.number} has been sent - its number is the client's reference now` };
+    const clash = await db.select({ id: quotes.id }).from(quotes)
+      .where(and(eq(quotes.number, number), forTenant(quotes.tenantOrgId, row.tenantOrgId)));
+    if (clash.some((c) => c.id !== id)) return { error: `${number} is already on file` };
+    await db.update(quotes).set({ number, updatedAt: new Date() }).where(eq(quotes.id, id));
+    await audit({
+      actor: u.email, entityType: "quote", entityId: id, tenantOrgId: row.tenantOrgId,
+      action: `renumbered ${row.number} to ${number}`, field: "number", oldValue: row.number, newValue: number,
+    });
+    revalidatePath(`/money/quotes/${id}`);
+    revalidatePath("/money/quotes");
+    return {};
+  }
+
+  const [row] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  if (!poEditable(row.status)) return { error: `${row.number} has been sent to the vendor - its number is their reference now` };
+  // Instance-wide, because po_number_unique is.
+  const clash = await db.select({ id: purchaseOrders.id }).from(purchaseOrders)
+    .where(eq(purchaseOrders.number, number));
+  if (clash.some((c) => c.id !== id)) return { error: `${number} is already on file` };
+  await db.update(purchaseOrders).set({ number }).where(eq(purchaseOrders.id, id));
+  await audit({
+    actor: u.email, entityType: "po", entityId: id, tenantOrgId: row.tenantOrgId,
+    action: `renumbered ${row.number} to ${number}`, field: "number", oldValue: row.number, newValue: number,
+  });
+  revalidatePath(`/money/purchasing/${id}`);
+  revalidatePath("/money/purchasing");
   return {};
 }
 
@@ -13415,9 +13597,11 @@ export async function draftInvoice(workOrderId: number): Promise<{ error?: strin
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, wo.tenantOrgId));
-    const number = nextWoNumber(used.map((r) => r.number), src.context.invoicePrefix);
+    // The job's own thread, read off the work order's number: job 030212's
+    // invoices are 030212_INV1, 030212_INV2.
+    const number = await nextDocNumber("invoice", wo.tenantOrgId, {
+      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+    });
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId,
@@ -14133,9 +14317,9 @@ export async function draftQuote(
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, wo.tenantOrgId));
-    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", wo.tenantOrgId, {
+      job: await jobFrom("work_order", wo.number, wo.tenantOrgId),
+    });
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: wo.tenantOrgId, orgId: wo.orgId, workOrderId,
@@ -14297,9 +14481,11 @@ async function applyQuoteApproval(
     const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
     const ctx = await billingContext(q.orgId);
     for (let attempt = 0; attempt < 4; attempt++) {
-      const used = await db.select({ number: invoices.number }).from(invoices)
-        .where(forTenant(invoices.tenantOrgId, q.tenantOrgId));
-      const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+      // The quote's thread, so the deposit and the final invoice sit in the
+      // same folder as the offer they came from.
+      const number = await nextDocNumber("invoice", q.tenantOrgId, {
+        job: await jobFrom("quote", q.number, q.tenantOrgId),
+      });
       try {
         const [inv] = await db.insert(invoices).values({
           tenantOrgId: q.tenantOrgId, orgId: q.orgId, workOrderId: q.workOrderId,
@@ -14540,7 +14726,6 @@ export async function saveExpensePolicy(data: Record<string, unknown>): Promise<
 
 export async function saveBillingDefaults(data: {
   policy: Record<string, unknown>;
-  invoicePrefix?: string;
   loadedLabor?: string;
   platformFeeBps?: number;
 }): Promise<{ error?: string }> {
@@ -14553,10 +14738,6 @@ export async function saveBillingDefaults(data: {
   const changes: string[] = [];
   for (const key of Object.keys(after) as (keyof typeof after)[]) {
     if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changes.push(String(key));
-  }
-  if (data.invoicePrefix !== undefined) {
-    const prefix = data.invoicePrefix.trim().slice(0, 12);
-    if (prefix && prefix !== row?.invoicePrefix) { patch.invoicePrefix = prefix; changes.push("invoice prefix"); }
   }
   if (data.loadedLabor !== undefined) {
     const cents = parseMoney(data.loadedLabor) ?? 0;
@@ -14820,9 +15001,7 @@ export async function requestDeposit(orgId: number, note: string): Promise<{ err
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, myTenantOrgId(u)));
-    const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+    const number = await nextDocNumber("invoice", myTenantOrgId(u));
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: myTenantOrgId(u), orgId, number, status: "sent",
@@ -14921,13 +15100,9 @@ export async function createBlankInvoice(orgId: number): Promise<{ error?: strin
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
   if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
   const tenant = orgTenant(org) ?? myTenantOrgId(u);
-  const { invoicePrefix } = await billingContext(orgId);
-
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    const number = await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId, number, status: "draft",
@@ -14980,13 +15155,9 @@ export async function raiseRetainerCycle(
   const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
   if (!org) return { error: "Not found" };
   const tenant = orgTenant(org) ?? ag.tenantOrgId;
-  const { invoicePrefix } = await billingContext(ag.orgId);
-
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    const number = await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId: ag.orgId, agreementId: ag.id, number,
@@ -15105,8 +15276,7 @@ export async function recordHistoricalInvoice(
     if (typed && used.some((r) => r.number.toLowerCase() === typed.toLowerCase())) {
       return { error: `${typed} is already on file` };
     }
-    const { invoicePrefix } = await billingContext(orgId);
-    const number = typed || nextWoNumber(used.map((r) => r.number), invoicePrefix);
+    const number = typed || await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId, number,
@@ -15157,6 +15327,110 @@ export async function recordHistoricalInvoice(
  * the client; both are wrong for a job that was quoted, won and finished two
  * years ago. This writes the answer and the day it came, and raises nothing.
  */
+/**
+ * A purchase order that was already placed, and probably already received.
+ *
+ * The last of the four documents to get a history door, and the one that most
+ * needed it: a part sitting on a shelf with no order behind it cannot be
+ * traced to what was paid for it, so a shop that migrates its invoices and
+ * quotes but not its purchasing arrives with an inventory it cannot cost.
+ *
+ * Defined by what it refuses, like its siblings: nothing is emailed to the
+ * vendor, no receiving notification fires, and no stock movement is invented.
+ * A received order writes its lines already received, because that is what
+ * happened - not because pressing a button here should move anything today.
+ *
+ * The number is THEIRS. A migration whose PO numbers do not match the vendor's
+ * copies is a migration that makes every future conversation about an old
+ * order harder.
+ */
+export async function recordHistoricalPurchaseOrder(
+  data: {
+    number: string; vendor: string; orderedOn: string; reference: string; note: string;
+    stockroomId: number | null;
+    /** received | sent | cancelled. */
+    outcome: string;
+    lines: { partNumber: string; name: string; qty: number; unitCents: number }[];
+  },
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  const vendor = data.vendor.trim().slice(0, 120);
+  const problem = poProblem({
+    vendor, orderedOn: data.orderedOn, outcome: data.outcome, lines: data.lines,
+  });
+  if (problem) return { error: problem };
+
+  // The destination room, when one was named, and only one of ours.
+  let stockroomId: number | null = null;
+  let orgId: number | null = null;
+  if (data.stockroomId !== null) {
+    const [room] = await db.select().from(stockrooms).where(and(
+      eq(stockrooms.id, data.stockroomId),
+      forTenant(stockrooms.tenantOrgId, tenant),
+    ));
+    if (!room) return { error: "That stockroom is not one of ours" };
+    stockroomId = room.id;
+    orgId = room.orgId;
+  }
+
+  const typed = data.number.trim().slice(0, 40);
+  // Instance-wide, because po_number_unique is - see lib/docNumberData.used.
+  const clash = typed
+    ? await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.number, typed))
+    : [];
+  if (clash.length) return { error: `${typed} is already on file` };
+
+  const lines = usablePoLines(data.lines).slice(0, 200);
+  const at = new Date(`${data.orderedOn}T12:00:00Z`);
+  const status = data.outcome === "cancelled" ? "cancelled"
+    : data.outcome === "sent" ? "sent" : "received";
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const number = typed || await nextDocNumber("purchase_order", tenant);
+    try {
+      const [po] = await db.insert(purchaseOrders).values({
+        tenantOrgId: tenant, number, vendor, stockroomId, orgId, status,
+        reference: data.reference.trim().slice(0, 80),
+        note: data.note.trim().slice(0, 500),
+        createdBy: u.email, createdAt: at,
+        // The dates it actually had. Every outcome this door offers was sent
+        // to a vendor - a cancelled order was still sent first - which is why
+        // sentAt is unconditional and only the closing stamp varies.
+        sentAt: at,
+        closedAt: status === "received" || status === "cancelled" ? at : null,
+        cancelReason: status === "cancelled" ? "Recorded as history" : "",
+      }).returning();
+      if (lines.length) {
+        await db.insert(poLines).values(lines.map((l) => ({
+          poId: po.id,
+          partNumber: l.partNumber.trim().slice(0, 80),
+          name: l.name.trim().slice(0, 160),
+          qtyOrdered: Math.max(1, Math.round(l.qty)),
+          // Received orders arrive already received. Nothing moves stock: the
+          // shelf is whatever the shelf says, and this is the paper behind it.
+          qtyReceived: status === "received" ? Math.max(1, Math.round(l.qty)) : 0,
+          unitCents: Number.isFinite(l.unitCents) && l.unitCents > 0 ? Math.round(l.unitCents) : null,
+        })));
+      }
+      await audit({
+        actor: u.email, entityType: "po", entityId: po.id, tenantOrgId: tenant,
+        action: `recorded historical purchase order ${number} to ${vendor}`
+          + ` (${data.orderedOn}, ${status}) - typed in as history, not sent from here`,
+      });
+      revalidatePath("/money/purchasing");
+      return { id: po.id, number };
+    } catch (e) {
+      // A number we generated collided with a concurrent insert; a number the
+      // person typed was checked above and will not get better by retrying.
+      if (typed) return { error: `${typed} is already on file` };
+      last = e;
+    }
+  }
+  throw last;
+}
+
 export async function recordHistoricalQuote(
   orgId: number,
   data: {
@@ -15190,7 +15464,7 @@ export async function recordHistoricalQuote(
     if (typed && used.some((r) => r.number.toLowerCase() === typed.toLowerCase())) {
       return { error: `${typed} is already on file` };
     }
-    const number = typed || nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = typed || await nextDocNumber("quote", tenant);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: tenant, orgId, number, status: outcome, title,
@@ -15227,6 +15501,33 @@ export async function recordHistoricalQuote(
  * checked, and the cycle still has to be one dueCycles agrees is due, so this
  * cannot be used to run a contract forward past its own schedule.
  */
+/**
+ * Raise a cycle the contract should have billed and never did.
+ *
+ * Its own verb, not a widened raiseRetainerCycleNow. That one raises what the
+ * calendar says is due and is the same thing the cron does unattended; this
+ * bills a period that has already been served, which is a decision somebody
+ * makes on purpose and signs their name to. Keeping them apart is what lets
+ * the automatic one stay strict.
+ *
+ * The date is still not free. It has to be one of the contract's own missed
+ * cycles - lib/recurring.missedCycles - so this cannot invoice an arbitrary
+ * day, only a period the terms already produce.
+ */
+export async function raiseMissedCycle(
+  agreementId: number, cycleOn: string,
+): Promise<{ error?: string; id?: number; number?: string }> {
+  const u = await requireStaff();
+  const [ag] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!ag) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, ag.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  if (!missedCycles(ag, shopToday()).includes(cycleOn)) {
+    return { error: `The ${cycleOn} cycle is not one this contract missed` };
+  }
+  return raiseRetainerCycle(agreementId, cycleOn, u.email);
+}
+
 export async function raiseRetainerCycleNow(
   agreementId: number, cycleOn: string,
 ): Promise<{ error?: string; id?: number; number?: string }> {
@@ -15269,7 +15570,8 @@ export async function saveRecurringTerms(
   // Keep the cursor where it is once it is running: retuning the amount must
   // not silently re-bill a month, and must not skip one either.
   const nextOn = every === 0 ? ""
-    : ag.billNextOn || openingCursor({ startsOn: ag.startsOn, billDayOfMonth: day }, today);
+    : ag.billNextOn || openingCursor(
+        { startsOn: ag.startsOn, billDayOfMonth: day, billEveryMonths: every }, today);
 
   await db.update(agreements).set({
     billEveryMonths: every, billAmountCents: cents,
@@ -15305,9 +15607,7 @@ export async function createBlankQuote(
 
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const used = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", tenant);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: tenant, orgId, number, status: "draft",
@@ -15606,9 +15906,7 @@ export async function placePartsOrder(
   const today = shopToday();
   let last: unknown;
   for (let attempt = 0; attempt < 4 && nowLines.length && !invoiceNumber; attempt++) {
-    const used = await db.select({ number: invoices.number }).from(invoices)
-      .where(forTenant(invoices.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), ctx.invoicePrefix);
+    const number = await nextDocNumber("invoice", tenant);
     try {
       const [inv] = await db.insert(invoices).values({
         tenantOrgId: tenant, orgId: org.id, number, status: "draft",
@@ -15631,9 +15929,7 @@ export async function placePartsOrder(
   if (nowLines.length && !invoiceNumber) throw last;
 
   for (let attempt = 0; attempt < 4 && quoteLinesWanted.length && !quoteNumber; attempt++) {
-    const used = await db.select({ number: quotes.number }).from(quotes)
-      .where(forTenant(quotes.tenantOrgId, tenant));
-    const number = nextWoNumber(used.map((r) => r.number), "Q-");
+    const number = await nextDocNumber("quote", tenant);
     try {
       const [q] = await db.insert(quotes).values({
         tenantOrgId: tenant, orgId: org.id, number, status: "draft",
@@ -15659,4 +15955,637 @@ export async function placePartsOrder(
   revalidatePath("/money/quotes");
   revalidatePath("/store");
   return { number: invoiceNumber, quoteNumber };
+}
+
+
+// ── Coverage estimates ──────────────────────────────────────────────────────
+// Pricing a contract off a PLAN rather than off a client's history: so many
+// systems, at so many addresses, so many visits each. See lib/coveragePrice for
+// the arithmetic and lib/pmKit for what a model brings with it.
+
+/**
+ * What one model takes for one visit - its kit, its consumables, its hours.
+ *
+ * The lookup behind the estimate builder's system picker. Read-only and
+ * catalog-wide: it reveals what the SHOP stocks and charges, never a client's
+ * anything, which is why it needs no more than staff.
+ */
+export async function lookupModelKit(model: string, category: string): Promise<
+  { error?: string; kit?: ModelKit }
+> {
+  const u = await requireStaff();
+  const name = model.trim();
+  if (!name) return { error: "Pick a model" };
+  // viewTenant, not myTenantOrgId: the part catalog and the procedure library
+  // are SHARED VOCABULARY (see lib/tenancy) - platform staff read every
+  // workspace's, and a strict own-tenant predicate would hide the rows an
+  // instance wrote before it named an operator.
+  const source = await kitSourceFor(await viewTenant(u));
+  return { kit: kitFrom(source, name, category.trim()) };
+}
+
+/**
+ * Put a coverage estimate onto a draft quote: one line per 12-month period.
+ *
+ * The INPUT travels, not the prices. The builder shows its own arithmetic while
+ * somebody is typing, but what lands on the quote is priced here by the same
+ * pure function - so a stale tab, a fiddled form field or a rounding difference
+ * between two machines cannot put a number on a client's paper that our own
+ * rules would not produce.
+ */
+export async function applyCoverageEstimate(
+  quoteId: number, input: CoverageInput, startsOn: string,
+): Promise<{ error?: string; added?: number }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  if (q.status !== "draft") return { error: `${q.number} has gone out - it reads as sent.` };
+
+  const problems = estimateProblems(input);
+  if (problems.length) return { error: problems[0] };
+  const out = estimate(input);
+  if (out.periods.length === 0) return { error: "Price at least one 12-month period" };
+
+  const start = startsOn.trim();
+  if (start && !isIsoDay(start)) return { error: "That start date is not a day" };
+  const windows = periodWindows(start, out.periods.length);
+
+  const existing = await db.select({ position: quoteLines.position }).from(quoteLines)
+    .where(eq(quoteLines.quoteId, quoteId));
+  let position = existing.length ? Math.max(...existing.map((l) => l.position)) + 1 : 0;
+
+  await db.insert(quoteLines).values(out.periods.map((p, i) => {
+    const w = windows[i];
+    return {
+      quoteId,
+      /*
+       * A retainer, which is what a coverage period IS: a standing fee for a
+       * span of time. Not labor - a labor line renders its quantity as hours,
+       * so five CLINs came out reading "1 h" apiece, and the parts and travel
+       * inside the fee are not being sold as parts or travel either. The same
+       * kind the recurring biller raises a cycle under (lib/recurring).
+       */
+      kind: "retainer",
+      description: `CLIN ${String(i + 1).padStart(4, "0")} · ${p.label}`,
+      detail: w.from ? `${w.from} through ${w.to}` : "12 months",
+      qty: 1000,
+      unitCents: p.priceCents,
+      position: position++,
+    };
+  }));
+
+  const trips = out.sites.reduce((a, s) => a + s.trips, 0);
+  await audit({
+    actor: u.email, entityType: "quote", entityId: quoteId, tenantOrgId: q.tenantOrgId,
+    action: `priced ${out.periods.length} coverage period${out.periods.length === 1 ? "" : "s"} onto ${q.number}: `
+      + `${formatCents(out.totalCents)} total, built from ${trips} planned journey${trips === 1 ? "" : "s"} a year `
+      + `at ${(input.marginBps / 100).toFixed(0)}% margin`,
+  });
+  revQuote(q);
+  return { added: out.periods.length };
+}
+
+
+// ── Multi-year awards ───────────────────────────────────────────────────────
+// One engagement, several separately-priced 12-month terms, of which only the
+// base year is committed. Each period is an ordinary agreement; lib/award holds
+// what the thread between them means.
+
+/** The period label a person reads: "Base year", "Option year 2". */
+const clinLabel = (i: number) => (i === 0 ? "Base year" : `Option year ${i}`);
+
+/**
+ * Turn a won quote into an award: one contract per CLIN line.
+ *
+ * The retainer lines the estimate builder wrote ARE the periods, in the order
+ * it wrote them, so nothing has to be retyped and the contract that goes into
+ * force is the one the client actually accepted. Only the base year is made
+ * active - the rest are drafts, which is exactly right, because an option
+ * nobody has exercised must not cover work or bill anybody.
+ */
+export async function awardFromQuote(quoteId: number, data: {
+  number: string; startsOn: string; awardedOn: string;
+  optionNoticeDays: number; visitsIncluded: number;
+}): Promise<{ error?: string; id?: number; periods?: number }> {
+  const u = await requireStaff();
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, q.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  // A draft has not been anywhere. Awarding one would mean the client accepted
+  // something nobody sent them.
+  if (q.status === "draft") return { error: `${q.number} has not gone out yet.` };
+
+  const existing = await db.select({ id: awards.id }).from(awards).where(eq(awards.quoteId, quoteId));
+  if (existing.length) return { error: `${q.number} has already been awarded.` };
+
+  const lines = await db.select().from(quoteLines)
+    .where(and(eq(quoteLines.quoteId, quoteId), eq(quoteLines.kind, "retainer")))
+    .orderBy(asc(quoteLines.position), asc(quoteLines.id));
+  if (!lines.length) {
+    return { error: "No coverage periods on this quote - build a coverage estimate first." };
+  }
+
+  const start = data.startsOn.trim();
+  if (!isIsoDay(start)) return { error: "Pick the day the base year begins" };
+  const awardedOn = data.awardedOn.trim();
+  if (awardedOn && !isIsoDay(awardedOn)) return { error: "That award date is not a day" };
+  const notice = Math.max(0, Math.min(365, Math.round(data.optionNoticeDays)));
+  const visits = Math.max(0, Math.min(365, Math.round(data.visitsIncluded)));
+  const windows = periodWindows(start, lines.length);
+  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+
+  const [award] = await db.insert(awards).values({
+    tenantOrgId: tenant, orgId: q.orgId, number: data.number.trim(),
+    title: q.title, awardedOn, optionNoticeDays: notice, quoteId, createdBy: u.email,
+  }).returning();
+
+  const day = parseInt(start.slice(8, 10), 10) || 1;
+  await db.insert(agreements).values(lines.map((l, i) => ({
+    tenantOrgId: tenant, orgId: q.orgId, kind: "contract",
+    number: [data.number.trim(), `CLIN ${String(i + 1).padStart(4, "0")}`].filter(Boolean).join(" "),
+    // Just the period. Its `number` already carries the award number and the
+    // CLIN, and the contract list prints number then title - so taking the
+    // line's own description put "CLIN 0001" on the row twice.
+    title: clinLabel(i),
+    // Only the base year. An option is priced and agreed and NOT bought, so it
+    // must not cover work, must not bill, and must not read as coverage on
+    // anybody's system page until somebody exercises it.
+    status: i === 0 ? "active" : "draft",
+    startsOn: windows[i].from, endsOn: windows[i].to,
+    renewNoticeDays: notice,
+    visitsIncluded: visits,
+    // The coverage estimate priced parts INTO the fee - that is what a
+    // firm-fixed price is - so the contract includes them. Saying otherwise
+    // here would have the client's parts drawn from an allowance of zero and
+    // billed a second time.
+    partsUnlimited: true, pmPartsIncluded: true,
+    billEveryMonths: 12,
+    billAmountCents: Math.round((l.qty / 1000) * l.unitCents),
+    billDescription: `${clinLabel(i)} - ${q.title || "coverage"}`,
+    billDayOfMonth: day,
+    // The base year's cursor opens now; an option has no cycle until it is
+    // exercised, which is what stops the biller raising an invoice for a year
+    // nobody has bought.
+    billNextOn: i === 0 ? windows[i].from : "",
+    valueCents: Math.round((l.qty / 1000) * l.unitCents),
+    awardId: award.id, periodIndex: i,
+    createdBy: u.email,
+  })));
+
+  await audit({
+    actor: u.email, entityType: "award", entityId: award.id, tenantOrgId: tenant,
+    action: `awarded ${data.number.trim() || q.number} for ${org.name}: ${lines.length} periods from ${start}, `
+      + `base year in force, ${lines.length - 1} option${lines.length === 2 ? "" : "s"} at ${notice} days' notice`,
+  });
+  revalidatePath("/money/contracts");
+  revalidatePath(`/money/quotes/${quoteId}`);
+  revalidatePath("/agreements");
+  return { id: award.id, periods: lines.length };
+}
+
+/** One agreement, with the award facts the period rules need. */
+async function periodOf(agreementId: number): Promise<
+  { row: typeof agreements.$inferSelect; award: typeof awards.$inferSelect; period: PeriodLike } | null
+> {
+  const [row] = await db.select().from(agreements).where(eq(agreements.id, agreementId));
+  if (!row?.awardId) return null;
+  const [award] = await db.select().from(awards).where(eq(awards.id, row.awardId));
+  if (!award) return null;
+  return { row, award, period: row as PeriodLike };
+}
+
+/**
+ * The client took an option year. Put it in force and start its billing.
+ *
+ * A late exercise is allowed and back-dates the term, because a client really
+ * can come back after the deadline and a shop that cannot record that has to
+ * lie in its own books. What it must not do is quietly skip the cycles the
+ * back-dated term already owes - which is why the cursor is set to the period's
+ * own start and left for the biller to catch up (lib/recurring missedCycles).
+ */
+export async function exerciseOption(agreementId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const found = await periodOf(agreementId);
+  if (!found) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, found.row.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+
+  const today = shopToday();
+  if (periodStanding(found.period, today) !== "option"
+    && periodStanding(found.period, today) !== "lapsed") {
+    return { error: exerciseProblems(found.period, today)[0] ?? "That period is not an option." };
+  }
+
+  await db.update(agreements)
+    .set({ status: "active", billNextOn: found.row.startsOn })
+    .where(eq(agreements.id, agreementId));
+  const late = periodStanding(found.period, today) === "lapsed";
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: agreementId, tenantOrgId: found.row.tenantOrgId,
+    action: `exercised ${clinLabel(found.row.periodIndex).toLowerCase()} of ${found.award.number || "the award"} `
+      + `for ${org.name}: ${found.row.startsOn} to ${found.row.endsOn}, ${formatCents(found.row.billAmountCents)}`
+      + (late ? " - back-dated, its term had already begun" : ""),
+  });
+  revalidatePath("/money/contracts");
+  revalidatePath("/agreements");
+  return {};
+}
+
+/** They are not taking it. Recorded on purpose, so it never reads as an oversight. */
+export async function declineOption(agreementId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const found = await periodOf(agreementId);
+  if (!found) return { error: "Not found" };
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, found.row.orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  const today = shopToday();
+  const was = periodStanding(found.period, today);
+  if (was !== "option" && was !== "lapsed") {
+    return { error: `That period is ${PERIOD_LABEL[was].toLowerCase()}.` };
+  }
+  await db.update(agreements).set({ status: "cancelled" }).where(eq(agreements.id, agreementId));
+  await audit({
+    actor: u.email, entityType: "agreement", entityId: agreementId, tenantOrgId: found.row.tenantOrgId,
+    action: `${clinLabel(found.row.periodIndex).toLowerCase()} of ${found.award.number || "the award"} `
+      + `not taken by ${org.name}: ${why}`,
+  });
+  revalidatePath("/money/contracts");
+  revalidatePath("/agreements");
+  return {};
+}
+
+
+// ── Telling a peer what a client runs ───────────────────────────────────────
+// Two service companies that share a client have always had to describe each
+// other's equipment down the phone. A fleet brief is that description, composed
+// once (lib/fleetBrief) and delivered three ways - copied, emailed, or opened
+// on a link - so the clipboard and the mail can never drift apart the way the
+// EOD ones did.
+
+/** The gate, the scope and the rows. Every door below comes through here. */
+async function briefFor(orgId: number, note = ""): Promise<
+  { error: string }
+  | { u: SessionUser; brief: FleetBrief; org: typeof orgs.$inferSelect; tenant: number | null; rowCount: number }
+> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  // mayAdminOrg, deliberately: it is the one gate that refuses another
+  // operator's client AND another operator. houseOfRecord degrades to "any
+  // staff is the house", which on this path would let one workspace brief out
+  // another's client.
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+
+  const tenant = readTenant(u);
+  const bad = scopeProblem(tenant, isPlatformStaff(tenantViewer(u)));
+  if (bad) return { error: bad };
+
+  const today = shopToday();
+  const brand = await brandForTenant(tenant);
+  const rows = await fleetRowsFor({
+    orgId, tenantOrgId: tenant, today, operatorName: brand.operatorName,
+  });
+  return {
+    u,
+    brief: buildFleetBrief({
+      client: org.name,
+      // Who is sending it. A list arriving from nobody is a list nobody can act
+      // on, and the operator name is what a peer knows us by.
+      from: `${u.email} at ${brand.operatorName || brand.name}`,
+      today, rows, note,
+    }),
+    org, tenant, rowCount: rows.length,
+  };
+}
+
+/**
+ * The brief as text, for the Copy button.
+ *
+ * Composed on the SERVER from the same function the email uses, rather than
+ * assembled in the browser out of what happens to be on the page. lib/eodEmail
+ * is the cautionary tale: its copy button filtered one thing and its mailer
+ * filtered another, so the clipboard quietly carried internal lines for months.
+ */
+export async function fleetBriefText(orgId: number, note = ""): Promise<
+  { error?: string; text?: string; systems?: number }
+> {
+  const got = await briefFor(orgId, note);
+  if ("error" in got) return { error: got.error };
+  return { text: renderFleetBriefText(got.brief), systems: got.rowCount };
+}
+
+/**
+ * Email it, to an address somebody typed.
+ *
+ * The first hand-typed recipient in the app - every other send reads addresses
+ * already stored on an organization - so the list is parsed, capped at five and
+ * written verbatim into the audit line. Who a client's equipment list was sent
+ * to is exactly the question somebody will ask in a year.
+ */
+export async function emailFleetBrief(orgId: number, data: {
+  to: string; note: string; withLink: boolean; expiresOn: string;
+}): Promise<{ error?: string; sent?: number; token?: string }> {
+  const got = await briefFor(orgId, data.note);
+  if ("error" in got) return { error: got.error };
+  const to = parseRecipients(data.to);
+  const problems = briefProblems(got.brief.groups.flatMap((g) => g.rows), to);
+  if (problems.length) return { error: problems[0] };
+
+  // Mint the link first when one was asked for, so the email carries it. A
+  // failed send leaves a live link, which is recoverable; a sent email naming
+  // a link that was never made is not.
+  let link: { url: string; expiresOn: string } | null = null;
+  let token: string | undefined;
+  if (data.withLink) {
+    const made = await createFleetShare(orgId, { label: "Emailed brief", expiresOn: data.expiresOn });
+    if (made.error) return { error: made.error };
+    const base = appUrl();
+    if (made.token && base) {
+      token = made.token;
+      link = { url: `${base}/share/${made.token}`, expiresOn: made.expiresOn ?? "" };
+    }
+  }
+
+  const brand = await brandForTenant(got.tenant);
+  const brief = { ...got.brief, link };
+  const html = renderFleetBriefHtml(brief, {
+    name: brand.operatorName || brand.name,
+    logoUrl: brand.operatorLogoUrl || undefined,
+  });
+  // Threaded per (client, sender) so a second brief about the same client is
+  // the same conversation in the peer's inbox rather than a new one to file.
+  const root = threadRootId(`fleet-brief-${orgId}`, mailHost(process.env.EMAIL_FROM));
+  await sendEmail(to, fleetBriefSubject(brief), html, {
+    headers: threadHeaders(root),
+    text: renderFleetBriefText(brief),
+  });
+  await audit({
+    actor: got.u.email, entityType: "org", entityId: orgId, tenantOrgId: got.tenant,
+    action: `emailed ${got.org.name}'s fleet (${got.rowCount} system${got.rowCount === 1 ? "" : "s"}) to ${to.join(", ")}`
+      + (token ? ` with a link to ${link?.expiresOn}` : " with no link"),
+  });
+  return { sent: to.length, token };
+}
+
+/**
+ * A link to the live list, for a peer with no login here.
+ *
+ * Deliberately a share_links row rather than anything new: that table already
+ * has expiry, revocation, an open counter and a public viewer that is already
+ * outside the auth gate, and revokeShareLink already works on any kind. The
+ * only new thing is which systems it names.
+ *
+ * Membership is FROZEN and content is LIVE, the same bargain the files share
+ * makes: the peer sees today's serials, and the link can never grow to cover a
+ * system nobody chose to show them.
+ */
+export async function createFleetShare(orgId: number, data: {
+  label: string; expiresOn: string;
+}): Promise<{ error?: string; token?: string; expiresOn?: string; systems?: number }> {
+  const got = await briefFor(orgId);
+  if ("error" in got) return { error: got.error };
+
+  const expiry = cleanExpiry(data.expiresOn, shopToday());
+  if ("error" in expiry) return expiry;
+
+  // Scoped exactly as the brief's own reader is - owner AND tenant - so a link
+  // can never name a system its maker could not see. That is the rule
+  // createShareLink states for files, applied to systems.
+  const ids = (await db.select({ id: instruments.id }).from(instruments)
+    .where(and(eq(instruments.ownerOrgId, orgId), forTenant(instruments.tenantOrgId, got.tenant))))
+    .map((r) => r.id);
+  if (!ids.length) return { error: "There are no systems on file for this client yet" };
+
+  const token = crypto.randomBytes(18).toString("base64url");
+  const [link] = await db.insert(shareLinks).values({
+    token, kind: "fleet", orgId,
+    label: cleanLabel(data.label), expiresOn: expiry.expiresOn,
+    tenantOrgId: got.tenant ?? myTenantOrgId(got.u), createdBy: got.u.email,
+  }).returning();
+  await db.insert(shareLinkSystems).values(ids.map((instrumentId) => ({ shareId: link.id, instrumentId })));
+  await audit({
+    actor: got.u.email, entityType: "share_link", entityId: link.id, tenantOrgId: link.tenantOrgId,
+    action: `shared ${got.org.name}'s fleet (${ids.length} system${ids.length === 1 ? "" : "s"}) by link (to ${expiry.expiresOn})`,
+  });
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return { token, expiresOn: expiry.expiresOn, systems: ids.length };
+}
+
+
+// ── The service-company network ─────────────────────────────────────────────
+// A directory shops can find each other in, a shortlist each keeps, and the
+// handover of one client from one workspace to another. See lib/clientShare
+// for what crosses and what deliberately does not.
+
+/** Our own listing. Only a workspace's owner publishes its shopfront. */
+export async function saveProviderProfile(data: {
+  listed: boolean; blurb: string; services: string; regions: string;
+  contactName: string; contactEmail: string; contactPhone: string; website: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (u.role !== "owner") return { error: "Only the owner publishes the listing" };
+  const orgId = myTenantOrgId(u);
+  if (orgId === null) return { error: "Your workspace could not be resolved" };
+
+  const clean = {
+    listed: !!data.listed,
+    blurb: data.blurb.trim().slice(0, MAX_BLURB),
+    services: parseTags(data.services),
+    regions: parseTags(data.regions),
+    contactName: data.contactName.trim().slice(0, 120),
+    contactEmail: data.contactEmail.trim().toLowerCase().slice(0, 200),
+    contactPhone: data.contactPhone.trim().slice(0, 60),
+    website: data.website.trim().slice(0, 200),
+  };
+  const problems = profileProblems(clean);
+  if (problems.length) return { error: problems[0] };
+
+  await db.insert(providerProfiles)
+    .values({ orgId, ...clean, updatedBy: u.email, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: providerProfiles.orgId,
+      set: { ...clean, updatedBy: u.email, updatedAt: new Date() },
+    });
+  await audit({
+    actor: u.email, entityType: "org", entityId: orgId, tenantOrgId: orgId,
+    action: clean.listed
+      ? `listed the workspace in the service directory: ${clean.services.join(", ") || "no services"} in ${clean.regions.join(", ") || "no regions"}`
+      : "removed the workspace from the service directory",
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/** Add a service company to our shortlist. One-sided and tells them nothing. */
+export async function linkProvider(providerOrgId: number, note = ""): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  if (providerOrgId === tenant) return { error: "That is your own workspace" };
+
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, providerOrgId));
+  if (!org?.isOperator) return { error: "Not found" };
+  // Only a company that asked to be found can be added, so a shortlist can
+  // never become a way to enumerate the instance.
+  const [profile] = await db.select().from(providerProfiles)
+    .where(eq(providerProfiles.orgId, providerOrgId));
+  if (!profile?.listed) return { error: "Not found" };
+
+  await db.insert(providerLinks)
+    .values({ tenantOrgId: tenant, providerOrgId, note: note.trim().slice(0, 200), createdBy: u.email })
+    .onConflictDoNothing();
+  await audit({
+    actor: u.email, entityType: "org", entityId: providerOrgId, tenantOrgId: tenant,
+    action: `added ${org.name} to our service companies`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+export async function unlinkProvider(providerOrgId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  await db.delete(providerLinks).where(and(
+    eq(providerLinks.tenantOrgId, tenant), eq(providerLinks.providerOrgId, providerOrgId)));
+  revalidatePath("/network");
+  return {};
+}
+
+/**
+ * Offer a client to another service company.
+ *
+ * Writes nothing into their workspace. The snapshot is frozen here and sits in
+ * client_shares until somebody over there answers - what they approve is
+ * exactly what they get, however long they take.
+ */
+export async function shareClient(orgId: number, data: {
+  toOrgIds: number[]; note: string;
+}): Promise<{ error?: string; sent?: number }> {
+  const u = await requireStaff();
+  const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
+  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
+  /*
+   * The sender is the client's OWN operator, not the caller's workspace. That
+   * is the only unambiguous answer - a platform-staff user supporting somebody
+   * has a null tenant, and "which workspace is offering this client" must not
+   * depend on who happens to be signed in.
+   */
+  const tenant = orgTenant(org);
+  if (tenant === null) return { error: "That organization has no workspace behind it" };
+
+  const targets = [...new Set(data.toOrgIds.filter((n) => Number.isInteger(n)))].slice(0, 10);
+  if (!targets.length) return { error: "Pick who to share it with" };
+  // Only companies on our own shortlist. The picker shows those; this is the
+  // door, and a door that trusted the ids in the request would let anybody
+  // push a client at any workspace on the instance.
+  const allowed = new Set((await db.select({ id: providerLinks.providerOrgId }).from(providerLinks)
+    .where(and(eq(providerLinks.tenantOrgId, tenant), inArray(providerLinks.providerOrgId, targets))))
+    .map((r) => r.id));
+  const picked = targets.filter((t) => allowed.has(t));
+  if (!picked.length) return { error: "Add them to your service companies first" };
+
+  const brand = await brandForTenant(tenant);
+  const payload = await composePayload({
+    orgId, tenantOrgId: tenant, operatorName: brand.operatorName || brand.name,
+    by: u.email, on: shopToday(), note: data.note,
+  });
+  if (!payload) return { error: "Not found" };
+  const problems = shareProblems({ payload, toOrgId: picked[0], fromTenantOrgId: tenant });
+  if (problems.length) return { error: problems[0] };
+
+  const frozen = JSON.stringify(payload);
+  for (const toOrgId of picked) {
+    // One live offer per pair. A second while the first is open is two answers
+    // to one question.
+    const open = await db.select({ id: clientShares.id }).from(clientShares).where(and(
+      eq(clientShares.tenantOrgId, tenant), eq(clientShares.toOrgId, toOrgId),
+      eq(clientShares.sourceOrgId, orgId), eq(clientShares.status, "pending")));
+    if (open.length) continue;
+
+    const [row] = await db.insert(clientShares).values({
+      tenantOrgId: tenant, toOrgId, sourceOrgId: orgId,
+      payload: frozen, status: "pending", note: data.note.trim().slice(0, 500),
+      createdBy: u.email,
+    }).returning();
+    const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
+    await notifyClientShared({
+      to: await houseEmails(toOrgId),
+      fromName: brand.operatorName || brand.name,
+      clientName: org.name, summary: summarize(payload), note: data.note,
+    }).catch(() => {});
+    await audit({
+      actor: u.email, entityType: "client_share", entityId: row.id, tenantOrgId: tenant,
+      action: `offered ${org.name} (${summarize(payload)}) to ${to?.name ?? "another service company"}`,
+    });
+  }
+  revalidatePath("/network");
+  revalidatePath(`/settings/organizations/${orgId}`);
+  return { sent: picked.length };
+}
+
+/**
+ * The recipient answers. Accepting is the one write that crosses a workspace
+ * boundary in the whole application, so the gate is narrow: it is our row only
+ * because it is addressed to us, and only while it is still open.
+ */
+export async function decideClientShare(
+  shareId: number, accept: boolean, reason = "",
+): Promise<{ error?: string; orgId?: number }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  // Addressed to us, or it is not ours to answer.
+  if (!row || row.toOrgId !== tenant) return { error: "Not found" };
+  if (!mayDecide(row.status)) return { error: `That offer is already ${SHARE_LABEL[row.status as "pending"] ?? row.status}.` };
+
+  const payload = parsePayload(row.payload);
+  if (accept && !payload) return { error: "That offer's contents could not be read" };
+
+  let orgId: number | undefined;
+  let systems = 0;
+  if (accept && payload) {
+    const made = await materialize({ payload, destTenantOrgId: tenant, actor: u.email });
+    orgId = made.orgId;
+    systems = made.systems;
+  }
+  await db.update(clientShares).set({
+    status: accept ? "accepted" : "declined",
+    destOrgId: orgId ?? null,
+    decidedBy: u.email, decidedAt: new Date(),
+    note: reason.trim() ? `${row.note}${row.note ? " | " : ""}${reason.trim().slice(0, 300)}` : row.note,
+  }).where(eq(clientShares.id, shareId));
+
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: tenant,
+    action: accept
+      ? `accepted ${payload?.client.name ?? "a client"} from another service company - ${systems} system${systems === 1 ? "" : "s"} copied in`
+      : `declined ${payload?.client.name ?? "a client"}${reason.trim() ? `: ${reason.trim()}` : ""}`,
+  });
+  revalidatePath("/network");
+  revalidatePath("/settings/organizations");
+  return { orgId };
+}
+
+/** The sender changes their mind, while nobody has answered. */
+export async function withdrawClientShare(shareId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = readTenant(u);
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  if (!row || (tenant !== null && row.tenantOrgId !== tenant)) return { error: "Not found" };
+  if (!mayWithdraw(row.status)) return { error: "That offer has already been answered." };
+  await db.update(clientShares).set({
+    status: "withdrawn", decidedBy: u.email, decidedAt: new Date(),
+  }).where(eq(clientShares.id, shareId));
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
+    action: "withdrew a client offer before it was answered",
+  });
+  revalidatePath("/network");
+  return {};
 }
