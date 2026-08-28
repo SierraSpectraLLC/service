@@ -42,6 +42,15 @@ const GUARD_VOCABULARY = new RegExp([
   "adminOrgGate\\(", "mayAdminOrg\\(", "maySeeBooks\\(", "mayEditPayroll\\(",
   "validationDocAccess\\(", "assertRequestDecider\\(", "guardFor\\(", "ownStage\\(",
   "folderById\\(", "roomAccess\\(", "deviceWithOrg\\(", "stockAccess\\(",
+  /*
+   * app/actions.workableReport, which is the reimbursement desk's whole gate
+   * and says so at length: houseOf(u, report.tenantOrgId) FIRST, because
+   * expense_reports is one instance-wide table and `person` is free text, then
+   * lib/expenseReports.mayWorkReport for whose claim it is. Every write to a
+   * report goes through it. payExpenseReport - the hole this file was written
+   * about - is the one that did not, and its own houseOf call is still there.
+   */
+  "workableReport\\(",
 ].join("|"));
 
 /** Table constants declared with tenantStamp(). */
@@ -124,12 +133,18 @@ describe("writes to a tenant-stamped table", () => {
    *
    * Set from what THIS scan counts, not from an earlier one-off script. The
    * first version of this number came from a sizing pass with a shorter guard
-   * list and no comment stripping; it read 48, the real scan reads 43, and the
+   * list and no comment stripping; it read 48, the real scan read 43, and the
    * four slots of slack let a deliberately unguarded test write slip under the
    * bar. A ceiling measured by anything other than the check it governs is not
    * a ceiling.
+   *
+   * 43 -> 42: submitDraftReport and removeReportExpense came off when
+   * workableReport joined the vocabulary above. Both were always guarded by
+   * it; the scan reads three lines past a write, and submitDraftReport's grew
+   * a line, which is the kind of accident a ceiling measured this way absorbs
+   * in the wrong direction. Reviewing the helper is the fix, not padding.
    */
-  const CEILING = 43;
+  const CEILING = 42;
 
   it(`no more than ${CEILING} unreviewed write sites`, () => {
     const sites = unguardedWrites(tables).filter((s) => !(s.fn in REVIEWED));

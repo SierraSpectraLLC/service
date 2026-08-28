@@ -693,7 +693,11 @@ async function main(): Promise<void> {
       homeAddress: "9 SW Barbur Blvd, Portland, OR 97219", homeLat: 45.4611, homeLng: -122.7010, createdAt: at(-300) },
     { email: HOUSE.priya.email, orgId: T, role: "staff", name: HOUSE.priya.name, addedBy: OWNER,
       homeAddress: "700 Bellevue Way NE, Bellevue, WA 98004", homeLat: 47.6150, homeLng: -122.2015, createdAt: at(-210) },
-    { email: HOUSE.dana.email, orgId: T, role: "staff", name: HOUSE.dana.name, addedBy: OWNER, createdAt: at(-360) },
+    /* The office manager is HR: she files the claims people hand her instead
+       of filing themselves, and reads the payroll register to run the payout.
+       Not the books - that stays the owner's. See lib/hr. */
+    { email: HOUSE.dana.email, orgId: T, role: "staff", name: HOUSE.dana.name, addedBy: OWNER,
+      canAdminPeople: true, createdAt: at(-360) },
   ]);
 
   // The accounts themselves. A user row is what a session attaches to; the
@@ -2111,17 +2115,43 @@ async function main(): Promise<void> {
   // Three different things that all look like "money out": rebillable costs on
   // a job, an engineer's own receipts waiting on a payout, and overhead nobody
   // will ever invoice.
+  /*
+   * Four claims, one per state the desk has a panel for - and the fourth is
+   * the point of the fourth panel: a DRAFT nobody has submitted. It is money
+   * the shop owes that has never been asked for, and until the desk showed the
+   * unsent ones it was visible to nobody but the person who opened it.
+   *
+   * Each carries the three things the create form now insists on: whose claim,
+   * what it is called, and the job it is for - Priya's being the honest null,
+   * an overnight no work order caused.
+   */
   const reports = await db.insert(expenseReports).values([
-    { tenantOrgId: T, person: HOUSE.tess.name, status: "submitted", submittedBy: HOUSE.tess.email,
+    { tenantOrgId: T, person: HOUSE.tess.name, status: "submitted",
+      title: "Astoria commissioning, week of the 8th", workOrderId: wo("WO-2045"),
+      purpose: "Two nights on site plus the drive, bringing the Pier Road LC-MS up.",
+      openedBy: HOUSE.tess.email, submittedBy: HOUSE.tess.email,
       submittedAt: at(-6), note: "Astoria week - two nights and the drive." },
-    { tenantOrgId: T, person: HOUSE.owen.name, status: "paid", submittedBy: HOUSE.owen.email,
+    { tenantOrgId: T, person: HOUSE.owen.name, status: "paid",
+      title: "Tacoma crate handling and the drives", workOrderId: wo("WO-2050"),
+      openedBy: HOUSE.owen.email, submittedBy: HOUSE.owen.email,
       submittedAt: at(-40), paidOn: day(-33), paidBy: OWNER, paidRef: "Payroll run 09-15",
       note: "Tacoma trips, first half of the month." },
-    { tenantOrgId: T, person: HOUSE.priya.name, status: "returned", submittedBy: HOUSE.priya.email,
+    { tenantOrgId: T, person: HOUSE.priya.name, status: "returned",
+      title: "Astoria overnight", workOrderId: null,
+      purpose: "Stayed over between the Friday install and the Saturday handover.",
+      openedBy: HOUSE.priya.email, submittedBy: HOUSE.priya.email,
       submittedAt: at(-12), returnedReason: "The hotel receipt is the booking confirmation, not the folio - resend it.",
       note: "Astoria overnight." },
+    /* Opened by the office manager in Owen's name, from a handful of receipts
+       he handed over - which is why openedBy and person differ, and why
+       submittedBy is still empty: nobody has sent it. */
+    { tenantOrgId: T, person: HOUSE.owen.name, status: "draft",
+      title: "Hillsboro parts run", workOrderId: wo("WO-2047"),
+      purpose: "The counter run for the gaskets, plus the toll both ways.",
+      openedBy: HOUSE.dana.email, submittedAt: at(-3) },
   ]).returning();
-  const rep = (person: string) => reports.find((r) => r.person === person)!.id;
+  const rep = (person: string, status = "") =>
+    reports.find((r) => r.person === person && (!status || r.status === status))!.id;
 
   await db.insert(expenses).values([
     // On a job, rebillable.
@@ -2152,7 +2182,17 @@ async function main(): Promise<void> {
       siteId: site("Pier Road"), loggedBy: HOUSE.tess.email, reportId: rep(HOUSE.tess.name), createdAt: at(-6) },
     { tenantOrgId: T, workOrderId: wo("WO-2050"), kind: "Mileage", description: "296 miles round trip at 0.67",
       amountCents: 19_832, incurredOn: day(-40), billable: true, person: HOUSE.owen.name,
-      siteId: site("Tacoma"), loggedBy: HOUSE.owen.email, reportId: rep(HOUSE.owen.name), createdAt: at(-40) },
+      siteId: site("Tacoma"), loggedBy: HOUSE.owen.email, reportId: rep(HOUSE.owen.name, "paid"), createdAt: at(-40) },
+    /* On the office manager's unsent draft. Owen's money either way - a row
+       filed onto somebody's claim is stamped with THEIR name, not the filer's,
+       or the payout would go to whoever typed it in. */
+    { tenantOrgId: T, workOrderId: wo("WO-2047"), kind: "Parts", description: "Gasket set, counter pickup",
+      amountCents: 8_640, incurredOn: day(-4), billable: true, person: HOUSE.owen.name,
+      siteId: site("Hillsboro"), loggedBy: HOUSE.dana.email, reportId: rep(HOUSE.owen.name, "draft"),
+      receiptName: "hillsboro-counter.jpg", createdAt: at(-3) },
+    { tenantOrgId: T, workOrderId: wo("WO-2047"), kind: "Tolls", description: "Bridge toll, both ways",
+      amountCents: 1_400, incurredOn: day(-4), billable: false, person: HOUSE.owen.name,
+      loggedBy: HOUSE.dana.email, reportId: rep(HOUSE.owen.name, "draft"), createdAt: at(-3) },
     { tenantOrgId: T, workOrderId: null, kind: "Lodging", description: "Astoria overnight",
       amountCents: 18_900, incurredOn: day(-13), billable: false, person: HOUSE.priya.name,
       loggedBy: HOUSE.priya.email, reportId: rep(HOUSE.priya.name), createdAt: at(-12) },

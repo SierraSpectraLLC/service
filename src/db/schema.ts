@@ -2925,8 +2925,42 @@ export const expenses = pgTable("expenses", {
   /** The receipt: a photo shot at the counter, or an emailed PDF. Blob URL. */
   receiptUrl: text("receipt_url").notNull().default(""),
   receiptName: text("receipt_name").notNull().default(""),
+  /*
+   * What the shop's travel rulebook made of this row, written when it was
+   * logged. See lib/expensePolicy.
+   *
+   * Only per diems are ruled on today, and only when a report names a job -
+   * that is what supplies the site, and the site plus the claimant's home is
+   * what supplies the distance. Everything else stores "" and behaves as it
+   * always did.
+   *
+   * The verdict is STORED rather than recomputed at render, and deliberately:
+   * the rulebook is a live setting an owner edits, road miles come from a
+   * routing provider, and an engineer's home moves. A claim has to be judged
+   * against the rules as they stood when it was filed, or raising the radius
+   * next March silently un-flags every claim anybody ever queried.
+   */
+  allowanceState: text("allowance_state").notNull().default(""), // "" | flagged | approved
+  /** What the rulebook said, in the words a reviewer reads. Written either way. */
+  allowanceNote: text("allowance_note").notNull().default(""),
+  /** Who cleared a flagged row, and when. Blank until somebody does. */
+  allowanceBy: text("allowance_by").notNull().default(""),
+  allowanceAt: timestamp("allowance_at"),
+  /**
+   * Nights away, as the claimant answered it. The one fact in the ruling that
+   * cannot be recovered from anywhere else - miles come from the job's site
+   * and the rates come from the rulebook, but only the person who made the
+   * trip knows whether they slept there. Kept so that moving a claim onto a
+   * different job re-judges it against the same trip rather than silently
+   * demoting an overnight to a day trip.
+   */
+  allowanceNights: integer("allowance_nights").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("expenses_wo_idx").on(t.workOrderId), index("expenses_report_idx").on(t.reportId)]);
+}, (t) => [
+  index("expenses_wo_idx").on(t.workOrderId),
+  index("expenses_report_idx").on(t.reportId),
+  index("expenses_allowance_idx").on(t.allowanceState),
+]);
 
 /**
  * An engineer's reimbursement claim: a batch of their expenses, submitted as
@@ -2962,7 +2996,29 @@ export const expenseReports = pgTable("expense_reports", {
    */
   title: text("title").notNull().default(""),
   purpose: text("purpose").notNull().default(""),
+  /**
+   * The job this claim is for, open or closed alike - a trip's receipts
+   * surface long after the order they belong to wraps, and a claim that
+   * cannot name a closed job is a claim that gets filed under nothing.
+   *
+   * Nullable, and the null is a real answer rather than an unset field: an
+   * overhead claim - the internet bill, a software seat - has no job that
+   * caused it, the same distinction expenses.work_order_id already draws.
+   * The FORM makes the reader choose one or the other; the column just
+   * records which. Set null on delete, because the claim outlives the order.
+   */
+  workOrderId: integer("work_order_id").references((): AnyPgColumn => workOrders.id, { onDelete: "set null" }),
   status: text("status").notNull().default("submitted"),
+  /**
+   * Who opened it, which is not always whose money it is: HR opens a claim in
+   * an engineer's name from a handful of receipts, and six weeks later the
+   * question "who filed this" has one honest answer and it is not `person`.
+   *
+   * Distinct from submittedBy on purpose. That one is now written when the
+   * report is actually SENT for payout - the two were the same address only
+   * because the column was set at creation and never touched again.
+   */
+  openedBy: text("opened_by").notNull().default(""),
   submittedBy: text("submitted_by").notNull().default(""),
   submittedAt: timestamp("submitted_at").notNull().defaultNow(),
   /** Payout facts, written when it is paid. */
@@ -2972,7 +3028,10 @@ export const expenseReports = pgTable("expense_reports", {
   /** Why it came back, when it did. */
   returnedReason: text("returned_reason").notNull().default(""),
   note: text("note").notNull().default(""),
-}, (t) => [index("expense_reports_person_idx").on(t.person)]);
+}, (t) => [
+  index("expense_reports_person_idx").on(t.person),
+  index("expense_reports_wo_idx").on(t.workOrderId),
+]);
 
 /**
  * A bill. Nothing here is a balance: what is owed is

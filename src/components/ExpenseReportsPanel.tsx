@@ -5,9 +5,12 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import {
   createExpenseReport, logMyExpense, payExpenseReport, returnExpenseReport,
-  submitExpenseReport, withdrawExpenseReport,
+  withdrawExpenseReport,
 } from "@/app/actions";
-import { REPORT_LABEL, REPORT_TONE, reportSpan, reportTotalCents } from "@/lib/expenseReports";
+import {
+  REPORT_LABEL, REPORT_TONE, checkReportTitle, deskReports, reportPeople, reportSpan,
+  reportTitle, reportTotalCents,
+} from "@/lib/expenseReports";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmReason } from "@/components/ui/ConfirmDialog";
@@ -20,39 +23,68 @@ export type PoolRow = {
 };
 export type ReportRow = {
   id: number; person: string; status: string; submittedAt: string;
-  /** The filer's own name for the claim. Blank reads as it always did. */
+  /** The filer's own name for the claim. Every report opened since the form insisted has one. */
   title: string;
+  /** The job it is filed against, or "" for an overhead claim. */
+  workOrderNumber: string;
+  workOrderId: number | null;
+  /** Who filed it, when that is not whose money it is. */
+  openedByName: string;
   paidOn: string; paidRef: string; returnedReason: string; note: string;
   expenses: { id: number; kind: string; description: string; amountCents: number; incurredOn: string }[];
+  /**
+   * Rows the travel rulebook queried and nobody has signed for yet. The payout
+   * waits on these - see lib/expensePolicy - so the desk says so rather than
+   * offering a button the action will refuse.
+   */
+  flaggedCount: number;
 };
+
+/** The work-order picker's unanswered state, kept distinct from "overhead". */
+const NO_JOB = "none";
 
 /**
  * The reimbursement desk, both sides of it.
  *
  * An engineer sees their pool - every expense of theirs not yet claimed -
- * ticks what this check should cover, and submits. From then on the money has
- * a status they can watch instead of a question they have to ask: Awaiting
- * payout, Paid (with the date and the check number), or Returned (with why,
- * and the rows back in the pool to fix and resubmit).
+ * opens a report for the trip, and watches the money instead of asking about
+ * it: Awaiting payout, Paid (with the date and the check number), or Returned
+ * (with why, the rows still on it, to fix and resubmit).
  *
- * The owner sees the queue: every submitted report, its rows, its summed
- * total - never a stored one - and two honest buttons. Mark paid records
- * that a check went out; it does not move money.
+ * The owner and HR see the SHOP's claims, all of them. That last word is the
+ * fix: this panel used to show them the submitted queue and a tail of settled
+ * reports, so a draft an engineer opened and never sent was visible to nobody
+ * but its author - which is exactly the claim somebody needs to chase. The
+ * three panels below are lib/expenseReports.deskReports, in the order the
+ * questions get asked: what is on my desk, what is still being written, what
+ * has gone out.
+ *
+ * Marking one paid records that a check went out. It does not move money.
  */
-export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, isOwner, subjects, today, categories, workOrders }: {
+export default function ExpenseReportsPanel({
+  pool, mine, queue, adminsPeople, isOwner, subjects, me, openFor, today, categories, workOrders,
+}: {
   pool: PoolRow[];
   mine: ReportRow[];
-  /** Everyone's reports - for HR and the owner, [] for anybody else. */
+  /** Everyone's reports, every status - for HR and the owner, [] for anybody else. */
   queue: ReportRow[];
   /**
-   * Whether this reader administers the people. They see the queue and may
-   * open a claim in somebody else's name; PAYING one is separate below,
+   * Whether this reader administers the people. They see the whole desk and
+   * may open a claim in somebody else's name; PAYING one is separate below,
    * because assembling a claim and writing the check are different jobs.
    */
   adminsPeople: boolean;
   isOwner: boolean;
   /** The roster a claim can be opened for. Empty for anyone who is not HR. */
   subjects: { name: string; email: string }[];
+  /** The reader's own directory name, for "Mine" in the whose-claim picker. */
+  me: string;
+  /**
+   * A name arrived at from the People desk - "open a claim for this person".
+   * It opens the one create dialog with them chosen, rather than minting a
+   * nameless report the way the roster button used to.
+   */
+  openFor: string;
   today: string;
   /** The tenant's expense categories, for the new-expense picker. */
   categories: string[];
@@ -61,13 +93,20 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
 }) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [paying, setPaying] = useState<ReportRow | null>(null);
-  const [opening, setOpening] = useState(false);
-  const [newDraft, setNewDraft] = useState({ title: "", purpose: "", forWhom: "" });
+  /* Arriving from the People desk with somebody chosen - "open a claim for
+     this person" is that page's whole gesture, and it now comes here rather
+     than minting a nameless report of its own. Initial state, not an effect:
+     the link is a route change, so the panel mounts fresh with the dialog
+     already open on the right name. */
+  const [opening, setOpening] = useState(openFor !== "");
+  const [newDraft, setNewDraft] = useState({ title: "", purpose: "", forWhom: openFor, workOrderId: "" });
+  const [openErr, setOpenErr] = useState("");
   const [adding, setAdding] = useState(false);
   const [addDraft, setAddDraft] = useState({ kind: "", description: "", amount: "", incurredOn: "", workOrderId: "" });
   const [addErr, setAddErr] = useState("");
   const [payDraft, setPayDraft] = useState({ paidOn: "", reference: "" });
   const [payErr, setPayErr] = useState("");
+  const [who, setWho] = useState("");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -77,13 +116,21 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
   const toggle = (id: number) =>
     setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const submit = () =>
-    startTransition(async () => {
-      const res = await submitExpenseReport([...picked]);
-      if (res?.error) { toast({ message: res.error }); return; }
-      setPicked(new Set());
-      toast({ message: `Submitted ${chosen.length} expense${chosen.length === 1 ? "" : "s"} (${formatCents(chosenCents)}) for reimbursement` });
-    });
+  const openNew = (forWhom = "") => {
+    setNewDraft({ title: "", purpose: "", forWhom, workOrderId: "" });
+    setOpenErr(""); setOpening(true);
+  };
+
+  /* The shop's claims, split the way they get asked about. One authority, so
+     this panel and the tests behind it cannot drift. */
+  const desk = useMemo(() => deskReports(queue), [queue]);
+  const everyone = useMemo(() => reportPeople(queue), [queue]);
+  const byWho = (rows: ReportRow[]) => (who ? rows.filter((r) => r.person === who) : rows);
+
+  const named = checkReportTitle(newDraft.title);
+  const newProblem = "error" in named ? named.error
+    : !newDraft.workOrderId ? "pick the job it is for, or say it is overhead"
+    : null;
 
   const reportCard = (r: ReportRow, side: "mine" | "queue") => {
     const total = reportTotalCents(r.expenses);
@@ -94,24 +141,27 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
             open
           </Link>
           {side === "queue" && <span className="t-body" style={{ fontWeight: 700 }}>{r.person}</span>}
-          {r.title && <span className="t-body" style={{ fontWeight: 600 }}>{r.title}</span>}
-          {/* A returned report has no rows left - they went back to the pool -
-              so a count and a $0 would read as an empty claim, not a bounce. */}
-          {r.status === "returned" && r.expenses.length === 0 ? (
-            <span className="mut t-small">sent back {r.submittedAt}</span>
-          ) : (
-            <>
-              <span className="t-body" style={{ fontWeight: side === "queue" ? 400 : 700 }}>
-                {reportSpan(r.expenses) || "No dated rows"} · {r.expenses.length} expense{r.expenses.length === 1 ? "" : "s"}
-              </span>
-              <span className="t-body" style={{ fontWeight: 700 }}>{formatCents(total)}</span>
-            </>
-          )}
+          <span className="t-body" style={{ fontWeight: 600 }}>{reportTitle(r, r.expenses)}</span>
+          {/* The job the claim is filed against - the fact a reviewer reaches
+              for first, and the reason overhead says so out loud rather than
+              showing nothing and reading as a gap. */}
+          {r.workOrderNumber
+            ? <span className="mut t-meta mono">{r.workOrderNumber}</span>
+            : <span className="pill faint">overhead</span>}
+          <span className="t-body">
+            {reportSpan(r.expenses) || "no dated rows"} · {r.expenses.length} expense{r.expenses.length === 1 ? "" : "s"}
+          </span>
+          <span className="t-body" style={{ fontWeight: 700 }}>{formatCents(total)}</span>
           <Pill tone={REPORT_TONE[r.status] ?? "warn"}>{REPORT_LABEL[r.status] ?? r.status}</Pill>
           {r.status === "paid" && (
             <span className="mut t-meta">{r.paidOn}{r.paidRef ? ` · ${r.paidRef}` : ""}</span>
           )}
         </div>
+        {/* Who filed it, only when that is not whose money it is - which is the
+            only time the question comes up, and the time it always does. */}
+        {r.openedByName && r.openedByName !== r.person && (
+          <div className="mut t-small" style={{ marginTop: 2 }}>Opened by {r.openedByName}</div>
+        )}
         {r.status === "returned" && r.returnedReason && (
           <div className="t-small" style={{ color: "var(--t-bad-fg)", marginTop: 2 }}>
             Returned: {r.returnedReason} - open it, fix it, resubmit.
@@ -131,9 +181,16 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
               toast({ message: "Back to draft - open it to edit" });
             })}>withdraw</button>
         )}
+        {r.flaggedCount > 0 && (
+          <div className="t-small" style={{ color: "var(--t-warn-fg)", marginTop: 2 }}>
+            {r.flaggedCount} row{r.flaggedCount === 1 ? "" : "s"} outside the travel rules - open it to approve
+            {r.flaggedCount === 1 ? " it" : " them"} before this can be paid.
+          </div>
+        )}
         {side === "queue" && isOwner && r.status === "submitted" && (
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-            <button className="btn sm accent" disabled={pending}
+            <button className="btn sm accent" disabled={pending || r.flaggedCount > 0}
+              title={r.flaggedCount ? "Approve the flagged rows first" : undefined}
               onClick={() => { setPayDraft({ paidOn: today, reference: "" }); setPayErr(""); setPaying(r); }}>
               Mark paid
             </button>
@@ -141,7 +198,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
               onClick={async () => {
                 const why = await confirmReason({
                   title: `Return ${r.person}'s report?`,
-                  body: "Its expenses go back to their pool to fix and resubmit. They read the reason, so write it to them.",
+                  body: "Its rows stay on it, so they fix the claim in place and resubmit. They read the reason, so write it to them.",
                   action: "Return it",
                 });
                 if (why === null) return;
@@ -159,37 +216,70 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
     );
   };
 
+  /* One filter across the three shop-wide panels: an owner chasing a person
+     wants that person's claims in every state at once, which is a filter and
+     not three separate searches. */
+  const whoFilter = everyone.length > 1 && (
+    <select value={who} aria-label="Whose claims" className="sm"
+      onChange={(e) => setWho(e.target.value)}>
+      <option value="">Everybody</option>
+      {everyone.map((p) => <option key={p} value={p}>{p}</option>)}
+    </select>
+  );
+
   return (
     <>
       {adminsPeople && (
-        <Panel title="Awaiting payout" count={queue.filter((r) => r.status === "submitted").length || undefined}
-          hint={isOwner
-            ? "Submitted reimbursement claims. Marking one paid records the payout - the check or payroll run happens where it happens."
-            : "Submitted reimbursement claims. Open one to check it; the owner marks it paid."}>
-          {queue.filter((r) => r.status === "submitted").map((r) => reportCard(r, "queue"))}
-          {queue.filter((r) => r.status === "submitted").length === 0 && (
-            <div className="mut t-small">Nothing waiting. Engineers submit from this same page.</div>
-          )}
+        <>
+          <Panel title="Awaiting payout" count={byWho(desk.awaiting).length || undefined}
+            actions={whoFilter}
+            hint={isOwner
+              ? "Claims that have been handed to you. Marking one paid records the payout - the check or payroll run happens where it happens."
+              : "Claims that have been handed to the owner. Open one to check it; the owner marks it paid."}>
+            {byWho(desk.awaiting).map((r) => reportCard(r, "queue"))}
+            {byWho(desk.awaiting).length === 0 && (
+              <div className="mut t-small">Nothing waiting on a check.</div>
+            )}
+          </Panel>
+
+          {/*
+            The half of the desk that was missing. A claim nobody has sent is
+            still money the shop owes, and until now the only person who could
+            see one was whoever opened it - so "what has my shop got open" was
+            answered with "what has been handed to me", and the difference was
+            every draft anybody had got distracted from.
+          */}
+          <Panel title="Being filled right now" count={byWho(desk.filling).length || undefined}
+            actions={whoFilter}
+            hint="Reports your people have opened and not yet submitted - drafts, and claims you sent back. Money the shop owes that nobody has asked for yet.">
+            {byWho(desk.filling).map((r) => reportCard(r, "queue"))}
+            {byWho(desk.filling).length === 0 && (
+              <div className="mut t-small">
+                {who ? `Nothing open in ${who}'s name.` : "Nobody has a claim part-written."}
+              </div>
+            )}
+          </Panel>
+
           {/* Marking one paid should visibly MOVE the row, not vanish it -
               this is where it lands, so the click has a receipt on screen. */}
-          {queue.some((r) => r.status === "paid" || r.status === "returned") && (
-            <>
-              <div className="eyebrow" style={{ marginTop: 12 }}>Recently settled</div>
-              {queue.filter((r) => r.status === "paid" || r.status === "returned").slice(0, 5).map((r) => reportCard(r, "queue"))}
-            </>
+          {byWho(desk.paid).length > 0 && (
+            <Panel title="Recently paid" count={byWho(desk.paid).length || undefined} actions={whoFilter}
+              hint="Payouts recorded here. The money moved wherever it moves - this is the record that it did.">
+              {byWho(desk.paid).slice(0, 8).map((r) => reportCard(r, "queue"))}
+            </Panel>
           )}
-        </Panel>
+        </>
       )}
 
-      <Panel title="Start here" hint="A report is the folder a trip's receipts go into. Open one, scan receipts into it as they happen, submit when the pocket is empty.">
-        <button className="btn primary" disabled={pending}
-          onClick={() => { setNewDraft({ title: "", purpose: "", forWhom: "" }); setOpening(true); }}>
+      <Panel title="Start here"
+        hint="A report is the folder a trip's receipts go into: name it, say which job it was for, then add the expenses one at a time. Nothing is claimed until you submit it.">
+        <button className="btn primary" disabled={pending} onClick={() => openNew()}>
           + New expense report
         </button>
       </Panel>
 
       <Panel title="My unclaimed expenses" count={pool.length || undefined}
-        hint="Everything of yours not yet on a report. Tick what this claim should cover and submit it.">
+        hint="Everything of yours not yet on a report. Tick what a claim should cover and it opens a report with those rows already on it.">
         <div style={{ marginBottom: 6 }}>
           <button className="btn sm primary" onClick={() => {
             setAddDraft({ kind: categories[0] ?? "Other", description: "", amount: "", incurredOn: today, workOrderId: "" });
@@ -217,15 +307,19 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
         )}
         {picked.size > 0 && (
           <div style={{ marginTop: 10 }}>
-            <button className="btn sm accent" disabled={pending} onClick={submit}>
-              {pending ? "Submitting..." : `Submit ${picked.size} expense${picked.size === 1 ? "" : "s"} (${formatCents(chosenCents)}) for reimbursement`}
+            {/* The same door as "+ New expense report", carrying the ticked
+                rows. This used to mint a nameless report already awaiting
+                payout; now it opens the claim, names it, and leaves a draft to
+                look over before anybody is asked for a check. */}
+            <button className="btn sm accent" disabled={pending} onClick={() => openNew()}>
+              Claim {picked.size} expense{picked.size === 1 ? "" : "s"} ({formatCents(chosenCents)})
             </button>
           </div>
         )}
       </Panel>
 
       <Panel title="My reports" count={mine.length || undefined}
-        hint="Each claim and where it stands - the status is the answer to 'has that check gone out'.">
+        hint="Each claim of mine and where it stands - the status is the answer to 'has that check gone out'.">
         {mine.map((r) => reportCard(r, "mine"))}
         {mine.length === 0 && <div className="mut t-small">No claims yet.</div>}
       </Panel>
@@ -233,18 +327,27 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
       {opening && (
         <Dialog open onClose={() => setOpening(false)} size="sm"
           title="New expense report"
-          context="A folder for a trip's receipts. Nothing is claimed until you submit it."
+          context={picked.size
+            ? `${picked.size} ticked expense${picked.size === 1 ? "" : "s"} (${formatCents(chosenCents)}) go onto it`
+            : "A folder for a trip's receipts. Nothing is claimed until you submit it."}
           footer={
             <>
+              <DialogStatus error={openErr} problem={newProblem} />
               <button className="btn" onClick={() => setOpening(false)} disabled={pending}>Cancel</button>
-              <button className="btn accent" disabled={pending}
+              <button className="btn accent" disabled={pending || newProblem !== null}
                 onClick={() => startTransition(async () => {
                   const res = await createExpenseReport({
                     onBehalfOf: newDraft.forWhom || undefined,
                     title: newDraft.title,
                     purpose: newDraft.purpose,
+                    // The picker's own empty string never reaches here - the
+                    // button is disabled until it is answered - so this is
+                    // "overhead" or an id, never "the field was skipped".
+                    workOrderId: newDraft.workOrderId === NO_JOB ? null : parseInt(newDraft.workOrderId, 10),
+                    expenseIds: [...picked],
                   });
-                  if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
+                  if (res?.error || !res.id) { setOpenErr(res.error ?? "That didn't save"); return; }
+                  setPicked(new Set());
                   setOpening(false);
                   router.push(`/money/reimbursements/${res.id}`);
                 })}>
@@ -256,17 +359,20 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
               it as a second button. Somebody hands the office manager a shoebox
               of receipts and never files anything; this opens the claim in
               THEIR name, so the payout is owed to them and the pool it fills
-              from is theirs. */}
+              from is theirs. Who actually opened it is recorded either way. */}
           {subjects.length > 0 && (
             <>
               <label>Whose claim</label>
               <select value={newDraft.forWhom} aria-label="Whose claim"
                 onChange={(e) => setNewDraft({ ...newDraft, forWhom: e.target.value })}>
-                <option value="">Mine</option>
-                {subjects.map((p) => <option key={p.email} value={p.name}>{p.name}</option>)}
+                <option value="">Mine{me ? ` (${me})` : ""}</option>
+                {subjects.filter((p) => p.name !== me).map((p) => (
+                  <option key={p.email} value={p.name}>{p.name}</option>
+                ))}
               </select>
               <div className="field-hint">
-                Opening one for somebody else fills it from their unclaimed receipts, not yours.
+                Opening one for somebody else fills it from their unclaimed receipts, not yours,
+                and the payout is owed to them. Your name goes on it as who filed it.
               </div>
             </>
           )}
@@ -275,15 +381,29 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
             placeholder="Reno install, week of the 12th"
             onChange={(e) => setNewDraft({ ...newDraft, title: e.target.value })} />
           <div className="field-hint">
-            Optional. Without one it reads as the person and the dates its receipts cover,
-            which tells two reports apart and not much else.
+            What whoever pays it will read on the list. Everybody&apos;s claims sit on one desk now,
+            so &quot;a week in July&quot; is not enough to tell two apart.
+          </div>
+          {/* The job. Open or closed alike - a receipt surfaces long after the
+              order it belongs to wraps - and "no job" is a deliberate answer
+              rather than a skipped field, which is why it starts unset. */}
+          <label style={{ marginTop: 8 }}>The job it is for</label>
+          <select value={newDraft.workOrderId} aria-label="Work order"
+            onChange={(e) => setNewDraft({ ...newDraft, workOrderId: e.target.value })}>
+            <option value="">Pick the job...</option>
+            <option value={NO_JOB}>No job - overhead</option>
+            {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}
+          </select>
+          <div className="field-hint">
+            Open or closed - the receipts usually turn up after the job does. Pick overhead for
+            spend no job caused, the way the internet bill is.
           </div>
           <label style={{ marginTop: 8 }}>What it was for</label>
           <input value={newDraft.purpose} aria-label="Purpose"
             placeholder="Commissioning the new LC-MS at the Reno site"
             onChange={(e) => setNewDraft({ ...newDraft, purpose: e.target.value })} />
           <div className="field-hint">
-            The sentence whoever pays it will read before they do.
+            Optional. The sentence whoever pays it will read before they do.
           </div>
         </Dialog>
       )}
@@ -354,7 +474,7 @@ export default function ExpenseReportsPanel({ pool, mine, queue, adminsPeople, i
       {paying && (
         <Dialog open onClose={() => setPaying(null)} size="sm"
           title={`Pay ${paying.person} ${formatCents(reportTotalCents(paying.expenses))}`}
-          context={`${paying.expenses.length} expense${paying.expenses.length === 1 ? "" : "s"}, ${reportSpan(paying.expenses)}`}
+          context={`${reportTitle(paying, paying.expenses)} · ${paying.expenses.length} expense${paying.expenses.length === 1 ? "" : "s"}, ${reportSpan(paying.expenses) || "no dated rows"}`}
           footer={
             <>
               <DialogStatus error={payErr} problem={payDraft.paidOn ? null : "pick the date"} />

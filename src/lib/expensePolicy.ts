@@ -115,3 +115,179 @@ export function tripAllowance(p: ExpensePolicy, trip: { oneWayMiles: number; nig
     nights,
   };
 }
+
+// ── Per diem, as a claim rather than a quick-log button ────────────────────
+//
+// tripAllowance above answers "what does this trip entitle somebody to". That
+// was enough while per diems were logged from the work order, where the
+// engineer is already looking at the job and typing the miles.
+//
+// On a reimbursement report the question arrives from the other end: a row is
+// being added to a claim that already names a job, so the miles are not
+// something to ask for - they are the road distance from the CLAIMANT's home
+// to that job's lab, which the app already knows. What follows turns that into
+// an amount, a sentence, and - the part that matters to whoever pays it - a
+// verdict on whether a human needs to look.
+
+/**
+ * Is this category a per diem?
+ *
+ * Tolerant, because expense categories are a workspace's own vocabulary: the
+ * starter list says "Per diem", the old hardcoded kind was `per_diem`, and a
+ * shop that calls it "Meals" is not wrong. A workspace that renamed it to
+ * something unrecognizable simply gets no autofill and the row behaves exactly
+ * as it did before any of this existed - which is the right way to be wrong.
+ */
+export const isPerDiemKind = (kind: string): boolean =>
+  /per[\s_-]*diem|^meals?$|^meal allowance$/i.test(kind.trim());
+
+/** How far and how long, as the rulebook needs it. */
+export type Trip = {
+  /**
+   * Road miles one way from the claimant's home. Null means the app could not
+   * work it out - no home base on file, or a job with no located site - which
+   * is a different answer from zero and is never treated as "close by".
+   */
+  oneWayMiles: number | null;
+  nights: number;
+  /** The lab, for the sentence. "" when there isn't one to name. */
+  siteName: string;
+};
+
+export type PerDiemOffer = {
+  /**
+   * Whether the rulebook has an opinion at all. False when nothing is
+   * configured - and then nothing below is used, no row is flagged, and the
+   * form behaves as it did before.
+   */
+  ruled: boolean;
+  /** What the rulebook allows for this trip. */
+  allowedCents: number;
+  /** The description to prefill, in the words the claim will carry. */
+  description: string;
+  /**
+   * Why a reviewer has to sign this off, in the words they will read. ""
+   * when the claim sits inside the rules and nobody needs to look.
+   */
+  flag: string;
+};
+
+const dollars = (cents: number): string =>
+  `$${(cents / 100).toFixed(2).replace(/\.00$/, "")}`;
+
+/**
+ * What the shop allows for a per diem on this trip, and whether it is the kind
+ * of claim somebody has to approve by hand.
+ *
+ * The three answers, in the order they are asked:
+ *
+ *   - NIGHTS FIRST. A trip with a stay is priced by its nights whatever the
+ *     odometer said - the same rule tripAllowance already states, for the same
+ *     reason: nobody books a hotel inside commuting range of their own bed by
+ *     choice, and when the job requires it the company that required it pays.
+ *     So an overnight is never flagged for being close.
+ *
+ *   - BEYOND THE RADIUS, no nights: the day rate, cleanly. This is the case
+ *     the whole feature is for - a 96-mile round of a job, one lunch, and the
+ *     engineer should not have to remember what the shop pays for that or type
+ *     a sentence explaining it.
+ *
+ *   - INSIDE THE RADIUS, no nights: the stipend already bought the meal, so
+ *     this is a claim against the rules. It is NOT refused - an all-day
+ *     install twenty minutes away where nobody could leave the lab is a real
+ *     thing, and a rulebook that cannot be departed from just teaches people
+ *     to file the lunch as "Supplies". It is offered AT THE SHOP'S OWN RATE,
+ *     so the exception costs what the rule costs, and flagged so a reviewer
+ *     signs it rather than it slipping through inside a fourteen-row claim.
+ *
+ * And the honest fourth: when the distance is unknown, the rulebook says so
+ * instead of guessing, and a human decides.
+ */
+export function perDiemOffer(p: ExpensePolicy, trip: Trip): PerDiemOffer {
+  if (!policyConfigured(p)) return { ruled: false, allowedCents: 0, description: "", flag: "" };
+  const at = trip.siteName ? ` - ${trip.siteName}` : "";
+  const nights = Math.max(0, Math.round(trip.nights));
+
+  if (nights > 0) {
+    const a = tripAllowance(p, { oneWayMiles: trip.oneWayMiles ?? 0, nights });
+    return {
+      ruled: true,
+      allowedCents: a.perDiemCents,
+      description: `Per diem, ${a.perDiemBreakdown || `${nights} night${nights === 1 ? "" : "s"}`}${at}`,
+      flag: "",
+    };
+  }
+
+  if (trip.oneWayMiles === null) {
+    return {
+      ruled: true,
+      allowedCents: p.dayPerDiemCents,
+      description: `Per diem, day trip${at}`,
+      flag: "The distance from home could not be worked out - no home base on file for them,"
+        + " or the job's site has no address. Check the trip before approving this one.",
+    };
+  }
+
+  const miles = Math.round(trip.oneWayMiles);
+  const a = tripAllowance(p, { oneWayMiles: miles, nights: 0 });
+  if (!a.withinRadius) {
+    return {
+      ruled: true,
+      allowedCents: a.perDiemCents,
+      description: a.perDiemCents > 0
+        ? `Lunch per diem - ${miles} mi from home, beyond the ${p.radiusMiles} mi radius${at}`
+        : `Day trip, ${miles} mi from home${at}`,
+      flag: "",
+    };
+  }
+
+  return {
+    ruled: true,
+    // The shop's own rate, still. See the note above: the exception costs
+    // what the rule costs.
+    allowedCents: p.dayPerDiemCents,
+    description: `Lunch per diem - ${miles} mi from home, inside the ${p.radiusMiles} mi radius${at}`,
+    flag: `Claimed ${miles} mi from home, inside the ${p.radiusMiles} mi radius`
+      + " - the car stipend already covers meals on a trip this short."
+      + " Approve it only if the day genuinely earned it.",
+  };
+}
+
+export type Allowance = {
+  /** "" = nothing to review. "flagged" = a reviewer must clear it before payout. */
+  state: "" | "flagged";
+  /** What the rulebook said, written either way so the record keeps the reason. */
+  note: string;
+};
+
+/**
+ * The verdict on an amount somebody actually claimed.
+ *
+ * Two ways to earn a flag: the trip itself is outside the rules (the offer
+ * says so), or the number is bigger than what the rules allow for it. The
+ * second is the one a form cannot prevent - the amount box stays typable,
+ * because a $52 airport lunch on a day the shop allows $30 for is a thing that
+ * happens and the answer is a reviewer, not a locked field.
+ *
+ * Under the allowance is never flagged. Claiming less than you are owed is not
+ * a policy problem.
+ */
+export function allowanceFor(offer: PerDiemOffer, claimedCents: number): Allowance {
+  if (!offer.ruled) return { state: "", note: "" };
+  if (offer.flag) return { state: "flagged", note: offer.flag };
+  if (claimedCents > offer.allowedCents) {
+    return {
+      state: "flagged",
+      note: `Claimed ${dollars(claimedCents)}; the rulebook allows ${dollars(offer.allowedCents)}`
+        + " for this trip. Approve the difference or send it back.",
+    };
+  }
+  return {
+    state: "",
+    note: `Within the rules - ${dollars(offer.allowedCents)} allowed for this trip.`,
+  };
+}
+
+/** A row a reviewer still has to clear. The payout gate, in one place. */
+export const needsApproval = (row: { allowanceState: string }): boolean =>
+  row.allowanceState === "flagged";
