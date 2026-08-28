@@ -91,10 +91,18 @@ export default function StandingLine({
       <button className="btn sm" onClick={dismiss} disabled={busy}>
         {busy ? "Dismissing…" : "Dismiss"}
       </button>
-    ) : canMove && (
+    ) : canMove && !(isMine && clientVoice) && (
+      /* No button when the system is already THEIRS.
+         "Hand it back" was the shop's verb pointed at the machine's owner:
+         it is in their lab, it is their instrument, and there is nowhere to
+         hand it. What a client actually wants from here is service, and
+         Request service is on the record's header where it always was. The
+         queue is still movable a card down for anybody who genuinely means
+         to send it in - that panel says "Move it" and names both ends,
+         which is the honest version of this button. */
       <button className={`btn sm${isMine ? "" : " accent"}`}
         onClick={() => window.dispatchEvent(new Event(QUEUE_EVENT))}>
-        {isMine ? (clientVoice ? "Hand it back" : "Hand it on") : "Move it"}
+        {isMine ? "Hand it on" : "Move it"}
       </button>
     )}>
       {isMine && clientVoice && !pending ? (

@@ -257,6 +257,10 @@ export default async function Home({ searchParams }: {
       priority: i.priority,
       lead: i.lead,
       stages: i.stages,
+      // Whose problem a block is - chosen when it was set, null being ours.
+      // The client landing reads it to tell "parked on them" from "parked on
+      // us", which used to be the same amber banner. See queueNeedsThem.
+      blockedOrgId: i.blockedOrgId,
       notes: i.notes,
       openParts,
       gasIssues,
@@ -418,6 +422,11 @@ export default async function Home({ searchParams }: {
            footer reading "With Sierra Spectra" above a list that says "book a
            window" is the page arguing with itself. Either is their move. */
         yourMove: d.queueMine || pmBySys.has(d.id),
+        /* Whether anything NAMES them, which is a different question from
+           whether the machine is well. See queueNeedsThem. */
+        pmDue: pmBySys.has(d.id),
+        blockedOnThem: d.stages.includes(BLOCKED_STAGE)
+          && d.blockedOrgId !== null && d.blockedOrgId === user.orgId,
         lastVisit: lastVisitBySys.get(d.id) ?? "",
         coverage: coverageOf(d.id, covAgreements, today, brand.operatorName),
       };
@@ -465,6 +474,12 @@ export default async function Home({ searchParams }: {
       systems: data.map((d, i) => ({
         id: d.id, externalId: d.externalId, queueMine: d.queueMine, queueReason: d.queueReason,
         state: systems[i].state,
+        pmDue: pmBySys.has(d.id),
+        /* Parked ON THEM, chosen when it was blocked rather than inferred.
+           blocked_org_id null is the operator, so a system parked while WE
+           wait on a vendor raises nothing here. */
+        blockedOnThem: d.stages.includes(BLOCKED_STAGE)
+          && d.blockedOrgId !== null && d.blockedOrgId === user.orgId,
       })),
       systemIds: rows.map((r) => r.id),
     });

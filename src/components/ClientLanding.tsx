@@ -26,6 +26,16 @@ export type ClientSystem = {
   why: string;
   /** True when the queue sits with THEM. */
   yourMove: boolean;
+  /**
+   * Whether anything actually NAMES them on it.
+   *
+   * Separate from `state` and for the same reason coverage is: a system can be
+   * unwell and be nothing for its owner to do about, and reading ill health as
+   * an obligation is what put "your move" on machines that had simply come
+   * home from service. See queueNeedsThem in lib/clientView.
+   */
+  pmDue: boolean;
+  blockedOnThem: boolean;
   lastVisit: string;
   /**
    * Who services this one, and until when.
@@ -258,7 +268,7 @@ function SystemCard({ s, operatorName, today }: {
   s: ClientSystem; operatorName: string; today: string;
 }) {
   const tone = CLIENT_STATE[s.state].tone;
-  const pill = standingPill(s.state, s.yourMove, operatorName);
+  const pill = standingPill({ pmDue: s.pmDue, blockedOnThem: s.blockedOnThem }, s.yourMove, operatorName);
   return (
     <Link href={`/instruments/${s.id}`} className={`inst ${tone}`}>
       <div className="top">

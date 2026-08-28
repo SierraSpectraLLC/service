@@ -31,6 +31,10 @@ export async function clientTodos(opts: {
   systems: {
     id: number; externalId: string; queueMine: boolean; queueReason: string;
     state: ClientState;
+    /** Maintenance fallen due - a window only they can grant. */
+    pmDue: boolean;
+    /** Parked, and parked on THEM. See queueNeedsThem. */
+    blockedOnThem: boolean;
   }[];
   /** Ids of the systems above, for the maintenance read. */
   systemIds: number[];
@@ -138,17 +142,27 @@ export async function clientTodos(opts: {
     for (const p of live) if (p.instrumentId !== null) named.add(p.instrumentId);
   }
 
-  /* A system parked in their queue - but only when something is actually
-     pending on it. Holding a system is not the same as owing a move: a shop
-     that finishes a job hands it back, and that is the queue arriving with
-     nothing attached. See queueNeedsThem in lib/clientView. */
+  /* A system parked in their queue - but only when something actually NAMES
+     them. Holding a system is not owing a move, and neither is a system being
+     unwell: a shop that finishes a job hands it back, and one parked while we
+     wait on a vendor is our problem however long it sits. Both used to raise
+     a chore here. See queueNeedsThem in lib/clientView. */
   for (const s of mode === "reseller" ? [] : systems) {
-    if (!s.queueMine || !queueNeedsThem(s.state) || named.has(s.id)) continue;
+    if (!s.queueMine || named.has(s.id)) continue;
+    if (!queueNeedsThem({ pmDue: s.pmDue, blockedOnThem: s.blockedOnThem })) continue;
     todos.push({
       key: `queue-${s.id}`,
       tone: "warn",
       title: `${s.externalId} is waiting on you`,
-      detail: s.queueReason || "Work is paused until you come back on this one",
+      /* The ask, never the handover note. queueReason is why it MOVED - "no
+         longer on the Google sheet" - and printing that in the slot meant for
+         what somebody owes is how a completed job read as an accusation. The
+         block reason is an ask; a due PM speaks for itself. */
+      detail: s.blockedOnThem && s.queueReason
+        ? s.queueReason
+        : s.pmDue
+          ? "Maintenance has fallen due and needs a window from you"
+          : "Work is paused until you come back on this one",
       href: `/instruments/${s.id}`,
       action: "Open",
     });

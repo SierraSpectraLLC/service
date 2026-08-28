@@ -594,6 +594,16 @@ const FIXTURE = `
   -- an empty array for every row.
   UPDATE instruments SET stages = ARRAY['Waiting / blocked']
     WHERE owner_org_id = 20 AND external_id = 'EP-004';
+
+  -- HANDED BACK, NOTHING ASKED. The shape the client landing kept calling an
+  -- emergency: a system parked in the client's own queue with the handover
+  -- note as its reason, blocked on nobody (blocked_org_id null = us), no PM
+  -- due. It must raise no chore and offer no "hand it back" - see
+  -- queueNeedsThem in lib/clientView.
+  UPDATE instruments SET queue_org_id = 1, queue_since = now() - interval '17 days',
+    queue_reason = 'No longer on the Google sheet',
+    stages = ARRAY['Waiting / blocked'], blocked_org_id = NULL
+    WHERE external_id = 'LZ-003';
   INSERT INTO assets (instrument_id, kind, model, serial, manufacturer, tenant_org_id, sort_order)
   SELECT i.id, 'Mass Spec',
          CASE WHEN i.category = 'GC-MS' THEN 'ISQ 7000' ELSE '6495C' END,

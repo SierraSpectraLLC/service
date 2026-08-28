@@ -26,7 +26,7 @@ import { linkedDevice } from "@/lib/remote";
 import { getModules } from "@/lib/flags";
 import { shopDay, shopMonthDay, shopTime, shopToday } from "@/lib/shopday";
 import { getStageDefs } from "@/lib/stageDefs";
-import { partOpen, GASES } from "@/lib/stages";
+import { BLOCKED_STAGE, partOpen, GASES } from "@/lib/stages";
 import { systemLabel } from "@/lib/systemLabel";
 import { copyTargetsFor } from "@/lib/copyTargets";
 import { clientOptions } from "@/lib/clientNames";
@@ -73,7 +73,6 @@ import { advisoryByCoverage, coverageOf, type CoverageAgreement } from "@/lib/co
 import { dayOf } from "@/lib/serviceHistory";
 import SystemCoverage from "@/components/SystemCoverage";
 import CoverageRecorder from "@/components/CoverageRecorder";
-import { stateOf } from "@/lib/clientLandingData";
 import { HeroKebab, Pill, RecordHero, type HeroStat } from "@/components/ui";
 import { getUiLayout } from "@/app/actions";
 import { canKick, daysSince, queueView } from "@/lib/queue";
@@ -452,13 +451,15 @@ export default async function InstrumentPage({ params }: { params: Promise<{ id:
      shop that finishes a job hands the system back, and that is the queue
      arriving with nothing attached to it. See queueNeedsThem in lib/clientView,
      which the landing's cards and its waiting-on-you list read too. */
-  const somethingPending = queueNeedsThem(stateOf({
-    down: openWos.some((w) => w.severity === "Down")
-      || assetRows.some((a) => a.status === "Down"),
-    openSeverities: openWos.map((w) => w.severity),
-    stages: inst.stages,
+  const somethingPending = queueNeedsThem({
     pmDue: pmDue > 0,
-  }));
+    /* Parked ON THEM. blocked_org_id is chosen at the moment of blocking and
+       null means the operator, so a system parked while WE wait on a vendor
+       is not their chore however long it sits - see the column, and
+       queueNeedsThem for why health alone stopped counting. */
+    blockedOnThem: inst.stages.includes(BLOCKED_STAGE)
+      && inst.blockedOrgId !== null && inst.blockedOrgId === user.orgId,
+  });
   /* Theirs, and nothing is pending on it - which makes the standing line a
      notification rather than a standing fact. It says one useful thing ("this
      is back with you, here is why") and then has nothing left to say, so it

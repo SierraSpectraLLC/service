@@ -95,26 +95,43 @@ export function moveLabel(yourMove: boolean, operatorName: string): string {
 export const moveTone = (yourMove: boolean): Tone => (yourMove ? "warn" : "info");
 
 /**
- * A QUEUE IS A POSITION, NOT AN OBLIGATION.
+ * A QUEUE IS A POSITION, NOT AN OBLIGATION - AND ILL HEALTH IS NOT AN ASK.
  *
- * This is the distinction the client surfaces got wrong. The queue answers who
- * HAS a system; it does not answer who owes a move. A shop that finishes a job
- * hands the system back - the queue arriving at the client with nothing
- * attached to it - and reading that as "they are waiting on you" turns every
- * completed job into a chore on somebody's list. Which is exactly what it did:
- * a system handed back in service, with no open work, was announced as
- * "Sierra Spectra is waiting on you".
+ * The queue answers who HAS a system; it does not answer who owes a move. That
+ * much the first version of this got right. What it got wrong was the test: it
+ * asked "is this system unhealthy" and treated yes as "they owe us something",
+ * which are different questions with different answers.
  *
- * So possession only counts as a chore when something is actually pending: an
- * open job, work that has stopped, or maintenance that has fallen due. All
- * three are already in the state, which is why the state decides this.
+ * A system can be down, or parked while the shop waits on a vendor, and be
+ * nothing whatever for the client to do about. Worse, it is already SAID: an
+ * unhealthy system earns its own card in the attention list, in its own words.
+ * Announcing it a second time as "we are waiting on you" is a double count
+ * that reads as an accusation, and the report that surfaced it was exactly
+ * that - a machine handed back a fortnight earlier, nothing asked of anybody,
+ * top of the client's screen in amber with the handover note printed in the
+ * slot meant for the ask.
  *
- * The known gap: a shop that parks a system with a written reason and opens
- * nothing gets no chore raised here. The reason still shows on the record, and
- * that is the better failure - a missed nudge costs a phone call, while
- * crying wolf on every finished job costs the list its credibility.
+ * So the test is now the two things that genuinely NAME the client:
+ *
+ *   - maintenance has fallen due, which needs a window only they can grant;
+ *   - work is parked and the thing it is parked on is theirs - which the shop
+ *     chose at the moment of blocking (instruments.blocked_org_id), rather
+ *     than anybody inferring it from the state.
+ *
+ * Everything else about a system's health keeps its card and loses its chore.
+ * The known gap is unchanged and still the better failure: a shop that parks
+ * something on the client without saying so raises nothing here, and a missed
+ * nudge costs a phone call, while crying wolf costs the list its credibility -
+ * and a list nobody believes is a list nobody reads.
  */
-export const queueNeedsThem = (state: ClientState): boolean => needsAttention(state);
+export function queueNeedsThem(s: {
+  /** Maintenance fallen due. Only they can grant the window. */
+  pmDue: boolean;
+  /** Parked, and parked on THEM - chosen when it was blocked, not guessed. */
+  blockedOnThem: boolean;
+}): boolean {
+  return s.pmDue || s.blockedOnThem;
+}
 
 /**
  * What the card's footer says about who holds this and whether it matters.
@@ -125,13 +142,15 @@ export const queueNeedsThem = (state: ClientState): boolean => needsAttention(st
  * the CLIENT held read "Your move" - the truth, inverted.
  */
 export function standingPill(
-  state: ClientState, yourMove: boolean, operatorName: string,
+  pending: { pmDue: boolean; blockedOnThem: boolean },
+  yourMove: boolean,
+  operatorName: string,
 ): { label: string; tone: Tone } {
   if (!yourMove) return { label: `With ${operatorName}`, tone: "info" };
-  return queueNeedsThem(state)
+  return queueNeedsThem(pending)
     ? { label: "Your move", tone: "warn" }
-    // Theirs, and nothing is pending on it. Back from service is the ordinary
-    // way a system ends up here.
+    // Theirs, and nothing is asked of them. Back from service is the ordinary
+    // way a system ends up here, and the ordinary way is not a chore.
     : { label: "Nothing pending", tone: "good" };
 }
 

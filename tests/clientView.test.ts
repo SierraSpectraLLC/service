@@ -99,32 +99,62 @@ describe("whose move it is", () => {
   });
 
   it("does not turn a finished job into a chore", () => {
-    /* The reported bug, exactly. The shop completed the maintenance on QQQ-6
-       and handed it back; the landing announced "Sierra Spectra is waiting on
-       you · QQQ-6 is waiting on you" under the words "In service". A queue is
-       a position, not an obligation - possession only counts when something
-       is pending. */
-    expect(queueNeedsThem("ok")).toBe(false);
-    for (const s of CLIENT_STATES.filter((x) => x !== "ok")) {
-      expect(queueNeedsThem(s), s).toBe(true);
-    }
+    /* The first reported bug. The shop completed the maintenance on QQQ-6 and
+       handed it back; the landing announced "Sierra Spectra is waiting on you
+       · QQQ-6 is waiting on you" under the words "In service". A queue is a
+       position, not an obligation. */
+    expect(queueNeedsThem({ pmDue: false, blockedOnThem: false })).toBe(false);
+  });
+
+  it("does not turn ill health into an accusation either", () => {
+    /*
+     * The SECOND report, a fortnight later, and the reason this stopped
+     * reading a ClientState at all. The rule was "unhealthy means they owe us
+     * something", which is a different question with a different answer: a
+     * system can be down, or parked while we wait on a vendor, and be nothing
+     * whatever for its owner to do. It is also already said - an unwell system
+     * earns its own card, in its own words - so the chore was a double count
+     * that read as blame.
+     */
+    expect(queueNeedsThem({ pmDue: false, blockedOnThem: false })).toBe(false);
+  });
+
+  it("raises the two things that genuinely name them", () => {
+    // A window only they can grant, and a block somebody deliberately parked
+    // on them - chosen at the time (instruments.blocked_org_id), not guessed.
+    expect(queueNeedsThem({ pmDue: true, blockedOnThem: false })).toBe(true);
+    expect(queueNeedsThem({ pmDue: false, blockedOnThem: true })).toBe(true);
+    expect(queueNeedsThem({ pmDue: true, blockedOnThem: true })).toBe(true);
   });
 
   it("has a third answer for held-and-fine", () => {
     // The condition this replaced tested `state === "ok" && !yourMove`, which
     // is the truth inverted: it said "Nothing pending" about a system the SHOP
     // held and "Your move" about a healthy one the client held.
-    expect(standingPill("ok", true, "Sierra Spectra")).toEqual(
+    const idle = { pmDue: false, blockedOnThem: false };
+    expect(standingPill(idle, true, "Sierra Spectra")).toEqual(
       { label: "Nothing pending", tone: "good" });
-    expect(standingPill("ok", false, "Sierra Spectra")).toEqual(
+    expect(standingPill(idle, false, "Sierra Spectra")).toEqual(
       { label: "With Sierra Spectra", tone: "info" });
   });
 
-  it("still says your move when something is actually pending", () => {
-    for (const s of CLIENT_STATES.filter((x) => x !== "ok")) {
-      expect(standingPill(s, true, "Sierra Spectra").label, s).toBe("Your move");
-      expect(standingPill(s, true, "Sierra Spectra").tone, s).toBe("warn");
+  it("still says your move when something is actually asked of them", () => {
+    for (const p of [
+      { pmDue: true, blockedOnThem: false },
+      { pmDue: false, blockedOnThem: true },
+    ]) {
+      expect(standingPill(p, true, "Sierra Spectra").label).toBe("Your move");
+      expect(standingPill(p, true, "Sierra Spectra").tone).toBe("warn");
     }
+  });
+
+  it("says nothing pending on a machine that is merely unwell", () => {
+    /* A down instrument in the client's own lab is a real problem and gets a
+       real card. What it is not is a chore they are late on, and the footer
+       used to say "Your move" about it - the shop's queue vocabulary
+       describing a failure nobody had asked them to do anything about. */
+    expect(standingPill({ pmDue: false, blockedOnThem: false }, true, "Sierra Spectra"))
+      .toEqual({ label: "Nothing pending", tone: "good" });
   });
 
   it("says who holds it before it says whether it matters", () => {
@@ -201,9 +231,21 @@ describe("a queue is a position, not an obligation", () => {
      what a rule with three copies does. The rule now lives in one function and
      these check that each surface asks it rather than re-deriving it. */
 
-  it("raises a held system as a chore only when something is pending", () => {
+  it("raises a held system as a chore only when something names them", () => {
+    // Off the system's STATE and onto the two facts that are actually an ask.
     const src = read("src/lib/clientLandingData.ts");
-    expect(src).toMatch(/!s\.queueMine \|\| !queueNeedsThem\(s\.state\)/);
+    expect(src).toMatch(/queueNeedsThem\(\{ pmDue: s\.pmDue, blockedOnThem: s\.blockedOnThem \}\)/);
+    expect(src).not.toMatch(/queueNeedsThem\(s\.state\)/);
+  });
+
+  it("never prints the handover note as the ask", () => {
+    /* "CASA-001 is waiting on you / No longer on the Google sheet" - the note
+       says why it MOVED, not what anybody owes, and in the detail slot it
+       read as an accusation about a machine sent home a fortnight earlier.
+       queueReason survives only where it really is the ask: a block somebody
+       parked on them. */
+    const src = read("src/lib/clientLandingData.ts");
+    expect(src).toMatch(/s\.blockedOnThem && s\.queueReason/);
   });
 
   it("lets a more specific chore own the line", () => {
@@ -218,9 +260,27 @@ describe("a queue is a position, not an obligation", () => {
 
   it("gives the card one pill from one rule", () => {
     const src = read("src/components/ClientLanding.tsx");
-    expect(src).toMatch(/standingPill\(s\.state, s\.yourMove, operatorName\)/);
+    expect(src).toMatch(
+      /standingPill\(\{ pmDue: s\.pmDue, blockedOnThem: s\.blockedOnThem \}, s\.yourMove, operatorName\)/);
     // The inverted condition this replaced.
     expect(src).not.toMatch(/state === "ok" && !s\.yourMove/);
+  });
+
+  it("offers nobody a way to hand back a machine that is already theirs", () => {
+    /*
+     * "Hand it back" was the shop's verb pointed at the machine's owner. It is
+     * in their lab; there is nowhere to hand it. Reported alongside the chore
+     * bug and it is the same mistake underneath - the queue is the shop's
+     * instrument for tracking its own bench, and every time one of its words
+     * reaches a client's screen unchanged it describes a world the client is
+     * not standing in. Request service is on the header; the Queue panel one
+     * card down still moves it, and names both ends while it does.
+     */
+    // Comments quote the old label as history; it is the live JSX that has to
+    // be clean, so they are stripped before the check.
+    const src = read("src/components/StandingLine.tsx").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(src).not.toMatch(/"Hand it back"/);
+    expect(src).toMatch(/canMove && !\(isMine && clientVoice\)/);
   });
 
   it("stops the record using the shop's words about the client's own machine", () => {
