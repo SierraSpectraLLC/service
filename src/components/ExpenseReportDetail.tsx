@@ -1,16 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
-  attachPoolExpenses, deleteExpenseReport, logMyExpense, nameExpenseReport, payExpenseReport,
-  removeReportExpense, returnExpenseReport, setReportWorkOrder, submitDraftReport,
+  approveExpenseAllowance, attachPoolExpenses, deleteExpenseReport, logMyExpense, nameExpenseReport,
+  payExpenseReport, removeReportExpense, returnExpenseReport, setReportWorkOrder, submitDraftReport,
   withdrawExpenseReport,
 } from "@/app/actions";
 import {
   REPORT_LABEL, REPORT_TONE, checkReportTitle, editableReport, reportSpan, reportTotalCents,
 } from "@/lib/expenseReports";
+import {
+  isPerDiemKind, perDiemOffer, policyConfigured, type ExpensePolicy,
+} from "@/lib/expensePolicy";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
 import { confirmDialog, confirmReason } from "@/components/ui/ConfirmDialog";
@@ -20,7 +23,15 @@ import { toast } from "@/components/ui/Toast";
 export type ReportExpense = {
   id: number; kind: string; description: string; amountCents: number; incurredOn: string;
   workOrderId: number | null; workOrderNumber: string; receiptUrl: string; receiptName: string;
+  /** What the travel rulebook made of it: "" | flagged | approved. */
+  allowanceState: string;
+  allowanceNote: string;
+  /** Who cleared it, when somebody has. */
+  allowanceByName: string;
 };
+
+/** One of the job's labs, with the claimant's road miles to it. */
+export type TripSite = { siteId: number; name: string; miles: number | null; estimated: boolean };
 
 /**
  * One expense report, opened like a record: the rows it claims, the receipt
@@ -32,7 +43,10 @@ export type ReportExpense = {
  * closed, or none), done. When the pocket is empty, Submit. The photo goes to
  * the same blob store the app's other files use.
  */
-export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwner, today, categories, workOrders, pool }: {
+export default function ExpenseReportDetail({
+  report, rows, mayWork, mine, isOwner, adminsPeople, today, categories, workOrders, pool,
+  policy, tripSites, defaultSiteId,
+}: {
   report: {
     id: number; person: string; status: string; submittedAt: string;
     paidOn: string; paidRef: string; returnedReason: string;
@@ -55,11 +69,22 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
   /** Whether it is the reader's OWN money. Only the wording turns on this. */
   mine: boolean;
   isOwner: boolean;
+  /**
+   * Whether this reader may CLEAR a flagged row - HR and the owner. Separate
+   * from isOwner because judging a claim against the rules and writing the
+   * check are different jobs, the same split the desk already draws.
+   */
+  adminsPeople: boolean;
   today: string;
   categories: string[];
   workOrders: { id: number; label: string }[];
   /** The claimant's unclaimed expenses, offered for pulling onto an open report. */
   pool: { id: number; kind: string; description: string; amountCents: number; incurredOn: string }[];
+  /** The shop's travel rules. All zeros = the rulebook is off and nothing below shows. */
+  policy: ExpensePolicy;
+  /** The job's labs and the CLAIMANT's road miles to each. Empty when there is no job. */
+  tripSites: TripSite[];
+  defaultSiteId: number | null;
 }) {
   const router = useRouter();
   const editable = mayWork && editableReport(report.status);
@@ -95,8 +120,72 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
   const nameProblem = "error" in named ? named.error : null;
 
   const total = reportTotalCents(rows);
+  /** Rows a reviewer still has to sign for. The payout waits on these. */
+  const flagged = rows.filter((r) => r.allowanceState === "flagged");
+
+  /*
+   * The trip behind a per diem: which lab, and how many nights. Miles are not
+   * asked for - they are the road distance from the claimant's own home to
+   * that lab, which the server worked out before this page rendered.
+   *
+   * Nights defaults to 0, the day trip, because that is the case this whole
+   * thing was built for: drive out, eat lunch, drive back. Somebody who stayed
+   * over types a 1 and the rulebook prices the nights instead of the miles.
+   */
+  const [tripDraft, setTripDraft] = useState({ siteId: defaultSiteId, nights: "0" });
+  const site = tripSites.find((x) => x.siteId === tripDraft.siteId)
+    ?? tripSites.find((x) => x.siteId === defaultSiteId)
+    ?? null;
+  /* The same call the action makes on the server, for the same trip - so what
+     the dialog promises and what the row is judged by cannot disagree. The
+     server still recomputes it; this is the preview, not the authority. */
+  const offer = perDiemOffer(policy, {
+    oneWayMiles: site?.miles ?? null,
+    nights: parseInt(tripDraft.nights, 10) || 0,
+    siteName: site?.name ?? "",
+  });
+  /* Only when the rulebook is on, the claim names a job, and the category the
+     engineer just picked is a per diem. Anything else and the dialog is the
+     plain one it has always been. */
+  const perDiem = policyConfigured(policy) && report.workOrderId !== null
+    && tripSites.length > 0 && isPerDiemKind(draft.kind);
+
+  /*
+   * The autofill itself.
+   *
+   * The gesture this is built around has no typing in it: pick "Per diem" and
+   * the amount and the sentence are already there, because the shop's rate and
+   * the distance from this person's front door are both things the app knows
+   * and the engineer standing in a car park does not want to look up.
+   *
+   * It only ever overwrites its OWN last answer, or an empty box. The moment
+   * somebody types over the amount - a $52 airport lunch on a $30 day - that
+   * number is theirs, and changing the nights afterwards must not quietly take
+   * it back. Which is what lastFill remembers: not "has the user typed", but
+   * "is what is in the box still the thing we put there".
+   */
+  const lastFill = useRef({ amount: "", description: "" });
+  useEffect(() => {
+    if (!perDiem || offer.allowedCents <= 0) return;
+    const amount = (offer.allowedCents / 100).toFixed(2);
+    const prev = lastFill.current;
+    setDraft((d) => {
+      const takeAmount = d.amount === "" || d.amount === prev.amount;
+      const takeDesc = d.description === "" || d.description === prev.description;
+      if (!takeAmount && !takeDesc) return d;
+      return {
+        ...d,
+        amount: takeAmount ? amount : d.amount,
+        description: takeDesc ? offer.description : d.description,
+      };
+    });
+    lastFill.current = { amount, description: offer.description };
+  }, [perDiem, offer.allowedCents, offer.description]);
 
   const openAdd = () => {
+    setTripDraft({ siteId: defaultSiteId, nights: "0" });
+    // A fresh dialog owns nothing yet, so the first offer fills both boxes.
+    lastFill.current = { amount: "", description: "" };
     setDraft({
       kind: categories[0] ?? "Other", description: "", amount: "", incurredOn: today,
       /* Pre-picked to the report's own job. Every row on a Reno-install claim
@@ -129,6 +218,10 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
         incurredOn: draft.incurredOn,
         workOrderId: draft.workOrderId ? parseInt(draft.workOrderId, 10) : null,
         receiptUrl, receiptName, reportId: report.id,
+        // Only meaningful for a per diem; the server ignores them otherwise,
+        // and re-derives the verdict either way.
+        nights: perDiem ? parseInt(tripDraft.nights, 10) || 0 : 0,
+        siteId: perDiem ? tripDraft.siteId : null,
       });
       if (res?.error) { setAddErr(res.error); return; }
       toast({ message: "Added to the report" });
@@ -242,7 +335,8 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
         )}
         {rows.map((r) => (
           <div key={r.id} className="row-hover"
-            style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 4px", borderTop: "1px solid var(--line)" }}>
+            style={{ padding: "6px 4px", borderTop: "1px solid var(--line)" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {/* The receipt leads the row: a claim with paper reads differently
                 from one without, and the reviewer looks for exactly that. */}
             {r.receiptUrl ? (
@@ -260,12 +354,46 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
             <span className="t-body" style={{ flex: "1 1 130px", minWidth: 0 }}>{r.description}</span>
             {r.workOrderNumber && <span className="mut t-meta mono">{r.workOrderNumber}</span>}
             <span className="t-body" style={{ fontWeight: 700 }}>{formatCents(r.amountCents)}</span>
+            {r.allowanceState === "flagged" && <Pill tone="warn">needs approval</Pill>}
+            {r.allowanceState === "approved" && <Pill tone="good">approved</Pill>}
             {editable && (
               <button className="btn link" disabled={pending} aria-label={`Remove ${r.description}`}
                 onClick={() => act(() => removeReportExpense(r.id), `Removed - it is back in ${theirs} unclaimed pool`)}>
                 remove
               </button>
             )}
+          </div>
+          {/*
+            What the rulebook said, under the row it said it about. A flag is
+            not a colour: this line is the sentence a reviewer has to agree
+            with before the report can be paid, so it is spelled out where they
+            are already looking rather than behind a hover.
+          */}
+          {r.allowanceState === "flagged" && (
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", marginTop: 2, paddingLeft: 2 }}>
+              <span className="t-small" style={{ color: "var(--t-warn-fg)", flex: "1 1 240px" }}>
+                {r.allowanceNote}
+              </span>
+              {adminsPeople && (
+                <button className="btn sm" disabled={pending}
+                  onClick={async () => {
+                    if (!(await confirmDialog({
+                      title: `Approve this ${formatCents(r.amountCents)} ${r.kind.toLowerCase()}?`,
+                      body: `${r.allowanceNote} Approving puts your name on it and lets the report be paid.`,
+                      action: "Approve it",
+                    }))) return;
+                    act(() => approveExpenseAllowance(r.id), "Approved - it can be paid now");
+                  }}>
+                  Approve
+                </button>
+              )}
+            </div>
+          )}
+          {r.allowanceState === "approved" && r.allowanceByName && (
+            <div className="mut t-small" style={{ marginTop: 2, paddingLeft: 2 }}>
+              {r.allowanceNote} Approved by {r.allowanceByName}.
+            </div>
+          )}
           </div>
         ))}
         {rows.length === 0 && (
@@ -379,6 +507,78 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
                 onChange={(e) => setDraft({ ...draft, amount: e.target.value })} />
             </div>
           </div>
+
+          {/*
+            The rulebook, answering as soon as the category says per diem.
+            Nobody types a distance: the claim names a job, the job names a lab,
+            and the lab is a known number of road miles from THIS claimant's
+            front door. What is left to ask is the one thing only they know -
+            whether they slept there.
+          */}
+          {perDiem && (
+            <div style={{ padding: "8px 10px", borderRadius: 8, background: "#F4F7FB", marginBottom: 8 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                {tripSites.length > 1 ? (
+                  <>
+                    <span className="mut t-small">Lab</span>
+                    <select className="t-small" value={tripDraft.siteId ?? ""} aria-label="Which lab"
+                      style={{ width: "auto", padding: "3px 6px" }}
+                      onChange={(e) => setTripDraft({
+                        ...tripDraft, siteId: parseInt(e.target.value, 10) || null,
+                      })}>
+                      {tripSites.map((x) => <option key={x.siteId} value={x.siteId}>{x.name}</option>)}
+                    </select>
+                  </>
+                ) : site && <span className="t-small" style={{ fontWeight: 600 }}>{site.name}</span>}
+                <span className="mut t-small">
+                  {site?.miles == null
+                    ? "distance from home unknown"
+                    : `${site.miles} mi from ${mine ? "your" : `${report.person.split(" ")[0]}'s`} home`
+                      + (site.estimated ? " (estimated)" : "")}
+                </span>
+                <span className="mut t-small">·</span>
+                <input className="t-small" inputMode="numeric" value={tripDraft.nights} aria-label="Nights away"
+                  style={{ width: 44, padding: "3px 6px" }}
+                  onChange={(e) => setTripDraft({ ...tripDraft, nights: e.target.value.replace(/[^0-9]/g, "") })} />
+                <span className="mut t-small">nights away</span>
+              </div>
+
+              <div className="t-small" style={{ marginTop: 6 }}>
+                {offer.allowedCents > 0 ? (
+                  <>
+                    The rulebook allows <b>{formatCents(offer.allowedCents)}</b>
+                    {draft.amount === (offer.allowedCents / 100).toFixed(2)
+                      ? " - filled in below."
+                      : <>
+                          , and you have claimed something else.{" "}
+                          {/* Only offered once they have departed from it. A
+                              button that undoes nothing is noise. */}
+                          <button className="btn link" type="button" disabled={pending}
+                            onClick={() => {
+                              const amount = (offer.allowedCents / 100).toFixed(2);
+                              setDraft((d) => ({ ...d, amount, description: offer.description }));
+                              lastFill.current = { amount, description: offer.description };
+                            }}>
+                            put the allowance back
+                          </button>
+                        </>}
+                  </>
+                ) : (
+                  <span className="mut">The rulebook offers nothing for this trip - claim what it cost and say why.</span>
+                )}
+              </div>
+
+              {/* Said before it is filed, not after. Somebody about to claim a
+                  lunch the stipend already covered should read the reason now,
+                  while they can still decide it was not worth queueing a
+                  reviewer for - and file it knowingly if it was. */}
+              {offer.flag && (
+                <div className="t-small" style={{ color: "var(--t-warn-fg)", marginTop: 6 }}>
+                  Needs approval: {offer.flag}
+                </div>
+              )}
+            </div>
+          )}
           <label>Description</label>
           <input value={draft.description} aria-label="Description" placeholder="Parking, downtown site"
             onChange={(e) => setDraft({ ...draft, description: e.target.value })} style={{ marginBottom: 8 }} />

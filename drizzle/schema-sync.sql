@@ -3563,3 +3563,23 @@ CREATE INDEX IF NOT EXISTS "expense_reports_wo_idx" ON "expense_reports" ("work_
 -- the submitted_by column names, because that is what the column meant then.
 UPDATE "expense_reports" SET "opened_by" = "submitted_by"
   WHERE "opened_by" = '' AND "submitted_by" <> '';
+
+-- What the travel rulebook made of an expense row, written when it was logged.
+--
+-- Only per diems are ruled on, and only on a report that names a job: the job
+-- supplies the site, and the site plus the claimant's home supplies the
+-- distance. Everything else stores '' and behaves as it always did.
+--
+-- Stored rather than recomputed at render: the rulebook is a live setting, road
+-- miles come from a routing provider and an engineer's home moves, so a claim
+-- has to be judged against the rules as they stood when it was filed. See
+-- src/lib/expensePolicy.ts.
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_state" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_note" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_by" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_at" timestamp;
+CREATE INDEX IF NOT EXISTS "expenses_allowance_idx" ON "expenses" ("allowance_state");
+-- Nights away as the claimant answered it: the one fact in a per diem ruling
+-- that cannot be recovered from the job or the rulebook, kept so re-judging a
+-- claim on a different job does not silently demote an overnight to a day trip.
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_nights" integer NOT NULL DEFAULT 0;

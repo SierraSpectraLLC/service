@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { reimbursementPool } from "@/lib/expenseReports";
+import { needsApproval } from "@/lib/expensePolicy";
 import { mayAdminPeople } from "@/lib/hr";
 import { listReportSubjects } from "@/app/actions";
 import { shopToday } from "@/lib/shopday";
@@ -97,6 +98,7 @@ export default async function ExpensesPage({ searchParams }: {
     expenses: expenseRows.filter((e) => e.reportId === r.id).map((e) => ({
       id: e.id, kind: e.kind, description: e.description, amountCents: e.amountCents, incurredOn: e.incurredOn,
     })),
+    flaggedCount: expenseRows.filter((e) => e.reportId === r.id && needsApproval(e)).length,
   });
 
   /* Arriving from the People desk with a person to file for. Checked against

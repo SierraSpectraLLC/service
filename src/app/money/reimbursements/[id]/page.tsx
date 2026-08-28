@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseCategories, expenseReports, expenses, houseMembers, workOrders } from "@/db/schema";
+import { appSettings, expenseCategories, expenseReports, expenses, houseMembers, workOrders } from "@/db/schema";
 import { requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
@@ -10,6 +10,8 @@ import {
   REPORT_LABEL, mayWorkReport, reimbursementPool, reportSpan, reportTitle, reportTotalCents,
 } from "@/lib/expenseReports";
 import { mayAdminPeople, reportSubjectFor } from "@/lib/hr";
+import { resolveExpensePolicy } from "@/lib/expensePolicy";
+import { workOrderTrip } from "@/lib/tripMiles";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { WO_LABEL } from "@/lib/workOrders";
@@ -86,6 +88,25 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
     : await reportSubjectFor(report);
   const pool = reimbursementPool(myExpenses, subject);
 
+  /*
+   * The travel rulebook, and this claim's trip under it.
+   *
+   * Both are needed by the add-expense dialog so it can answer the per diem
+   * question the moment somebody picks the category, instead of asking for a
+   * distance the app already knows. The miles are measured from the SUBJECT's
+   * home - the person the money is owed to - which is why this waits for the
+   * subject lookup above rather than using the reader's address.
+   *
+   * Only for a claim that names a job: no job, no site, no distance, and the
+   * dialog is the plain one it has always been.
+   */
+  const [policyRow, trip] = await Promise.all([
+    db.select({ expensePolicy: appSettings.expensePolicy }).from(appSettings).where(eq(appSettings.id, 1)),
+    report.workOrderId !== null && subject.email
+      ? workOrderTrip(subject.email, report.workOrderId).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
   const total = reportTotalCents(rows);
   return (
     <div className="container">
@@ -114,8 +135,17 @@ export default async function ExpenseReportPage({ params }: { params: Promise<{ 
           incurredOn: r.incurredOn, workOrderId: r.workOrderId,
           workOrderNumber: r.workOrderId !== null ? (woNumber.get(r.workOrderId) ?? "") : "",
           receiptUrl: r.receiptUrl, receiptName: r.receiptName,
+          allowanceState: r.allowanceState, allowanceNote: r.allowanceNote,
+          allowanceByName: r.allowanceBy.trim()
+            ? (roster.find((m) => m.email.trim().toLowerCase() === r.allowanceBy.trim().toLowerCase())?.name
+              ?? r.allowanceBy)
+            : "",
         }))}
         mayWork={mayWork} mine={mine} isOwner={isOwner} today={shopToday()}
+        adminsPeople={adminsPeople}
+        policy={resolveExpensePolicy(policyRow[0]?.expensePolicy ?? null)}
+        tripSites={trip?.sites ?? []}
+        defaultSiteId={trip?.defaultSiteId ?? null}
         categories={categoryRows.map((c) => c.name)}
         workOrders={pickable.map((w) => ({
           id: w.id,

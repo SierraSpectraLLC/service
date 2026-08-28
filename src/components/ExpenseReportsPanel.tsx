@@ -32,6 +32,12 @@ export type ReportRow = {
   openedByName: string;
   paidOn: string; paidRef: string; returnedReason: string; note: string;
   expenses: { id: number; kind: string; description: string; amountCents: number; incurredOn: string }[];
+  /**
+   * Rows the travel rulebook queried and nobody has signed for yet. The payout
+   * waits on these - see lib/expensePolicy - so the desk says so rather than
+   * offering a button the action will refuse.
+   */
+  flaggedCount: number;
 };
 
 /** The work-order picker's unanswered state, kept distinct from "overhead". */
@@ -175,9 +181,16 @@ export default function ExpenseReportsPanel({
               toast({ message: "Back to draft - open it to edit" });
             })}>withdraw</button>
         )}
+        {r.flaggedCount > 0 && (
+          <div className="t-small" style={{ color: "var(--t-warn-fg)", marginTop: 2 }}>
+            {r.flaggedCount} row{r.flaggedCount === 1 ? "" : "s"} outside the travel rules - open it to approve
+            {r.flaggedCount === 1 ? " it" : " them"} before this can be paid.
+          </div>
+        )}
         {side === "queue" && isOwner && r.status === "submitted" && (
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-            <button className="btn sm accent" disabled={pending}
+            <button className="btn sm accent" disabled={pending || r.flaggedCount > 0}
+              title={r.flaggedCount ? "Approve the flagged rows first" : undefined}
               onClick={() => { setPayDraft({ paidOn: today, reference: "" }); setPayErr(""); setPaying(r); }}>
               Mark paid
             </button>

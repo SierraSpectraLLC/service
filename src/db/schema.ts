@@ -2733,8 +2733,42 @@ export const expenses = pgTable("expenses", {
   /** The receipt: a photo shot at the counter, or an emailed PDF. Blob URL. */
   receiptUrl: text("receipt_url").notNull().default(""),
   receiptName: text("receipt_name").notNull().default(""),
+  /*
+   * What the shop's travel rulebook made of this row, written when it was
+   * logged. See lib/expensePolicy.
+   *
+   * Only per diems are ruled on today, and only when a report names a job -
+   * that is what supplies the site, and the site plus the claimant's home is
+   * what supplies the distance. Everything else stores "" and behaves as it
+   * always did.
+   *
+   * The verdict is STORED rather than recomputed at render, and deliberately:
+   * the rulebook is a live setting an owner edits, road miles come from a
+   * routing provider, and an engineer's home moves. A claim has to be judged
+   * against the rules as they stood when it was filed, or raising the radius
+   * next March silently un-flags every claim anybody ever queried.
+   */
+  allowanceState: text("allowance_state").notNull().default(""), // "" | flagged | approved
+  /** What the rulebook said, in the words a reviewer reads. Written either way. */
+  allowanceNote: text("allowance_note").notNull().default(""),
+  /** Who cleared a flagged row, and when. Blank until somebody does. */
+  allowanceBy: text("allowance_by").notNull().default(""),
+  allowanceAt: timestamp("allowance_at"),
+  /**
+   * Nights away, as the claimant answered it. The one fact in the ruling that
+   * cannot be recovered from anywhere else - miles come from the job's site
+   * and the rates come from the rulebook, but only the person who made the
+   * trip knows whether they slept there. Kept so that moving a claim onto a
+   * different job re-judges it against the same trip rather than silently
+   * demoting an overnight to a day trip.
+   */
+  allowanceNights: integer("allowance_nights").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("expenses_wo_idx").on(t.workOrderId), index("expenses_report_idx").on(t.reportId)]);
+}, (t) => [
+  index("expenses_wo_idx").on(t.workOrderId),
+  index("expenses_report_idx").on(t.reportId),
+  index("expenses_allowance_idx").on(t.allowanceState),
+]);
 
 /**
  * An engineer's reimbursement claim: a batch of their expenses, submitted as

@@ -117,7 +117,10 @@ import { VIEW_LABEL, isViewPref, viewAllowed, type ViewMode } from "@/lib/viewMo
 import { gasesForSystemWithUnits, gasesForUnit, missingGases } from "@/lib/catalogGas";
 import { shopToday, shopTodayMDY } from "@/lib/shopday";
 import { composeEodEmail, isOffSystem } from "@/lib/eodEmail";
-import { resolveExpensePolicy } from "@/lib/expensePolicy";
+import {
+  allowanceFor, isPerDiemKind, needsApproval, perDiemOffer, resolveExpensePolicy,
+} from "@/lib/expensePolicy";
+import { workOrderTrip } from "@/lib/tripMiles";
 import { categoryKey, cleanCategoryName, missingStarters } from "@/lib/expenseCategories";
 import { drivingRoute, geocode } from "@/lib/geo";
 import { getBrand } from "@/lib/brand";
@@ -8190,12 +8193,100 @@ export async function logOverheadExpense(
  * order, which leaves person blank because it is recording job cost, not a
  * personal claim.
  */
+/**
+ * What the travel rulebook makes of a per diem being added to a claim.
+ *
+ * Recomputed HERE, on the server, from the report's own job and the CLAIMANT's
+ * home - never taken from the form. The dialog computes the same answer to
+ * show it, but a verdict the browser could post is not a verdict: the whole
+ * point of the flag is that a claim outside the rules cannot be paid without
+ * somebody signing for it, and a client that can send `allowanceState: ""`
+ * makes that a suggestion.
+ *
+ * Everything that is not a ruled per diem returns the empty verdict, so a
+ * shop with no rulebook, a report with no job, or a parking receipt all behave
+ * exactly as they did before any of this existed.
+ */
+async function ruleAllowance(
+  input: {
+    kind: string; amountCents: number; nights: number; siteId: number | null;
+    report: { person: string; workOrderId: number | null; tenantOrgId: number | null } | null;
+  },
+): Promise<{ state: "" | "flagged"; note: string; siteId: number | null; nights: number }> {
+  const nights = Math.max(0, Math.round(input.nights));
+  const blank = { state: "" as const, note: "", siteId: input.siteId, nights };
+  if (!input.report || input.report.workOrderId === null) return blank;
+  if (!isPerDiemKind(input.kind)) return blank;
+  const [cfg] = await db.select({ expensePolicy: appSettings.expensePolicy })
+    .from(appSettings).where(eq(appSettings.id, 1));
+  const policy = resolveExpensePolicy(cfg?.expensePolicy ?? null);
+
+  // Whose doorstep the trip starts from: the person the money is owed to, not
+  // whoever is typing. lib/hr.reportSubjectFor is the same lookup the pool uses.
+  const subject = await reportSubjectFor(input.report);
+  const trip = subject.email
+    ? await workOrderTrip(subject.email, input.report.workOrderId).catch(() => null)
+    : null;
+  /* The form's site if it offered one and the job actually has it; otherwise
+     the job's own lab. A site id off the wire that is not one of this job's is
+     not an error worth a refusal - it is simply not used. */
+  const site = trip?.sites.find((x) => x.siteId === input.siteId)
+    ?? trip?.sites.find((x) => x.siteId === trip.defaultSiteId)
+    ?? null;
+  const offer = perDiemOffer(policy, {
+    oneWayMiles: site?.miles ?? null,
+    nights,
+    siteName: site?.name ?? "",
+  });
+  const verdict = allowanceFor(offer, input.amountCents);
+  return { ...verdict, siteId: site?.siteId ?? null, nights };
+}
+
+/**
+ * Judge every per diem on a report again, against the job it now names.
+ *
+ * Called whenever the facts under a ruling move: a row is pulled in from the
+ * pool, or the claim is filed against a different job. Both change the
+ * distance the rulebook measures, and a verdict computed against the old ones
+ * is worse than no verdict - a claim flagged for being close by would quietly
+ * clear itself the moment somebody re-pointed the report at a job three
+ * hundred miles away.
+ *
+ * An APPROVAL does not survive it. Somebody signed for a specific trip; the
+ * trip changed, so the signature is spent and a reviewer looks again. The
+ * audit trail keeps the first one either way.
+ */
+async function rerulePerDiems(report: {
+  id: number; person: string; workOrderId: number | null; tenantOrgId: number | null;
+}): Promise<void> {
+  const rows = await db.select().from(expenses).where(eq(expenses.reportId, report.id));
+  for (const row of rows) {
+    if (!isPerDiemKind(row.kind)) continue;
+    const ruling = await ruleAllowance({
+      kind: row.kind, amountCents: row.amountCents, nights: row.allowanceNights,
+      siteId: row.siteId, report,
+    });
+    if (ruling.state === row.allowanceState && ruling.note === row.allowanceNote) continue;
+    await db.update(expenses).set({
+      allowanceState: ruling.state, allowanceNote: ruling.note,
+      siteId: ruling.siteId, allowanceBy: "", allowanceAt: null,
+    }).where(eq(expenses.id, row.id));
+  }
+}
+
 export async function logMyExpense(
   data: {
     kind: string; description: string; amount: string; incurredOn: string; workOrderId: number | null;
     receiptUrl?: string; receiptName?: string;
     /** Land it straight on one of my open reports instead of the pool. */
     reportId?: number | null;
+    /**
+     * Nights away, for a per diem on a report that names a job. Zero - a day
+     * trip - is the ordinary case and what an omitted field means.
+     */
+    nights?: number;
+    /** Which of the job's labs the trip went to, when it has more than one. */
+    siteId?: number | null;
   },
 ): Promise<{ error?: string }> {
   const u = await requireStaff();
@@ -8227,27 +8318,34 @@ export async function logMyExpense(
    * paying the office manager back.
    */
   let person = u.name;
+  let report: Awaited<ReturnType<typeof workableReport>> = null;
   if (data.reportId != null) {
-    const report = await workableReport(u, data.reportId);
+    report = await workableReport(u, data.reportId);
     if (!report) return { error: "Not your report" };
     if (!editableReport(report.status)) return { error: `That report is ${report.status} - it cannot take new rows` };
     reportId = report.id;
     person = report.person;
   }
+  const ruling = await ruleAllowance({
+    kind, amountCents: cents, nights: Math.max(0, Math.round(data.nights ?? 0)),
+    siteId: data.siteId ?? null, report,
+  });
   const [row] = await db.insert(expenses).values({
     tenantOrgId: t, workOrderId, kind, description, amountCents: cents, incurredOn: date,
     // On a job it defaults to rebillable, same as the work order form; with no
     // job there is nobody to rebill - it is overhead, like the internet bill.
     billable: workOrderId !== null,
-    person, loggedBy: u.email, reportId,
+    person, loggedBy: u.email, reportId, siteId: ruling.siteId,
     receiptUrl: (data.receiptUrl ?? "").trim().slice(0, 500),
     receiptName: (data.receiptName ?? "").trim().slice(0, 200),
+    allowanceState: ruling.state, allowanceNote: ruling.note, allowanceNights: ruling.nights,
   }).returning();
   await audit({
     actor: u.email, entityType: "expense", entityId: row.id, tenantOrgId: row.tenantOrgId,
     action: `logged ${formatCents(cents)} - ${description}`
       + (workOrderId !== null ? ` on a work order` : " (no job - overhead)")
-      + (person === u.name ? "" : ` for ${person}`),
+      + (person === u.name ? "" : ` for ${person}`)
+      + (ruling.state === "flagged" ? ` - FLAGGED: ${ruling.note}` : ""),
   });
   revalidatePath("/money/reimbursements");
   if (reportId !== null) revalidatePath(`/money/reimbursements/${reportId}`);
@@ -8395,6 +8493,9 @@ export async function createExpenseReport(
   }).returning();
   if (ids.length) {
     await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
+    // Same reason as attachPoolExpenses: the claim's job is the first thing
+    // that lets the rulebook judge a per diem that was loose in the pool.
+    await rerulePerDiems(report);
   }
   await audit({
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
@@ -8430,6 +8531,8 @@ export async function setReportWorkOrder(
   if ("error" in job) return job;
   if (job.id === report.workOrderId) return {};
   await db.update(expenseReports).set({ workOrderId: job.id }).where(eq(expenseReports.id, reportId));
+  // The job IS the distance. Moving it re-judges every per diem on the claim.
+  await rerulePerDiems({ ...report, workOrderId: job.id });
   await audit({
     actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
     action: job.id === null
@@ -8505,8 +8608,58 @@ export async function attachPoolExpenses(
     };
   }
   await db.update(expenses).set({ reportId }).where(inArray(expenses.id, ids));
+  /* A per diem logged loose in the pool was never judged - there was no job to
+     judge it against. Landing on a claim that names one is the first moment
+     the rulebook can speak, and skipping it here would make the pool the way
+     round the flag. */
+  await rerulePerDiems(report);
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${reportId}`);
+  return {};
+}
+
+/**
+ * Clear a flagged row, by hand, on the record.
+ *
+ * The other half of "flag it but still follow the org allowances": the claim
+ * is allowed to exist, at the shop's own rate, and a person decides. Until
+ * somebody does, payExpenseReport will not pay the report - which is what
+ * makes the flag a gate rather than a colour.
+ *
+ * WHO. Whoever administers the people, which is HR and the owner - the same
+ * readers who see the whole desk, because chasing and judging claims is one
+ * job. Not the engineer whose claim it is: an approval you can grant yourself
+ * is not an approval, and this rule is the entire point of the feature.
+ *
+ * The owner is the exception, deliberately. In a shop with one owner there is
+ * nobody above them to sign their lunch, and refusing would leave their own
+ * flagged row permanently unpayable. The audit line records that they cleared
+ * their own, which is the honest answer where a rule cannot help.
+ */
+export async function approveExpenseAllowance(expenseId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  if (!(await mayAdminPeople(u))) return { error: "Only HR or the owner can approve a flagged expense" };
+  const [row] = await db.select().from(expenses).where(eq(expenses.id, expenseId));
+  if (!row || !houseOf(u, row.tenantOrgId)) return { error: "Not found" };
+  if (row.allowanceState !== "flagged") return {};
+  if (row.reportId === null) return { error: "That row is not on a report" };
+  const report = await workableReport(u, row.reportId);
+  if (!report) return { error: "Not found" };
+  if (report.person === u.name && u.role !== "owner") {
+    return { error: "Somebody else has to approve your own claim - ask the owner" };
+  }
+  await db.update(expenses).set({
+    allowanceState: "approved", allowanceBy: u.email, allowanceAt: new Date(),
+  }).where(eq(expenses.id, expenseId));
+  await audit({
+    actor: u.email, entityType: "expense", entityId: expenseId, tenantOrgId: row.tenantOrgId,
+    action: `approved ${report.person}'s ${formatCents(row.amountCents)} ${row.kind}`
+      + ` against the travel rules - ${row.allowanceNote}`
+      + (report.person === u.name ? " (their own claim, as the owner)" : ""),
+    field: "allowance_state", oldValue: "flagged", newValue: "approved",
+  });
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${row.reportId}`);
   return {};
 }
 
@@ -8518,7 +8671,13 @@ export async function removeReportExpense(expenseId: number): Promise<{ error?: 
   const report = await workableReport(u, row.reportId);
   if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - its rows are fixed` };
-  await db.update(expenses).set({ reportId: null }).where(eq(expenses.id, expenseId));
+  /* Off the report, off the rulebook: the verdict was about this row on THIS
+     claim against THIS job, and a loose receipt in the pool has none of those.
+     Leaving a stale flag on it would follow the row onto the next claim and
+     ask a reviewer to approve a trip nobody has described yet. */
+  await db.update(expenses).set({
+    reportId: null, allowanceState: "", allowanceNote: "", allowanceBy: "", allowanceAt: null,
+  }).where(eq(expenses.id, expenseId));
   revalidatePath("/money/reimbursements");
   revalidatePath(`/money/reimbursements/${report.id}`);
   return {};
@@ -8623,6 +8782,21 @@ export async function payExpenseReport(
   if (!isIsoDay(day)) return { error: "Pick the date it was paid" };
   if (day > shopToday()) return { error: "That date is in the future" };
   const rows = await db.select().from(expenses).where(eq(expenses.reportId, id));
+  /* The gate the flag exists for. A row the travel rules queried cannot be
+     paid until a person has said so on the record - otherwise "flagged" is a
+     colour on a screen, and the fourteenth row of a claim is exactly where an
+     unapproved one goes unnoticed. Refusing here rather than at submit is
+     deliberate: the engineer files what they spent, and the judging happens
+     where the money does. */
+  const unapproved = rows.filter(needsApproval);
+  if (unapproved.length) {
+    return {
+      error: `${unapproved.length} row${unapproved.length === 1 ? "" : "s"} on this report `
+        + `${unapproved.length === 1 ? "is" : "are"} outside the travel rules and `
+        + `${unapproved.length === 1 ? "has" : "have"} not been approved. Open the report and approve `
+        + `${unapproved.length === 1 ? "it" : "them"}, or send it back.`,
+    };
+  }
   const total = reportTotalCents(rows);
   await db.update(expenseReports).set({
     status: "paid", paidOn: day, paidBy: u.email, paidRef: data.reference.trim().slice(0, 120),
