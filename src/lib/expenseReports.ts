@@ -108,3 +108,75 @@ export function reportSpan(rows: { incurredOn: string }[]): string {
   const a = days[0], b = days[days.length - 1];
   return a === b ? fmt(a) : `${fmt(a)} - ${fmt(b)}`;
 }
+
+/**
+ * Whether a report is still being ASSEMBLED - nobody has asked to be paid yet.
+ *
+ * The same two statuses editableReport names, read the other way round: that
+ * one answers "may this be edited", this one answers "is this still in the
+ * engineer's hands". They are the same pair today and they are not the same
+ * question, which is why the desk asks this one by name.
+ */
+export const unsubmittedReport = (status: string): boolean =>
+  status === "draft" || status === "returned";
+
+export type DeskReport = { id: number; person: string; status: string };
+
+/**
+ * The reimbursement desk, split the way the people reading it think.
+ *
+ * `filling` is the half that did not exist. The desk showed the owner every
+ * SUBMITTED claim and a tail of settled ones, so a draft an engineer opened in
+ * March and never sent was invisible to everybody but its author - which is
+ * precisely the report somebody needs to chase. An owner asking "what has my
+ * shop got open" was being answered "what has been handed to you", and those
+ * differ by exactly the claims nobody has got round to.
+ *
+ * Pure, and over rows the caller has already scoped to one workspace, for the
+ * reason lib/hr's tests spell out at length: expense_reports.person is a
+ * directory name and a name is not a scope.
+ */
+export function deskReports<T extends DeskReport>(rows: T[]): {
+  awaiting: T[]; filling: T[]; paid: T[];
+} {
+  return {
+    awaiting: rows.filter((r) => r.status === "submitted"),
+    filling: rows.filter((r) => unsubmittedReport(r.status)),
+    paid: rows.filter((r) => r.status === "paid"),
+  };
+}
+
+/** Everybody who has a report on this desk, once each, in reading order. */
+export const reportPeople = (rows: DeskReport[]): string[] =>
+  [...new Set(rows.map((r) => r.person.trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+
+/**
+ * What to call a report on a list.
+ *
+ * Its own name when it has one - every report opened from the desk now does,
+ * because the form insists - and the old person-and-span fallback for every
+ * report filed before it did. One function so the list, the record page and
+ * the payout dialog cannot disagree about what a claim is called.
+ */
+export const reportTitle = (
+  report: { person: string; title: string },
+  rows: { incurredOn: string }[],
+): string =>
+  report.title.trim() || `${report.person} - ${reportSpan(rows) || "expense report"}`;
+
+/**
+ * A report's name, as the create form must have it.
+ *
+ * Naming is no longer optional. A desk where the owner can see every claim -
+ * including the drafts nobody has sent - is a desk with a lot of rows on it,
+ * and "Steve Jones, Jul 12 - Aug 3" three times over is not a list anybody can
+ * work. The check lives here so the dialog can grey its own button on the same
+ * rule the action refuses on.
+ */
+export const REPORT_TITLE_MAX = 120;
+export function checkReportTitle(raw: string): { title: string } | { error: string } {
+  const title = raw.trim().slice(0, REPORT_TITLE_MAX);
+  if (!title) return { error: "Name the report - \"Reno install, week of the 12th\"" };
+  return { title };
+}

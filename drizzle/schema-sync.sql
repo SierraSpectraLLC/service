@@ -3537,3 +3537,29 @@ DO $$ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS "org_name_per_tenant"
   ON "orgs" (COALESCE("parent_org_id", 0), "name");
+
+-- The job an expense report is for, and who opened it.
+--
+-- work_order_id is nullable and the null is a real answer, not an unset field:
+-- an overhead claim has no job that caused it. Any state qualifies - a trip's
+-- receipts surface after the order they belong to has closed. Set null on
+-- delete, because the claim outlives the order.
+--
+-- opened_by is who FILED it, which is not always whose money it is: HR opens a
+-- claim in an engineer's name. submitted_by is now written when the report is
+-- actually sent for payout; the two were only ever the same address because
+-- the column was stamped at creation and never touched again.
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "opened_by" text NOT NULL DEFAULT '';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expense_reports_work_order_id_work_orders_id_fk') THEN
+    ALTER TABLE "expense_reports" ADD CONSTRAINT "expense_reports_work_order_id_work_orders_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS "expense_reports_wo_idx" ON "expense_reports" ("work_order_id");
+
+-- Backfill: every report filed before opened_by existed was created by whoever
+-- the submitted_by column names, because that is what the column meant then.
+UPDATE "expense_reports" SET "opened_by" = "submitted_by"
+  WHERE "opened_by" = '' AND "submitted_by" <> '';

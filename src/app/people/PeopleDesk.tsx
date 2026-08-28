@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { createExpenseReport, setHouseHr } from "@/app/actions";
+import { useTransition } from "react";
+import { setHouseHr } from "@/app/actions";
 import { formatCents } from "@/lib/money";
 import { DataTable, Panel, Pill } from "@/components/ui";
 import { toast } from "@/components/ui/Toast";
@@ -42,16 +42,6 @@ export default function PeopleDesk({ roster, isOwner }: {
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [busy, setBusy] = useState("");
-
-  const openFor = (person: string) =>
-    startTransition(async () => {
-      setBusy(person);
-      const res = await createExpenseReport({ onBehalfOf: person });
-      setBusy("");
-      if (res?.error || !res.id) { toast({ message: res.error ?? "That didn't save" }); return; }
-      router.push(`/money/reimbursements/${res.id}`);
-    });
 
   const toggleHr = (row: RosterRow) =>
     startTransition(async () => {
@@ -115,11 +105,17 @@ export default function PeopleDesk({ roster, isOwner }: {
                   {/* A report is filed against a NAME - expense_reports.person -
                       so somebody with none cannot be the subject of one. Saying
                       so beats a picker that silently leaves them out. */}
+                  {/* Through the reimbursement desk's own create form rather
+                      than straight into a new row. This button used to mint a
+                      report on the spot - nameless, and attached to no job -
+                      which is the one shape the desk no longer lets anybody
+                      make. The name rides along; the form opens with them
+                      already chosen, and the action checks the roster again. */}
                   {r.nameable ? (
-                    <button className="btn sm" disabled={pending}
-                      onClick={() => openFor(r.name)}>
-                      {busy === r.name ? "Opening..." : "Open a claim"}
-                    </button>
+                    <Link className="btn sm"
+                      href={`/money/reimbursements?for=${encodeURIComponent(r.name)}`}>
+                      Open a claim
+                    </Link>
                   ) : (
                     <span className="mut t-meta" title="Set their name in Settings › Our people first">
                       needs a name

@@ -5,10 +5,11 @@ import { useState, useTransition } from "react";
 import { upload } from "@vercel/blob/client";
 import {
   attachPoolExpenses, deleteExpenseReport, logMyExpense, nameExpenseReport, payExpenseReport,
-  removeReportExpense, returnExpenseReport, submitDraftReport, withdrawExpenseReport,
+  removeReportExpense, returnExpenseReport, setReportWorkOrder, submitDraftReport,
+  withdrawExpenseReport,
 } from "@/app/actions";
 import {
-  REPORT_LABEL, REPORT_TONE, editableReport, reportSpan, reportTotalCents,
+  REPORT_LABEL, REPORT_TONE, checkReportTitle, editableReport, reportSpan, reportTotalCents,
 } from "@/lib/expenseReports";
 import { formatCents } from "@/lib/money";
 import Dialog, { DialogStatus } from "@/components/ui/Dialog";
@@ -35,8 +36,13 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
   report: {
     id: number; person: string; status: string; submittedAt: string;
     paidOn: string; paidRef: string; returnedReason: string;
-    /** The filer's own words. Both optional - see expense_reports. */
+    /** The filer's own words. The name is required now; the purpose is not. */
     title: string; purpose: string;
+    /** The job this claim is for. Null is "no job - overhead", a real answer. */
+    workOrderId: number | null;
+    workOrderNumber: string;
+    /** Who filed it, shown only when that is somebody other than its claimant. */
+    openedByName: string;
   };
   rows: ReportExpense[];
   /**
@@ -76,11 +82,30 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
   const theirs = mine ? "your" : `${report.person.split(" ")[0]}'s`;
 
   const [name, setName] = useState({ title: report.title, purpose: report.purpose });
+  /* The job, as the picker holds it: "" is overhead here rather than an
+     unanswered field, because the report already HAS an answer - it was made
+     to give one at creation - and this control is only ever changing it. */
+  const [job, setJob] = useState(report.workOrderId === null ? "" : String(report.workOrderId));
+  const jobChanged = (report.workOrderId === null ? "" : String(report.workOrderId)) !== job;
+
+  /* Greyed on the same rule the action refuses on - a report's name is no
+     longer optional, so "save" with it emptied would be a round trip to a
+     toast. */
+  const named = checkReportTitle(name.title);
+  const nameProblem = "error" in named ? named.error : null;
 
   const total = reportTotalCents(rows);
 
   const openAdd = () => {
-    setDraft({ kind: categories[0] ?? "Other", description: "", amount: "", incurredOn: today, workOrderId: "" });
+    setDraft({
+      kind: categories[0] ?? "Other", description: "", amount: "", incurredOn: today,
+      /* Pre-picked to the report's own job. Every row on a Reno-install claim
+         is, overwhelmingly, for the Reno install - typing it once on the report
+         and then again on each of nine receipts is the friction this whole
+         flow exists to remove. Still a picker: a stray toll on the drive home
+         is changed here, not worked around. */
+      workOrderId: report.workOrderId === null ? "" : String(report.workOrderId),
+    });
     setReceipt(null); setAddErr(""); setAdding(true);
   };
 
@@ -121,40 +146,78 @@ export default function ExpenseReportDetail({ report, rows, mayWork, mine, isOwn
 
   return (
     <>
-      {/* What this claim is and why it happened. Editable while the report is,
-          because creation-time naming with no way back makes a typo permanent -
-          and what a trip was for is often clearer on the way home than it was
-          on the way out. Absent entirely once the claim is fixed. */}
-      {(editable || report.title || report.purpose) && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          {editable ? (
-            <>
-              <label>Name</label>
-              <input value={name.title} aria-label="Report name"
-                placeholder={`${report.person}'s expenses`} disabled={pending}
-                onChange={(e) => setName({ ...name, title: e.target.value })} />
-              <label style={{ marginTop: 8 }}>What it was for</label>
-              <input value={name.purpose} aria-label="Purpose" disabled={pending}
-                placeholder="The sentence whoever pays this will read first"
-                onChange={(e) => setName({ ...name, purpose: e.target.value })} />
-              {(name.title !== report.title || name.purpose !== report.purpose) && (
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button className="btn sm accent" disabled={pending}
-                    onClick={() => act(() => nameExpenseReport(report.id, name), "Saved")}>
-                    Save
-                  </button>
-                  <button className="btn sm" disabled={pending}
-                    onClick={() => setName({ title: report.title, purpose: report.purpose })}>
-                    Discard
-                  </button>
-                </div>
-              )}
-            </>
-          ) : (
+      {/* What this claim is, why it happened, and which job it belongs to.
+          Editable while the report is, because creation-time-only makes a typo
+          permanent - and a trip often turns out to have been for the other
+          site, which without this means deleting the claim and starting over.
+          Read-only once the claim is fixed. */}
+      <div className="card" style={{ marginBottom: 12 }}>
+        {editable ? (
+          <>
+            <label>Name</label>
+            <input value={name.title} aria-label="Report name"
+              placeholder="Reno install, week of the 12th" disabled={pending}
+              onChange={(e) => setName({ ...name, title: e.target.value })} />
+            <label style={{ marginTop: 8 }}>What it was for</label>
+            <input value={name.purpose} aria-label="Purpose" disabled={pending}
+              placeholder="The sentence whoever pays this will read first"
+              onChange={(e) => setName({ ...name, purpose: e.target.value })} />
+            {(name.title !== report.title || name.purpose !== report.purpose) && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                <button className="btn sm accent" disabled={pending || nameProblem !== null}
+                  onClick={() => act(() => nameExpenseReport(report.id, name), "Saved")}>
+                  Save
+                </button>
+                <button className="btn sm" disabled={pending}
+                  onClick={() => setName({ title: report.title, purpose: report.purpose })}>
+                  Discard
+                </button>
+                {nameProblem && <span className="mut t-small">{nameProblem}</span>}
+              </div>
+            )}
+
+            <label style={{ marginTop: 8 }}>The job it is for</label>
+            {/* Open or closed alike, and "no job" is a real answer rather than
+                an unset field - the same distinction the create form draws. */}
+            <select value={job} aria-label="Work order" disabled={pending}
+              onChange={(e) => setJob(e.target.value)}>
+              <option value="">No job - overhead</option>
+              {workOrders.map((w) => <option key={w.id} value={String(w.id)}>{w.label}</option>)}
+            </select>
+            {jobChanged && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button className="btn sm accent" disabled={pending}
+                  onClick={() => act(
+                    () => setReportWorkOrder(report.id, job ? parseInt(job, 10) : null),
+                    job ? "Moved onto that job" : "Filed as overhead - no job",
+                  )}>
+                  Save the job
+                </button>
+                <button className="btn sm" disabled={pending}
+                  onClick={() => setJob(report.workOrderId === null ? "" : String(report.workOrderId))}>
+                  Discard
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
             <div className="t-body">{report.purpose || report.title}</div>
-          )}
-        </div>
-      )}
+            <div className="mut t-small" style={{ marginTop: 4 }}>
+              {report.workOrderNumber
+                ? <>Filed against <a href={`/work/${report.workOrderId}`}>{report.workOrderNumber}</a></>
+                : "Overhead - no job caused this"}
+            </div>
+          </>
+        )}
+        {/* Who filed it, said only when that is not whose money it is - which
+            is the one time anybody asks, and the time they always do. */}
+        {report.openedByName && report.openedByName !== report.person && (
+          <div className="mut t-small" style={{ marginTop: 4 }}>
+            Opened by {report.openedByName} on {report.person}&apos;s behalf.
+          </div>
+        )}
+      </div>
 
       {report.status === "returned" && (
         <div className="card" style={{ borderLeft: "3px solid var(--t-bad-fg)", marginBottom: 12 }}>

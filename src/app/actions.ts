@@ -58,7 +58,9 @@ import {
 import {
   addMonths, billCadenceLabel, dueCycles, missedCycles, openingCursor, recurring,
 } from "@/lib/recurring";
-import { editableReport, mayWorkReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
+import {
+  checkReportTitle, editableReport, mayWorkReport, reimbursementPool, reportTotalCents,
+} from "@/lib/expenseReports";
 import { poProblem, usablePoLines } from "@/lib/backfill";
 import { invoiceView, isOpen, METHOD_LABEL, PAYMENT_METHODS } from "@/lib/statement";
 import { feeFor, isReferred, nextAction, promiseBroken } from "@/lib/dunning";
@@ -8277,7 +8279,47 @@ async function workableReport(u: SessionUser, id: number) {
 }
 
 /**
+ * The job a report is filed against, resolved and checked, or an error.
+ *
+ * `undefined` is an UNANSWERED field and refused; `null` is the answer
+ * "no job - overhead", which is a real thing a claim can be and is what the
+ * internet bill is. The distinction only survives if it is drawn here: a
+ * missing field silently becoming overhead is how a trip's receipts end up
+ * costed against nothing.
+ *
+ * Any state qualifies, open or closed. A receipt surfaces weeks after the
+ * order it belongs to wraps, and refusing a closed job would send somebody to
+ * reopen a finished record just to file a hotel bill.
+ */
+async function reportWorkOrder(
+  u: SessionUser, want: number | null | undefined,
+): Promise<{ id: number | null } | { error: string }> {
+  if (want === undefined) return { error: "Attach the job this is for, or say it is overhead" };
+  if (want === null) return { id: null };
+  const [wo] = await db.select().from(workOrders)
+    .where(and(eq(workOrders.id, want), forTenant(workOrders.tenantOrgId, readTenant(u))));
+  if (!wo) return { error: "That work order is not one of ours" };
+  return { id: wo.id };
+}
+
+/**
  * Open a fresh draft report to fill - the container the receipts land in.
+ *
+ * THE one way a report comes into existence. It used to be two: this, and a
+ * bulk "submit these receipts" that minted a nameless, jobless report already
+ * awaiting payout. Two doors meant half the reports on the desk had nothing on
+ * them to read but a person and a date range, and the flow the shop actually
+ * works - name the claim, say what job it is for, then start adding expenses -
+ * was the one you got only if you came in the right door. So the pool's
+ * gesture now comes through here too, carrying its picked rows as `expenseIds`
+ * and landing on a DRAFT the filer reviews and submits, rather than a claim
+ * already on the owner's desk.
+ *
+ * What it insists on, and why:
+ *   - a NAME, because a desk that shows every claim including the unsent ones
+ *     is a long list, and three "Steve Jones, Jul 12 - Aug 3" rows are not one;
+ *   - a JOB, open or closed, or an explicit "no job - overhead". Answered
+ *     either way, never skipped - see reportWorkOrder.
  *
  * `onBehalfOf` is the HR half: the office manager opens the claim in the
  * engineer's name, pulls their unclaimed receipts onto it and sends it for
@@ -8285,14 +8327,22 @@ async function workableReport(u: SessionUser, id: number) {
  * anything. The name is checked against the ROSTER rather than trusted, so a
  * report cannot be opened in the name of somebody who does not work here - and
  * the row it writes carries their name, not the filer's, because the money is
- * owed to them.
+ * owed to them. Who actually opened it is kept too, in openedBy: six weeks on,
+ * "who filed this" has an answer that is not `person`.
  */
 export async function createExpenseReport(
   opts: {
     onBehalfOf?: string;
-    /** What this claim is, in the filer's words. Optional - see the column. */
+    /** What this claim is, in the filer's words. Required - see checkReportTitle. */
     title?: string;
     purpose?: string;
+    /**
+     * The job, open or closed; null for overhead. Undefined is the field left
+     * alone, which is refused rather than read as overhead.
+     */
+    workOrderId?: number | null;
+    /** Unclaimed rows to seed it with - the pool's "claim these" gesture. */
+    expenseIds?: number[];
   } = {},
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
@@ -8312,21 +8362,86 @@ export async function createExpenseReport(
     if (!member) return { error: "That is not somebody on your roster" };
     person = member.name;
   }
-  const title = (opts.title ?? "").trim().slice(0, 120);
+  const named = checkReportTitle(opts.title ?? "");
+  if ("error" in named) return named;
+  const job = await reportWorkOrder(u, opts.workOrderId);
+  if ("error" in job) return job;
   const purpose = (opts.purpose ?? "").trim().slice(0, 500);
+  const t = readTenant(u);
+
+  /* The seed rows are checked against the CLAIMANT's pool before the report
+     exists, so a bad pick refuses instead of leaving an empty draft behind.
+     Whose pool is the report's person's, not the caller's - the same rule
+     attachPoolExpenses follows, and for the same reason. */
+  const ids = [...new Set(opts.expenseIds ?? [])].filter((n) => Number.isInteger(n));
+  if (ids.length) {
+    const rows = await db.select().from(expenses)
+      .where(and(inArray(expenses.id, ids), forTenant(expenses.tenantOrgId, t)));
+    const subject = person === u.name
+      ? { name: u.name, email: u.email }
+      : await reportSubjectFor({ person, tenantOrgId: t });
+    if (reimbursementPool(rows, subject).length !== ids.length) {
+      return {
+        error: person === u.name
+          ? "Some of those are not yours to claim, or are already on a report"
+          : `Some of those are not ${person}'s to claim, or are already on a report`,
+      };
+    }
+  }
+
   const [report] = await db.insert(expenseReports).values({
-    tenantOrgId: readTenant(u), person, status: "draft", submittedBy: u.email, title, purpose,
+    tenantOrgId: t, person, status: "draft", openedBy: u.email,
+    workOrderId: job.id, title: named.title, purpose,
   }).returning();
+  if (ids.length) {
+    await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
+  }
   await audit({
     actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: report.tenantOrgId,
     action: (person === u.name
-      ? "opened a draft expense report"
-      : `opened a draft expense report for ${person}`)
-      + (title ? ` - "${title}"` : ""),
+      ? `opened a draft expense report - "${named.title}"`
+      : `opened a draft expense report for ${person} - "${named.title}"`)
+      + (job.id === null ? " (no job - overhead)" : "")
+      + (ids.length ? ` with ${ids.length} unclaimed expense${ids.length === 1 ? "" : "s"} on it` : ""),
   });
   revalidatePath("/money/reimbursements");
+  revalidatePath("/money/expenses");
   revalidatePath("/people");
   return { id: report.id };
+}
+
+/**
+ * Move a claim onto a different job, or off one and onto overhead.
+ *
+ * The job is asked for at creation, which is where it belongs - but a trip
+ * often turns out to have been for the OTHER site, and creation-time-only
+ * would mean deleting the report and starting again. Same gate as every other
+ * edit to a claim: whose it is, inside the tenant, and only while it is still
+ * being assembled.
+ */
+export async function setReportWorkOrder(
+  reportId: number, workOrderId: number | null,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const report = await workableReport(u, reportId);
+  if (!report) return { error: "Not your report" };
+  if (!editableReport(report.status)) return { error: `That report is ${report.status} - it is fixed now` };
+  const job = await reportWorkOrder(u, workOrderId);
+  if ("error" in job) return job;
+  if (job.id === report.workOrderId) return {};
+  await db.update(expenseReports).set({ workOrderId: job.id }).where(eq(expenseReports.id, reportId));
+  await audit({
+    actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
+    action: job.id === null
+      ? `took ${report.person}'s expense report off its work order - overhead now`
+      : `attached ${report.person}'s expense report to a work order`,
+    field: "work_order_id",
+    oldValue: report.workOrderId === null ? "" : String(report.workOrderId),
+    newValue: job.id === null ? "" : String(job.id),
+  });
+  revalidatePath("/money/reimbursements");
+  revalidatePath(`/money/reimbursements/${reportId}`);
+  return {};
 }
 
 /**
@@ -8345,13 +8460,15 @@ export async function nameExpenseReport(
   const report = await workableReport(u, reportId);
   if (!report) return { error: "Not your report" };
   if (!editableReport(report.status)) return { error: `That report is ${report.status} - it is fixed now` };
-  const title = data.title.trim().slice(0, 120);
+  const named = checkReportTitle(data.title);
+  if ("error" in named) return named;
+  const title = named.title;
   const purpose = data.purpose.trim().slice(0, 500);
   if (title === report.title && purpose === report.purpose) return {};
   await db.update(expenseReports).set({ title, purpose }).where(eq(expenseReports.id, reportId));
   await audit({
     actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
-    action: title ? `named ${report.person}'s expense report "${title}"` : `cleared the name on ${report.person}'s expense report`,
+    action: `named ${report.person}'s expense report "${title}"`,
     field: "title", oldValue: report.title, newValue: title,
   });
   revalidatePath("/money/reimbursements");
@@ -8420,7 +8537,13 @@ export async function submitDraftReport(reportId: number): Promise<{ error?: str
   if (!editableReport(report.status)) return { error: `It is already ${report.status}` };
   const rows = await db.select().from(expenses).where(eq(expenses.reportId, reportId));
   if (!rows.length) return { error: "There is nothing on this report to submit" };
-  await db.update(expenseReports).set({ status: "submitted", returnedReason: "" })
+  /* submittedBy and submittedAt are written HERE, at the submit, rather than
+     at creation - which is what they used to mean, because the columns were
+     stamped when the row was inserted and never touched again. Who opened it
+     is openedBy's job now, and the two differ every time HR files for somebody
+     or a draft sits for a fortnight before it is sent. */
+  await db.update(expenseReports)
+    .set({ status: "submitted", returnedReason: "", submittedBy: u.email, submittedAt: new Date() })
     .where(eq(expenseReports.id, reportId));
   await audit({
     actor: u.email, entityType: "expense_report", entityId: reportId, tenantOrgId: report.tenantOrgId,
@@ -8448,41 +8571,18 @@ export async function deleteExpenseReport(id: number): Promise<{ error?: string 
   return {};
 }
 
-/**
- * Submit my expenses as one reimbursement claim.
+/*
+ * submitExpenseReport used to live here: tick rows in the pool, and a report
+ * appeared already awaiting payout, with no name and no job on it. It was the
+ * second door into a table that should only have one, and everything that came
+ * through it landed on the owner's desk reading "Steve Jones, Jul 12 - Aug 3".
  *
- * The ids are re-checked against MY pool on the server: rows already on a
- * report are refused (the same receipt on two reports is the same money paid
- * twice), and rows that belong to somebody else are not mine to claim,
- * whatever the client sent.
+ * The gesture survives - it is how somebody claims a handful of receipts in
+ * one go - but it now runs through createExpenseReport with `expenseIds`,
+ * which asks for the name and the job first and leaves a DRAFT to look over
+ * rather than a claim already asked for. Deleted rather than deprecated: a
+ * bypass that still compiles is a bypass somebody reaches for.
  */
-export async function submitExpenseReport(
-  expenseIds: number[], note = "",
-): Promise<{ error?: string; id?: number }> {
-  const u = await requireStaff();
-  const ids = [...new Set(expenseIds)].filter((n) => Number.isInteger(n));
-  if (!ids.length) return { error: "Pick at least one expense" };
-  const t = readTenant(u);
-  const rows = await db.select().from(expenses)
-    .where(and(inArray(expenses.id, ids), forTenant(expenses.tenantOrgId, t)));
-  const mine = reimbursementPool(rows, { name: u.name, email: u.email });
-  if (mine.length !== ids.length) {
-    return { error: "Some of those are not yours to claim, or are already on a report" };
-  }
-  const total = reportTotalCents(mine);
-  const [report] = await db.insert(expenseReports).values({
-    tenantOrgId: t, person: u.name, status: "submitted",
-    submittedBy: u.email, note: note.trim().slice(0, 500),
-  }).returning();
-  await db.update(expenses).set({ reportId: report.id }).where(inArray(expenses.id, ids));
-  await audit({
-    actor: u.email, entityType: "expense_report", entityId: report.id, tenantOrgId: t,
-    action: `submitted ${ids.length} expense${ids.length === 1 ? "" : "s"} (${formatCents(total)}) for reimbursement`,
-  });
-  revalidatePath("/money/reimbursements");
-  revalidatePath("/money/expenses");
-  return { id: report.id };
-}
 
 /** Take my own unpaid report back to draft - rows stay on it, editable again. */
 export async function withdrawExpenseReport(id: number): Promise<{ error?: string }> {
