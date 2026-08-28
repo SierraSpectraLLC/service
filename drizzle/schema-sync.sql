@@ -3669,3 +3669,45 @@ DO $$ BEGIN
       FOREIGN KEY ("po_id") REFERENCES "purchase_orders"("id") ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- Recovered from the reimbursements merge: schema.ts gained these two columns
+-- and the merge resolution on this file dropped their DDL, so main shipped a
+-- schema.ts the deploy could not produce. (Guard test: check-schema-mirror.)
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_state" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_note" text NOT NULL DEFAULT '';
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_at" timestamp;
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_nights" integer NOT NULL DEFAULT 0;
+ALTER TABLE "expenses" ADD COLUMN IF NOT EXISTS "allowance_by" text NOT NULL DEFAULT '';
+
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "opened_by" text NOT NULL DEFAULT '';
+ALTER TABLE "expense_reports" ADD COLUMN IF NOT EXISTS "work_order_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expense_reports_work_order_id_fk') THEN
+    ALTER TABLE "expense_reports" ADD CONSTRAINT "expense_reports_work_order_id_fk"
+      FOREIGN KEY ("work_order_id") REFERENCES "work_orders"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- The person file: the half of an employee record that is not pay.
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "phone" text NOT NULL DEFAULT '';
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "emergency_name" text NOT NULL DEFAULT '';
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "emergency_phone" text NOT NULL DEFAULT '';
+ALTER TABLE "house_members" ADD COLUMN IF NOT EXISTS "started_on" text NOT NULL DEFAULT '';
+
+-- Perks: compensation that is not wages. Same access family as payroll.
+CREATE TABLE IF NOT EXISTS "perks" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "person_email" text NOT NULL DEFAULT '',
+  "name" text NOT NULL DEFAULT '',
+  "title" text NOT NULL DEFAULT '',
+  "amount_cents" integer NOT NULL DEFAULT 0,
+  "cadence" text NOT NULL DEFAULT 'monthly',
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "note" text NOT NULL DEFAULT '',
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "perks_org_idx" ON "perks" ("org_id");

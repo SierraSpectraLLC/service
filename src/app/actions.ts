@@ -19,7 +19,7 @@ import {
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
-  dunningEvents, creditOverrides, quotes, quoteLines, payroll,
+  dunningEvents, creditOverrides, quotes, quoteLines, payroll, perks,
 } from "@/db/schema";
 import { siteLabel } from "@/lib/sites";
 import {
@@ -145,6 +145,7 @@ import {
   maySeePayroll, mayEditPayroll, visibleRows, type PayRow, type PayrollViewer,
 } from "@/lib/payroll";
 import { isHouseHr, mayAdminPeople, payrollViewerFor, reportSubjectFor } from "@/lib/hr";
+import { perkProblems } from "@/lib/perks";
 import { jobFrom, nextDocNumber } from "@/lib/docNumberData";
 import {
   DOC_KINDS, DOC_LABEL, serializeScheme, templateProblems, type Scheme,
@@ -10877,6 +10878,147 @@ export async function setHouseHr(email: string, on: boolean): Promise<{ error?: 
     field: "can_admin_people", oldValue: String(member.canAdminPeople), newValue: String(on),
   });
   revHouse();
+  revalidatePath("/people");
+  return {};
+}
+
+/**
+ * The rest of somebody's person file: the facts that are not pay.
+ *
+ * HR writes these, not just the person themselves - which is a deliberate
+ * loosening of setMyHomeBase's "it is their home, so they type it". The HR
+ * reality is the other way around: the address, the phone and the emergency
+ * contact come to the office manager on the intake paperwork, and an app where
+ * only the engineer could type them in is an app where they stay on the paper.
+ * The engineer keeps their own door too; this is the office's.
+ *
+ * Same refusal shape as setHouseHr: "Not found" for a missing person and for
+ * another company's person alike, so the shape of the error confirms nothing.
+ */
+export async function saveMemberProfile(email: string, data: {
+  homeAddress: string; phone: string; emergencyName: string; emergencyPhone: string;
+  startedOn: string;
+}): Promise<{ error?: string; geocoded?: boolean }> {
+  const u = await requireStaff();
+  if (!(await mayAdminPeople(u))) return { error: "Not found" };
+  const e = email.trim().toLowerCase();
+  const [member] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  const mine = isPlatformStaff(tenantViewer(u)) ? null : u.operatorOrgId;
+  if (!member || member.role === "none") return { error: "Not found" };
+  if (mine !== null && (member.orgId ?? null) !== mine) return { error: "Not found" };
+
+  const startedOn = data.startedOn.trim();
+  if (startedOn && !isIsoDay(startedOn)) return { error: "The start date needs to be a calendar day" };
+
+  const clean = data.homeAddress.trim().slice(0, 300);
+  const moved = clean !== member.homeAddress;
+  // Geocoded only when it changed - same once-at-save rule as setMyHomeBase,
+  // and an unchanged address must not burn a lookup or lose its pin to a
+  // provider hiccup while somebody was only fixing the phone number.
+  const hit = moved && clean ? await geocode(clean) : null;
+  await db.update(houseMembers).set({
+    homeAddress: clean,
+    ...(moved ? { homeLat: hit?.lat ?? null, homeLng: hit?.lng ?? null } : {}),
+    phone: data.phone.trim().slice(0, 60),
+    emergencyName: data.emergencyName.trim().slice(0, 120),
+    emergencyPhone: data.emergencyPhone.trim().slice(0, 60),
+    startedOn,
+  }).where(eq(houseMembers.id, member.id));
+  if (moved) {
+    // Their routed answers start from a place that no longer stands.
+    await db.delete(driveCache).where(eq(driveCache.memberEmail, member.email));
+  }
+  await audit({
+    actor: u.email, entityType: "house", entityId: e, tenantOrgId: member.orgId,
+    // The fact of the edit, never the address - the audit log is read by more
+    // people than the person file is.
+    action: `updated ${member.name || e}'s person file`,
+  });
+  revalidatePath("/people");
+  return { geocoded: moved && clean !== "" ? hit !== null : undefined };
+}
+
+/**
+ * Grant a perk, or record that one changed.
+ *
+ * The employing organization is the caller's own workspace, resolved here and
+ * never taken from the wire - lib/payroll's access family, where the register
+ * belongs to the employer and nobody else. mayEditPayroll decides, exactly as
+ * it does for wages, because a stipend is pay wearing a smaller number.
+ */
+export async function addPerk(email: string, data: {
+  title: string; amount: string; cadence: string; startsOn: string; note: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your workspace could not be resolved" };
+  const v = await payrollViewer(u);
+  if (!mayEditPayroll(v, mine)) return { error: "Not found" };
+
+  const e = email.trim().toLowerCase();
+  const [member] = await db.select().from(houseMembers).where(eq(houseMembers.email, e));
+  if (!member || member.role === "none" || (member.orgId ?? null) !== mine) return { error: "Not found" };
+
+  const amountCents = parseMoney(data.amount);
+  const draft = {
+    title: data.title.trim().slice(0, 120),
+    amountCents: amountCents ?? 0,
+    cadence: data.cadence,
+    startsOn: data.startsOn.trim(),
+    endsOn: "",
+  };
+  const problems = perkProblems(draft);
+  if (problems.length) return { error: problems[0] };
+
+  await db.insert(perks).values({
+    tenantOrgId: mine, orgId: mine,
+    personEmail: e, name: member.name,
+    title: draft.title, amountCents: draft.amountCents, cadence: draft.cadence,
+    startsOn: draft.startsOn, note: data.note.trim().slice(0, 300), createdBy: u.email,
+  });
+  await audit({
+    actor: u.email, entityType: "perk", entityId: e, tenantOrgId: mine,
+    // The fact, never the figure - same rule as payroll's audit lines.
+    action: `granted ${member.name || e} a perk: ${draft.title}`,
+  });
+  revalidatePath("/people");
+  return {};
+}
+
+/** The perk stops. The history stays; the months after it do not. */
+export async function endPerk(id: number, endsOn: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(perks).where(eq(perks.id, id));
+  if (!row) return { error: "Not found" };
+  const v = await payrollViewer(u);
+  if (!mayEditPayroll(v, row.orgId)) return { error: "Not found" };
+  const day = endsOn.trim();
+  if (!isIsoDay(day)) return { error: "Pick the last day" };
+  if (day < row.startsOn) return { error: "That is before the perk started" };
+  await db.update(perks).set({ endsOn: day }).where(and(eq(perks.id, id), eq(perks.orgId, row.orgId)));
+  await audit({
+    actor: u.email, entityType: "perk", entityId: row.personEmail, tenantOrgId: row.tenantOrgId,
+    action: `ended ${row.name || row.personEmail}'s ${row.title} on ${day}`,
+  });
+  revalidatePath("/people");
+  return {};
+}
+
+/** Delete outright - for the row typed wrong, not for a perk that stopped. */
+export async function deletePerk(id: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(perks).where(eq(perks.id, id));
+  if (!row) return { error: "Not found" };
+  const v = await payrollViewer(u);
+  if (!mayEditPayroll(v, row.orgId)) return { error: "Not found" };
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  await db.delete(perks).where(eq(perks.id, id));
+  await audit({
+    actor: u.email, entityType: "perk", entityId: row.personEmail, tenantOrgId: row.tenantOrgId,
+    action: `deleted ${row.name || row.personEmail}'s ${row.title} - reason: ${why}`,
+    field: "reason", newValue: why,
+  });
   revalidatePath("/people");
   return {};
 }

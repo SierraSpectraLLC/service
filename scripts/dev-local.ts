@@ -98,6 +98,13 @@ const FIXTURE = `
     ('dev-maria', 'Maria Chen', 'maria@labzen.test', 'client_editor', now());
   INSERT INTO sessions (session_token, user_id, expires) VALUES
     ('clienttoken', 'dev-maria', now() + interval '30 days');
+  -- A READ-ONLY client contact. Half the client-view rules only show their
+  -- shape from a viewer who cannot edit - Maria can, so she proves nothing
+  -- about them.
+  INSERT INTO users (id, name, email, role, onboarded_at) VALUES
+    ('dev-kosei', 'K. Osei', 'accounts@coastal.test', 'client_viewer', now());
+  INSERT INTO sessions (session_token, user_id, expires) VALUES
+    ('viewertoken', 'dev-kosei', now() + interval '30 days');
 
   INSERT INTO instruments (external_id, client, model, manufacturer, serial, priority, stages, notes) VALUES
     ('LZ-001', 'Lab Zen', 'Agilent 6495C LC-MS', 'Agilent', 'US2405111', 1, '{"Checkout"}', 'Reserpine test and tune.'),
@@ -517,6 +524,10 @@ const FIXTURE = `
   INSERT INTO system_shares (instrument_id, org_id, access, added_by)
     SELECT id, owner_org_id, 'edit', 'fixture' FROM instruments WHERE owner_org_id IS NOT NULL
     ON CONFLICT DO NOTHING;
+  -- Coastal's share is read-only, so the fixture holds BOTH share shapes: an
+  -- edit share (Lab Zen) and a view share. Production is mostly view shares,
+  -- and a client-view bug that only bites on 'view' was invisible here.
+  UPDATE system_shares SET access = 'view' WHERE org_id = 2;
 
   -- A reseller account, so the third shape of the client product has something
   -- to render: their units are stock heading for a sale rather than benches, so

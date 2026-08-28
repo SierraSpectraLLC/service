@@ -968,6 +968,18 @@ export const houseMembers = pgTable("house_members", {
   homeAddress: text("home_address").notNull().default(""),
   homeLat: doublePrecision("home_lat"),
   homeLng: doublePrecision("home_lng"),
+  /**
+   * The person file - the half of an employee record that is not pay.
+   *
+   * Kept on the roster row rather than in a second table because each is one
+   * fact with no history worth keeping: a phone number that changes is simply
+   * the new number. Pay is the opposite case and lives in `payroll`, which is
+   * effective-dated for exactly that reason.
+   */
+  phone: text("phone").notNull().default(""),
+  emergencyName: text("emergency_name").notNull().default(""),
+  emergencyPhone: text("emergency_phone").notNull().default(""),
+  startedOn: text("started_on").notNull().default(""),   // YYYY-MM-DD
   addedBy: text("added_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("house_member_email_unique").on(t.email)]);
@@ -2824,6 +2836,40 @@ export const payroll = pgTable("payroll", {
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("payroll_org_idx").on(t.orgId)]);
+
+/**
+ * Perks: the compensation that is not wages.
+ *
+ * A phone stipend, a vehicle allowance, a boot allowance, a bonus - money the
+ * company has promised a person on top of their pay. Its own table rather
+ * than extra payroll rows because a payroll row IS a person (headcount and
+ * FTE are counted off it), and a person with a salary and two stipends must
+ * not read as three people.
+ *
+ * Same access family as payroll, enforced by the same rules (lib/payroll):
+ * the employing organization's own administrators read and write these, and
+ * nobody else. Effective-dated the same way - ending a perk closes it, so
+ * what March cost stays what March cost.
+ */
+export const perks = pgTable("perks", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** The employing organization - the whole access rule, exactly as payroll. */
+  orgId: integer("org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  personEmail: text("person_email").notNull().default(""),
+  name: text("name").notNull().default(""),        // whose it is, display
+  /** What the perk is, in the words on the offer letter: "Phone stipend". */
+  title: text("title").notNull().default(""),
+  amountCents: integer("amount_cents").notNull().default(0),
+  /** monthly | annual | one_off - how the amount is read. */
+  cadence: text("cadence").notNull().default("monthly"),
+  startsOn: text("starts_on").notNull().default(""),   // YYYY-MM-DD
+  /** Blank = still running. One-offs are their own start and end. */
+  endsOn: text("ends_on").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("perks_org_idx").on(t.orgId)]);
 
 export const rateCards = pgTable("rate_cards", {
   id: serial("id").primaryKey(),

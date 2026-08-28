@@ -104,10 +104,20 @@ export function maySeePayroll(v: PayrollViewer, orgId: number): boolean {
  */
 export function mayEditPayroll(v: PayrollViewer, orgId: number): boolean {
   if (!maySeePayroll(v, orgId)) return false;
-  // HR is deliberately not here. Reading the register is how they run a
-  // payout; deciding what somebody is paid is the owner's, and the two are
-  // different jobs even when one person happens to hold both.
-  return v.role === "owner" || v.role === "client_editor";
+  if (v.role === "owner" || v.role === "client_editor") return true;
+  /*
+   * House HR keeps the register, not just reads it. This used to stop at the
+   * owner - "deciding what somebody is paid is the owner's" - and the person
+   * file made that stance untenable in practice: the owner decides the raise,
+   * and the office manager RECORDS it, along with the start date and the
+   * stipend, because that is what HR is for. The flag is handed out by the
+   * owner alone (setHouseHr), so the decision still traces to them - what
+   * changed is who may type it in.
+   *
+   * The client side keeps the old split: a client contact with the flag reads
+   * the register their manager keeps, and only their editors keep it.
+   */
+  return v.orgId === null && v.canSeePayroll;
 }
 
 /**
@@ -157,6 +167,12 @@ export function inForce(row: Pick<PayRow, "effectiveOn" | "endsOn">, ym: string)
   const from = row.effectiveOn || "0000-00-00";
   if (from > lastOfMonth) return false;
   return !row.endsOn || row.endsOn >= firstOfMonth;
+}
+
+/** The rows in force on one DAY - the register as it stands, not a month's sum. */
+export function inForceOn(rows: PayRow[], day: string): PayRow[] {
+  return rows.filter((r) =>
+    (r.effectiveOn || "0000-00-00") <= day && (!r.endsOn || r.endsOn >= day));
 }
 
 export type MonthPayroll = {

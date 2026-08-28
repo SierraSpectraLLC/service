@@ -30,6 +30,9 @@ const STAMPED = [
   // decided in lib/payroll - the stamp is deliberately not a permission there,
   // which is the one place in the app where those two come apart.
   "payroll",
+  // Perks are the payroll family: stamped for housekeeping, gated by
+  // lib/payroll's employer-only rule rather than by the stamp.
+  "perks",
 ];
 
 const walk = (dir: string): string[] =>

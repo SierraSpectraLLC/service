@@ -1327,10 +1327,25 @@ label { display: block; font-size: var(--fs-meta); font-weight: 700; color: var(
      four lists and they have to read as one continuous row, not four rows or
      four separate scrollers. */
   .rail {
-    position: sticky; top: var(--head-h); z-index: 25; background: var(--bg);
+    position: sticky; top: var(--head-h); z-index: 25;
     padding: 8px 0; box-shadow: 0 6px 8px -8px rgba(23, 42, 74, 0.28);
     display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px;
     scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    /* THE ROW MUST SAY IT SCROLLS. The scrollbar is hidden (below), so with a
+       plain background the row clips clean between two tabs and the ones past
+       the edge might as well not exist - which is how a client on a phone
+       reported "I can't see the configuration": "What it is" was the fifth of
+       six tabs. Classic scroll-shadow: two background-attachment:local covers
+       ride the content and slide off the shadows exactly when there is more
+       row in that direction, so the edge fades only while it is hiding
+       something. No JS, and it turns itself off when everything fits. */
+    background:
+      linear-gradient(90deg, var(--bg) 45%, rgba(245, 246, 249, 0)) left center / 28px 100% no-repeat,
+      linear-gradient(270deg, var(--bg) 45%, rgba(245, 246, 249, 0)) right center / 28px 100% no-repeat,
+      radial-gradient(farthest-side at 0 50%, rgba(23, 42, 74, 0.32), rgba(23, 42, 74, 0)) left center / 16px 100% no-repeat,
+      radial-gradient(farthest-side at 100% 50%, rgba(23, 42, 74, 0.32), rgba(23, 42, 74, 0)) right center / 16px 100% no-repeat;
+    background-attachment: local, local, scroll, scroll;
+    background-color: var(--bg);
   }
   .rail::-webkit-scrollbar { display: none; }
   .railhead, .rail ul + .railhead { display: none; }

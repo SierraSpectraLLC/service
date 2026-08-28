@@ -144,13 +144,19 @@ describe("HR reads the payroll register and not the books", () => {
     expect(await seesPayrollFor(house({ email: "tech@sierra.test" }))).toBe(false);
   });
 
-  it("does not let HR change what anybody is paid", async () => {
-    // Reading the register is how a payout gets run. Deciding what somebody
-    // earns is the owner's, and the two are different jobs even when one
-    // person holds both.
+  it("lets HR keep the register, not just read it", async () => {
+    /*
+     * This pinned the opposite for one release: reading was HR's, deciding
+     * was the owner's. The person file made that stance untenable - the owner
+     * decides the raise and the office manager RECORDS it, with the start
+     * date and the stipend, because recording is what HR is for. The flag is
+     * still handed out by the owner alone, so the decision still traces to
+     * them; what changed is who may type it in. Their own workspace only.
+     */
     const { payrollViewerFor } = await import("@/lib/hr");
     const v = await payrollViewerFor(house({ email: "hr@sierra.test" }));
-    expect(mayEditPayroll(v, SIERRA)).toBe(false);
+    expect(mayEditPayroll(v, SIERRA)).toBe(true);
+    expect(mayEditPayroll(v, SIERRA + 1)).toBe(false);
   });
 
   it("gives HR no part of the books", async () => {

@@ -2,13 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, asc, desc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { expenseReports, expenses, houseMembers, payroll } from "@/db/schema";
-import { requireUser } from "@/lib/authz";
+import { expenseReports, expenses, houseMembers, payroll, perks } from "@/db/schema";
+import { myTenantOrgId, requireUser } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { forTenant, readTenant } from "@/lib/tenancy";
 import { mayAdminPeople, seesPayrollFor } from "@/lib/hr";
 import { editableReport, reimbursementPool, reportTotalCents } from "@/lib/expenseReports";
-import { payrollForMonth, type PayRow } from "@/lib/payroll";
+import { inForceOn, payrollForMonth, type PayRow } from "@/lib/payroll";
+import { perksMonthlyTotal, type PerkRow } from "@/lib/perks";
 import { formatCents } from "@/lib/money";
 import { shopToday } from "@/lib/shopday";
 import { PageHead, Panel } from "@/components/ui";
@@ -65,10 +66,22 @@ export default async function PeoplePage() {
    * they do the answer is the stricter one. Nobody's individual pay appears on
    * this page either way; that is /money/payroll, one click away.
    */
-  const payRows: PayRow[] = seesPay && t !== null
-    ? (await db.select().from(payroll).where(eq(payroll.orgId, t))) as PayRow[]
+  /* WHOSE pay. Deliberately not `t`: readTenant is null for the root
+     operator's own staff (the platform-support path), and the root owner is
+     exactly the person this page is for. /money/payroll already answers
+     "whose register" with myTenantOrgId, and the two must agree or this page
+     shows the roster while the register beside it shows the money. */
+  const payOrg = user.orgId ?? myTenantOrgId(user);
+  const payRows: PayRow[] = seesPay && payOrg !== null
+    ? (await db.select().from(payroll).where(eq(payroll.orgId, payOrg))) as PayRow[]
     : [];
   const month = payrollForMonth(payRows, today.slice(0, 7));
+  /* Perks ride the same gate as the register: they are compensation, and the
+     reader who may not see a wage may not see a stipend either. */
+  const perkRows: PerkRow[] = seesPay && payOrg !== null
+    ? (await db.select().from(perks).where(eq(perks.orgId, payOrg))) as PerkRow[]
+    : [];
+  const perksMonth = perksMonthlyTotal(perkRows, today);
 
   const open = reportRows.filter((r) => r.status !== "paid");
   const awaiting = reportRows.filter((r) => r.status === "submitted");
@@ -92,6 +105,23 @@ export default async function PeoplePage() {
       name: m.name,
       role: m.role,
       isHr: m.canAdminPeople,
+      profile: {
+        homeAddress: m.homeAddress, phone: m.phone,
+        emergencyName: m.emergencyName, emergencyPhone: m.emergencyPhone,
+        startedOn: m.startedOn,
+      },
+      /* Their pay row in force today, matched the way addPayrollEntry matches
+         its supersede - by address first, name as the fallback for rows from
+         before addresses were recorded. Null when the reader may not see pay,
+         which is what keeps the figure out of the serialized page. */
+      pay: seesPay
+        ? inForceOn(payRows, today).find((r) =>
+          (m.email && r.personEmail.toLowerCase() === m.email.toLowerCase())
+          || (m.name && r.name.toLowerCase() === m.name.toLowerCase())) ?? null
+        : null,
+      perks: seesPay
+        ? perkRows.filter((x) => x.personEmail.toLowerCase() === m.email.toLowerCase())
+        : [],
       /* Somebody with no name set cannot be the subject of a report at all -
          expense_reports.person is a directory name. Worth saying on the row,
          because the alternative is a picker that quietly omits them. */
@@ -144,7 +174,8 @@ export default async function PeoplePage() {
         </div>
       </Panel>
 
-      <PeopleDesk roster={roster} isOwner={isOwner} />
+      <PeopleDesk roster={roster} isOwner={isOwner} seesPay={seesPay} orgId={payOrg} today={today}
+        perksMonthCents={perksMonth} />
     </div>
   );
 }

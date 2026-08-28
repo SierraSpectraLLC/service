@@ -83,7 +83,11 @@ describe("no layout hard-codes the head's height", () => {
   it("the rail measures itself", () => {
     const src = read("src/components/RailLayout.tsx");
     expect(src).toMatch(/useMeasuredHeight<HTMLElement>\("--rail-h"\)/);
-    expect(src).toMatch(/className="rail"[^>]*ref=\{railRef\}/);
+    // The measured-height callback now rides a composed ref (the nav also
+    // needs an element handle for scroll-into-view), so pin the composition:
+    // the nav takes setRail, and setRail hands the element to railRef.
+    expect(src).toMatch(/className="rail"[^>]*ref=\{setRail\}/);
+    expect(src).toMatch(/railRef\(el\)/);
   });
 
   it("no layout carries a literal scroll offset", () => {

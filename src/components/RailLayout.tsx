@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrangeBar, panelSlot, panelTail } from "@/components/PanelSlot";
 import { useMeasuredHeight } from "@/components/useMeasuredHeight";
 import type { Arrangement, PanelGroup } from "@/components/usePanelArrangement";
@@ -29,6 +29,10 @@ export default function RailLayout({ a, groups, pinned }: {
   // stuck to the top of the viewport - so at those widths it is the thing the
   // pane has to clear when a context change scrolls it back into view.
   const railRef = useMeasuredHeight<HTMLElement>("--rail-h");
+  // useMeasuredHeight hands out a callback ref, so the element itself needs a
+  // second home for the scroll-into-view effect below.
+  const navEl = useRef<HTMLElement | null>(null);
+  const setRail = (el: HTMLElement | null) => { navEl.current = el; railRef(el); };
 
   /**
    * A context with nothing in it renders no button. The band layout's bar got
@@ -57,6 +61,15 @@ export default function RailLayout({ a, groups, pinned }: {
   // A context that empties out while it is open (its last panel hidden in
   // arrange mode) must not leave the pane blank with no way back.
   const current = live.find((g) => g.key === active) ?? live[0];
+
+  // On a phone the rail is one sideways-scrolling row, and a deep link can
+  // land on a tab past its right edge - active but out of sight, which reads
+  // as no tab being active at all. Bring it into the row; block "nearest" so
+  // the page's own scroll position is left alone.
+  useEffect(() => {
+    navEl.current?.querySelector('button[aria-current="true"]')
+      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [current?.key]);
 
   const go = (key: string) => {
     setActive(key);
@@ -119,7 +132,7 @@ export default function RailLayout({ a, groups, pinned }: {
         </div>
       ) : (
         <div className="rail-body">
-          <nav className="rail" aria-label="Sections of this record" ref={railRef}>
+          <nav className="rail" aria-label="Sections of this record" ref={setRail}>
             <div className="railhead">This record</div>
             <ul>
               {live.map((g) => {
