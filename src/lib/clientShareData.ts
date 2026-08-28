@@ -8,10 +8,11 @@ import { assets, clientShares, instruments, orgSites, orgs, providerProfiles } f
 import { forTenant } from "@/lib/tenancy";
 import { siteLabel } from "@/lib/sites";
 import {
-  freeTag, parsePayload, provenanceLine, SHARE_VERSION,
+  freeTag, parsePayload, provenanceLine, redactPayload, SHARE_VERSION,
   type SharePayload, type SharedSite, type SharedSystem,
 } from "@/lib/clientShare";
 import type { ProviderListing } from "@/lib/providerDirectory";
+import type { FeeTerms } from "@/lib/referral";
 
 /**
  * The snapshot, taken now.
@@ -182,6 +183,13 @@ export async function listings(): Promise<ProviderListing[]> {
 export type ShareRow = {
   id: number;
   status: string;
+  /** What accepting costs. Frozen with the payload - see lib/referral. */
+  terms: FeeTerms;
+  /** What the recipient proposed instead, when they countered. Null when none. */
+  counter: FeeTerms | null;
+  counteredBy: string;
+  /** True while the recipient is seeing a redacted view of it. */
+  blind: boolean;
   note: string;
   createdBy: string;
   createdOn: string;
@@ -213,13 +221,36 @@ export async function sharesFor(tenantOrgId: number | null): Promise<{
     : []);
   const shape = (r: typeof clientShares.$inferSelect, otherId: number | null): ShareRow => ({
     id: r.id, status: r.status, note: r.note, createdBy: r.createdBy,
+    terms: {
+      kind: r.feeKind, feeCents: r.feeCents, feeBps: r.feeBps,
+      windowMonths: r.feeWindowMonths, note: r.feeNote,
+      minCents: r.feeMinCents, maxCents: r.feeMaxCents,
+    },
+    counter: r.counterKind
+      ? {
+        kind: r.counterKind, feeCents: r.counterCents, feeBps: r.counterBps,
+        windowMonths: r.counterWindowMonths, note: r.counterNote,
+        minCents: r.counterMinCents, maxCents: r.counterMaxCents,
+      }
+      : null,
+    counteredBy: r.counteredBy,
+    blind: r.blind && r.status !== "accepted",
     createdOn: r.createdAt.toISOString().slice(0, 10),
     otherName: (otherId !== null ? names.get(otherId) : "") ?? "another service company",
     payload: parsePayload(r.payload),
     sourceOrgId: r.sourceOrgId, destOrgId: r.destOrgId,
   });
+  /*
+   * Redacted on the way to the RECIPIENT and never to the sender - it is their
+   * client, and a blind offer that hid the name from the person who wrote it
+   * would be nonsense. Done here, at the edge, so nothing downstream has to
+   * remember: whatever reaches their screen is already blind.
+   */
+  const blindly = (r: ShareRow): ShareRow =>
+    (r.blind && r.payload ? { ...r, payload: redactPayload(r.payload) } : r);
+
   return {
     sent: sent.map((r) => shape(r, r.toOrgId)),
-    inbox: inbox.map((r) => shape(r, r.tenantOrgId)),
+    inbox: inbox.map((r) => blindly(shape(r, r.tenantOrgId))),
   };
 }

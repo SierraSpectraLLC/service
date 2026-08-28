@@ -75,11 +75,122 @@ export type SharePayload = {
   note: string;
 };
 
-export const SHARE_STATES = ["pending", "accepted", "declined", "withdrawn"] as const;
+/**
+ * The state an address is in, and nothing finer.
+ *
+ * "2000 Sample Way, Hayward CA 94544" is a street somebody can drive to and a
+ * company somebody can look up. "CA" is enough for a shop to know whether the
+ * work is theirs to want. Matched off the ZIP because that is the one part of a
+ * US address whose shape is reliable; anything it cannot read comes back blank
+ * rather than guessed, and blank is shown as "region not stated".
+ */
+export function stateOf(address: string): string {
+  const line = address.trim().split(/\n/).pop() ?? "";
+  const zip = /\b([A-Za-z]{2})[.,]?\s+\d{5}(?:-\d{4})?\s*$/.exec(line);
+  if (zip) return zip[1].toUpperCase();
+  const bare = /,\s*([A-Za-z]{2})\.?\s*$/.exec(line);
+  return bare ? bare[1].toUpperCase() : "";
+}
+
+/**
+ * The same offer with the client's identity taken out of it.
+ *
+ * A referral is worth something because the other shop cannot go round you, and
+ * the unredacted list hands them everything they need to: the company name, the
+ * street, the person to ask for, and serials a manufacturer will match to an
+ * owner. So a BLIND offer says what the work IS and never who it is for -
+ * enough to decide whether you want it, not enough to take it.
+ *
+ * What survives: how many systems, of what category and model, at how many
+ * sites, in which state, and what somebody already has a contract on. What goes:
+ * the client's name, site names, addresses, every contact, every serial, and
+ * the asset tags - which look innocuous and are not, because a tag on a photo
+ * or a service report identifies the machine and the machine identifies the lab.
+ *
+ * Applied at the LAST MOMENT, on the way to a screen, never on the way into the
+ * database. The full snapshot is what they get when they accept - they cannot
+ * service a lab whose address they do not have - so redacting at rest would
+ * mean storing the offer twice and one of them being wrong.
+ */
+export function redactPayload(p: SharePayload): SharePayload {
+  const states = [...new Set(p.sites.map((s) => stateOf(s.address)).filter(Boolean))];
+  return {
+    ...p,
+    client: { ...p.client, name: "A client" },
+    sites: p.sites.map((_, i) => ({
+      name: states.length === 1 ? `Site ${i + 1}, ${states[0]}` : `Site ${i + 1}`,
+      address: "", accessNotes: "", contactName: "", contactPhone: "", contactEmail: "",
+    })),
+    systems: p.systems.map((x, i) => ({
+      ...x,
+      sourceRef: `System ${i + 1}`,
+      siteName: "",
+      location: "",
+      modules: x.modules.map((m) => ({ ...m, serial: "" })),
+    })),
+  };
+}
+
+/**
+ * The shortest string worth matching a note against.
+ *
+ * Below this it is initials and street numbers, and every offer would trip on
+ * a site called "Lab 2" or a contact called "Al". A warning that fires on
+ * everything is a warning people learn to click through.
+ */
+export const MIN_IDENTIFYING = 4;
+
+/**
+ * The strings a blind offer takes out, so a note can be checked against them.
+ *
+ * Not the redacted payload's inverse - a list of the actual identifying VALUES,
+ * which is what a covering note would have to contain to give the game away.
+ */
+export function identifyingBits(p: SharePayload): string[] {
+  const bits = [
+    p.client.name,
+    ...p.sites.flatMap((s) => [
+      s.name, s.contactName, s.contactEmail, s.contactPhone,
+      // The first line of an address is the door. The rest is town and ZIP,
+      // and the state is published anyway.
+      s.address.split(/[\n,]/)[0] ?? "",
+    ]),
+    ...p.systems.flatMap((x) => [x.sourceRef, ...x.modules.map((m) => m.serial)]),
+  ];
+  return [...new Set(bits.map((b) => b.trim()).filter((b) => b.length >= MIN_IDENTIFYING))];
+}
+
+/**
+ * What a covering note gives away that the offer itself withholds.
+ *
+ * THE HOLE THIS CLOSES. Redaction reached the payload and stopped there, and
+ * the note travelled beside it untouched - onto the recipient's screen and
+ * into the notification email. A sender who ticked nothing (blind is the
+ * default wherever there is a fee) and wrote "Emery Pharma want the Alameda
+ * GCs covered" was told the name would be held back, and it was not.
+ *
+ * The note still has to go: it is the reason anybody says yes. So it is
+ * checked rather than stripped, and the sender is told which words to change -
+ * or can turn blinding off, which is a decision rather than an accident.
+ */
+export function noteLeaks(note: string, p: SharePayload): string[] {
+  const hay = note.toLowerCase();
+  return identifyingBits(p).filter((b) => hay.includes(b.toLowerCase()));
+}
+
+/** "12 systems across 2 sites in CA" - the headline of a blind offer. */
+export function blindSummary(p: SharePayload): string {
+  const states = [...new Set(p.sites.map((s) => stateOf(s.address)).filter(Boolean))];
+  const where = states.length ? ` in ${states.join(", ")}` : " - region not stated";
+  return `${summarize(p)}${where}`;
+}
+
+export const SHARE_STATES = ["pending", "countered", "accepted", "declined", "withdrawn"] as const;
 export type ShareState = (typeof SHARE_STATES)[number];
 
 export const SHARE_LABEL: Record<ShareState, string> = {
   pending: "Waiting on them",
+  countered: "They countered",
   accepted: "Accepted",
   declined: "Declined",
   withdrawn: "Withdrawn",
@@ -88,17 +199,33 @@ export const SHARE_LABEL: Record<ShareState, string> = {
 /** The same states, from the receiving end - "waiting on them" is us. */
 export const SHARE_LABEL_IN: Record<ShareState, string> = {
   pending: "Needs a decision",
+  countered: "Waiting on them",
   accepted: "Accepted",
   declined: "Declined",
   withdrawn: "Withdrawn by the sender",
 };
 
-export const isOpen = (status: string): boolean => status === "pending";
+/** Still live - nobody has settled it either way. */
+export const isOpen = (status: string): boolean =>
+  status === "pending" || status === "countered";
 
-/** Only the recipient decides, and only while it is open. */
-export const mayDecide = (status: string): boolean => isOpen(status);
-/** Only the sender withdraws, and only while it is open. */
+/**
+ * Only the recipient decides, and not while their own counter is outstanding.
+ *
+ * A recipient who could accept the original terms while their counter sat
+ * unanswered would be able to take the client at whichever price the sender
+ * had not yet replied to. One offer on the table at a time.
+ */
+export const mayDecide = (status: string): boolean => status === "pending";
+
+/** Only the sender withdraws, and a countered offer is still withdrawable. */
 export const mayWithdraw = (status: string): boolean => isOpen(status);
+
+/** The recipient proposes different terms. Only against a live, unanswered offer. */
+export const mayCounter = (status: string): boolean => status === "pending";
+
+/** The sender answers a counter. Theirs alone, and only while one is outstanding. */
+export const mayAnswerCounter = (status: string): boolean => status === "countered";
 
 /** "12 systems across 2 sites". The line a person decides on. */
 export function summarize(p: SharePayload): string {

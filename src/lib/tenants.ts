@@ -202,6 +202,33 @@ export function mayCreateOrgs(v: TenantViewer): boolean {
  * The guard that matters is the negative one: an operator must not be able to
  * touch another operator's client, or another operator, however the id arrives.
  */
+/**
+ * May this workspace put an organization on a piece of its own paper?
+ *
+ * ADMINISTERING and BILLING are different powers, and conflating them is what
+ * made a peer service company unbillable. mayAdminOrg governs editing an
+ * organization - its sites, its people, its settings - and must go on refusing
+ * another operator outright. Naming one on an invoice is not that: it is this
+ * workspace's own bookkeeping about a company it deals with, and the row lands
+ * in this workspace stamped to this workspace.
+ *
+ * The extra door is narrow on purpose: an operator this workspace has actually
+ * added to its own list of service companies (provider_links), which the caller
+ * resolves and passes in. Not "any operator" - that would make every workspace
+ * on the instance billable by every other, and the reason operators are hidden
+ * from each other in the first place is that being nameable is not nothing.
+ */
+export function mayBillOrg(v: TenantViewer, org: OrgNode, linkedPeers: number[]): boolean {
+  // Never yourself. mayAdminOrg allows an operator its own workspace org - it
+  // has to, that is where its settings live - but an invoice from a company to
+  // itself is not a document, and the gate should say so rather than relying on
+  // no picker happening to offer it.
+  if (v.operatorOrgId !== null && org.id === v.operatorOrgId) return false;
+  if (mayAdminOrg(v, org)) return true;
+  if (!isStaffRole(v.role) || v.operatorOrgId === null) return false;
+  return org.isOperator && org.id !== v.operatorOrgId && linkedPeers.includes(org.id);
+}
+
 export function mayAdminOrg(v: TenantViewer, org: OrgNode): boolean {
   if (!isStaffRole(v.role)) return false;
   if (isPlatformStaff(v)) return true;

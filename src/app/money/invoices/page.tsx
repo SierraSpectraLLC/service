@@ -11,6 +11,7 @@ import { allInvoices, asStatementRow } from "@/lib/invoiceData";
 import { invoiceView, STANDING_LABEL, STANDING_TONE } from "@/lib/statement";
 import FinanceShell from "@/components/FinanceShell";
 import { booksContext } from "@/lib/financeData";
+import { billableOrgs } from "@/lib/referralData";
 import { NewInvoiceButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
@@ -88,6 +89,12 @@ export default async function InvoicesPage({ searchParams }: {
     },
   });
 
+  /* Clients, plus the peer service companies this workspace has added - a peer
+     who subcontracts to us or owes us a referral fee is a customer for that
+     transaction. Listed apart, so nobody bills a lab by mistake. */
+  const billable = await billableOrgs(readTenant(user));
+  const payable = [...billable.clients, ...billable.peers];
+
   return (
     <FinanceShell
       rail={{ active: "invoices", amounts: fig.amounts, seesBooks: true, seesPayroll }}
@@ -97,8 +104,8 @@ export default async function InvoicesPage({ searchParams }: {
       sub="What has been billed, and what has come back."
       actions={<>
         <BackfillButton kind="invoice" today={today}
-          clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
-        <NewInvoiceButton clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
+          clients={payable} />
+        <NewInvoiceButton clients={payable} />
       </>}
     >
       <Toolbar

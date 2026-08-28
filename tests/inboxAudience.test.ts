@@ -20,6 +20,8 @@ const HOUSE_ONLY = [
   // work, arriving from outside the workspace - and a client of ours has no
   // business knowing their record was offered to anybody.
   "client_share",
+  // Work offered to us by another shop, and the answer when we offer one.
+  "lead",
 ];
 
 describe("who is offered which switch", () => {

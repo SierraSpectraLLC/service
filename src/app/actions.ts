@@ -14,7 +14,8 @@ import {
   notifications, notificationPrefs, stockrooms, stockroomShares, stockItems, stockMoves,
   purchaseOrders, poLines, custodyEvents, queueEvents, houseMembers, uiLayouts, remoteDevices,
   workOrders, workOrderNotes, orgSites, partCatalog, partKitLines, partNumbers, partPhotos, agreements,
-  awards, shareLinkSystems, providerProfiles, providerLinks, clientShares,
+  awards, shareLinkSystems, providerProfiles, providerLinks, clientShares, referralFees,
+  leads, leadOffers,
   catalogRefs, taskResults, folders, dropLinks, shareLinks, shareLinkFiles,
   validationDocs, validationSignatures, messageThreads, threadMembers, messages,
   driveCache, expenses, expenseReports, expenseCategories, invoices, invoiceLines, payments, invoiceFees, promises, disputes,
@@ -84,7 +85,7 @@ import {
 import { matchesEntry, roleForEmail, emailInClientAllowlist, signOut } from "@/auth";
 import { parseList } from "@/lib/allowMatch";
 import { getStageDefs } from "@/lib/stageDefs";
-import { notifyClientShared, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
+import { notifyClientShared, notifyLeadClaimed, notifyLeadOffered, notifyMessage, notifyModelProposed, notifyPartsRequested, notifyTaskAssigned, notifyGasEmpty, notifyDiscussion, notifySystemAssigned, notifyAccessRequest, notifyInvite, notifyHandoff, notifyQueueKick, notifyMention, notifyIssueRaised, notifyPmRequested } from "@/lib/notify";
 import { normalizeSerial, MIN_SERIAL_LOOKUP } from "@/lib/serial";
 import { isValidHex } from "@/lib/theme";
 import { canSeeCosts } from "@/lib/redact";
@@ -156,12 +157,23 @@ import {
 } from "@/lib/fleetBrief";
 import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
 import {
-  mayDecide, mayWithdraw, parsePayload, shareProblems, summarize, SHARE_LABEL,
+  blindSummary, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, noteLeaks,
+  parsePayload, shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
 import { composePayload, materialize } from "@/lib/clientShareData";
+import {
+  accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
+  feeLine, termsProblems, windowEnd, type FeeTerms,
+} from "@/lib/referral";
+import { billedForFee, feeById } from "@/lib/referralData";
 import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
+import {
+  blurbLeaks, equipmentLine, leadProblems, leadSummary, mayClaim, mayWithdrawLead,
+  parseSystems, serializeSystems, type LeadSystem,
+} from "@/lib/lead";
+import { leadWithOffers, wasOffered } from "@/lib/leadData";
 import { normalizePhone } from "@/lib/sms";
-import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
 import { maySeeTrail } from "@/lib/trail";
@@ -14902,7 +14914,7 @@ export async function startPayment(
   try {
     const url = await checkoutSession({
       accountId: operator.stripeAccountId,
-      invoiceId, invoiceNumber: full.row.number,
+      ref: { key: "invoiceId", id: invoiceId, label: `Invoice ${full.row.number}` },
       amountCents: amount.amountCents, method,
       platformFeeBps: settings?.platformFeeBps ?? 0,
       successUrl: `${base}/share/${token}?paid=1`,
@@ -14925,47 +14937,6 @@ export async function startPayment(
     });
     return { error: "We could not start the payment just now. Please try again, or send a check referencing this invoice." };
   }
-}
-
-/**
- * Stripe says the money arrived. Called only by the webhook, which has already
- * verified the signature - this records the payment, lets the credit hold
- * recompute itself, and writes the audit row.
- */
-export async function recordStripePayment(input: {
-  invoiceId: number; amountCents: number; reference: string; method: string;
-}): Promise<void> {
-  const [inv] = await db.select().from(invoices).where(eq(invoices.id, input.invoiceId));
-  if (!inv) return;
-  const already = await db.select().from(payments)
-    .where(and(eq(payments.invoiceId, input.invoiceId), eq(payments.reference, input.reference)));
-  if (already.length) return;   // Stripe retries; a payment is not recorded twice.
-
-  await db.insert(payments).values({
-    tenantOrgId: inv.tenantOrgId, invoiceId: input.invoiceId,
-    method: input.method === "card" ? "card" : "ach",
-    amountCents: input.amountCents, reference: input.reference,
-    receivedOn: shopToday(), recordedBy: "stripe",
-  });
-
-  const full = await invoiceById(input.invoiceId);
-  const view = full ? invoiceView(asStatementRow(full), shopToday()) : null;
-  if (view && inv.status !== "void" && inv.status !== "referred") {
-    const next = view.balanceCents <= 0 ? "paid" : "partial";
-    if (next !== inv.status) {
-      await db.update(invoices).set({ status: next, updatedAt: new Date() }).where(eq(invoices.id, input.invoiceId));
-    }
-  }
-  // The hold is computed, never stored, so paying the balance lifts it by
-  // arithmetic the next time anybody looks. Nothing to un-set here.
-  const credit = await creditFor(inv.orgId, shopToday()).catch(() => null);
-  await audit({
-    actor: "stripe", entityType: "invoice", entityId: input.invoiceId, tenantOrgId: inv.tenantOrgId,
-    action: `received ${formatCents(input.amountCents)} by ${input.method === "card" ? "card" : "bank transfer"} on ${inv.number}`
-      + (view ? ` - ${view.balanceCents <= 0 ? "paid in full" : `${formatCents(view.balanceCents)} still open`}` : "")
-      + (credit && !credit.onHold ? "; the credit hold has cleared" : ""),
-  });
-  revInvoice(inv);
 }
 
 /**
@@ -15098,8 +15069,16 @@ function cleanManualLine(data: { kind: string; description: string; qty: number;
 export async function createBlankInvoice(orgId: number): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
-  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  if (!org || !(await mayBillHere(u, org))) return { error: "Not found" };
+  /*
+   * THE ISSUER'S workspace, never the subject's. For an ordinary client the
+   * two are the same number - orgTenant(client) is the operator that owns them
+   * - and they come apart for exactly one case: a peer service company, whose
+   * own tenant is themselves. Stamping an invoice with orgTenant there would
+   * file our bill inside THEIR workspace, where we could not see it and they
+   * could. A document belongs to whoever issued it.
+   */
+  const tenant = myTenantOrgId(u);
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     const number = await nextDocNumber("invoice", tenant);
@@ -15597,8 +15576,10 @@ export async function createBlankQuote(
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
-  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  if (!org || !(await mayBillHere(u, org))) return { error: "Not found" };
+  // The issuer's workspace - see createBlankInvoice for why this is not
+  // orgTenant(org).
+  const tenant = myTenantOrgId(u);
   const title = data.title.trim();
   if (!title) return { error: "Say what the quote is for" };
   const expires = data.expiresOn.trim();
@@ -16464,7 +16445,7 @@ export async function unlinkProvider(providerOrgId: number): Promise<{ error?: s
  * exactly what they get, however long they take.
  */
 export async function shareClient(orgId: number, data: {
-  toOrgIds: number[]; note: string;
+  toOrgIds: number[]; note: string; terms?: FeeTerms; blind?: boolean;
 }): Promise<{ error?: string; sent?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
@@ -16498,6 +16479,42 @@ export async function shareClient(orgId: number, data: {
   const problems = shareProblems({ payload, toOrgId: picked[0], fromTenantOrgId: tenant });
   if (problems.length) return { error: problems[0] };
 
+  /*
+   * The price is frozen into the offer with everything else. A fee discovered
+   * after somebody has taken on a client is not a price, it is a bill - so the
+   * recipient sees what accepting costs before they accept, and accepting IS
+   * the agreement. That is also what makes reading an aggregate out of their
+   * ledger later something they consented to.
+   */
+  const terms: FeeTerms = {
+    kind: data.terms?.kind ?? "none",
+    feeCents: Math.max(0, Math.round(data.terms?.feeCents ?? 0)),
+    feeBps: Math.max(0, Math.round(data.terms?.feeBps ?? 0)),
+    windowMonths: Math.max(0, Math.round(data.terms?.windowMonths ?? 12)),
+    minCents: Math.max(0, Math.round(data.terms?.minCents ?? 0)),
+    maxCents: Math.max(0, Math.round(data.terms?.maxCents ?? 0)),
+    note: (data.terms?.note ?? "").trim().slice(0, 200),
+  };
+  const termProblems = termsProblems(terms);
+  if (termProblems.length) return { error: termProblems[0] };
+
+  /*
+   * A blind offer whose covering note names the client is not a blind offer.
+   * Refused here rather than warned about in the form alone, because the form
+   * is a courtesy and this function is reachable from anything holding a
+   * session. The escape hatch is to untick blinding, which is a decision.
+   */
+  const wouldBlind = data.blind ?? terms.kind !== "none";
+  if (wouldBlind) {
+    const said = noteLeaks(data.note, payload);
+    if (said.length) {
+      return {
+        error: `Your note gives away "${said[0]}", which a blind offer holds back. `
+          + "Reword it, or untick keeping the name back.",
+      };
+    }
+  }
+
   const frozen = JSON.stringify(payload);
   for (const toOrgId of picked) {
     // One live offer per pair. A second while the first is open is two answers
@@ -16510,17 +16527,29 @@ export async function shareClient(orgId: number, data: {
     const [row] = await db.insert(clientShares).values({
       tenantOrgId: tenant, toOrgId, sourceOrgId: orgId,
       payload: frozen, status: "pending", note: data.note.trim().slice(0, 500),
+      feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
+      feeWindowMonths: terms.windowMonths, feeNote: terms.note,
+      feeMinCents: terms.minCents, feeMaxCents: terms.maxCents,
+      // Blind by default wherever there is a fee: the fee is the reason they
+      // cannot be handed the client's name before they agree to it.
+      blind: data.blind ?? terms.kind !== "none",
       createdBy: u.email,
     }).returning();
     const [to] = await db.select().from(orgs).where(eq(orgs.id, toOrgId));
     await notifyClientShared({
       to: await houseEmails(toOrgId),
       fromName: brand.operatorName || brand.name,
-      clientName: org.name, summary: summarize(payload), note: data.note,
+      // A blind offer stays blind in the email too. An inbox line naming the
+      // client would undo the whole thing in the one place nobody thinks to
+      // check, and these get forwarded.
+      clientName: row.blind ? "a client" : org.name,
+      summary: row.blind ? blindSummary(payload) : summarize(payload),
+      note: data.note,
     }).catch(() => {});
     await audit({
       actor: u.email, entityType: "client_share", entityId: row.id, tenantOrgId: tenant,
-      action: `offered ${org.name} (${summarize(payload)}) to ${to?.name ?? "another service company"}`,
+      action: `offered ${org.name} (${summarize(payload)}) to ${to?.name ?? "another service company"}`
+        + (terms.kind === "none" ? "" : ` for ${termsLine(terms, formatCents)}`),
     });
   }
   revalidatePath("/network");
@@ -16534,7 +16563,7 @@ export async function shareClient(orgId: number, data: {
  * because it is addressed to us, and only while it is still open.
  */
 export async function decideClientShare(
-  shareId: number, accept: boolean, reason = "",
+  shareId: number, accept: boolean, reason = "", choice = "",
 ): Promise<{ error?: string; orgId?: number }> {
   const u = await requireStaff();
   const tenant = myTenantOrgId(u);
@@ -16553,6 +16582,13 @@ export async function decideClientShare(
     const made = await materialize({ payload, destTenantOrgId: tenant, actor: u.email });
     orgId = made.orgId;
     systems = made.systems;
+
+    /*
+     * The fee comes into being at acceptance, never before: an offer nobody
+     * took carries a price and no debt. A flat fee is owed in full from this
+     * moment; a percent starts at zero and accrues as they bill.
+     */
+    await raiseReferralFee(row, tenant, orgId, choice);
   }
   await db.update(clientShares).set({
     status: accept ? "accepted" : "declined",
@@ -16585,6 +16621,645 @@ export async function withdrawClientShare(shareId: number): Promise<{ error?: st
   await audit({
     actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
     action: "withdrew a client offer before it was answered",
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+
+// ── Referral fees ───────────────────────────────────────────────────────────
+// Money between two service companies for a client that changed hands. Paid
+// through the PAYEE's own Stripe Connect account, exactly as an invoice is -
+// this platform never holds the funds. See lib/referral.
+
+/**
+ * Recompute what a percentage fee is worth.
+ *
+ * Runs in the PAYER's workspace and only ever writes back an aggregate. The
+ * referrer never sees an invoice, a line or a date - one number crosses, and
+ * billed_from records that it was computed rather than reported.
+ *
+ * Either side may ask for it: the payer because they want the figure to be
+ * right before they pay, the payee because they want to know what they are
+ * owed. Neither can influence what it comes out as.
+ */
+export async function recomputeReferralFee(feeId: number): Promise<{ error?: string; billed?: number }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  if (mine !== fee.payerOrgId && mine !== fee.payeeOrgId) return { error: "Not found" };
+  if (fee.kind !== "percent") return { error: "That fee is a flat amount - there is nothing to recompute." };
+  /*
+   * A fee from a LEAD starts with no client attached - the winner had not
+   * signed them up yet. Computing anyway would write a confident zero over a
+   * figure the payer had reported, so it refuses and says what is missing.
+   */
+  if (fee.clientOrgId === null) {
+    return { error: "Point this fee at the client first, then it can be computed from your invoices." };
+  }
+
+  const billed = await billedForFee(fee);
+  await db.update(referralFees)
+    .set({ billedCents: billed, billedFrom: "invoices", billedAt: new Date() })
+    .where(eq(referralFees.id, feeId));
+  revalidatePath("/network");
+  return { billed };
+}
+
+/**
+ * The payer says what they billed, when Ridgeline cannot see it.
+ *
+ * A shop that invoices this client outside the app has no computable figure,
+ * and refusing to record one would make the honest ones unable to pay what
+ * they owe. So it is accepted - and marked `reported`, because a number a
+ * person typed and a number summed from a ledger are different claims and
+ * every surface says which this is.
+ */
+export async function reportReferralBilling(
+  feeId: number, amount: string,
+): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  // The payer alone. A referrer typing their own basis is not a report.
+  if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
+  const cents = parseMoney(amount);
+  if (cents === null || cents < 0) return { error: "That is not an amount" };
+
+  await db.update(referralFees)
+    .set({ billedCents: cents, billedFrom: "reported", billedAt: new Date() })
+    .where(eq(referralFees.id, feeId));
+  await audit({
+    actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+    action: `reported ${formatCents(cents)} billed against a referred client`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/**
+ * Pay what is owed, into the referrer's own Stripe account.
+ *
+ * The same arrangement an invoice uses and for the same reason: Connect
+ * Express, money bank to bank, no card number here and no funds held. If the
+ * referrer has not connected an account there is nothing to pay INTO, and the
+ * honest answer is to say so rather than to offer a button that fails.
+ */
+export async function payReferralFee(
+  feeId: number, method: "card" | "ach" = "card",
+): Promise<{ error?: string; url?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
+  if (!stripeConfigured()) return { error: "Online payment is not set up on this instance." };
+
+  const owed = outstandingCents(fee);
+  if (owed <= 0) return { error: "There is nothing outstanding on this fee." };
+
+  const [payee] = await db.select().from(orgs).where(eq(orgs.id, fee.payeeOrgId));
+  if (!payee?.stripeAccountId || !payee.stripeReady) {
+    return { error: `${payee?.name ?? "They"} have not connected an account to be paid into yet.` };
+  }
+  const [settings] = await db.select().from(appSettings).where(eq(appSettings.id, 1));
+  const base = appUrl() || "";
+  try {
+    const url = await checkoutSession({
+      accountId: payee.stripeAccountId,
+      ref: { key: "referralFeeId", id: feeId, label: `Referral fee - ${payee.name}` },
+      amountCents: owed, method,
+      platformFeeBps: settings?.platformFeeBps ?? 0,
+      successUrl: `${base}/network?paid=1`,
+      cancelUrl: `${base}/network`,
+    });
+    await audit({
+      actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+      action: `opened a ${method === "ach" ? "bank transfer" : "card"} payment of ${formatCents(owed)}`
+        + ` for a referral fee to ${payee.name} (${stripeMode()} mode)`,
+    });
+    return { url };
+  } catch (e) {
+    await audit({
+      actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+      action: `a referral payment could not be started: ${(e as Error).message}`,
+    });
+    return { error: "We could not start the payment just now." };
+  }
+}
+
+/**
+ * Say which of your own clients a lead's fee is measured against.
+ *
+ * A handover names the client at the moment it is accepted, because accepting
+ * one CREATES it. A lead names nobody: the winner is handed a phone number and
+ * has to go and win the work. This is the step where the two rejoin - once the
+ * prospect is a client in the payer's own workspace, the percentage has a
+ * ledger to be taken of and Recompute starts working.
+ *
+ * The PAYER's alone, and only over their own clients. A referrer choosing
+ * which of somebody else's clients their percentage is measured on would be
+ * picking the number they are paid.
+ */
+export async function linkFeeClient(feeId: number, clientOrgId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  if (mine === null || mine !== fee.payerOrgId) return { error: "Not found" };
+  if (fee.status === "waived") return { error: "That fee was waived." };
+
+  const [client] = await db.select().from(orgs).where(and(
+    eq(orgs.id, clientOrgId),
+    eq(orgs.parentOrgId, mine),          // theirs, and not another workspace's
+  ));
+  if (!client) return { error: "That is not one of your clients." };
+
+  await db.update(referralFees).set({ clientOrgId })
+    .where(and(eq(referralFees.id, feeId), eq(referralFees.payerOrgId, mine)));
+  await audit({
+    actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+    action: `pointed a referral fee at ${client.name}`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/** The referrer lets it go. Theirs alone to forgive, and it stays on the record. */
+export async function waiveReferralFee(feeId: number, reason: string): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const why = requireReason(reason);
+  if (typeof why !== "string") return why;
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  if (mine === null || mine !== fee.payeeOrgId) return { error: "Not found" };
+  await db.update(referralFees).set({ status: "waived" }).where(eq(referralFees.id, feeId));
+  await audit({
+    actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+    action: `waived a referral fee: ${why}`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+
+/**
+ * Turn an accepted offer's terms into the fee itself.
+ *
+ * One place, because a counter agreed by the sender strikes exactly the same
+ * deal a plain acceptance does and must produce exactly the same row. `terms`
+ * is whichever set was actually agreed - the offer's, or the counter's.
+ */
+async function raiseReferralFee(
+  row: typeof clientShares.$inferSelect,
+  payerTenantOrgId: number,
+  clientOrgId: number | undefined,
+  choice: string,
+): Promise<void> {
+  const agreed: FeeTerms = row.counterKind
+    ? {
+      kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
+      windowMonths: row.counterWindowMonths, note: row.counterNote,
+      minCents: row.counterMinCents, maxCents: row.counterMaxCents,
+    }
+    : {
+      kind: row.feeKind, feeCents: row.feeCents, feeBps: row.feeBps,
+      windowMonths: row.feeWindowMonths, note: row.feeNote,
+      minCents: row.feeMinCents, maxCents: row.feeMaxCents,
+    };
+  // "Either" is only ever an OFFER. What lands on the fee is the one they
+  // picked, so nothing downstream has to carry a choice that was already made.
+  const t = resolveChoice(agreed, choice);
+  if (t.kind !== "flat" && t.kind !== "percent") return;
+
+  const startsOn = shopToday();
+  await db.insert(referralFees).values({
+    // The payee's receivable, so the payee's stamp.
+    tenantOrgId: row.tenantOrgId,
+    shareId: row.id,
+    payeeOrgId: row.tenantOrgId ?? 0,
+    payerOrgId: payerTenantOrgId,
+    clientOrgId: clientOrgId ?? null,
+    kind: t.kind,
+    feeCents: t.feeCents, feeBps: t.feeBps,
+    minCents: t.minCents, maxCents: t.maxCents,
+    startsOn,
+    endsOn: t.kind === "percent" ? windowEnd(startsOn, t.windowMonths) : "",
+    note: t.note,
+  });
+}
+
+/**
+ * The recipient proposes different terms.
+ *
+ * A CONDITIONAL ACCEPTANCE rather than a refusal: "I will take this client, at
+ * this price." Which is why agreeing to it completes the deal on the spot
+ * instead of bouncing back for a second yes - that second yes was already
+ * given here, and asking for it again is how a negotiation dies of round trips.
+ *
+ * The offer's own fee columns are left exactly as they were. The record has to
+ * go on saying what was originally asked for even after the deal is struck at
+ * a different number.
+ */
+export async function counterClientShare(shareId: number, data: {
+  terms: FeeTerms; note: string;
+}): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const tenant = myTenantOrgId(u);
+  if (tenant === null) return { error: "Your workspace could not be resolved" };
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  // Addressed to us, or it is not ours to answer.
+  if (!row || row.toOrgId !== tenant) return { error: "Not found" };
+  if (!mayCounter(row.status)) {
+    return { error: `That offer is ${SHARE_LABEL[row.status as "pending"] ?? row.status}.` };
+  }
+  const terms: FeeTerms = {
+    kind: data.terms.kind,
+    feeCents: Math.max(0, Math.round(data.terms.feeCents)),
+    feeBps: Math.max(0, Math.round(data.terms.feeBps)),
+    windowMonths: Math.max(0, Math.round(data.terms.windowMonths)),
+    minCents: Math.max(0, Math.round(data.terms.minCents)),
+    maxCents: Math.max(0, Math.round(data.terms.maxCents)),
+    note: data.note.trim().slice(0, 200),
+  };
+  const problems = termsProblems(terms);
+  if (problems.length) return { error: problems[0] };
+
+  await db.update(clientShares).set({
+    status: "countered",
+    counterKind: terms.kind, counterCents: terms.feeCents, counterBps: terms.feeBps,
+    counterWindowMonths: terms.windowMonths, counterNote: terms.note,
+    counterMinCents: terms.minCents, counterMaxCents: terms.maxCents,
+    counteredBy: u.email, counteredAt: new Date(),
+  }).where(eq(clientShares.id, shareId));
+
+  const [from] = await db.select().from(orgs).where(eq(orgs.id, row.tenantOrgId ?? -1));
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: tenant,
+    action: `countered ${from?.name ?? "a"} offer: ${termsLine(terms, formatCents)}`
+      + ` instead of ${termsLine({
+        kind: row.feeKind, feeCents: row.feeCents, feeBps: row.feeBps,
+        windowMonths: row.feeWindowMonths, note: "",
+        minCents: row.feeMinCents, maxCents: row.feeMaxCents,
+      }, formatCents)}`,
+  });
+  revalidatePath("/network");
+  return {};
+}
+
+/**
+ * The sender answers a counter.
+ *
+ * Agreeing completes the deal and copies the client across then and there,
+ * because the counter was already the recipient's yes. Refusing puts the
+ * ORIGINAL offer back on the table rather than killing it - the recipient
+ * asked for a better price, was told no, and may still want the client at the
+ * price first asked. Ending the whole thing on a refused counter would make
+ * countering a risk, and a negotiation nobody dares open is not a negotiation.
+ */
+export async function answerCounterOffer(
+  shareId: number, agree: boolean, choice = "",
+): Promise<{ error?: string; orgId?: number }> {
+  const u = await requireStaff();
+  const [row] = await db.select().from(clientShares).where(eq(clientShares.id, shareId));
+  if (!row) return { error: "Not found" };
+  const tenant = readTenant(u);
+  // The sender's alone: their money being argued over.
+  if (tenant !== null && row.tenantOrgId !== tenant) return { error: "Not found" };
+  if (!mayAnswerCounter(row.status)) return { error: "There is no counter outstanding on that offer." };
+
+  const [to] = await db.select().from(orgs).where(eq(orgs.id, row.toOrgId));
+  const countered: FeeTerms = {
+    kind: row.counterKind, feeCents: row.counterCents, feeBps: row.counterBps,
+    windowMonths: row.counterWindowMonths, note: row.counterNote,
+    minCents: row.counterMinCents, maxCents: row.counterMaxCents,
+  };
+
+  if (!agree) {
+    await db.update(clientShares).set({
+      status: "pending",
+      counterKind: "", counterCents: 0, counterBps: 0, counterNote: "",
+      counterMinCents: 0, counterMaxCents: 0,
+      counteredBy: "", counteredAt: null,
+    }).where(eq(clientShares.id, shareId));
+    await audit({
+      actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
+      action: `turned down ${to?.name ?? "their"} counter - the original offer stands`,
+    });
+    revalidatePath("/network");
+    return {};
+  }
+
+  const payload = parsePayload(row.payload);
+  if (!payload) return { error: "That offer's contents could not be read" };
+  const made = await materialize({
+    payload, destTenantOrgId: row.toOrgId, actor: u.email,
+  });
+  await raiseReferralFee(row, row.toOrgId, made.orgId, choice);
+  await db.update(clientShares).set({
+    status: "accepted", destOrgId: made.orgId,
+    decidedBy: u.email, decidedAt: new Date(),
+  }).where(eq(clientShares.id, shareId));
+
+  await audit({
+    actor: u.email, entityType: "client_share", entityId: shareId, tenantOrgId: row.tenantOrgId,
+    action: `agreed ${to?.name ?? "their"} counter of ${termsLine(countered, formatCents)}`
+      + ` - ${payload.client.name} copied to their workspace, ${made.systems} systems`,
+  });
+  revalidatePath("/network");
+  return { orgId: made.orgId };
+}
+
+
+/**
+ * May this person put that organization on this workspace's paper?
+ *
+ * The DB half of lib/tenants' mayBillOrg: it needs the list of service
+ * companies this workspace has added, which is a query, so the pure rule takes
+ * it and this resolves it. One helper because a quote and an invoice must never
+ * disagree about who may be billed.
+ */
+async function mayBillHere(u: SessionUser, org: typeof orgs.$inferSelect): Promise<boolean> {
+  const v = tenantViewer(u);
+  if (mayAdminOrg(v, org)) return true;
+  const mine = myTenantOrgId(u);
+  if (mine === null) return false;
+  const peers = (await db.select({ id: providerLinks.providerOrgId }).from(providerLinks)
+    .where(eq(providerLinks.tenantOrgId, mine))).map((r) => r.id);
+  return mayBillOrg(v, org, peers);
+}
+
+/**
+ * Put a referral fee on an invoice, in the payee's own books.
+ *
+ * Until this, a fee was a private arrangement with a pay link. An invoice makes
+ * it accounting: it has a number, it appears in the ledger and on a statement,
+ * it ages into collections, dunning chases it, and the payer can pay it the way
+ * they pay anything else. Both companies need it in their books, and neither
+ * gets that from a row in a table nobody's accountant reads.
+ *
+ * A DRAFT, not a sent invoice. What to say on a bill to somebody you refer work
+ * to is a judgement, and a button that silently emails a peer service company a
+ * demand is not one anybody should press by accident.
+ */
+export async function billReferralFee(feeId: number): Promise<{ error?: string; invoiceId?: number }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const fee = await feeById(feeId);
+  if (!fee) return { error: "Not found" };
+  // The payee's alone: it is their receivable.
+  if (mine === null || mine !== fee.payeeOrgId) return { error: "Not found" };
+  if (fee.invoiceId) return { error: "That fee is already on an invoice." };
+  if (fee.status === "waived") return { error: "That fee was waived." };
+
+  const owed = outstandingCents(fee);
+  if (owed <= 0) {
+    return {
+      error: fee.kind === "percent"
+        ? "Nothing has accrued yet - recompute it once they have billed some work."
+        : "There is nothing outstanding on that fee.",
+    };
+  }
+  const [payer] = await db.select().from(orgs).where(eq(orgs.id, fee.payerOrgId));
+  if (!payer) return { error: "Not found" };
+
+  const [client] = fee.clientOrgId === null ? [null]
+    : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, fee.clientOrgId));
+  const what = client?.name ?? "a referred client";
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const number = await nextDocNumber("invoice", mine);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: mine, orgId: payer.id, number, status: "draft",
+        note: `Referral fee - ${what}`, createdBy: u.email,
+      }).returning();
+      await db.insert(invoiceLines).values({
+        invoiceId: inv.id,
+        // A referral fee is a fee, not labor and not a part. fee_ref is the
+        // kind the line editor already prints as "Charge".
+        kind: "fee_ref",
+        description: `Referral fee - ${what}`,
+        detail: feeLine(fee, formatCents),
+        qty: 1000, unitCents: owed, position: 0,
+      });
+      await db.update(referralFees).set({ invoiceId: inv.id }).where(eq(referralFees.id, feeId));
+      await audit({
+        actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+        action: `invoiced ${payer.name} ${formatCents(owed)} for the ${what} referral as ${number}`,
+      });
+      revalidatePath("/network");
+      revalidatePath("/money/invoices");
+      return { invoiceId: inv.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+
+// ── Leads ───────────────────────────────────────────────────────────────────
+// An enquiry you are never going to drive to, put in front of shops who would,
+// for a finder's fee. Blind until claimed, first claim wins - see lib/lead.
+
+/**
+ * Post a lead to a few of the service companies on your list.
+ *
+ * The contact details go in and stay in: they are stored from the start,
+ * because the finder has to be able to hand them over the moment somebody
+ * claims it, and they are never sent to anybody who has not.
+ */
+export async function postLead(data: {
+  contactName: string; contactEmail: string; contactPhone: string;
+  orgName: string; address: string; region: string; blurb: string;
+  systems: LeadSystem[]; terms: FeeTerms; toOrgIds: number[];
+}): Promise<{ error?: string; id?: number; sent?: number }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your workspace could not be resolved" };
+
+  const terms: FeeTerms = {
+    kind: data.terms.kind,
+    feeCents: Math.max(0, Math.round(data.terms.feeCents)),
+    feeBps: Math.max(0, Math.round(data.terms.feeBps)),
+    windowMonths: Math.max(0, Math.round(data.terms.windowMonths)),
+    minCents: Math.max(0, Math.round(data.terms.minCents)),
+    maxCents: Math.max(0, Math.round(data.terms.maxCents)),
+    note: data.terms.note.trim().slice(0, 200),
+  };
+  const systems = data.systems
+    .map((x) => ({
+      category: x.category.trim().slice(0, 60),
+      model: x.model.trim().slice(0, 60),
+      count: Math.max(1, Math.min(999, Math.round(x.count) || 1)),
+    }))
+    .filter((x) => x.category || x.model);
+
+  const problems = leadProblems({
+    region: data.region, systems, terms,
+    contactEmail: data.contactEmail, contactPhone: data.contactPhone, orgName: data.orgName,
+  });
+  if (problems.length) return { error: problems[0] };
+
+  // The blurb IS published. A lead whose blurb names the lab is a lead given
+  // away for nothing - see lib/lead blurbLeaks.
+  const said = blurbLeaks(data.blurb, data);
+  if (said.length) {
+    return {
+      error: `"${said[0]}" is in what they asked for, which every shop sees. `
+        + "Keep who they are out of it - that is what they are paying for.",
+    };
+  }
+
+  // Only shops on our own list, and re-checked here: a picker is not a
+  // permission, and this one posts somebody else's contact details.
+  const targets = [...new Set(data.toOrgIds.filter((n) => Number.isInteger(n)))].slice(0, 10);
+  const allowed = new Set((await db.select({ id: providerLinks.providerOrgId }).from(providerLinks)
+    .where(and(eq(providerLinks.tenantOrgId, mine), inArray(providerLinks.providerOrgId, targets))))
+    .map((r) => r.id));
+  const picked = targets.filter((t) => allowed.has(t));
+  if (!picked.length) return { error: "Pick who to offer it to, from your service companies" };
+
+  const [lead] = await db.insert(leads).values({
+    tenantOrgId: mine,
+    contactName: data.contactName.trim().slice(0, 120),
+    contactEmail: data.contactEmail.trim().toLowerCase().slice(0, 200),
+    contactPhone: data.contactPhone.trim().slice(0, 60),
+    orgName: data.orgName.trim().slice(0, 120),
+    address: data.address.trim().slice(0, 400),
+    region: data.region.trim().slice(0, 120),
+    blurb: data.blurb.trim().slice(0, 600),
+    systems: serializeSystems(systems),
+    feeKind: terms.kind, feeCents: terms.feeCents, feeBps: terms.feeBps,
+    feeWindowMonths: terms.windowMonths, feeMinCents: terms.minCents,
+    feeMaxCents: terms.maxCents, feeNote: terms.note,
+    createdBy: u.email,
+  }).returning();
+  await db.insert(leadOffers).values(picked.map((toOrgId) => ({ leadId: lead.id, toOrgId })));
+
+  const brand = await brandForTenant(mine);
+  for (const toOrgId of picked) {
+    await notifyLeadOffered({
+      to: await houseEmails(toOrgId),
+      fromName: brand.operatorName || brand.name,
+      summary: leadSummary({ region: data.region, systems }),
+      equipment: equipmentLine(systems),
+      terms: termsLine(terms, formatCents),
+    }).catch(() => {});
+  }
+  await audit({
+    actor: u.email, entityType: "lead", entityId: lead.id, tenantOrgId: mine,
+    action: `posted a lead to ${picked.length} service ${picked.length === 1 ? "company" : "companies"}: `
+      + `${leadSummary({ region: data.region, systems })} for ${termsLine(terms, formatCents)}`,
+  });
+  revalidatePath("/network");
+  return { id: lead.id, sent: picked.length };
+}
+
+/**
+ * Take it. First claim wins, and the losers are told plainly.
+ *
+ * The race is settled in the database, not in the reader: the UPDATE carries
+ * status = 'open' in its own WHERE, so two shops pressing at once produce one
+ * winner and one row that changed nothing. Reading the status first and writing
+ * second is exactly how both of them end up phoning the lab.
+ */
+export async function claimLead(leadId: number, choice = ""): Promise<{ error?: string; claimed?: boolean }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  if (mine === null) return { error: "Your workspace could not be resolved" };
+  const found = await leadWithOffers(leadId);
+  if (!found || !(await wasOffered(leadId, mine))) return { error: "Not found" };
+  if (!mayClaim(found.lead, mine)) {
+    return { error: found.lead.status === "open" ? "That is your own lead." : "Somebody has already taken that one." };
+  }
+
+  const offered: FeeTerms = {
+    kind: found.lead.feeKind, feeCents: found.lead.feeCents, feeBps: found.lead.feeBps,
+    windowMonths: found.lead.feeWindowMonths, minCents: found.lead.feeMinCents,
+    maxCents: found.lead.feeMaxCents, note: found.lead.feeNote,
+  };
+  /*
+   * Settled BEFORE the claim, because a claim that cannot produce a fee is a
+   * lead given away: the winner would hold the contact details and the finder
+   * would hold nothing.
+   *
+   * An either/or demands the answer explicitly rather than leaning on
+   * resolveChoice's default. On a share the recipient sits with a radio button
+   * already on one side, so a blank is a real choice; here two buttons say
+   * which is which, and a blank means the answer never arrived.
+   */
+  if (offered.kind === "either" && choice !== "flat" && choice !== "percent") {
+    return { error: "Say which of the two you are taking." };
+  }
+  const agreed = resolveChoice(offered, choice);
+  if (agreed.kind !== "flat" && agreed.kind !== "percent") {
+    return { error: "That lead has no fee on it." };
+  }
+
+  const won = await db.update(leads).set({
+    status: "claimed", claimedByOrgId: mine, claimedBy: u.email, claimedAt: new Date(),
+  }).where(and(eq(leads.id, leadId), eq(leads.status, "open"))).returning({ id: leads.id });
+  if (!won.length) return { error: "Somebody has already taken that one." };
+
+  /*
+   * The fee, on the same ledger a handover's fee lands on.
+   *
+   * clientOrgId is NULL and stays null until the winner actually signs them
+   * up and points the fee at their own copy - there is no client yet, and a
+   * percent measured against "no client" would either be zero forever or,
+   * worse, against their whole book. billedForFee returns 0 for a null client
+   * on purpose; lib/referralData says why.
+   */
+  const startsOn = shopToday();
+  await db.insert(referralFees).values({
+    tenantOrgId: found.lead.tenantOrgId,          // the payee's receivable
+    leadId,
+    payeeOrgId: found.lead.tenantOrgId ?? 0,
+    payerOrgId: mine,
+    clientOrgId: null,
+    kind: agreed.kind, feeCents: agreed.feeCents, feeBps: agreed.feeBps,
+    minCents: agreed.minCents, maxCents: agreed.maxCents,
+    startsOn,
+    endsOn: agreed.kind === "percent" ? windowEnd(startsOn, agreed.windowMonths) : "",
+    // No note: leadId already says this came from a lead, and the ledger reads
+    // the prospect's name off the lead itself rather than off a string here.
+    note: found.lead.feeNote,
+  });
+
+  const [me] = await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, mine));
+  await notifyLeadClaimed({
+    to: await houseEmails(found.lead.tenantOrgId),
+    byName: me?.name ?? "another service company",
+    summary: leadSummary({
+      region: found.lead.region, systems: parseSystems(found.lead.systems),
+    }),
+  }).catch(() => {});
+  await audit({
+    actor: u.email, entityType: "lead", entityId: leadId, tenantOrgId: mine,
+    action: `claimed a lead from ${found.lead.createdBy}: `
+      + `${found.lead.orgName || "a prospect"} in ${found.lead.region || "an unstated region"}`,
+  });
+  revalidatePath("/network");
+  return { claimed: true };
+}
+
+/** The finder pulls it, while nobody has taken it. */
+export async function withdrawLead(leadId: number): Promise<{ error?: string }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const found = await leadWithOffers(leadId);
+  if (!found || mine === null || found.lead.tenantOrgId !== mine) return { error: "Not found" };
+  if (!mayWithdrawLead(found.lead.status)) return { error: "Somebody has already taken that one." };
+  await db.update(leads).set({ status: "withdrawn" }).where(eq(leads.id, leadId));
+  await audit({
+    actor: u.email, entityType: "lead", entityId: leadId, tenantOrgId: mine,
+    action: "withdrew a lead before anybody took it",
   });
   revalidatePath("/network");
   return {};

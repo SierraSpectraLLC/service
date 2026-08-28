@@ -3537,3 +3537,125 @@ DO $$ BEGIN
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS "org_name_per_tenant"
   ON "orgs" (COALESCE("parent_org_id", 0), "name");
+
+-- What a referrer asks for, frozen into the offer so the recipient sees the
+-- price before accepting. See src/lib/referral.ts.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_kind" text NOT NULL DEFAULT 'none';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_bps" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_window_months" integer NOT NULL DEFAULT 12;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_note" text NOT NULL DEFAULT '';
+
+-- The fee itself, once somebody has accepted. Money between two service
+-- companies, paid through the payee's own Stripe Connect account.
+CREATE TABLE IF NOT EXISTS "referral_fees" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "share_id" integer NOT NULL REFERENCES "client_shares"("id") ON DELETE CASCADE,
+  "payee_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "payer_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "client_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "kind" text NOT NULL DEFAULT 'flat',
+  "fee_cents" integer NOT NULL DEFAULT 0,
+  "fee_bps" integer NOT NULL DEFAULT 0,
+  "starts_on" text NOT NULL DEFAULT '',
+  "ends_on" text NOT NULL DEFAULT '',
+  "billed_cents" integer NOT NULL DEFAULT 0,
+  "billed_from" text NOT NULL DEFAULT 'invoices',
+  "billed_at" timestamp,
+  "paid_cents" integer NOT NULL DEFAULT 0,
+  "status" text NOT NULL DEFAULT 'open',
+  "note" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "referral_fees_payer_idx" ON "referral_fees" ("payer_org_id");
+CREATE INDEX IF NOT EXISTS "referral_fees_payee_idx" ON "referral_fees" ("payee_org_id");
+
+-- What the recipient proposed instead. Same five fields as the offer, so
+-- agreeing to a counter is a copy rather than a translation, and the offer's
+-- own fields stay true. See src/lib/clientShare.ts.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_kind" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_bps" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_window_months" integer NOT NULL DEFAULT 12;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_note" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "countered_by" text NOT NULL DEFAULT '';
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "countered_at" timestamp;
+
+-- The invoice raised for a referral fee, in the payee's books. From then on the
+-- invoice is how it is collected and the fee stops keeping its own count - see
+-- src/lib/referralData.ts.
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "invoice_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'referral_fees_invoice_id_fk') THEN
+    ALTER TABLE "referral_fees" ADD CONSTRAINT "referral_fees_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- A floor and a cap on a percentage referral fee. The floor waits for the
+-- first dollar billed - see src/lib/referral.ts accruedCents.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_min_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "fee_max_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_min_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_max_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "min_cents" integer NOT NULL DEFAULT 0;
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "max_cents" integer NOT NULL DEFAULT 0;
+
+-- Show the work without showing whose it is, until they accept. The snapshot is
+-- never redacted at rest - only the rendering before the deal is struck. See
+-- src/lib/clientShare.ts redactPayload.
+ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "blind" boolean NOT NULL DEFAULT false;
+
+-- An enquiry nobody has taken, offered to service companies for a finder's fee.
+-- Blind until claimed, first claim wins. See src/lib/lead.ts.
+CREATE TABLE IF NOT EXISTS "leads" (
+  "id" serial PRIMARY KEY,
+  "tenant_org_id" integer REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "contact_name" text NOT NULL DEFAULT '',
+  "contact_email" text NOT NULL DEFAULT '',
+  "contact_phone" text NOT NULL DEFAULT '',
+  "org_name" text NOT NULL DEFAULT '',
+  "address" text NOT NULL DEFAULT '',
+  "region" text NOT NULL DEFAULT '',
+  "blurb" text NOT NULL DEFAULT '',
+  "systems" text NOT NULL DEFAULT '',
+  "fee_kind" text NOT NULL DEFAULT 'flat',
+  "fee_cents" integer NOT NULL DEFAULT 0,
+  "fee_bps" integer NOT NULL DEFAULT 0,
+  "fee_window_months" integer NOT NULL DEFAULT 12,
+  "fee_min_cents" integer NOT NULL DEFAULT 0,
+  "fee_max_cents" integer NOT NULL DEFAULT 0,
+  "fee_note" text NOT NULL DEFAULT '',
+  "status" text NOT NULL DEFAULT 'open',
+  "claimed_by_org_id" integer REFERENCES "orgs"("id") ON DELETE SET NULL,
+  "claimed_by" text NOT NULL DEFAULT '',
+  "claimed_at" timestamp,
+  "created_by" text NOT NULL DEFAULT '',
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "lead_offers" (
+  "id" serial PRIMARY KEY,
+  "lead_id" integer NOT NULL REFERENCES "leads"("id") ON DELETE CASCADE,
+  "to_org_id" integer NOT NULL REFERENCES "orgs"("id") ON DELETE CASCADE,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "lead_offers_to_idx" ON "lead_offers" ("to_org_id");
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'lead_offer_unique') THEN
+    ALTER TABLE "lead_offers" ADD CONSTRAINT "lead_offer_unique" UNIQUE ("lead_id", "to_org_id");
+  END IF;
+END $$;
+
+-- A lead's finder's fee is the same debt as a handover's, so it is the same
+-- row: share_id gives way to "one of the two", and both are now nullable.
+-- DROP NOT NULL is safe on an existing column with every row filled.
+ALTER TABLE "referral_fees" ALTER COLUMN "share_id" DROP NOT NULL;
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "lead_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'referral_fees_lead_id_fk') THEN
+    ALTER TABLE "referral_fees" ADD CONSTRAINT "referral_fees_lead_id_fk"
+      FOREIGN KEY ("lead_id") REFERENCES "leads"("id") ON DELETE CASCADE;
+  END IF;
+END $$;

@@ -5,10 +5,15 @@ import { orgs, providerLinks, providerProfiles } from "@/db/schema";
 import { requireUser, myTenantOrgId } from "@/lib/authz";
 import { isStaffRole } from "@/lib/tenants";
 import { listings, sharesFor } from "@/lib/clientShareData";
+import { billableOrgs, feesFor } from "@/lib/referralData";
+import { leadsFor } from "@/lib/leadData";
+import { shopToday } from "@/lib/shopday";
 import { PageHead } from "@/components/ui";
 import ProviderProfileForm from "@/components/ProviderProfileForm";
 import ProviderDirectory from "@/components/ProviderDirectory";
 import ClientShareBoard from "@/components/ClientShareBoard";
+import ReferralLedger from "@/components/ReferralLedger";
+import LeadBoard from "@/components/LeadBoard";
 
 export const dynamic = "force-dynamic";
 
@@ -31,13 +36,16 @@ export default async function NetworkPage() {
   const mine = myTenantOrgId(user);
   if (mine === null) redirect("/");
 
-  const [all, links, shares, profileRow, meRow] = await Promise.all([
+  const [all, links, shares, profileRow, meRow, fees, leadRows, billable] = await Promise.all([
     listings(),
     db.select({ providerOrgId: providerLinks.providerOrgId, note: providerLinks.note })
       .from(providerLinks).where(eq(providerLinks.tenantOrgId, mine)),
     sharesFor(mine),
     db.select().from(providerProfiles).where(eq(providerProfiles.orgId, mine)).then((r) => r[0] ?? null),
     db.select({ name: orgs.name }).from(orgs).where(and(eq(orgs.id, mine))).then((r) => r[0] ?? null),
+    feesFor(mine),
+    leadsFor(mine),
+    billableOrgs(mine),
   ]);
 
   const linked = new Set(links.map((l) => l.providerOrgId));
@@ -53,6 +61,12 @@ export default async function NetworkPage() {
       />
 
       <ClientShareBoard inbox={shares.inbox} sent={shares.sent} />
+
+      <LeadBoard mine={leadRows.mine} offered={leadRows.offered}
+        providers={others.filter((l) => linked.has(l.orgId)).map((l) => ({ id: l.orgId, name: l.name }))} />
+
+      <ReferralLedger earned={fees.earned} owed={fees.owed} today={shopToday()}
+        canPay={user.role === "owner"} clients={billable.clients} />
 
       <ProviderDirectory
         listings={others}

@@ -477,6 +477,74 @@ export const providerLinks = pgTable("provider_links", {
 }, (t) => [unique("provider_link_unique").on(t.tenantOrgId, t.providerOrgId)]);
 
 /**
+ * An enquiry somebody has not taken: a LEAD, offered to service companies for
+ * a finder's fee.
+ *
+ * The sibling of a client share and deliberately not the same thing. A share
+ * hands over a client you already service - there are records, a fleet, a
+ * history. A lead is somebody who wrote to you about four systems on the east
+ * coast that you are never going to drive to. There is no client organization
+ * behind it and there should not be one: putting a prospect into the client
+ * list to sell them on would foul the one table every tenancy rule reads.
+ *
+ * BLIND UNTIL CLAIMED, which is the whole mechanism. What is published is the
+ * work - what equipment, roughly where, what they asked for. The name, the
+ * address and the person to call are held back until somebody takes it, because
+ * a finder's fee is only worth anything while the finder is the only route.
+ *
+ * FIRST TO CLAIM WINS, and the rest are told it is gone. An enquiry offered to
+ * four shops that all "accept" it is four shops phoning one lab, which is worse
+ * for the lab than not being referred at all.
+ */
+export const leads = pgTable("leads", {
+  id: serial("id").primaryKey(),
+  tenantOrgId: tenantStamp(),
+  /** Held back until somebody claims it - see lib/lead. */
+  contactName: text("contact_name").notNull().default(""),
+  contactEmail: text("contact_email").notNull().default(""),
+  contactPhone: text("contact_phone").notNull().default(""),
+  orgName: text("org_name").notNull().default(""),
+  address: text("address").notNull().default(""),
+  /** Published from the start: where, roughly, and what they want. */
+  region: text("region").notNull().default(""),
+  blurb: text("blurb").notNull().default(""),
+  /** [{category, model, count}] as JSON - what they say they have. */
+  systems: text("systems").notNull().default(""),
+  /** What the finder is asking. Same vocabulary as a share's - see lib/referral. */
+  feeKind: text("fee_kind").notNull().default("flat"),
+  feeCents: integer("fee_cents").notNull().default(0),
+  feeBps: integer("fee_bps").notNull().default(0),
+  feeWindowMonths: integer("fee_window_months").notNull().default(12),
+  feeMinCents: integer("fee_min_cents").notNull().default(0),
+  feeMaxCents: integer("fee_max_cents").notNull().default(0),
+  feeNote: text("fee_note").notNull().default(""),
+  /** open | claimed | withdrawn */
+  status: text("status").notNull().default("open"),
+  claimedByOrgId: integer("claimed_by_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  claimedBy: text("claimed_by").notNull().default(""),
+  claimedAt: timestamp("claimed_at"),
+  createdBy: text("created_by").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/**
+ * Which shops a lead was put in front of.
+ *
+ * A lead is offered to a chosen few rather than posted to the instance: a
+ * board anybody could read is a board somebody scrapes, and the shortlist is
+ * already how a share picks its recipients.
+ */
+export const leadOffers = pgTable("lead_offers", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id").notNull().references((): AnyPgColumn => leads.id, { onDelete: "cascade" }),
+  toOrgId: integer("to_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("lead_offers_to_idx").on(t.toOrgId),
+  unique("lead_offer_unique").on(t.leadId, t.toOrgId),
+]);
+
+/**
  * One client, offered to one other service company.
  *
  * The payload is a FROZEN SNAPSHOT taken when the offer is made, and that is
@@ -505,14 +573,138 @@ export const clientShares = pgTable("client_shares", {
   destOrgId: integer("dest_org_id").references(() => orgs.id, { onDelete: "set null" }),
   /** The snapshot, as JSON - see lib/clientShare. */
   payload: text("payload").notNull().default(""),
-  /** pending | accepted | declined | withdrawn */
+  /** pending | countered | accepted | declined | withdrawn */
   status: text("status").notNull().default("pending"),
+  /**
+   * Show the work without showing whose it is, until they accept.
+   *
+   * A referral is worth something because the other shop cannot go round you,
+   * and an unredacted list hands them the company, the street, the person to
+   * ask for and serials a manufacturer will match to an owner. Blind is the
+   * default for anything with a fee on it. See lib/clientShare redactPayload -
+   * the snapshot itself is never redacted, only the way it is rendered before
+   * the deal is struck.
+   */
+  blind: boolean("blind").notNull().default(false),
   note: text("note").notNull().default(""),
+  /**
+   * What the referrer is asking for, frozen into the offer with everything
+   * else. none | flat | percent.
+   *
+   * On the OFFER rather than agreed afterwards, because a price discovered
+   * after somebody has taken on a client is not a price, it is a bill. The
+   * recipient sees what it costs before they accept, and accepting is the
+   * agreement - which is also what makes the accrual something they consented
+   * to rather than something read out of their books.
+   */
+  feeKind: text("fee_kind").notNull().default("none"),
+  /** flat: what it costs to accept, once. */
+  feeCents: integer("fee_cents").notNull().default(0),
+  /** percent: basis points of what they bill this client inside the window. */
+  feeBps: integer("fee_bps").notNull().default(0),
+  feeWindowMonths: integer("fee_window_months").notNull().default(12),
+  /** percent only: the fee is never less than this once they bill anything, nor more than that. 0 = unbounded. */
+  feeMinCents: integer("fee_min_cents").notNull().default(0),
+  feeMaxCents: integer("fee_max_cents").notNull().default(0),
+  feeNote: text("fee_note").notNull().default(""),
+  /**
+   * What the RECIPIENT proposed instead, when they countered.
+   *
+   * The same five fields as the offer, so agreeing to a counter is a straight
+   * copy rather than a translation - and the offer's own fields are left
+   * alone, so the record still says what was originally asked for even after
+   * the deal is struck at a different number.
+   *
+   * A counter is a CONDITIONAL ACCEPTANCE, not a rejection: "I will take this
+   * client at $1,500." So the sender agreeing to it completes the deal, and
+   * the client copies across at that moment - there is no second round trip
+   * asking the recipient whether they meant it.
+   */
+  counterKind: text("counter_kind").notNull().default(""),
+  counterCents: integer("counter_cents").notNull().default(0),
+  counterBps: integer("counter_bps").notNull().default(0),
+  counterWindowMonths: integer("counter_window_months").notNull().default(12),
+  counterMinCents: integer("counter_min_cents").notNull().default(0),
+  counterMaxCents: integer("counter_max_cents").notNull().default(0),
+  counterNote: text("counter_note").notNull().default(""),
+  counteredBy: text("countered_by").notNull().default(""),
+  counteredAt: timestamp("countered_at"),
   createdBy: text("created_by").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   decidedBy: text("decided_by").notNull().default(""),
   decidedAt: timestamp("decided_at"),
 }, (t) => [index("client_shares_to_idx").on(t.toOrgId)]);
+
+/**
+ * A referral fee, once somebody has accepted the client it hangs off.
+ *
+ * Money between two service companies, and the platform is not in the middle
+ * of it: payment runs through the PAYEE's own Stripe Connect account, the same
+ * arrangement an invoice already uses (lib/stripe). Ridgeline never holds the
+ * funds.
+ *
+ * WHAT THE REFERRER MAY SEE is the whole design of the percent case. The
+ * billing happens in the payer's workspace and stays there - what crosses is
+ * one aggregate, `billed_cents`, and never an invoice, a client name on a
+ * line, or a date. `billed_from` says where even that number came from, and
+ * the two answers are not the same kind of fact: 'invoices' is computed from
+ * rows in the payer's own ledger, 'reported' is a figure a person typed. A
+ * surface that showed them identically would be inviting somebody to read a
+ * self-reported number as an audited one.
+ */
+export const referralFees = pgTable("referral_fees", {
+  id: serial("id").primaryKey(),
+  /** The payee's workspace: their receivable, so their stamp. */
+  tenantOrgId: tenantStamp(),
+  /**
+   * The handover it came from, or the LEAD it came from. Exactly one is set.
+   *
+   * A lead's fee is the same debt as a share's - somebody was sent work and is
+   * owed for it - so it is the same row and the same ledger rather than a
+   * second table that would need its own invoicing, its own settlement and its
+   * own reconciliation with the first.
+   */
+  shareId: integer("share_id").references((): AnyPgColumn => clientShares.id, { onDelete: "cascade" }),
+  leadId: integer("lead_id").references((): AnyPgColumn => leads.id, { onDelete: "cascade" }),
+  /** Who is owed - the referrer. */
+  payeeOrgId: integer("payee_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** Who owes - the shop that accepted. */
+  payerOrgId: integer("payer_org_id").notNull().references(() => orgs.id, { onDelete: "cascade" }),
+  /** The payer's own copy of the client, which is what the percent is measured on. */
+  clientOrgId: integer("client_org_id").references(() => orgs.id, { onDelete: "set null" }),
+  kind: text("kind").notNull().default("flat"),
+  feeCents: integer("fee_cents").notNull().default(0),
+  feeBps: integer("fee_bps").notNull().default(0),
+  /** The bounds agreed. See lib/referral - the floor waits for the first dollar billed. */
+  minCents: integer("min_cents").notNull().default(0),
+  maxCents: integer("max_cents").notNull().default(0),
+  startsOn: text("starts_on").notNull().default(""),   // YYYY-MM-DD, the day it was accepted
+  endsOn: text("ends_on").notNull().default(""),       // the window's last day
+  /** The aggregate the percent is taken of. The ONLY figure that crosses. */
+  billedCents: integer("billed_cents").notNull().default(0),
+  /** invoices | reported - see the comment above; they are different facts. */
+  billedFrom: text("billed_from").notNull().default("invoices"),
+  billedAt: timestamp("billed_at"),
+  paidCents: integer("paid_cents").notNull().default(0),
+  /** open | settled | waived */
+  status: text("status").notNull().default("open"),
+  /**
+   * The invoice raised for it, in the PAYEE's books. Null until somebody bills it.
+   *
+   * From the moment it exists the invoice is how this fee is collected, and the
+   * fee stops keeping its own count: outstanding is the invoice's balance, paid
+   * is the invoice's payments. Two places counting the same money is two places
+   * free to disagree about it, and the disagreement always surfaces in front of
+   * whoever is being chased. Same rule the agreements table states about stored
+   * balances.
+   */
+  invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
+  note: text("note").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("referral_fees_payer_idx").on(t.payerOrgId),
+  index("referral_fees_payee_idx").on(t.payeeOrgId),
+]);
 
 export const orgSites = pgTable("org_sites", {
   id: serial("id").primaryKey(),

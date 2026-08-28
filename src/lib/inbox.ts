@@ -67,6 +67,9 @@ export const NOTIFY_KINDS = [
   // Another service company hands us a client. House only: it is a decision
   // about taking on work, and it arrives from outside the workspace entirely.
   { kind: "client_share", label: "Another service company shares a client with us", audience: "house" },
+  // Work somebody is offering us, and the answer to one we offered. House
+  // only: it is a decision about taking on work, from outside the workspace.
+  { kind: "lead", label: "A lead is offered to us, or one of ours is taken", audience: "house" },
 ] as const satisfies readonly {
   kind: string; label: string; audience: NotifyAudience; hold?: NotifyHold;
 }[];
