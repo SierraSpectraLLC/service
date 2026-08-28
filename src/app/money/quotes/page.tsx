@@ -11,6 +11,7 @@ import { allQuotes, quoteTotal } from "@/lib/invoiceData";
 import { daysToExpiry, quoteStanding, STANDING_LABEL, STANDING_TONE } from "@/lib/quotes";
 import FinanceShell from "@/components/FinanceShell";
 import { booksContext } from "@/lib/financeData";
+import { billableOrgs } from "@/lib/referralData";
 import { NewQuoteButton } from "@/components/NewMoneyButtons";
 import BackfillButton from "@/components/BackfillButton";
 import { DataTable, Dot, FacetStrip, Id, PageHead, Pill, Toolbar } from "@/components/ui";
@@ -89,6 +90,12 @@ export default async function QuotesPage({ searchParams }: {
     };
   };
 
+  /* Clients, plus the peer service companies this workspace has added - a peer
+     who subcontracts to us or owes us a referral fee is a customer for that
+     transaction. Listed apart, so nobody bills a lab by mistake. */
+  const billable = await billableOrgs(readTenant(user));
+  const payable = [...billable.clients, ...billable.peers];
+
   return (
     <FinanceShell
       rail={{ active: "quotes", amounts: fig.amounts, seesBooks: true, seesPayroll }}
@@ -98,8 +105,8 @@ export default async function QuotesPage({ searchParams }: {
       sub="Work priced but not yet won. Not revenue until it is accepted."
       actions={<>
         <BackfillButton kind="quote" today={today}
-          clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
-        <NewQuoteButton today={today} clients={orgRows.filter((o) => o.kind === "client").map((o) => ({ id: o.id, name: o.name }))} />
+          clients={payable} />
+        <NewQuoteButton today={today} clients={payable} />
       </>}
     >
       <Toolbar

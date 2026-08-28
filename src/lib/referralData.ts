@@ -4,7 +4,10 @@
 import { and, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { clientShares, invoiceLines, invoices, orgs, referralFees } from "@/db/schema";
-import { accruedCents, outstandingCents, type FeeRow } from "@/lib/referral";
+import { accruedCents, feeOutstanding, type FeeRow } from "@/lib/referral";
+import { asStatementRow, invoiceById } from "@/lib/invoiceData";
+import { invoiceView } from "@/lib/statement";
+import { shopToday } from "@/lib/shopday";
 
 /**
  * What the payer has billed this client inside the window.
@@ -52,7 +55,10 @@ export type LedgerFee = FeeRow & {
   clientName: string;
   otherName: string;
   note: string;
+  /** The invoice it was billed on, once it has been. */
+  invoice: { id: number; number: string; status: string; balanceCents: number } | null;
 };
+
 
 /**
  * The fees this workspace owes and is owed.
@@ -78,6 +84,22 @@ export async function feesFor(tenantOrgId: number | null): Promise<{
   // The client's name off the SHARE's frozen payload would be the sender's
   // spelling; the payer's own org row is what the payer calls them. Both are
   // right, and the row each side reads is its own.
+  // The invoices behind whichever fees have been billed. One read, then a
+  // balance each through the same view the money pages use, so a referral fee
+  // and the invoice for it can never report different numbers.
+  const invoiced = all.filter((f) => f.invoiceId !== null);
+  const balances = new Map<number, { id: number; number: string; status: string; balanceCents: number }>();
+  const today = shopToday();
+  for (const f of invoiced) {
+    const full = await invoiceById(f.invoiceId!).catch(() => null);
+    if (!full) continue;
+    const view = invoiceView(asStatementRow(full), today);
+    balances.set(f.invoiceId!, {
+      id: full.row.id, number: full.row.number, status: full.row.status,
+      balanceCents: view.balanceCents,
+    });
+  }
+
   const shape = (f: typeof referralFees.$inferSelect, other: number): LedgerFee => ({
     id: f.id, shareId: f.shareId,
     payeeOrgId: f.payeeOrgId, payerOrgId: f.payerOrgId, clientOrgId: f.clientOrgId,
@@ -87,6 +109,7 @@ export async function feesFor(tenantOrgId: number | null): Promise<{
     startsOn: f.startsOn, endsOn: f.endsOn,
     billedCents: f.billedCents, billedFrom: f.billedFrom,
     paidCents: f.paidCents, status: f.status, note: f.note,
+    invoice: f.invoiceId !== null ? balances.get(f.invoiceId) ?? null : null,
   });
   return {
     earned: earned.map((f) => shape(f, f.payerOrgId)),
@@ -108,6 +131,37 @@ export async function feeWithShare(id: number): Promise<
 export function totals(rows: LedgerFee[]): { accrued: number; outstanding: number } {
   return {
     accrued: rows.reduce((n, f) => n + accruedCents(f), 0),
-    outstanding: rows.reduce((n, f) => n + outstandingCents(f), 0),
+    outstanding: rows.reduce((n, f) => n + feeOutstanding(f), 0),
   };
+}
+
+/**
+ * Everyone this workspace may put on its own paper: its clients, and the peer
+ * service companies it has added.
+ *
+ * The pickers on the money pages listed `kind === "client"` and nothing else,
+ * which is right for almost every bill and wrong for the one that pays for
+ * this feature - a peer who subcontracts work to you, or who owes you a
+ * referral fee, is a customer for that transaction and is not a client org.
+ *
+ * Peers are listed apart rather than mixed in. "Northwest Instrument Services"
+ * sitting unremarked between two labs invites somebody to bill the wrong one.
+ */
+export async function billableOrgs(tenantOrgId: number | null): Promise<{
+  clients: { id: number; name: string }[];
+  peers: { id: number; name: string }[];
+}> {
+  const { providerLinks } = await import("@/db/schema");
+  const rows = await db.select().from(orgs);
+  const clients = rows
+    .filter((o) => o.kind === "client" && (tenantOrgId === null || o.parentOrgId === tenantOrgId))
+    .map((o) => ({ id: o.id, name: o.name }));
+  if (tenantOrgId === null) return { clients, peers: [] };
+
+  const linked = new Set((await db.select({ id: providerLinks.providerOrgId })
+    .from(providerLinks).where(eq(providerLinks.tenantOrgId, tenantOrgId))).map((r) => r.id));
+  const peers = rows
+    .filter((o) => o.isOperator && o.id !== tenantOrgId && linked.has(o.id))
+    .map((o) => ({ id: o.id, name: `${o.name} (service company)` }));
+  return { clients, peers };
 }

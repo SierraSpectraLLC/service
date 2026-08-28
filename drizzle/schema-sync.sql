@@ -3581,3 +3581,14 @@ ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_window_months" int
 ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "counter_note" text NOT NULL DEFAULT '';
 ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "countered_by" text NOT NULL DEFAULT '';
 ALTER TABLE "client_shares" ADD COLUMN IF NOT EXISTS "countered_at" timestamp;
+
+-- The invoice raised for a referral fee, in the payee's books. From then on the
+-- invoice is how it is collected and the fee stops keeping its own count - see
+-- src/lib/referralData.ts.
+ALTER TABLE "referral_fees" ADD COLUMN IF NOT EXISTS "invoice_id" integer;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'referral_fees_invoice_id_fk') THEN
+    ALTER TABLE "referral_fees" ADD CONSTRAINT "referral_fees_invoice_id_fk"
+      FOREIGN KEY ("invoice_id") REFERENCES "invoices"("id") ON DELETE SET NULL;
+  END IF;
+END $$;

@@ -592,6 +592,17 @@ export const referralFees = pgTable("referral_fees", {
   paidCents: integer("paid_cents").notNull().default(0),
   /** open | settled | waived */
   status: text("status").notNull().default("open"),
+  /**
+   * The invoice raised for it, in the PAYEE's books. Null until somebody bills it.
+   *
+   * From the moment it exists the invoice is how this fee is collected, and the
+   * fee stops keeping its own count: outstanding is the invoice's balance, paid
+   * is the invoice's payments. Two places counting the same money is two places
+   * free to disagree about it, and the disagreement always surfaces in front of
+   * whoever is being chased. Same rule the agreements table states about stored
+   * balances.
+   */
+  invoiceId: integer("invoice_id").references((): AnyPgColumn => invoices.id, { onDelete: "set null" }),
   note: text("note").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [

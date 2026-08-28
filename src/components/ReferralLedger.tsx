@@ -2,11 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import {
-  payReferralFee, recomputeReferralFee, reportReferralBilling, waiveReferralFee,
+  billReferralFee, payReferralFee, recomputeReferralFee, reportReferralBilling,
+  waiveReferralFee,
 } from "@/app/actions";
 import {
-  accruedCents, feeLine, feeStanding, outstandingCents, STANDING_LABEL,
+  accruedCents, feeLine, feeOutstanding, feeStanding, STANDING_LABEL,
   type FeeStanding,
 } from "@/lib/referral";
 import type { LedgerFee } from "@/lib/referralData";
@@ -64,11 +66,12 @@ export default function ReferralLedger({ earned, owed, today, canPay }: {
           </span>
           <Pill tone={TONE[s]}>{STANDING_LABEL[s]}</Pill>
           <b className="t-body" style={{ width: 92, textAlign: "right" }}>
-            {formatCents(outstandingCents(f) || accruedCents(f))}
+            {formatCents(feeOutstanding(f) || accruedCents(f))}
           </b>
         </div>
         <div className="mut t-small">
           {feeLine(f, formatCents)}
+          {f.invoice ? ` · invoiced as ${f.invoice.number}` : ""}
           {f.kind === "percent" && f.endsOn ? ` · window to ${f.endsOn}` : ""}
         </div>
         {/* Said on the row, not in a footnote: a figure somebody typed and a
@@ -87,10 +90,10 @@ export default function ReferralLedger({ earned, owed, today, canPay }: {
               Recompute
             </button>
           )}
-          {side === "owed" && outstandingCents(f) > 0 && canPay && (
+          {side === "owed" && !f.invoice && feeOutstanding(f) > 0 && canPay && (
             <button className="btn accent" disabled={pending}
               onClick={() => run(() => payReferralFee(f.id, "card"), "")}>
-              Pay {formatCents(outstandingCents(f))}
+              Pay {formatCents(feeOutstanding(f))}
             </button>
           )}
           {side === "owed" && f.kind === "percent" && s !== "waived" && (
@@ -99,7 +102,23 @@ export default function ReferralLedger({ earned, owed, today, canPay }: {
               report what you billed
             </button>
           )}
-          {side === "earned" && s !== "waived" && s !== "settled" && (
+          {/* On an invoice it becomes accounting: a number, a place in the
+              ledger, a statement line, ageing, dunning, and the payer settles
+              it the way they settle anything else. */}
+          {side === "earned" && !f.invoice && s === "due" && (
+            <button className="btn accent" disabled={pending}
+              onClick={() => run(() => billReferralFee(f.id), "Drafted an invoice for it")}>
+              Invoice it
+            </button>
+          )}
+          {f.invoice && (
+            <Link className="btn sm" style={{ textDecoration: "none" }}
+              href={`/money/invoices/${f.invoice.id}`}>
+              {f.invoice.number}
+              {f.invoice.balanceCents <= 0 ? " · paid" : ` · ${formatCents(f.invoice.balanceCents)} open`}
+            </Link>
+          )}
+          {side === "earned" && s !== "waived" && s !== "settled" && !f.invoice && (
             <button className="btn link" style={{ fontSize: 12 }} disabled={pending}
               onClick={() => { setError(""); setText(""); setWaiving(f.id); }}>
               waive it
@@ -113,13 +132,13 @@ export default function ReferralLedger({ earned, owed, today, canPay }: {
   return (
     <>
       {owed.length > 0 && (
-        <Panel title="Referral fees you owe" count={owed.filter((f) => outstandingCents(f) > 0).length || undefined}
+        <Panel title="Referral fees you owe" count={owed.filter((f) => feeOutstanding(f) > 0).length || undefined}
           hint="Paid straight to them - this platform never holds the money.">
           {owed.map((f) => row(f, "owed"))}
         </Panel>
       )}
       {earned.length > 0 && (
-        <Panel title="Referral fees owed to you" count={earned.filter((f) => outstandingCents(f) > 0).length || undefined}
+        <Panel title="Referral fees owed to you" count={earned.filter((f) => feeOutstanding(f) > 0).length || undefined}
           hint="For clients you handed to another shop.">
           {earned.map((f) => row(f, "earned"))}
         </Panel>

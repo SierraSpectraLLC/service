@@ -139,6 +139,21 @@ export function accruedCents(f: FeeRow): number {
 export const outstandingCents = (f: FeeRow): number =>
   Math.max(0, accruedCents(f) - Math.max(0, f.paidCents));
 
+/**
+ * What is owed once an invoice may exist for it.
+ *
+ * ONCE IT IS ON AN INVOICE, THE INVOICE IS THE ANSWER. The fee stops keeping
+ * its own count the moment one is raised: payments, credits, partial
+ * settlement and write-offs all land on the invoice, and a second tally beside
+ * it would be free to drift - and would drift in front of whoever was being
+ * chased. Same rule lib/agreements states about stored balances.
+ *
+ * Structural rather than typed to the ledger row, so this stays pure and the
+ * client bundle can reach it. lib/referralData does the fetching.
+ */
+export const feeOutstanding = (f: FeeRow & { invoice?: { balanceCents: number } | null }): number =>
+  (f.invoice ? f.invoice.balanceCents : outstandingCents(f));
+
 export const FEE_STANDINGS = ["due", "accruing", "settled", "waived", "closed"] as const;
 export type FeeStanding = (typeof FEE_STANDINGS)[number];
 

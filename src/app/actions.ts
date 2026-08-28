@@ -162,12 +162,12 @@ import {
 import { composePayload, materialize } from "@/lib/clientShareData";
 import {
   accruedCents, feeStanding, outstandingCents, resolveChoice, termsLine,
-  termsProblems, windowEnd, type FeeTerms,
+  feeLine, termsProblems, windowEnd, type FeeTerms,
 } from "@/lib/referral";
 import { billedForFee, feeWithShare } from "@/lib/referralData";
 import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
 import { normalizePhone } from "@/lib/sms";
-import { isPlatformStaff, isStaffRole, mayAdminOrg, mayCreateOrgs } from "@/lib/tenants";
+import { isPlatformStaff, isStaffRole, mayAdminOrg, mayBillOrg, mayCreateOrgs } from "@/lib/tenants";
 import { personaCookie } from "@/lib/viewAs";
 import { signInIdentity } from "@/auth";
 import { maySeeTrail } from "@/lib/trail";
@@ -15063,8 +15063,16 @@ function cleanManualLine(data: { kind: string; description: string; qty: number;
 export async function createBlankInvoice(orgId: number): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
-  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  if (!org || !(await mayBillHere(u, org))) return { error: "Not found" };
+  /*
+   * THE ISSUER'S workspace, never the subject's. For an ordinary client the
+   * two are the same number - orgTenant(client) is the operator that owns them
+   * - and they come apart for exactly one case: a peer service company, whose
+   * own tenant is themselves. Stamping an invoice with orgTenant there would
+   * file our bill inside THEIR workspace, where we could not see it and they
+   * could. A document belongs to whoever issued it.
+   */
+  const tenant = myTenantOrgId(u);
   let last: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
     const number = await nextDocNumber("invoice", tenant);
@@ -15562,8 +15570,10 @@ export async function createBlankQuote(
 ): Promise<{ error?: string; id?: number }> {
   const u = await requireStaff();
   const [org] = await db.select().from(orgs).where(eq(orgs.id, orgId));
-  if (!org || !mayAdminOrg(tenantViewer(u), org)) return { error: "Not found" };
-  const tenant = orgTenant(org) ?? myTenantOrgId(u);
+  if (!org || !(await mayBillHere(u, org))) return { error: "Not found" };
+  // The issuer's workspace - see createBlankInvoice for why this is not
+  // orgTenant(org).
+  const tenant = myTenantOrgId(u);
   const title = data.title.trim();
   if (!title) return { error: "Say what the quote is for" };
   const expires = data.expiresOn.trim();
@@ -16875,4 +16885,94 @@ export async function answerCounterOffer(
   });
   revalidatePath("/network");
   return { orgId: made.orgId };
+}
+
+
+/**
+ * May this person put that organization on this workspace's paper?
+ *
+ * The DB half of lib/tenants' mayBillOrg: it needs the list of service
+ * companies this workspace has added, which is a query, so the pure rule takes
+ * it and this resolves it. One helper because a quote and an invoice must never
+ * disagree about who may be billed.
+ */
+async function mayBillHere(u: SessionUser, org: typeof orgs.$inferSelect): Promise<boolean> {
+  const v = tenantViewer(u);
+  if (mayAdminOrg(v, org)) return true;
+  const mine = myTenantOrgId(u);
+  if (mine === null) return false;
+  const peers = (await db.select({ id: providerLinks.providerOrgId }).from(providerLinks)
+    .where(eq(providerLinks.tenantOrgId, mine))).map((r) => r.id);
+  return mayBillOrg(v, org, peers);
+}
+
+/**
+ * Put a referral fee on an invoice, in the payee's own books.
+ *
+ * Until this, a fee was a private arrangement with a pay link. An invoice makes
+ * it accounting: it has a number, it appears in the ledger and on a statement,
+ * it ages into collections, dunning chases it, and the payer can pay it the way
+ * they pay anything else. Both companies need it in their books, and neither
+ * gets that from a row in a table nobody's accountant reads.
+ *
+ * A DRAFT, not a sent invoice. What to say on a bill to somebody you refer work
+ * to is a judgement, and a button that silently emails a peer service company a
+ * demand is not one anybody should press by accident.
+ */
+export async function billReferralFee(feeId: number): Promise<{ error?: string; invoiceId?: number }> {
+  const u = await requireStaff();
+  const mine = myTenantOrgId(u);
+  const found = await feeWithShare(feeId);
+  if (!found) return { error: "Not found" };
+  const { fee } = found;
+  // The payee's alone: it is their receivable.
+  if (mine === null || mine !== fee.payeeOrgId) return { error: "Not found" };
+  if (fee.invoiceId) return { error: "That fee is already on an invoice." };
+  if (fee.status === "waived") return { error: "That fee was waived." };
+
+  const owed = outstandingCents(fee);
+  if (owed <= 0) {
+    return {
+      error: fee.kind === "percent"
+        ? "Nothing has accrued yet - recompute it once they have billed some work."
+        : "There is nothing outstanding on that fee.",
+    };
+  }
+  const [payer] = await db.select().from(orgs).where(eq(orgs.id, fee.payerOrgId));
+  if (!payer) return { error: "Not found" };
+
+  const [client] = fee.clientOrgId === null ? [null]
+    : await db.select({ name: orgs.name }).from(orgs).where(eq(orgs.id, fee.clientOrgId));
+  const what = client?.name ?? "a referred client";
+
+  let last: unknown;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const number = await nextDocNumber("invoice", mine);
+    try {
+      const [inv] = await db.insert(invoices).values({
+        tenantOrgId: mine, orgId: payer.id, number, status: "draft",
+        note: `Referral fee - ${what}`, createdBy: u.email,
+      }).returning();
+      await db.insert(invoiceLines).values({
+        invoiceId: inv.id,
+        // A referral fee is a fee, not labor and not a part. fee_ref is the
+        // kind the line editor already prints as "Charge".
+        kind: "fee_ref",
+        description: `Referral fee - ${what}`,
+        detail: feeLine(fee, formatCents),
+        qty: 1000, unitCents: owed, position: 0,
+      });
+      await db.update(referralFees).set({ invoiceId: inv.id }).where(eq(referralFees.id, feeId));
+      await audit({
+        actor: u.email, entityType: "referral_fee", entityId: feeId, tenantOrgId: mine,
+        action: `invoiced ${payer.name} ${formatCents(owed)} for the ${what} referral as ${number}`,
+      });
+      revalidatePath("/network");
+      revalidatePath("/money/invoices");
+      return { invoiceId: inv.id };
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
 }
