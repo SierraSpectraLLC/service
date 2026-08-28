@@ -131,6 +131,53 @@ export function redactPayload(p: SharePayload): SharePayload {
   };
 }
 
+/**
+ * The shortest string worth matching a note against.
+ *
+ * Below this it is initials and street numbers, and every offer would trip on
+ * a site called "Lab 2" or a contact called "Al". A warning that fires on
+ * everything is a warning people learn to click through.
+ */
+export const MIN_IDENTIFYING = 4;
+
+/**
+ * The strings a blind offer takes out, so a note can be checked against them.
+ *
+ * Not the redacted payload's inverse - a list of the actual identifying VALUES,
+ * which is what a covering note would have to contain to give the game away.
+ */
+export function identifyingBits(p: SharePayload): string[] {
+  const bits = [
+    p.client.name,
+    ...p.sites.flatMap((s) => [
+      s.name, s.contactName, s.contactEmail, s.contactPhone,
+      // The first line of an address is the door. The rest is town and ZIP,
+      // and the state is published anyway.
+      s.address.split(/[\n,]/)[0] ?? "",
+    ]),
+    ...p.systems.flatMap((x) => [x.sourceRef, ...x.modules.map((m) => m.serial)]),
+  ];
+  return [...new Set(bits.map((b) => b.trim()).filter((b) => b.length >= MIN_IDENTIFYING))];
+}
+
+/**
+ * What a covering note gives away that the offer itself withholds.
+ *
+ * THE HOLE THIS CLOSES. Redaction reached the payload and stopped there, and
+ * the note travelled beside it untouched - onto the recipient's screen and
+ * into the notification email. A sender who ticked nothing (blind is the
+ * default wherever there is a fee) and wrote "Emery Pharma want the Alameda
+ * GCs covered" was told the name would be held back, and it was not.
+ *
+ * The note still has to go: it is the reason anybody says yes. So it is
+ * checked rather than stripped, and the sender is told which words to change -
+ * or can turn blinding off, which is a decision rather than an accident.
+ */
+export function noteLeaks(note: string, p: SharePayload): string[] {
+  const hay = note.toLowerCase();
+  return identifyingBits(p).filter((b) => hay.includes(b.toLowerCase()));
+}
+
 /** "12 systems across 2 sites in CA" - the headline of a blind offer. */
 export function blindSummary(p: SharePayload): string {
   const states = [...new Set(p.sites.map((s) => stateOf(s.address)).filter(Boolean))];

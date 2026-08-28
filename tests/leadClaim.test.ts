@@ -103,6 +103,17 @@ describe("offering it", () => {
     expect(await testDb.select().from(schema.leads)).toHaveLength(0);
   });
 
+  it("refuses a blurb that names the lab, however the call arrived", async () => {
+    /*
+     * The form warns as you type; this is the same rule where it has to hold.
+     * postLead is a server action, so it is reachable from anything holding a
+     * session - a check that lived only in the component would be a check.
+     */
+    const res = await post({ blurb: "XYZ Biosciences want four 5000s covered" });
+    expect(res.error).toContain("XYZ Biosciences");
+    expect(await testDb.select().from(schema.leads)).toHaveLength(0);
+  });
+
   it("refuses one nobody could act on", async () => {
     expect((await post({ contactEmail: "", contactPhone: "" })).error).toContain("email or a phone");
     expect((await post({ region: "" })).error).toContain("where it is");

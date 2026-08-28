@@ -6,7 +6,7 @@
 // the race - four shops, one lab, one winner.
 import { describe, expect, it } from "vitest";
 import {
-  equipmentLine, leadLine, leadProblems, leadSummary, mayClaim, mayWithdrawLead,
+  blurbLeaks, equipmentLine, leadLine, leadProblems, leadSummary, mayClaim, mayWithdrawLead,
   parseSystems, publicOnly, serializeSystems, systemCount,
   type LeadPrivate, type LeadPublic, type LeadSystem,
 } from "@/lib/lead";
@@ -186,5 +186,34 @@ describe("the equipment list, which arrives as free text", () => {
     expect(back).toHaveLength(20);
     expect(back[0].count).toBe(999);
     expect(parseSystems('[{"model":"5000","count":0}]')[0].count).toBe(1);
+  });
+});
+
+describe("the blurb, which is published", () => {
+  it("catches a finder who names the lab in the box every shop reads", () => {
+    /*
+     * The same hole a share's covering note left, from the other end. "Who
+     * they are" is held back by construction - it is not in the object a shop
+     * receives - and then the finder types the name into the field next to it.
+     */
+    expect(blurbLeaks("XYZ Biosciences need PM on four 5000s", LEAD))
+      .toContain("XYZ Biosciences");
+    expect(blurbLeaks("Two labs, no PM cover since their FSE left.", LEAD)).toEqual([]);
+  });
+
+  it("catches the person, the number and the door as well as the company", () => {
+    expect(blurbLeaks("ask for Dr. P. Osei", LEAD)).toContain("Dr. P. Osei");
+    expect(blurbLeaks("they answer on 555-0142", LEAD)).toContain("555-0142");
+    expect(blurbLeaks("write to posei@xyzbio.test", LEAD)).toContain("posei@xyzbio.test");
+    expect(blurbLeaks("the place on 44 Kendall St", LEAD)).toContain("44 Kendall St");
+  });
+
+  it("does not care how it was capitalized", () => {
+    expect(blurbLeaks("xyz biosciences, four quads", LEAD)).toContain("XYZ Biosciences");
+  });
+
+  it("leaves the equipment and the region alone - that is the whole listing", () => {
+    // A blurb has to be able to say what the work is, or nobody can price it.
+    expect(blurbLeaks("4 × API 5000 in Boston metro, wants a PM contract", LEAD)).toEqual([]);
   });
 });

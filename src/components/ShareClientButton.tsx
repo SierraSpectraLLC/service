@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { shareClient } from "@/app/actions";
+import { MIN_IDENTIFYING } from "@/lib/clientShare";
 import { FEE_KINDS, FEE_LABEL, termsLine, termsProblems, type FeeKind } from "@/lib/referral";
 import { formatCents, parseMoney } from "@/lib/money";
 import { Panel } from "@/components/ui";
@@ -27,6 +28,10 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
   const [pending, startTransition] = useTransition();
   const [picked, setPicked] = useState<number[]>([]);
   const [note, setNote] = useState("");
+  // The client's own name is the leak that actually happens. The server does
+  // the full check against every site, contact and serial in the payload.
+  const noteNames = orgName.trim().length >= MIN_IDENTIFYING
+    && note.toLowerCase().includes(orgName.trim().toLowerCase());
   const [error, setError] = useState("");
   const [blind, setBlind] = useState(true);
   const [fee, setFee] = useState({
@@ -84,8 +89,18 @@ export default function ShareClientButton({ orgId, orgName, systems, providers }
 
           <label style={{ marginTop: 10 }}>A line for them</label>
           <input value={note} aria-label="Note to them" disabled={pending}
-            placeholder="you take the Alameda site, we keep Hayward"
+            placeholder="you take the second site, we keep the first"
             onChange={(e) => setNote(e.target.value)} />
+          {/* The note travels beside the offer and is NOT redacted with it -
+              it is the reason anybody says yes, so it is checked rather than
+              stripped. Said here as you type; the server checks the whole
+              payload, not just the name. */}
+          {blind && noteNames && (
+            <div className="t-meta" style={{ color: "var(--t-warn-fg)", marginTop: 4 }}>
+              Your note says &ldquo;{orgName}&rdquo; - that is the one thing a blind offer
+              holds back. Reword it, or untick below.
+            </div>
+          )}
 
           {/* The price goes ON the offer. A fee discovered after somebody has
               taken on a client is not a price, it is a bill - so they see what

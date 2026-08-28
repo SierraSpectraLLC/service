@@ -5,9 +5,9 @@
 // is nowhere to put a price - and these hold the composer to it.
 import { describe, expect, it } from "vitest";
 import {
-  blindSummary, freeTag, isOpen, mayAnswerCounter, mayCounter, mayDecide,
-  mayWithdraw, parsePayload, provenanceLine, redactPayload, shareProblems,
-  stateOf, summarize, SHARE_VERSION, type SharePayload,
+  blindSummary, freeTag, identifyingBits, isOpen, mayAnswerCounter, mayCounter,
+  mayDecide, mayWithdraw, noteLeaks, parsePayload, provenanceLine, redactPayload,
+  shareProblems, stateOf, summarize, SHARE_VERSION, type SharePayload,
 } from "@/lib/clientShare";
 
 const PAYLOAD: SharePayload = {
@@ -208,5 +208,58 @@ describe("a blind offer", () => {
 
   it("still round-trips as a payload, so nothing downstream has to know", () => {
     expect(parsePayload(JSON.stringify(blind))).toEqual(blind);
+  });
+});
+
+describe("the covering note, which travels beside the offer", () => {
+  it("catches a note that names the client", () => {
+    /*
+     * The hole redaction left. The payload was blinded and the note went
+     * across untouched - onto their screen and into the email - so a sender
+     * who was told the name would be held back had it forwarded for them.
+     */
+    expect(noteLeaks("Emery Pharma want the GCs covered", PAYLOAD)).toContain("Emery Pharma");
+    expect(noteLeaks("they want the GCs covered", PAYLOAD)).toEqual([]);
+  });
+
+  it("catches every other thing blinding takes out", () => {
+    expect(noteLeaks("meet R. Diaz at the dock", PAYLOAD)).toContain("R. Diaz");
+    expect(noteLeaks("ring 555-0100 first", PAYLOAD)).toContain("555-0100");
+    expect(noteLeaks("rd@emery.test knows the site", PAYLOAD)).toContain("rd@emery.test");
+    expect(noteLeaks("the one at 2000 Sample Way", PAYLOAD)).toContain("2000 Sample Way");
+    expect(noteLeaks("SN7009 is the newer one", PAYLOAD)).toContain("SN7009");
+    expect(noteLeaks("start with the Hayward pair", PAYLOAD)).toContain("Hayward");
+  });
+
+  it("does not care how it was capitalized", () => {
+    // A sender typing "emery pharma" has given away exactly as much.
+    expect(noteLeaks("emery pharma are moving", PAYLOAD)).toContain("Emery Pharma");
+  });
+
+  it("leaves short strings alone, so it is not a warning people click through", () => {
+    /*
+     * Initials and door numbers match everything. A check that fired on "Al"
+     * would fire on "also", and a warning that fires on every offer is one
+     * people learn to click through - which costs more than it saves.
+     */
+    const tiny: SharePayload = {
+      ...PAYLOAD,
+      client: { name: "AB", kind: "client" },
+      sites: [{ ...PAYLOAD.sites[0], name: "Lab", address: "44", contactName: "Al",
+        contactPhone: "", contactEmail: "" }],
+      systems: [],
+    };
+    expect(identifyingBits(tiny)).toEqual([]);
+    expect(noteLeaks("Al is at the Lab, 44, and AB is also fine", tiny)).toEqual([]);
+  });
+
+  it("lists what is identifying without listing what is published anyway", () => {
+    const bits = identifyingBits(PAYLOAD);
+    expect(bits).toContain("Emery Pharma");
+    expect(bits).toContain("SN7009");
+    // The model and the category survive blinding, so they are not leaks - a
+    // note is free to say "the two 6495Cs".
+    expect(bits).not.toContain("6495C");
+    expect(bits).not.toContain("LC-MS");
   });
 });

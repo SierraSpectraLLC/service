@@ -26,6 +26,7 @@
 //
 // Pure. Callers hand in the rows.
 
+import { MIN_IDENTIFYING } from "@/lib/clientShare";
 import { termsLine, termsProblems, type FeeTerms } from "@/lib/referral";
 
 /** One line of what they say they have. Nobody has verified any of it. */
@@ -101,6 +102,29 @@ export function leadSummary(p: Pick<LeadPublic, "region" | "systems">): string {
   const n = systemCount(p.systems);
   const kit = n > 0 ? `${n} system${n === 1 ? "" : "s"}` : "Equipment not listed";
   return p.region.trim() ? `${kit} · ${p.region.trim()}` : kit;
+}
+
+/**
+ * What the published blurb gives away that the lead itself withholds.
+ *
+ * Same hole as a share's covering note, arrived at from the other direction.
+ * "Who they are" is held back by construction - it is not in the object a shop
+ * receives - and then the finder types "XYZ Biosciences need PM on four 5000s"
+ * into the box marked "What they asked for", which IS published, and the whole
+ * arrangement is undone by the field next to it.
+ *
+ * Checked rather than stripped: the blurb is what makes a shop want the lead.
+ */
+export function blurbLeaks(blurb: string, p: {
+  orgName: string; contactName: string; contactEmail: string; contactPhone: string; address: string;
+}): string[] {
+  const bits = [
+    p.orgName, p.contactName, p.contactEmail, p.contactPhone,
+    p.address.split(/[\n,]/)[0] ?? "",
+  ];
+  const hay = blurb.toLowerCase();
+  return [...new Set(bits.map((b) => b.trim()).filter((b) => b.length >= MIN_IDENTIFYING))]
+    .filter((b) => hay.includes(b.toLowerCase()));
 }
 
 /** Everything wrong with a lead somebody is trying to offer. */

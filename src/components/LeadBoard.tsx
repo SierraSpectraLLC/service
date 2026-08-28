@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { claimLead, postLead, withdrawLead } from "@/app/actions";
 import {
-  equipmentLine, leadSummary, LEAD_LABEL, type LeadState, type LeadSystem,
+  blurbLeaks, equipmentLine, leadSummary, LEAD_LABEL, type LeadState, type LeadSystem,
 } from "@/lib/lead";
 import type { LeadRow } from "@/lib/leadData";
 import {
@@ -65,7 +65,11 @@ export default function LeadBoard({ mine, offered, providers }: {
     minCents: parseMoney(f.min) ?? 0, maxCents: parseMoney(f.max) ?? 0,
     note: f.note,
   };
-  const problem = !f.region.trim() ? "say roughly where it is"
+  // "What they asked for" is PUBLISHED. A finder who types the lab's name into
+  // it has given the lead away in the field next to the one holding it back.
+  const said = blurbLeaks(f.blurb, f);
+  const problem = said.length ? `keep "${said[0]}" out of what they asked for - that is published`
+    : !f.region.trim() ? "say roughly where it is"
     : systems.length === 0 ? "say what they have"
       : !f.orgName.trim() ? "give the company's name"
         : !f.contactEmail.trim() && !f.contactPhone.trim() ? "give an email or a phone number"

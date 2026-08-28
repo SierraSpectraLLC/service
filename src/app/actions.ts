@@ -157,8 +157,8 @@ import {
 } from "@/lib/fleetBrief";
 import { fleetRowsFor, scopeProblem } from "@/lib/fleetBriefData";
 import {
-  blindSummary, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, parsePayload,
-  shareProblems, summarize, SHARE_LABEL,
+  blindSummary, mayAnswerCounter, mayCounter, mayDecide, mayWithdraw, noteLeaks,
+  parsePayload, shareProblems, summarize, SHARE_LABEL,
 } from "@/lib/clientShare";
 import { composePayload, materialize } from "@/lib/clientShareData";
 import {
@@ -168,7 +168,7 @@ import {
 import { billedForFee, feeById } from "@/lib/referralData";
 import { parseTags, profileProblems, MAX_BLURB } from "@/lib/providerDirectory";
 import {
-  equipmentLine, leadProblems, leadSummary, mayClaim, mayWithdrawLead,
+  blurbLeaks, equipmentLine, leadProblems, leadSummary, mayClaim, mayWithdrawLead,
   parseSystems, serializeSystems, type LeadSystem,
 } from "@/lib/lead";
 import { leadWithOffers, wasOffered } from "@/lib/leadData";
@@ -16498,6 +16498,23 @@ export async function shareClient(orgId: number, data: {
   const termProblems = termsProblems(terms);
   if (termProblems.length) return { error: termProblems[0] };
 
+  /*
+   * A blind offer whose covering note names the client is not a blind offer.
+   * Refused here rather than warned about in the form alone, because the form
+   * is a courtesy and this function is reachable from anything holding a
+   * session. The escape hatch is to untick blinding, which is a decision.
+   */
+  const wouldBlind = data.blind ?? terms.kind !== "none";
+  if (wouldBlind) {
+    const said = noteLeaks(data.note, payload);
+    if (said.length) {
+      return {
+        error: `Your note gives away "${said[0]}", which a blind offer holds back. `
+          + "Reword it, or untick keeping the name back.",
+      };
+    }
+  }
+
   const frozen = JSON.stringify(payload);
   for (const toOrgId of picked) {
     // One live offer per pair. A second while the first is open is two answers
@@ -17088,6 +17105,16 @@ export async function postLead(data: {
     contactEmail: data.contactEmail, contactPhone: data.contactPhone, orgName: data.orgName,
   });
   if (problems.length) return { error: problems[0] };
+
+  // The blurb IS published. A lead whose blurb names the lab is a lead given
+  // away for nothing - see lib/lead blurbLeaks.
+  const said = blurbLeaks(data.blurb, data);
+  if (said.length) {
+    return {
+      error: `"${said[0]}" is in what they asked for, which every shop sees. `
+        + "Keep who they are out of it - that is what they are paying for.",
+    };
+  }
 
   // Only shops on our own list, and re-checked here: a picker is not a
   // permission, and this one posts somebody else's contact details.
